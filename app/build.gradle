@@ -1,11 +1,12 @@
 plugins { id 'com.android.application' }
 
-android { namespace 'com.ashkanrafiee.balance'; compileSdk 35; buildToolsVersion '35.0.0'
+android { namespace 'com.ashkanrafiee.balance'; compileSdk 35
     defaultConfig { applicationId 'com.ashkanrafiee.balance'; minSdk 23; targetSdk 35; versionCode 10101; versionName '1.1.1' }
+    dependenciesInfo { includeInApk = false; includeInBundle = false }
+    def signingFile = rootProject.file('signing.properties')
+    def signingValues = new Properties()
+    if (signingFile.exists()) signingFile.withInputStream { signingValues.load(it) }
     signingConfigs { release {
-        def signingFile = rootProject.file('signing.properties')
-        def signingValues = new Properties()
-        if (signingFile.exists()) signingFile.withInputStream { signingValues.load(it) }
         if (signingValues['storeFile']) {
             storeFile rootProject.file(signingValues['storeFile'])
             if (signingValues['storeType']) storeType signingValues['storeType']
@@ -14,5 +15,5 @@ android { namespace 'com.ashkanrafiee.balance'; compileSdk 35; buildToolsVersion
             keyPassword signingValues['keyPassword']
         }
     } }
-    buildTypes { release { minifyEnabled false; def signingFile = rootProject.file('signing.properties'); if (signingFile.exists()) signingConfig signingConfigs.release } }
+    buildTypes { release { if (signingValues['storeFile']) signingConfig signingConfigs.release; minifyEnabled false } }
 }
