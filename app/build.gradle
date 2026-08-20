@@ -1,29 +1,18 @@
 plugins { id 'com.android.application' }
 
-def signingProperties = new Properties()
-def signingFile = rootProject.file('signing.properties')
-if (signingFile.exists()) signingFile.withInputStream { signingProperties.load(it) }
-def signingValue = { String propertyName, String environmentName -> signingProperties[propertyName] ?: System.getenv(environmentName) }
-def hasSigning = signingFile.exists() || System.getenv('BALANCE_STORE_FILE')
-
 android { namespace 'com.ashkanrafiee.balance'; compileSdk 35; buildToolsVersion '35.0.0'
     defaultConfig { applicationId 'com.ashkanrafiee.balance'; minSdk 23; targetSdk 35; versionCode 10101; versionName '1.1.1' }
     signingConfigs { release {
-        def configuredStore = signingValue('storeFile', 'BALANCE_STORE_FILE')
-        if (configuredStore) storeFile = rootProject.file(configuredStore)
-        if (signingValue('storePassword', 'BALANCE_STORE_PASSWORD')) storePassword = signingValue('storePassword', 'BALANCE_STORE_PASSWORD')
-        if (signingValue('keyAlias', 'BALANCE_KEY_ALIAS')) keyAlias = signingValue('keyAlias', 'BALANCE_KEY_ALIAS')
-        if (signingValue('keyPassword', 'BALANCE_KEY_PASSWORD')) keyPassword = signingValue('keyPassword', 'BALANCE_KEY_PASSWORD')
-        if (signingValue('storeType', 'BALANCE_STORE_TYPE')) storeType = signingValue('storeType', 'BALANCE_STORE_TYPE')
+        def signingFile = rootProject.file('signing.properties')
+        def signingValues = new Properties()
+        if (signingFile.exists()) signingFile.withInputStream { signingValues.load(it) }
+        if (signingValues['storeFile']) {
+            storeFile rootProject.file(signingValues['storeFile'])
+            if (signingValues['storeType']) storeType signingValues['storeType']
+            storePassword signingValues['storePassword']
+            keyAlias signingValues['keyAlias']
+            keyPassword signingValues['keyPassword']
+        }
     } }
-    buildTypes { release { minifyEnabled false; if (hasSigning) signingConfig signingConfigs.release } }
-}
-
-def releaseTag = providers.gradleProperty('releaseTag').orElse(System.getenv('RELEASE_TAG') ?: '').get()
-if (!releaseTag.isEmpty()) {
-    def versionPattern = ~/^v?(\d+)\.(\d+)\.(\d+)$/
-    def versionMatcher = versionPattern.matcher(releaseTag)
-    if (!versionMatcher.matches()) throw new GradleException("Release tag must use semantic version format, for example v1.1.0: ${releaseTag}")
-    android.defaultConfig.versionName = "${versionMatcher.group(1)}.${versionMatcher.group(2)}.${versionMatcher.group(3)}"
-    android.defaultConfig.versionCode = versionMatcher.group(1).toInteger() * 10000 + versionMatcher.group(2).toInteger() * 100 + versionMatcher.group(3).toInteger()
+    buildTypes { release { minifyEnabled false; def signingFile = rootProject.file('signing.properties'); if (signingFile.exists()) signingConfig signingConfigs.release } }
 }
