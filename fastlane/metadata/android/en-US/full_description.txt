@@ -1,0 +1,13 @@
+Balance reads supported bank balance SMS messages locally and shows the latest balance for each bank plus the combined total.
+
+Currently designed for users in Iran, with support for Iranian banks and Persian bank SMS formats.
+
+Features:
+- Offline SMS parsing with no internet permission
+- Latest balance per supported bank without duplicate accumulation
+- Combined balance total
+- Toman display mode
+- Persistent privacy masking for balances
+- Pull-to-refresh with progress animation
+
+SMS and financial data stay on the device. No account, cloud service, analytics, or network access is required.
