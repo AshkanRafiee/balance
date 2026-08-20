@@ -49,15 +49,15 @@ jobs:
           test -n "$KEY_ALIAS"
           test -n "$KEY_PASSWORD"
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > balance-release.jks
+          cat > signing.properties <<EOF
+          storeFile=balance-release.jks
+          storeType=JKS
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
 
       - name: Build signed release
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag_name }}
-          BALANCE_STORE_FILE: balance-release.jks
-          BALANCE_STORE_TYPE: JKS
-          BALANCE_STORE_PASSWORD: ${{ secrets.BALANCE_KEYSTORE_PASSWORD }}
-          BALANCE_KEY_ALIAS: ${{ secrets.BALANCE_KEY_ALIAS }}
-          BALANCE_KEY_PASSWORD: ${{ secrets.BALANCE_KEY_PASSWORD }}
         run: bash ./gradlew clean assembleRelease
 
       - name: Create checksum
