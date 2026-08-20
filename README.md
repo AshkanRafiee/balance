@@ -9,7 +9,6 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Local SMS parsing only
 - Latest balance per supported bank, without accumulating repeated messages
 - Combined total balance
-- Rial/Toman display switch
 - Persistent masked-balance and currency preferences
 - Pull-to-refresh and animated refresh indicator
 - No account, cloud service, analytics, or internet permission
