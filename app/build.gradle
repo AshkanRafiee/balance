@@ -13,7 +13,7 @@ android { namespace 'com.ashkanrafiee.balance'; compileSdk 35
             storePassword signingValues['storePassword']
             keyAlias signingValues['keyAlias']
             keyPassword signingValues['keyPassword']
-            v3SigningEnabled true
+            enableV3Signing true
         }
     } }
     buildTypes { release { if (signingValues['storeFile']) signingConfig signingConfigs.release; minifyEnabled false } }
