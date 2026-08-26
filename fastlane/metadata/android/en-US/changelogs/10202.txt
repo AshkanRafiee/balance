@@ -1,0 +1,1 @@
+Enabled APK Signature Scheme v3 for release builds.
