@@ -1,0 +1,1 @@
+Added Persian (فارسی) language support, including translated bank names, with automatic detection of the system language and an in-app language switcher.

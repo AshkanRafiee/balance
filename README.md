@@ -11,6 +11,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Combined total balance
 - Persistent masked-balance and currency preferences
 - Pull-to-refresh and animated refresh indicator
+- English and Persian (فارسی) interface, with automatic system-language detection and localized bank names
 - No account, cloud service, analytics, or internet permission
 
 ## Build
