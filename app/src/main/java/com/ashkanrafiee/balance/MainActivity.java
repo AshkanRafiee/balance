@@ -66,7 +66,7 @@ public class MainActivity extends Activity {
         boolean hidden, refreshing;
         float scrollY = 0, lastY, downY, refreshAngle;
         boolean dragging;
-        String status = "Reading bank SMS on this device...";
+        String status = getString(R.string.status_reading_sms);
         long total;
         final int[] bankColors = {
             Color.rgb(14, 165, 233), Color.rgb(139, 92, 246),
@@ -100,12 +100,12 @@ public class MainActivity extends Activity {
         void refresh() {
             if (refreshing) return;
             if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
-                status = "SMS permission is needed to read balances";
+                status = getString(R.string.status_permission_needed);
                 invalidate();
                 return;
             }
             refreshing = true;
-            status = "Refreshing balances...";
+            status = getString(R.string.status_refreshing);
             invalidate();
             new Thread(() -> {
                 try {
@@ -131,9 +131,9 @@ public class MainActivity extends Activity {
                     saveBalances(saved);
                     String message = count == 0
                         ? (saved.isEmpty()
-                            ? "No supported bank balance SMS found yet"
-                            : "Balances loaded from saved data")
-                        : "Updated " + count + " bank balance" + (count > 1 ? "s" : "") + " from SMS";
+                            ? getString(R.string.status_no_sms_found)
+                            : getString(R.string.status_loaded_from_saved))
+                        : getResources().getQuantityString(R.plurals.status_updated_banks, count, count);
                     post(() -> {
                         banks.clear();
                         banks.putAll(saved);
@@ -150,7 +150,7 @@ public class MainActivity extends Activity {
                         banks.putAll(saved);
                         total = 0;
                         for (Bank b : banks.values()) total += b.amount;
-                        status = banks.isEmpty() ? "SMS could not be read" : "Balances loaded from saved data";
+                        status = banks.isEmpty() ? getString(R.string.status_sms_unreadable) : getString(R.string.status_loaded_from_saved);
                         refreshing = false;
                         invalidate();
                     });
@@ -231,7 +231,7 @@ public class MainActivity extends Activity {
             float current = size;
             while (current > 10 && measure(number, current) > width) current -= 1;
             text(c, number, x, baseline, current, Color.rgb(103, 232, 249), align);
-            text(c, "Toman", x, baseline + 19, 11, Color.rgb(148, 163, 184), align);
+            text(c, getString(R.string.unit_toman), x, baseline + 19, 11, Color.rgb(148, 163, 184), align);
         }
 
         void totalValue(Canvas c, long n, float x, float baseline, float width) {
@@ -240,12 +240,13 @@ public class MainActivity extends Activity {
                 return;
             }
             String number = amount(n);
-            float unitSize = 13, unitGap = 10, unitWidth = measure("Toman", unitSize);
+            String unit = getString(R.string.unit_toman);
+            float unitSize = 13, unitGap = 10, unitWidth = measure(unit, unitSize);
             float current = 34;
             while (current > 16 && measure(number, current) + unitGap + unitWidth > width) current -= 1;
             float numberWidth = measure(number, current);
             text(c, number, x, baseline, current, Color.rgb(241, 245, 249), Paint.Align.LEFT);
-            text(c, "Toman", x + numberWidth + unitGap, baseline - 2, unitSize,
+            text(c, unit, x + numberWidth + unitGap, baseline - 2, unitSize,
                  Color.rgb(148, 163, 184), Paint.Align.LEFT);
         }
 
@@ -297,11 +298,11 @@ public class MainActivity extends Activity {
                 panel = Color.rgb(17, 27, 43);
             c.drawColor(Color.rgb(8, 13, 22));
 
-            text(c, "Balance", 32, 58, 25, fg, Paint.Align.LEFT);
-            text(c, fit("Offline bank balances", 14, w - 64), 32, 86, 14, muted, Paint.Align.LEFT);
+            text(c, getString(R.string.app_name), 32, 58, 25, fg, Paint.Align.LEFT);
+            text(c, fit(getString(R.string.subtitle_offline_bank_balances), 14, w - 64), 32, 86, 14, muted, Paint.Align.LEFT);
 
             round(c, 24, 120, w - 24, 270, 28, panel);
-            text(c, "TOTAL BALANCE", 48, 158, 13, muted, Paint.Align.LEFT);
+            text(c, getString(R.string.total_balance_label), 48, 158, 13, muted, Paint.Align.LEFT);
             totalValue(c, total, 48, 220, w - 150);
             p.setStyle(Paint.Style.STROKE);
             p.setStrokeWidth(2.5f);
@@ -316,7 +317,7 @@ public class MainActivity extends Activity {
                 c.drawLine(w - 77, 142, w - 43, 170, p);
             }
 
-            text(c, "Banks", 28, 320, 22, fg, Paint.Align.LEFT);
+            text(c, getString(R.string.section_banks), 28, 320, 22, fg, Paint.Align.LEFT);
             if (refreshing) {
                 p.setStyle(Paint.Style.STROKE);
                 p.setStrokeWidth(3);
@@ -326,7 +327,7 @@ public class MainActivity extends Activity {
                 refreshAngle = (refreshAngle + 14) % 360;
                 postInvalidateOnAnimation();
             } else {
-                text(c, "Refresh", w - 28, 320, 14, cyan, Paint.Align.RIGHT);
+                text(c, getString(R.string.action_refresh), w - 28, 320, 14, cyan, Paint.Align.RIGHT);
             }
 
             float by = (getHeight() - top - bottom) / d - 32;
@@ -349,8 +350,8 @@ public class MainActivity extends Activity {
 
             p.setTextSize(13);
             p.setTypeface(android.graphics.Typeface.create("sans", 0));
-            String footerPrefix = fit("Local by design  \u00b7  Balance  \u00b7  ", 13, w - 90),
-                about = "About";
+            String footerPrefix = fit(getString(R.string.footer_prefix) + "  \u00b7  ", 13, w - 90),
+                about = getString(R.string.footer_about);
             float footerWidth = p.measureText(footerPrefix) + p.measureText(about),
                 footerX = (w - footerWidth) / 2;
             text(c, footerPrefix, footerX, by + 4, 13, muted, Paint.Align.LEFT);
@@ -373,12 +374,12 @@ public class MainActivity extends Activity {
 
         void copyBalance(String label, long value) {
             if (hidden) {
-                Toast.makeText(MainActivity.this, "Unmask the balance to copy it", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, getString(R.string.toast_unmask_to_copy), Toast.LENGTH_SHORT).show();
                 return;
             }
             ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
             clipboard.setPrimaryClip(ClipData.newPlainText(label, Long.toString(value / 10)));
-            Toast.makeText(MainActivity.this, "Copied " + label + " balance", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, getString(R.string.toast_copied_balance, label), Toast.LENGTH_SHORT).show();
         }
 
         @Override
@@ -417,7 +418,7 @@ public class MainActivity extends Activity {
                     MainActivity.this.getSharedPreferences("balance_preferences", MODE_PRIVATE)
                         .edit().putBoolean("balances_hidden", hidden).apply();
                     invalidate();
-                } else copyBalance("Total", total);
+                } else copyBalance(getString(R.string.total_label), total);
             } else if (y > 290 && y < 350 && x > getWidth() / d - 150) {
                 refresh();
             } else if (y >= 352 && y < byForTouch(h)) {

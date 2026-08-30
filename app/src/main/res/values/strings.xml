@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Balance</string>
+    <string name="subtitle_offline_bank_balances">Offline bank balances</string>
+    <string name="total_balance_label">TOTAL BALANCE</string>
+    <string name="section_banks">Banks</string>
+    <string name="action_refresh">Refresh</string>
+    <string name="unit_toman">Toman</string>
+    <string name="total_label">Total</string>
+
+    <string name="status_reading_sms">Reading bank SMS on this device...</string>
+    <string name="status_permission_needed">SMS permission is needed to read balances</string>
+    <string name="status_refreshing">Refreshing balances...</string>
+    <string name="status_no_sms_found">No supported bank balance SMS found yet</string>
+    <string name="status_loaded_from_saved">Balances loaded from saved data</string>
+    <string name="status_sms_unreadable">SMS could not be read</string>
+    <plurals name="status_updated_banks">
+        <item quantity="one">Updated %1$d bank balance from SMS</item>
+        <item quantity="other">Updated %1$d bank balances from SMS</item>
+    </plurals>
+
+    <string name="toast_unmask_to_copy">Unmask the balance to copy it</string>
+    <string name="toast_copied_balance">Copied %1$s balance</string>
+
+    <string name="footer_prefix">Local by design  ·  Balance</string>
+    <string name="footer_about">About</string>
+    <string name="footer_language">Language</string>
+
+    <string name="dialog_language_title">App language</string>
+    <string name="language_system_default">System default</string>
+
+    <string name="about_title">About</string>
+    <string name="tagline_offline_bank_balance">Offline bank balance</string>
+    <string name="about_section_heading">ABOUT THIS APP</string>
+    <string name="about_section_body">Balance is a private, offline dashboard for the latest balances reported by supported banks. It reads supported bank SMS messages locally, keeps one current balance per bank, and never sends SMS or financial data anywhere.</string>
+    <string name="about_created_by_label">Created by</string>
+    <string name="about_license_label">License</string>
+    <string name="about_source_label">Source code</string>
+    <string name="about_privacy_label">Privacy</string>
+    <string name="about_privacy_value">Offline by design · no cloud · no account</string>
+    <string name="about_footer">Balance · Version %1$s</string>
+
+    <string name="bank_pasargad">Pasargad</string>
+    <string name="bank_eghtesad_novin">Eghtesad Novin</string>
+    <string name="bank_shahr">Shahr</string>
+    <string name="bank_ansar">Ansar</string>
+    <string name="bank_tejarat">Tejarat</string>
+    <string name="bank_refah">Refah</string>
+    <string name="bank_saman">Saman</string>
+    <string name="bank_sarmayeh">Sarmayeh</string>
+    <string name="bank_sina">Sina</string>
+    <string name="bank_saderat">Saderat</string>
+    <string name="bank_mellat">Mellat</string>
+    <string name="bank_melli">Melli</string>
+    <string name="bank_maskan">Maskan</string>
+    <string name="bank_keshavarzi">Keshavarzi</string>
+    <string name="bank_parsian">Parsian</string>
+    <string name="bank_post">Post</string>
+    <string name="bank_dey">Dey</string>
+    <string name="bank_hekmat">Hekmat</string>
+    <string name="bank_tosee_taavon">Tosee Taavon</string>
+    <string name="bank_noor">Noor</string>
+    <string name="bank_blu">Blu</string>
+    <string name="bank_kosar">Kosar</string>
+    <string name="bank_mehr">Mehr</string>
+    <string name="bank_mehr_eghtesad">Mehr Eghtesad</string>
+    <string name="bank_ghavamin">Ghavamin</string>
+    <string name="bank_zamin">Zamin</string>
+    <string name="bank_gardeshgari">Gardeshgari</string>
+    <string name="bank_middle_east">Middle East</string>
+    <string name="bank_tosee">Tosee</string>
+    <string name="bank_karafarin">Karafarin</string>
+    <string name="bank_resalat">Resalat</string>
+    <string name="bank_venezuela">Venezuela</string>
+    <string name="bank_melal">Melal</string>
+    <string name="bank_sanat_madan">Sanat Madan</string>
+    <string name="bank_sepah">Sepah</string>
+    <string name="bank_tosee_saderat">Tosee Saderat</string>
+    <string name="bank_bankino">Bankino</string>
+    <string name="bank_wepod">Wepod</string>
+    <string name="bank_industry_mine">Industry &amp; Mine</string>
+    <string name="bank_tosee_credit_inst">Tosee Credit Inst.</string>
+    <string name="bank_edbi">EDBI</string>
+    <string name="bank_melal_credit_inst">Melal Credit Inst.</string>
+    <string name="bank_noor_credit_inst">Noor Credit Inst.</string>
+</resources>

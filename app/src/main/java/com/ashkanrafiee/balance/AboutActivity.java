@@ -73,11 +73,11 @@ public final class AboutActivity extends Activity {
 
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        TextView back = text("\u2039", 34, Color.WHITE);
+        TextView back = text("‹", 34, Color.WHITE);
         back.setGravity(Gravity.CENTER);
         back.setOnClickListener(v -> finish());
         bar.addView(back, new LinearLayout.LayoutParams(dp(42), dp(48)));
-        bar.addView(text("About", 21, Color.WHITE), margin(10, 0, 0, 0));
+        bar.addView(text(getString(R.string.about_title), 21, Color.WHITE), margin(10, 0, 0, 0));
         root.addView(bar, margin(0, 0, 0, 16));
 
         ScrollView scroll = new ScrollView(this);
@@ -96,25 +96,21 @@ public final class AboutActivity extends Activity {
         mark.setTypeface(null, Typeface.BOLD);
         mark.setBackground(rounded(cyan, 16));
         hero.addView(mark, new LinearLayout.LayoutParams(dp(56), dp(56)));
-        TextView title = text("Balance", 24, Color.WHITE);
+        TextView title = text(getString(R.string.app_name), 24, Color.WHITE);
         title.setPadding(0, dp(14), 0, dp(2));
         hero.addView(title);
-        hero.addView(text("Offline bank balance", 13, Color.rgb(201, 211, 230)));
+        hero.addView(text(getString(R.string.tagline_offline_bank_balance), 13, Color.rgb(201, 211, 230)));
         body.addView(hero, margin(0, 0, 0, 22));
 
-        body.addView(section("ABOUT THIS APP",
-            "Balance is a private, offline dashboard for the latest balances "
-            + "reported by supported banks. It reads supported bank SMS messages "
-            + "locally, keeps one current balance per bank, and never sends SMS "
-            + "or financial data anywhere."), margin(0, 0, 0, 10));
-        body.addView(info("Created by", "Ashkan Rafiee", "https://AshkanRafiee.com/"), margin(0, 0, 0, 8));
-        body.addView(info("License", "GNU General Public License v3.0",
+        body.addView(section(getString(R.string.about_section_heading), getString(R.string.about_section_body)), margin(0, 0, 0, 10));
+        body.addView(info(getString(R.string.about_created_by_label), "Ashkan Rafiee", "https://AshkanRafiee.com/"), margin(0, 0, 0, 8));
+        body.addView(info(getString(R.string.about_license_label), "GNU General Public License v3.0",
             "https://github.com/AshkanRafiee/balance/blob/main/LICENSE"), margin(0, 0, 0, 8));
-        body.addView(info("Source code", "github.com/ashkanrafiee/balance",
+        body.addView(info(getString(R.string.about_source_label), "github.com/ashkanrafiee/balance",
             "https://github.com/AshkanRafiee/balance"), margin(0, 0, 0, 8));
-        body.addView(info("Privacy", "Offline by design \u00b7 no cloud \u00b7 no account"), margin(0, 0, 0, 20));
+        body.addView(info(getString(R.string.about_privacy_label), getString(R.string.about_privacy_value)), margin(0, 0, 0, 20));
 
-        TextView footer = text("Balance \u00b7 Version " + appVersion(), 11, Color.rgb(103, 115, 136));
+        TextView footer = text(getString(R.string.about_footer, appVersion()), 11, Color.rgb(103, 115, 136));
         footer.setGravity(Gravity.CENTER);
         body.addView(footer);
     }
