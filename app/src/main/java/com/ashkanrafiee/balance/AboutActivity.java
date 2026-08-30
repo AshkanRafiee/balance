@@ -57,6 +57,7 @@ public final class AboutActivity extends Activity {
         super.onCreate(state);
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
+        boolean rtl = getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -79,11 +80,13 @@ public final class AboutActivity extends Activity {
 
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        TextView back = text("‹", 34, Color.WHITE);
+        TextView back = text(rtl ? "›" : "‹", 34, Color.WHITE);
         back.setGravity(Gravity.CENTER);
         back.setOnClickListener(v -> finish());
         bar.addView(back, new LinearLayout.LayoutParams(dp(42), dp(48)));
-        bar.addView(text(getString(R.string.about_title), 21, Color.WHITE), margin(10, 0, 0, 0));
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-2, -2);
+        titleParams.setMarginStart(dp(10));
+        bar.addView(text(getString(R.string.about_title), 21, Color.WHITE), titleParams);
         root.addView(bar, margin(0, 0, 0, 16));
 
         ScrollView scroll = new ScrollView(this);

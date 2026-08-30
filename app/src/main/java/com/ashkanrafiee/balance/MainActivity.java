@@ -120,6 +120,10 @@ public class MainActivity extends Activity {
             setBackgroundColor(Color.rgb(8, 13, 22));
         }
 
+        boolean isRtl() {
+            return getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+        }
+
         void refresh() {
             if (refreshing) return;
             if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
@@ -257,9 +261,10 @@ public class MainActivity extends Activity {
             text(c, getString(R.string.unit_toman), x, baseline + 19, 11, Color.rgb(148, 163, 184), align);
         }
 
-        void totalValue(Canvas c, long n, float x, float baseline, float width) {
+        void totalValue(Canvas c, long n, float x, float baseline, float width, boolean rtl) {
+            Paint.Align anchor = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
             if (hidden) {
-                text(c, "\u2022\u2022\u2022\u2022\u2022\u2022", x, baseline, 34, Color.WHITE, Paint.Align.LEFT);
+                text(c, "\u2022\u2022\u2022\u2022\u2022\u2022", x, baseline, 34, Color.WHITE, anchor);
                 return;
             }
             String number = amount(n);
@@ -268,9 +273,9 @@ public class MainActivity extends Activity {
             float current = 34;
             while (current > 16 && measure(number, current) + unitGap + unitWidth > width) current -= 1;
             float numberWidth = measure(number, current);
-            text(c, number, x, baseline, current, Color.rgb(241, 245, 249), Paint.Align.LEFT);
-            text(c, unit, x + numberWidth + unitGap, baseline - 2, unitSize,
-                 Color.rgb(148, 163, 184), Paint.Align.LEFT);
+            text(c, number, x, baseline, current, Color.rgb(241, 245, 249), anchor);
+            float unitX = rtl ? x - numberWidth - unitGap : x + numberWidth + unitGap;
+            text(c, unit, unitX, baseline - 2, unitSize, Color.rgb(148, 163, 184), anchor);
         }
 
         float measure(String value, float size) {
@@ -307,6 +312,7 @@ public class MainActivity extends Activity {
         @Override
         protected void onDraw(Canvas c) {
             super.onDraw(c);
+            boolean rtl = isRtl();
             int top = 0, bottom = 0;
             if (android.os.Build.VERSION.SDK_INT >= 23 && getRootWindowInsets() != null) {
                 top = getRootWindowInsets().getSystemWindowInsetTop();
@@ -321,36 +327,46 @@ public class MainActivity extends Activity {
                 panel = Color.rgb(17, 27, 43);
             c.drawColor(Color.rgb(8, 13, 22));
 
-            text(c, getString(R.string.app_name), 32, 58, 25, fg, Paint.Align.LEFT);
-            text(c, fit(getString(R.string.subtitle_offline_bank_balances), 14, w - 64), 32, 86, 14, muted, Paint.Align.LEFT);
+            Paint.Align edgeAlign = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
+            float edgeX = rtl ? w - 32 : 32;
+            text(c, getString(R.string.app_name), edgeX, 58, 25, fg, edgeAlign);
+            text(c, fit(getString(R.string.subtitle_offline_bank_balances), 14, w - 64), edgeX, 86, 14, muted, edgeAlign);
 
             round(c, 24, 120, w - 24, 270, 28, panel);
-            text(c, getString(R.string.total_balance_label), 48, 158, 13, muted, Paint.Align.LEFT);
-            totalValue(c, total, 48, 220, w - 150);
+            float totalLabelX = rtl ? w - 48 : 48;
+            text(c, getString(R.string.total_balance_label), totalLabelX, 158, 13, muted, edgeAlign);
+            totalValue(c, total, totalLabelX, 220, w - 150, rtl);
+            RectF eyeRect = rtl ? new RectF(45, 147, 75, 165) : new RectF(w - 75, 147, w - 45, 165);
+            float eyeCenterX = rtl ? 60 : w - 60;
             p.setStyle(Paint.Style.STROKE);
             p.setStrokeWidth(2.5f);
             p.setColor(cyan);
-            c.drawOval(new RectF(w - 75, 147, w - 45, 165), p);
+            c.drawOval(eyeRect, p);
             p.setStyle(Paint.Style.FILL);
             p.setColor(cyan);
-            c.drawCircle(w - 60, 156, 5, p);
+            c.drawCircle(eyeCenterX, 156, 5, p);
             if (hidden) {
                 p.setColor(cyan);
                 p.setStrokeWidth(2.5f);
-                c.drawLine(w - 77, 142, w - 43, 170, p);
+                if (rtl) c.drawLine(43, 142, 77, 170, p);
+                else c.drawLine(w - 77, 142, w - 43, 170, p);
             }
 
-            text(c, getString(R.string.section_banks), 28, 320, 22, fg, Paint.Align.LEFT);
+            float banksHeaderX = rtl ? w - 28 : 28;
+            text(c, getString(R.string.section_banks), banksHeaderX, 320, 22, fg, edgeAlign);
+            RectF refreshArc = rtl ? new RectF(30, 297, 58, 325) : new RectF(w - 58, 297, w - 30, 325);
             if (refreshing) {
                 p.setStyle(Paint.Style.STROKE);
                 p.setStrokeWidth(3);
                 p.setColor(cyan);
-                c.drawArc(new RectF(w - 58, 297, w - 30, 325), refreshAngle, 270, false, p);
+                c.drawArc(refreshArc, refreshAngle, 270, false, p);
                 p.setStyle(Paint.Style.FILL);
                 refreshAngle = (refreshAngle + 14) % 360;
                 postInvalidateOnAnimation();
             } else {
-                text(c, getString(R.string.action_refresh), w - 28, 320, 14, cyan, Paint.Align.RIGHT);
+                float refreshX = rtl ? 28 : w - 28;
+                Paint.Align refreshAlign = rtl ? Paint.Align.LEFT : Paint.Align.RIGHT;
+                text(c, getString(R.string.action_refresh), refreshX, 320, 14, cyan, refreshAlign);
             }
 
             float by = (getHeight() - top - bottom) / d - 32;
@@ -359,15 +375,21 @@ public class MainActivity extends Activity {
             float y = 352 - scrollY;
             if (banks.isEmpty()) {
                 round(c, 24, y, w - 24, y + 96, 22, panel);
-                text(c, fit(status, 15, w - 96), 48, y + 56, 15, muted, Paint.Align.LEFT);
+                float statusX = rtl ? w - 48 : 48;
+                text(c, fit(status, 15, w - 96), statusX, y + 56, 15, muted, edgeAlign);
             } else for (Bank b : banks.values()) {
                 round(c, 24, y, w - 24, y + 82, 20, panel);
                 String displayName = BankRules.displayName(MainActivity.this, b.name);
-                bankBadge(c, b.name, 55, y + 41);
                 float valueWidth = Math.min(170, Math.max(125, w * .40f));
                 float valueLeft = w - 48 - valueWidth;
-                text(c, fit(displayName, 17, Math.max(40, valueLeft - 100)), 88, y + 36, 17, fg, Paint.Align.LEFT);
-                value(c, b.amount, w - 48, y + 35, valueWidth, 17, Paint.Align.RIGHT);
+                float badgeX = rtl ? w - 55 : 55;
+                float nameX = rtl ? w - 88 : 88;
+                float valueX = rtl ? 48 : w - 48;
+                Paint.Align nameAlign = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
+                Paint.Align valueAlign = rtl ? Paint.Align.LEFT : Paint.Align.RIGHT;
+                bankBadge(c, b.name, badgeX, y + 41);
+                text(c, fit(displayName, 17, Math.max(40, valueLeft - 100)), nameX, y + 36, 17, fg, nameAlign);
+                value(c, b.amount, valueX, y + 35, valueWidth, 17, valueAlign);
                 y += 96;
             }
             c.restore();
@@ -382,11 +404,19 @@ public class MainActivity extends Activity {
                 langW = measure(langText, 13), sepW = measure(sep, 13);
             float totalW = prefixW + sepW + aboutW + sepW + langW;
             float x0 = (w - totalW) / 2;
-            text(c, prefixText, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += prefixW;
-            text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
-            footerAboutStart = x0; text(c, aboutText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += aboutW; footerAboutEnd = x0;
-            text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
-            footerLangStart = x0; text(c, langText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += langW; footerLangEnd = x0;
+            if (!rtl) {
+                text(c, prefixText, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += prefixW;
+                text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
+                footerAboutStart = x0; text(c, aboutText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += aboutW; footerAboutEnd = x0;
+                text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
+                footerLangStart = x0; text(c, langText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += langW; footerLangEnd = x0;
+            } else {
+                footerLangStart = x0; text(c, langText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += langW; footerLangEnd = x0;
+                text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
+                footerAboutStart = x0; text(c, aboutText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += aboutW; footerAboutEnd = x0;
+                text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
+                text(c, prefixText, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += prefixW;
+            }
             footerY = by;
             c.restore();
         }
@@ -417,6 +447,7 @@ public class MainActivity extends Activity {
 
         @Override
         public boolean onTouchEvent(MotionEvent e) {
+            boolean rtl = isRtl();
             int top = 0, bottom = 0;
             if (android.os.Build.VERSION.SDK_INT >= 23 && getRootWindowInsets() != null) {
                 top = getRootWindowInsets().getSystemWindowInsetTop();
@@ -450,13 +481,14 @@ public class MainActivity extends Activity {
                     MainActivity.this.languageDialog();
                 }
             } else if (y >= 120 && y <= 270) {
-                if (x >= getWidth() / d - 105 && y <= 185) {
+                boolean onEye = rtl ? x <= 105 && y <= 185 : x >= getWidth() / d - 105 && y <= 185;
+                if (onEye) {
                     hidden = !hidden;
                     MainActivity.this.getSharedPreferences("balance_preferences", MODE_PRIVATE)
                         .edit().putBoolean("balances_hidden", hidden).apply();
                     invalidate();
                 } else copyBalance(getString(R.string.total_label), total);
-            } else if (y > 290 && y < 350 && x > getWidth() / d - 150) {
+            } else if (y > 290 && y < 350 && (rtl ? x < 150 : x > getWidth() / d - 150)) {
                 refresh();
             } else if (y >= 352 && y < byForTouch(h)) {
                 int index = (int) ((y - 352 + scrollY) / 96);
