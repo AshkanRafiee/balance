@@ -1,8 +1,65 @@
 package com.ashkanrafiee.balance;
 
+import android.content.Context;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 
 final class BankRules {
+    /** Maps a canonical (English, storage-key) bank name to its localized display string resource. */
+    private static final Map<String, Integer> DISPLAY_NAME_RES = new HashMap<>();
+    static {
+        DISPLAY_NAME_RES.put("Pasargad", R.string.bank_pasargad);
+        DISPLAY_NAME_RES.put("Eghtesad Novin", R.string.bank_eghtesad_novin);
+        DISPLAY_NAME_RES.put("Shahr", R.string.bank_shahr);
+        DISPLAY_NAME_RES.put("Ansar", R.string.bank_ansar);
+        DISPLAY_NAME_RES.put("Tejarat", R.string.bank_tejarat);
+        DISPLAY_NAME_RES.put("Refah", R.string.bank_refah);
+        DISPLAY_NAME_RES.put("Saman", R.string.bank_saman);
+        DISPLAY_NAME_RES.put("Sarmayeh", R.string.bank_sarmayeh);
+        DISPLAY_NAME_RES.put("Sina", R.string.bank_sina);
+        DISPLAY_NAME_RES.put("Saderat", R.string.bank_saderat);
+        DISPLAY_NAME_RES.put("Mellat", R.string.bank_mellat);
+        DISPLAY_NAME_RES.put("Melli", R.string.bank_melli);
+        DISPLAY_NAME_RES.put("Maskan", R.string.bank_maskan);
+        DISPLAY_NAME_RES.put("Keshavarzi", R.string.bank_keshavarzi);
+        DISPLAY_NAME_RES.put("Parsian", R.string.bank_parsian);
+        DISPLAY_NAME_RES.put("Post", R.string.bank_post);
+        DISPLAY_NAME_RES.put("Dey", R.string.bank_dey);
+        DISPLAY_NAME_RES.put("Hekmat", R.string.bank_hekmat);
+        DISPLAY_NAME_RES.put("Tosee Taavon", R.string.bank_tosee_taavon);
+        DISPLAY_NAME_RES.put("Noor", R.string.bank_noor);
+        DISPLAY_NAME_RES.put("Blu", R.string.bank_blu);
+        DISPLAY_NAME_RES.put("Kosar", R.string.bank_kosar);
+        DISPLAY_NAME_RES.put("Mehr", R.string.bank_mehr);
+        DISPLAY_NAME_RES.put("Mehr Eghtesad", R.string.bank_mehr_eghtesad);
+        DISPLAY_NAME_RES.put("Ghavamin", R.string.bank_ghavamin);
+        DISPLAY_NAME_RES.put("Zamin", R.string.bank_zamin);
+        DISPLAY_NAME_RES.put("Gardeshgari", R.string.bank_gardeshgari);
+        DISPLAY_NAME_RES.put("Middle East", R.string.bank_middle_east);
+        DISPLAY_NAME_RES.put("Tosee", R.string.bank_tosee);
+        DISPLAY_NAME_RES.put("Karafarin", R.string.bank_karafarin);
+        DISPLAY_NAME_RES.put("Resalat", R.string.bank_resalat);
+        DISPLAY_NAME_RES.put("Venezuela", R.string.bank_venezuela);
+        DISPLAY_NAME_RES.put("Melal", R.string.bank_melal);
+        DISPLAY_NAME_RES.put("Sanat Madan", R.string.bank_sanat_madan);
+        DISPLAY_NAME_RES.put("Sepah", R.string.bank_sepah);
+        DISPLAY_NAME_RES.put("Tosee Saderat", R.string.bank_tosee_saderat);
+        DISPLAY_NAME_RES.put("Bankino", R.string.bank_bankino);
+        DISPLAY_NAME_RES.put("Wepod", R.string.bank_wepod);
+        DISPLAY_NAME_RES.put("Industry & Mine", R.string.bank_industry_mine);
+        DISPLAY_NAME_RES.put("Tosee Credit Inst.", R.string.bank_tosee_credit_inst);
+        DISPLAY_NAME_RES.put("EDBI", R.string.bank_edbi);
+        DISPLAY_NAME_RES.put("Melal Credit Inst.", R.string.bank_melal_credit_inst);
+        DISPLAY_NAME_RES.put("Noor Credit Inst.", R.string.bank_noor_credit_inst);
+    }
+
+    /** Localized name for display; the canonical name passed in remains the storage/lookup key everywhere else. */
+    static String displayName(Context context, String canonical) {
+        Integer resId = DISPLAY_NAME_RES.get(canonical);
+        return resId != null ? context.getString(resId) : canonical;
+    }
+
     private static final String[][] RULES = {
         {"Pasargad", "b.pasargad|098500019000|98500019000|+98500019000"},
         {"Eghtesad Novin", "ENBank|Enbank|+9890004800|90004800"},

@@ -362,10 +362,11 @@ public class MainActivity extends Activity {
                 text(c, fit(status, 15, w - 96), 48, y + 56, 15, muted, Paint.Align.LEFT);
             } else for (Bank b : banks.values()) {
                 round(c, 24, y, w - 24, y + 82, 20, panel);
+                String displayName = BankRules.displayName(MainActivity.this, b.name);
                 bankBadge(c, b.name, 55, y + 41);
                 float valueWidth = Math.min(170, Math.max(125, w * .40f));
                 float valueLeft = w - 48 - valueWidth;
-                text(c, fit(b.name, 17, Math.max(40, valueLeft - 100)), 88, y + 36, 17, fg, Paint.Align.LEFT);
+                text(c, fit(displayName, 17, Math.max(40, valueLeft - 100)), 88, y + 36, 17, fg, Paint.Align.LEFT);
                 value(c, b.amount, w - 48, y + 35, valueWidth, 17, Paint.Align.RIGHT);
                 y += 96;
             }
@@ -390,10 +391,11 @@ public class MainActivity extends Activity {
             c.restore();
         }
 
-        void bankBadge(Canvas c, String name, float x, float centerY) {
-            int color = bankColors[Math.floorMod(name.hashCode(), bankColors.length)];
+        /** Uses the canonical (English) name so a bank's badge color and initials stay stable across languages. */
+        void bankBadge(Canvas c, String canonicalName, float x, float centerY) {
+            int color = bankColors[Math.floorMod(canonicalName.hashCode(), bankColors.length)];
             round(c, x - 18, centerY - 18, x + 18, centerY + 18, 12, color);
-            text(c, bankInitials(name), x, centerY + 5, 11, Color.WHITE, Paint.Align.CENTER);
+            text(c, bankInitials(canonicalName), x, centerY + 5, 11, Color.WHITE, Paint.Align.CENTER);
         }
 
         String bankInitials(String name) {
@@ -463,7 +465,7 @@ public class MainActivity extends Activity {
                     int i = 0;
                     for (Bank bank : banks.values()) {
                         if (i++ == index) {
-                            copyBalance(bank.name, bank.amount);
+                            copyBalance(BankRules.displayName(MainActivity.this, bank.name), bank.amount);
                             break;
                         }
                     }
