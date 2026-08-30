@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
@@ -27,6 +28,11 @@ import org.json.JSONObject;
 public class MainActivity extends Activity {
     private static final int SMS_REQUEST = 10;
     private BalanceView view;
+
+    @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(LocaleHelper.wrap(base));
+    }
 
     @Override
     public void onCreate(Bundle state) {
@@ -59,6 +65,22 @@ public class MainActivity extends Activity {
         if (r == SMS_REQUEST) view.refresh();
     }
 
+    private void languageDialog() {
+        String[] tags = LocaleHelper.SUPPORTED;
+        String[] labels = new String[tags.length];
+        for (int i = 0; i < tags.length; i++)
+            labels[i] = tags[i].isEmpty() ? getString(R.string.language_system_default) : LocaleHelper.displayName(tags[i]);
+        String current = LocaleHelper.currentTag(this);
+        int checkedIndex = 0;
+        for (int i = 0; i < tags.length; i++) if (tags[i].equals(current)) { checkedIndex = i; break; }
+        new android.app.AlertDialog.Builder(this).setTitle(getString(R.string.dialog_language_title))
+            .setSingleChoiceItems(labels, checkedIndex, (dialogInterface, which) -> {
+                LocaleHelper.setLanguage(this, tags[which]);
+                dialogInterface.dismiss();
+                recreate();
+            }).show();
+    }
+
     private final class BalanceView extends View {
         final Paint p = new Paint(3);
         final LinkedHashMap<String, Bank> banks = new LinkedHashMap<>();
@@ -68,6 +90,7 @@ public class MainActivity extends Activity {
         boolean dragging;
         String status = getString(R.string.status_reading_sms);
         long total;
+        float footerAboutStart, footerAboutEnd, footerLangStart, footerLangEnd, footerY;
         final int[] bankColors = {
             Color.rgb(14, 165, 233), Color.rgb(139, 92, 246),
             Color.rgb(16, 185, 129), Color.rgb(245, 158, 11),
@@ -350,12 +373,20 @@ public class MainActivity extends Activity {
 
             p.setTextSize(13);
             p.setTypeface(android.graphics.Typeface.create("sans", 0));
-            String footerPrefix = fit(getString(R.string.footer_prefix) + "  \u00b7  ", 13, w - 90),
-                about = getString(R.string.footer_about);
-            float footerWidth = p.measureText(footerPrefix) + p.measureText(about),
-                footerX = (w - footerWidth) / 2;
-            text(c, footerPrefix, footerX, by + 4, 13, muted, Paint.Align.LEFT);
-            text(c, about, footerX + p.measureText(footerPrefix), by + 4, 13, purple, Paint.Align.LEFT);
+            String prefixText = fit(getString(R.string.footer_prefix), 13, w - 90);
+            String aboutText = getString(R.string.footer_about);
+            String langText = getString(R.string.footer_language);
+            String sep = "  \u00b7  ";
+            float prefixW = measure(prefixText, 13), aboutW = measure(aboutText, 13),
+                langW = measure(langText, 13), sepW = measure(sep, 13);
+            float totalW = prefixW + sepW + aboutW + sepW + langW;
+            float x0 = (w - totalW) / 2;
+            text(c, prefixText, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += prefixW;
+            text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
+            footerAboutStart = x0; text(c, aboutText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += aboutW; footerAboutEnd = x0;
+            text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
+            footerLangStart = x0; text(c, langText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += langW; footerLangEnd = x0;
+            footerY = by;
             c.restore();
         }
 
@@ -410,8 +441,12 @@ public class MainActivity extends Activity {
                 if (downY < 360 && y - downY > 55) refresh();
                 return true;
             }
-            if (y > h - 55 && x > getWidth() / d / 2 + 55) {
-                startActivity(new Intent(MainActivity.this, AboutActivity.class));
+            if (y > footerY - 20 && y < footerY + 24) {
+                if (x >= footerAboutStart - 10 && x <= footerAboutEnd + 10) {
+                    startActivity(new Intent(MainActivity.this, AboutActivity.class));
+                } else if (x >= footerLangStart - 10 && x <= footerLangEnd + 10) {
+                    MainActivity.this.languageDialog();
+                }
             } else if (y >= 120 && y <= 270) {
                 if (x >= getWidth() / d - 105 && y <= 185) {
                     hidden = !hidden;

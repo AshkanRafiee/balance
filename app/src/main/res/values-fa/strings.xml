@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Balance</string>
+    <string name="subtitle_offline_bank_balances">موجودی آفلاین بانک‌ها</string>
+    <string name="total_balance_label">مجموع موجودی</string>
+    <string name="section_banks">بانک‌ها</string>
+    <string name="action_refresh">به‌روزرسانی</string>
+    <string name="unit_toman">تومان</string>
+    <string name="total_label">مجموع</string>
+
+    <string name="status_reading_sms">در حال خواندن پیامک‌های بانکی این دستگاه...</string>
+    <string name="status_permission_needed">برای خواندن موجودی به اجازهٔ دسترسی به پیامک نیاز است</string>
+    <string name="status_refreshing">در حال به‌روزرسانی موجودی‌ها...</string>
+    <string name="status_no_sms_found">هنوز پیامک موجودی از بانک‌های پشتیبانی‌شده یافت نشد</string>
+    <string name="status_loaded_from_saved">موجودی‌ها از داده‌های ذخیره‌شده بارگذاری شد</string>
+    <string name="status_sms_unreadable">پیامک‌ها خوانده نشد</string>
+    <plurals name="status_updated_banks">
+        <item quantity="one">موجودی %1$d بانک از روی پیامک به‌روزرسانی شد</item>
+        <item quantity="other">موجودی %1$d بانک از روی پیامک به‌روزرسانی شد</item>
+    </plurals>
+
+    <string name="toast_unmask_to_copy">برای کپی کردن، ابتدا موجودی را نمایان کنید</string>
+    <string name="toast_copied_balance">موجودی %1$s کپی شد</string>
+
+    <string name="footer_prefix">طراحی‌شده به‌صورت محلی  ·  Balance</string>
+    <string name="footer_about">درباره</string>
+    <string name="footer_language">زبان</string>
+
+    <string name="dialog_language_title">زبان برنامه</string>
+    <string name="language_system_default">پیش‌فرض سیستم</string>
+
+    <string name="about_title">درباره</string>
+    <string name="tagline_offline_bank_balance">موجودی آفلاین بانکی</string>
+    <string name="about_section_heading">دربارهٔ این برنامه</string>
+    <string name="about_section_body">Balance یک داشبورد خصوصی و آفلاین برای آخرین موجودی‌های اعلام‌شده توسط بانک‌های پشتیبانی‌شده است. این برنامه پیامک‌های بانکی پشتیبانی‌شده را به‌صورت محلی می‌خواند، یک موجودی جاری برای هر بانک نگه می‌دارد و هرگز پیامک یا اطلاعات مالی را به جایی ارسال نمی‌کند.</string>
+    <string name="about_created_by_label">ساخته‌شده توسط</string>
+    <string name="about_license_label">مجوز</string>
+    <string name="about_source_label">کد منبع</string>
+    <string name="about_privacy_label">حریم خصوصی</string>
+    <string name="about_privacy_value">آفلاین از پایه · بدون فضای ابری · بدون حساب کاربری</string>
+    <string name="about_footer">Balance · نسخهٔ %1$s</string>
+
+    <string name="bank_pasargad">بانک پاسارگاد</string>
+    <string name="bank_eghtesad_novin">بانک اقتصاد نوین</string>
+    <string name="bank_shahr">بانک شهر</string>
+    <string name="bank_ansar">بانک انصار</string>
+    <string name="bank_tejarat">بانک تجارت</string>
+    <string name="bank_refah">بانک رفاه کارگران</string>
+    <string name="bank_saman">بانک سامان</string>
+    <string name="bank_sarmayeh">بانک سرمایه</string>
+    <string name="bank_sina">بانک سینا</string>
+    <string name="bank_saderat">بانک صادرات ایران</string>
+    <string name="bank_mellat">بانک ملت</string>
+    <string name="bank_melli">بانک ملی ایران</string>
+    <string name="bank_maskan">بانک مسکن</string>
+    <string name="bank_keshavarzi">بانک کشاورزی</string>
+    <string name="bank_parsian">بانک پارسیان</string>
+    <string name="bank_post">پست بانک ایران</string>
+    <string name="bank_dey">بانک دی</string>
+    <string name="bank_hekmat">بانک حکمت ایرانیان</string>
+    <string name="bank_tosee_taavon">بانک توسعه تعاون</string>
+    <string name="bank_noor">مؤسسه اعتباری نور</string>
+    <string name="bank_blu">بلو</string>
+    <string name="bank_kosar">مؤسسه اعتباری کوثر</string>
+    <string name="bank_mehr">بانک قرض‌الحسنه مهر ایران</string>
+    <string name="bank_mehr_eghtesad">بانک مهر اقتصاد</string>
+    <string name="bank_ghavamin">بانک قوامین</string>
+    <string name="bank_zamin">بانک ایران زمین</string>
+    <string name="bank_gardeshgari">بانک گردشگری</string>
+    <string name="bank_middle_east">بانک خاورمیانه</string>
+    <string name="bank_tosee">بانک توسعه</string>
+    <string name="bank_karafarin">بانک کارآفرین</string>
+    <string name="bank_resalat">بانک قرض‌الحسنه رسالت</string>
+    <string name="bank_venezuela">بانک مشترک ایران و ونزوئلا</string>
+    <string name="bank_melal">مؤسسه اعتباری ملل</string>
+    <string name="bank_sanat_madan">بانک صنعت و معدن</string>
+    <string name="bank_sepah">بانک سپه</string>
+    <string name="bank_tosee_saderat">بانک توسعه صادرات ایران</string>
+    <string name="bank_bankino">بانکینو</string>
+    <string name="bank_wepod">وی‌پاد</string>
+    <string name="bank_industry_mine">بانک صنعت و معدن</string>
+    <string name="bank_tosee_credit_inst">مؤسسه اعتباری توسعه</string>
+    <string name="bank_edbi">بانک توسعه صادرات ایران</string>
+    <string name="bank_melal_credit_inst">مؤسسه اعتباری ملل</string>
+    <string name="bank_noor_credit_inst">مؤسسه اعتباری نور</string>
+</resources>

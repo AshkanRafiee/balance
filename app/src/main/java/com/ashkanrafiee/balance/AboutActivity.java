@@ -1,6 +1,7 @@
 package com.ashkanrafiee.balance;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -44,6 +45,11 @@ public final class AboutActivity extends Activity {
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
         p.setMargins(dp(l), dp(t), dp(r), dp(b));
         return p;
+    }
+
+    @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(LocaleHelper.wrap(base));
     }
 
     @Override
