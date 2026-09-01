@@ -1,0 +1,1 @@
+Raised the minimum supported Android version to 8.0 (API 26) to drop legacy platform support and take advantage of modern APIs.
