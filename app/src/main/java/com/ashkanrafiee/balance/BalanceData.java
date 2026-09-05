@@ -9,9 +9,9 @@ import android.provider.Telephony;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
+import android.util.Log;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
-import java.security.SecureRandom;
 import java.text.NumberFormat;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -30,11 +30,11 @@ final class BalanceData {
     static final String PREFS_PREF = "balance_preferences";
     static final String KEY_HIDDEN = "balances_hidden";
 
+    private static final String TAG = "BalanceData";
     private static final String KEYSTORE = "AndroidKeyStore";
     private static final String KEY_ALIAS = "balance_enc_key";
     private static final String TRANSFORM = "AES/GCM/NoPadding";
     private static final int GCM_TAG_BITS = 128;
-    private static final SecureRandom RANDOM = new SecureRandom();
     private static final Pattern balance = Pattern.compile(
         "(?:\u0645\u0648\u062c\u0648\u062f\u06cc \u062d\u0633\u0627\u0628" +
         "|\u0645\u0627\u0646\u062f\u0647 \u062d\u0633\u0627\u0628" +
@@ -103,8 +103,8 @@ final class BalanceData {
             parse(map, json);
             if (legacy) write(context, map);
         } catch (Exception e) {
-            context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-                .remove(KEY_BALANCES).apply();
+            Log.w(TAG, "read failed", e);
+            return map;
         }
         return map;
     }
@@ -137,7 +137,9 @@ final class BalanceData {
             String json = obj.toString();
             context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
                 .putString(KEY_BALANCES, encrypt(json)).apply();
-        } catch (Exception e) { }
+        } catch (Exception e) {
+            Log.w(TAG, "write failed", e);
+        }
     }
 
     static boolean isHidden(Context context) {
@@ -149,11 +151,10 @@ final class BalanceData {
     static void scanSms(Context context, LinkedHashMap<String, Bank> saved) {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
             return;
-        try {
-            Cursor cursor = context.getContentResolver().query(
-                Telephony.Sms.Inbox.CONTENT_URI,
-                new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
-                null, null, Telephony.Sms.DATE + " DESC");
+        try (Cursor cursor = context.getContentResolver().query(
+            Telephony.Sms.Inbox.CONTENT_URI,
+            new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
+            null, null, Telephony.Sms.DATE + " DESC")) {
             if (cursor != null) while (cursor.moveToNext()) {
                 String sender = cursor.getString(0), body = cursor.getString(1);
                 long date = cursor.getLong(2);
@@ -165,8 +166,9 @@ final class BalanceData {
                 if (existing == null || date > existing.date)
                     saved.put(bank, new Bank(bank, value, date, sender));
             }
-            if (cursor != null) cursor.close();
-        } catch (Exception e) { }
+        } catch (Exception e) {
+            Log.w(TAG, "scan failed", e);
+        }
         write(context, saved);
     }
 

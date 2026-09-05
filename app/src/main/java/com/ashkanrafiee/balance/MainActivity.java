@@ -120,27 +120,28 @@ public class MainActivity extends Activity {
             status = getString(R.string.status_refreshing);
             invalidate();
             new Thread(() -> {
+                final Context app = MainActivity.this.getApplicationContext();
                 try {
-                    LinkedHashMap<String, Bank> saved = BalanceData.read(MainActivity.this);
+                    LinkedHashMap<String, Bank> saved = BalanceData.read(app);
                     int count = 0;
-                    Cursor c = getContentResolver().query(
+                    try (Cursor c = app.getContentResolver().query(
                         Telephony.Sms.Inbox.CONTENT_URI,
                         new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
-                        null, null, Telephony.Sms.DATE + " DESC");
-                    if (c != null) while (c.moveToNext()) {
-                        String sender = c.getString(0), body = c.getString(1);
-                        long date = c.getLong(2);
-                        long value = BalanceData.extract(body);
-                        if (value < 0) continue;
-                        String bank = BankRules.resolve(sender);
-                        if (bank == null || value <= 0) continue;
-                        Bank existing = saved.get(bank);
-                        if (existing == null || date > existing.date)
-                            saved.put(bank, new Bank(bank, value, date, sender));
-                        count++;
+                        null, null, Telephony.Sms.DATE + " DESC")) {
+                        if (c != null) while (c.moveToNext()) {
+                            String sender = c.getString(0), body = c.getString(1);
+                            long date = c.getLong(2);
+                            long value = BalanceData.extract(body);
+                            if (value < 0) continue;
+                            String bank = BankRules.resolve(sender);
+                            if (bank == null || value <= 0) continue;
+                            Bank existing = saved.get(bank);
+                            if (existing == null || date > existing.date)
+                                saved.put(bank, new Bank(bank, value, date, sender));
+                            count++;
+                        }
                     }
-                    if (c != null) c.close();
-                    BalanceData.write(MainActivity.this, saved);
+                    BalanceData.write(app, saved);
                     String message = count == 0
                         ? (saved.isEmpty()
                             ? getString(R.string.status_no_sms_found)
@@ -154,11 +155,11 @@ public class MainActivity extends Activity {
                         status = message;
                         refreshing = false;
                         invalidate();
-                        BalanceWidgetProvider.push(MainActivity.this);
+                        BalanceWidgetProvider.push(app);
                     });
                 } catch (Exception e) {
                     post(() -> {
-                        LinkedHashMap<String, Bank> saved = BalanceData.read(MainActivity.this);
+                        LinkedHashMap<String, Bank> saved = BalanceData.read(app);
                         banks.clear();
                         banks.putAll(saved);
                         total = 0;
@@ -166,7 +167,7 @@ public class MainActivity extends Activity {
                         status = banks.isEmpty() ? getString(R.string.status_sms_unreadable) : getString(R.string.status_loaded_from_saved);
                         refreshing = false;
                         invalidate();
-                        BalanceWidgetProvider.push(MainActivity.this);
+                        BalanceWidgetProvider.push(app);
                     });
                 }
             }).start();

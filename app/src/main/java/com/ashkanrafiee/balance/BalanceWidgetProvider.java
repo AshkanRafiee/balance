@@ -23,7 +23,6 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     private static final int REQ_ALARM = 100;
     static final int REQ_ITEM_TAP = 201;
     private static final long MIN_SPIN_DURATION = 700L;
-    private static final long MAX_SPIN_DURATION = 2500L;
     private static final AtomicBoolean REFRESHING = new AtomicBoolean(false);
     private static volatile float spin;
 
@@ -43,7 +42,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
 
                 long start = SystemClock.uptimeMillis();
                 int step = 0;
-                while (!done.get() && SystemClock.uptimeMillis() - start < MAX_SPIN_DURATION) {
+                while (!done.get()) {
                     step++;
                     spin = (float) ((step * 45) % 360);
                     applySpin(context);
@@ -169,10 +168,19 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         refreshData(context);
     }
 
+    /**
+     * Delivers the widget actions (refresh, mask, alarm) and system events.
+     * This receiver is exported (required for APPWIDGET_UPDATE/BOOT_COMPLETED), so a
+     * same-device app could in principle send an explicit broadcast for these actions.
+     * The impact is bounded to toggling the local hidden flag or triggering an SMS
+     * rescan; no balances are ever exposed to other apps (no INTERNET, MODE_PRIVATE),
+     * so we accept it rather than add sender-validation machinery.
+     */
     @Override
     public void onReceive(Context context, Intent intent) {
         super.onReceive(context, intent);
         String action = intent.getAction();
+        if (action == null) return;
         if (ACTION_REFRESH.equals(action) || ACTION_ALARM.equals(action)) {
             if (ACTION_ALARM.equals(action)) scheduleAlarm(context);
             refreshData(context);
