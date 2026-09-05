@@ -1,1 +1,5 @@
-Added a home-screen widget so your bank balances are always a glance away. Hide amounts, refresh on demand, and it follows your language and keeps itself up to date. Balances are now stored encrypted on your device.
+Added a home-screen widget so your bank balances are always a glance away.
+Hide amounts whenever you want.
+Refresh balances on demand, right from the widget.
+The widget follows your app's language and keeps itself up to date.
+Your balances are now stored encrypted on your device.
