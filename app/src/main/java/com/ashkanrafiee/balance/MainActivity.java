@@ -101,7 +101,7 @@ public class MainActivity extends Activity {
         BalanceView() {
             super(MainActivity.this);
             hidden = BalanceData.isHidden(MainActivity.this);
-            p.setTypeface(android.graphics.Typeface.create("sans", 0));
+            p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
             setBackgroundColor(Color.rgb(8, 13, 22));
         }
 
@@ -204,13 +204,13 @@ public class MainActivity extends Activity {
 
         float measure(String value, float size) {
             p.setTextSize(size);
-            p.setTypeface(android.graphics.Typeface.create("sans", 0));
+            p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
             return p.measureText(value);
         }
 
         String fit(String value, float size, float max) {
             p.setTextSize(size);
-            p.setTypeface(android.graphics.Typeface.create("sans", 0));
+            p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
             if (p.measureText(value) <= max) return value;
             String s = value;
             while (s.length() > 1 && p.measureText(s + "\u2026") > max)
@@ -223,7 +223,7 @@ public class MainActivity extends Activity {
             p.setTextSize(size);
             p.setColor(color);
             p.setTextAlign(align);
-            p.setTypeface(android.graphics.Typeface.create("sans", 0));
+            p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
             c.drawText(s, x, y, p);
         }
 
@@ -320,7 +320,7 @@ public class MainActivity extends Activity {
             c.restore();
 
             p.setTextSize(13);
-            p.setTypeface(android.graphics.Typeface.create("sans", 0));
+            p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
             String prefixText = fit(getString(R.string.footer_prefix), 13, w - 90);
             String aboutText = getString(R.string.footer_about);
             String langText = getString(R.string.footer_language);
