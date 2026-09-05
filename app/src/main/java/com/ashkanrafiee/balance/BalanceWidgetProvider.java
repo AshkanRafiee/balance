@@ -93,7 +93,6 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         views.setRemoteAdapter(R.id.widget_list, new Intent(c, BalanceWidgetService.class));
         views.setInt(R.id.widget_root, "setLayoutDirection",
             c.getResources().getConfiguration().getLayoutDirection());
-        views.setTextViewText(R.id.widget_title, c.getString(R.string.app_name));
         views.setTextViewText(R.id.widget_total,
             hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : BalanceData.toman(c, total));
         views.setTextViewText(R.id.widget_unit, c.getString(R.string.unit_toman));
