@@ -6,12 +6,22 @@ import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.database.Cursor;
 import android.provider.Telephony;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
+import android.util.Base64;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
+import java.security.SecureRandom;
 import java.text.NumberFormat;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
 import org.json.JSONObject;
 
 final class BalanceData {
@@ -20,6 +30,11 @@ final class BalanceData {
     static final String PREFS_PREF = "balance_preferences";
     static final String KEY_HIDDEN = "balances_hidden";
 
+    private static final String KEYSTORE = "AndroidKeyStore";
+    private static final String KEY_ALIAS = "balance_enc_key";
+    private static final String TRANSFORM = "AES/GCM/NoPadding";
+    private static final int GCM_TAG_BITS = 128;
+    private static final SecureRandom RANDOM = new SecureRandom();
     private static final Pattern balance = Pattern.compile(
         "(?:\u0645\u0648\u062c\u0648\u062f\u06cc \u062d\u0633\u0627\u0628" +
         "|\u0645\u0627\u0646\u062f\u0647 \u062d\u0633\u0627\u0628" +
@@ -38,20 +53,71 @@ final class BalanceData {
 
     private BalanceData() {}
 
+    private static SecretKey createKey() throws Exception {
+        KeyGenerator kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE);
+        kg.init(new KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT
+            | KeyProperties.PURPOSE_DECRYPT)
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setKeySize(256)
+            .setUserAuthenticationRequired(false)
+            .setRandomizedEncryptionRequired(true)
+            .build());
+        return kg.generateKey();
+    }
+
+    private static SecretKey getOrCreateKey() throws Exception {
+        KeyStore ks = KeyStore.getInstance(KEYSTORE);
+        ks.load(null);
+        if (ks.containsAlias(KEY_ALIAS)) return (SecretKey) ks.getKey(KEY_ALIAS, null);
+        return createKey();
+    }
+
+    private static String encrypt(String plain) throws Exception {
+        Cipher cipher = Cipher.getInstance(TRANSFORM);
+        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey());
+        byte[] iv = cipher.getIV();
+        byte[] ct = cipher.doFinal(plain.getBytes(StandardCharsets.UTF_8));
+        byte[] out = new byte[iv.length + ct.length];
+        System.arraycopy(iv, 0, out, 0, iv.length);
+        System.arraycopy(ct, 0, out, iv.length, ct.length);
+        return Base64.encodeToString(out, Base64.NO_WRAP);
+    }
+
+    private static String decrypt(String blob) throws Exception {
+        byte[] in = Base64.decode(blob, Base64.NO_WRAP);
+        Cipher cipher = Cipher.getInstance(TRANSFORM);
+        GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_BITS, in, 0, 12);
+        cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), spec);
+        return new String(cipher.doFinal(in, 12, in.length - 12), StandardCharsets.UTF_8);
+    }
+
     static LinkedHashMap<String, Bank> read(Context context) {
         LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
         try {
-            String json = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
+            String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
                 .getString(KEY_BALANCES, null);
-            if (json != null) {
-                JSONObject obj = new JSONObject(json);
-                Iterator<String> keys = obj.keys();
-                while (keys.hasNext()) {
-                    String bank = keys.next();
-                    JSONObject entry = obj.getJSONObject(bank);
-                    map.put(bank, new Bank(bank, entry.getLong("amount"),
-                        entry.getLong("date"), entry.getString("sender")));
-                }
+            if (stored == null) return map;
+            boolean legacy = stored.indexOf('{') == 0;
+            String json = legacy ? stored : decrypt(stored);
+            parse(map, json);
+            if (legacy) write(context, map);
+        } catch (Exception e) {
+            context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
+                .remove(KEY_BALANCES).apply();
+        }
+        return map;
+    }
+
+    private static LinkedHashMap<String, Bank> parse(LinkedHashMap<String, Bank> map, String json) {
+        try {
+            JSONObject obj = new JSONObject(json);
+            Iterator<String> keys = obj.keys();
+            while (keys.hasNext()) {
+                String bank = keys.next();
+                JSONObject entry = obj.getJSONObject(bank);
+                map.put(bank, new Bank(bank, entry.getLong("amount"),
+                    entry.getLong("date"), entry.getString("sender")));
             }
         } catch (Exception e) { }
         return map;
@@ -68,8 +134,9 @@ final class BalanceData {
                 entry.put("sender", b.sender);
                 obj.put(e.getKey(), entry);
             }
+            String json = obj.toString();
             context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-                .putString(KEY_BALANCES, obj.toString()).apply();
+                .putString(KEY_BALANCES, encrypt(json)).apply();
         } catch (Exception e) { }
     }
 
