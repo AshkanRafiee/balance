@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <application android:theme="@style/AppTheme" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="false" android:supportsRtl="true">
         <activity android:name=".MainActivity" android:screenOrientation="portrait" android:exported="true">
@@ -10,5 +11,23 @@
             </intent-filter>
         </activity>
         <activity android:name=".AboutActivity" android:screenOrientation="portrait" android:exported="false" />
+        <receiver android:name=".BalanceWidgetProvider" android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.ashkanrafiee.balance.WIDGET_REFRESH" />
+                <action android:name="com.ashkanrafiee.balance.WIDGET_MASK" />
+                <action android:name="com.ashkanrafiee.balance.WIDGET_ALARM" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider"
+                android:resource="@xml/balance_widget_info" />
+        </receiver>
+        <service android:name=".BalanceWidgetService"
+            android:permission="android.permission.BIND_REMOTEVIEWS"
+            android:exported="false" />
     </application>
 </manifest>

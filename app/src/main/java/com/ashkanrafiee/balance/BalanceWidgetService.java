@@ -1,0 +1,93 @@
+package com.ashkanrafiee.balance;
+
+import android.content.Context;
+import android.content.Intent;
+import android.view.Gravity;
+import android.view.View;
+import android.widget.RemoteViews;
+import android.widget.RemoteViewsService;
+import java.util.ArrayList;
+import java.util.List;
+
+public class BalanceWidgetService extends RemoteViewsService {
+    @Override
+    public RemoteViewsFactory onGetViewFactory(Intent intent) {
+        return new Factory(getApplicationContext());
+    }
+
+    private static final class Factory implements RemoteViewsService.RemoteViewsFactory {
+        private static final int TYPE_HEADER = 0, TYPE_BANK = 1, TYPE_EMPTY = 2;
+        private final Context context;
+        private final List<Bank> banks = new ArrayList<>();
+
+        Factory(Context context) { this.context = context; }
+
+        @Override public void onCreate() { }
+
+        @Override public void onDataSetChanged() {
+            banks.clear();
+            banks.addAll(BalanceData.read(LocaleHelper.wrap(context)).values());
+        }
+
+        @Override public int getCount() {
+            return 1 + (banks.isEmpty() ? 1 : banks.size());
+        }
+
+        @Override public RemoteViews getViewAt(int i) {
+            if (i == 0) return headerViews();
+            if (banks.isEmpty()) return emptyViews();
+            return bankViews(i - 1);
+        }
+
+        private RemoteViews headerViews() {
+            Context c = LocaleHelper.wrap(context);
+            String pkg = c.getPackageName();
+            int dir = c.getResources().getConfiguration().getLayoutDirection();
+            boolean hidden = BalanceData.isHidden(c);
+            RemoteViews views = new RemoteViews(pkg, R.layout.widget_balance_header);
+            views.setInt(R.id.widget_header_root, "setLayoutDirection", dir);
+            views.setTextViewText(R.id.widget_title, c.getString(R.string.app_name));
+            long total = 0;
+            for (Bank b : banks) total += b.amount;
+            views.setTextViewText(R.id.widget_total,
+                hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : BalanceData.toman(c, total));
+            views.setTextViewText(R.id.widget_unit, c.getString(R.string.unit_toman));
+            return views;
+        }
+
+        private RemoteViews bankViews(int index) {
+            Context c = LocaleHelper.wrap(context);
+            int dir = c.getResources().getConfiguration().getLayoutDirection();
+            boolean rtl = dir == View.LAYOUT_DIRECTION_RTL;
+            boolean hidden = BalanceData.isHidden(c);
+            Bank b = banks.get(index);
+            RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance_item);
+            views.setInt(R.id.widget_item_root, "setLayoutDirection", dir);
+            views.setTextViewText(R.id.bank_name, BankRules.displayName(c, b.name));
+            views.setTextViewText(R.id.bank_amount,
+                hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : BalanceData.toman(c, b.amount));
+            views.setInt(R.id.bank_name, "setGravity", Gravity.CENTER_VERTICAL | (rtl ? Gravity.RIGHT : Gravity.LEFT));
+            views.setInt(R.id.bank_amount, "setGravity", Gravity.CENTER_VERTICAL | (rtl ? Gravity.LEFT : Gravity.RIGHT));
+            return views;
+        }
+
+        private RemoteViews emptyViews() {
+            Context c = LocaleHelper.wrap(context);
+            RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance_empty);
+            views.setInt(R.id.widget_empty, "setLayoutDirection",
+                c.getResources().getConfiguration().getLayoutDirection());
+            views.setViewVisibility(R.id.widget_empty, View.VISIBLE);
+            return views;
+        }
+
+        @Override public long getItemId(int i) { return i; }
+
+        @Override public RemoteViews getLoadingView() { return null; }
+
+        @Override public int getViewTypeCount() { return 3; }
+
+        @Override public boolean hasStableIds() { return false; }
+
+        @Override public void onDestroy() { }
+    }
+}

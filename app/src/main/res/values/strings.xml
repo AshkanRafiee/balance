@@ -27,6 +27,10 @@
     <string name="footer_language">Language</string>
 
     <string name="dialog_language_title">App language</string>
+    <string name="widget_description">Bank balances on your home screen</string>
+    <string name="widget_empty">No balances yet — tap refresh to scan your bank SMS</string>
+    <string name="widget_action_refresh">Refresh</string>
+    <string name="widget_action_mask">Show or hide balances</string>
     <string name="language_system_default">System default</string>
 
     <string name="about_title">About</string>
