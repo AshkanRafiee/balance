@@ -191,6 +191,8 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
             updateAll(context);
         } else if (ACTION_BOOT_COMPLETED.equals(action) && hasWidgets(context)) {
             scheduleAlarm(context);
+        } else if (Intent.ACTION_CONFIGURATION_CHANGED.equals(action) && hasWidgets(context)) {
+            updateAll(context);
         }
     }
 }

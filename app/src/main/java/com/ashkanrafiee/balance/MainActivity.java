@@ -34,8 +34,8 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         if (android.os.Build.VERSION.SDK_INT >= 30)
             getWindow().setDecorFitsSystemWindows(false);
-        getWindow().setStatusBarColor(Color.rgb(11, 18, 32));
-        getWindow().setNavigationBarColor(Color.rgb(8, 13, 22));
+        getWindow().setStatusBarColor(resColor(R.color.status_bar));
+        getWindow().setNavigationBarColor(resColor(R.color.nav_bar));
         view = new BalanceView();
         setContentView(view);
         view.setOnApplyWindowInsetsListener((v, insets) -> {
@@ -51,6 +51,18 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (view != null) view.refresh();
+    }
+
+    /**
+     * Forces a full redraw when the window regains focus. Without this, a frame
+     * drawn around an Activity recreation can leave the bottom strip (below the
+     * footer) showing the dark window background until something triggers a
+     * redraw (e.g. tapping the eye). Repainting here clears that stale frame.
+     */
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && view != null) view.invalidate();
     }
 
     private void requestSms() {
@@ -82,6 +94,10 @@ public class MainActivity extends Activity {
             }).show();
     }
 
+    private int resColor(int res) {
+        return getResources().getColor(res, getTheme());
+    }
+
     private final class BalanceView extends View {
         final Paint p = new Paint(3);
         final LinkedHashMap<String, Bank> banks = new LinkedHashMap<>();
@@ -93,6 +109,12 @@ public class MainActivity extends Activity {
         String status = getString(R.string.status_reading_sms);
         long total;
         float footerAboutStart, footerAboutEnd, footerLangStart, footerLangEnd, footerY;
+        final int fg = resColor(R.color.fg);
+        final int muted = resColor(R.color.muted);
+        final int accent = resColor(R.color.accent);
+        final int purple = resColor(R.color.purple);
+        final int panel = resColor(R.color.panel);
+        final int bg = resColor(R.color.bg);
         final int[] bankColors = {
             Color.rgb(14, 165, 233), Color.rgb(139, 92, 246),
             Color.rgb(16, 185, 129), Color.rgb(245, 158, 11),
@@ -102,7 +124,7 @@ public class MainActivity extends Activity {
             super(MainActivity.this);
             hidden = BalanceData.isHidden(MainActivity.this);
             p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
-            setBackgroundColor(Color.rgb(8, 13, 22));
+            setBackgroundColor(bg);
         }
 
         boolean isRtl() {
@@ -176,20 +198,20 @@ public class MainActivity extends Activity {
         void value(Canvas c, long n, float x, float baseline, float width,
                    float size, Paint.Align align) {
             if (hidden) {
-                text(c, "\u2022\u2022\u2022\u2022\u2022\u2022", x, baseline, size, Color.WHITE, align);
+                text(c, "\u2022\u2022\u2022\u2022\u2022\u2022", x, baseline, size, fg, align);
                 return;
             }
             String number = BalanceData.toman(MainActivity.this, n);
             float current = size;
             while (current > 10 && measure(number, current) > width) current -= 1;
-            text(c, number, x, baseline, current, Color.rgb(103, 232, 249), align);
-            text(c, getString(R.string.unit_toman), x, baseline + 19, 11, Color.rgb(148, 163, 184), align);
+            text(c, number, x, baseline, current, accent, align);
+            text(c, getString(R.string.unit_toman), x, baseline + 19, 11, muted, align);
         }
 
         void totalValue(Canvas c, long n, float x, float baseline, float width, boolean rtl) {
             Paint.Align anchor = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
             if (hidden) {
-                text(c, "\u2022\u2022\u2022\u2022\u2022\u2022", x, baseline, 34, Color.WHITE, anchor);
+                text(c, "\u2022\u2022\u2022\u2022\u2022\u2022", x, baseline, 34, fg, anchor);
                 return;
             }
             String number = BalanceData.toman(MainActivity.this, n);
@@ -198,9 +220,9 @@ public class MainActivity extends Activity {
             float current = 34;
             while (current > 16 && measure(number, current) + unitGap + unitWidth > width) current -= 1;
             float numberWidth = measure(number, current);
-            text(c, number, x, baseline, current, Color.rgb(241, 245, 249), anchor);
+            text(c, number, x, baseline, current, fg, anchor);
             float unitX = rtl ? x - numberWidth - unitGap : x + numberWidth + unitGap;
-            text(c, unit, unitX, baseline - 2, unitSize, Color.rgb(148, 163, 184), anchor);
+            text(c, unit, unitX, baseline - 2, unitSize, muted, anchor);
         }
 
         float measure(String value, float size) {
@@ -248,10 +270,7 @@ public class MainActivity extends Activity {
             c.translate(0, top);
             c.scale(d, d);
             int w = (int) (getWidth() / d);
-            int fg = Color.rgb(241, 245, 249), muted = Color.rgb(148, 163, 184),
-                cyan = Color.rgb(103, 232, 249), purple = Color.rgb(167, 139, 250),
-                panel = Color.rgb(17, 27, 43);
-            c.drawColor(Color.rgb(8, 13, 22));
+            c.drawColor(bg);
 
             Paint.Align edgeAlign = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
             float edgeX = rtl ? w - 32 : 32;
@@ -266,13 +285,13 @@ public class MainActivity extends Activity {
             float eyeCenterX = rtl ? 60 : w - 60;
             p.setStyle(Paint.Style.STROKE);
             p.setStrokeWidth(2.5f);
-            p.setColor(cyan);
+            p.setColor(accent);
             c.drawOval(eyeRect, p);
             p.setStyle(Paint.Style.FILL);
-            p.setColor(cyan);
+            p.setColor(accent);
             c.drawCircle(eyeCenterX, 156, 5, p);
             if (hidden) {
-                p.setColor(cyan);
+                p.setColor(accent);
                 p.setStrokeWidth(2.5f);
                 if (rtl) c.drawLine(43, 142, 77, 170, p);
                 else c.drawLine(w - 77, 142, w - 43, 170, p);
@@ -284,7 +303,7 @@ public class MainActivity extends Activity {
             if (refreshing) {
                 p.setStyle(Paint.Style.STROKE);
                 p.setStrokeWidth(3);
-                p.setColor(cyan);
+                p.setColor(accent);
                 c.drawArc(refreshArc, refreshAngle, 270, false, p);
                 p.setStyle(Paint.Style.FILL);
                 refreshAngle = (refreshAngle + 14) % 360;
@@ -292,7 +311,7 @@ public class MainActivity extends Activity {
             } else {
                 float refreshX = rtl ? 28 : w - 28;
                 Paint.Align refreshAlign = rtl ? Paint.Align.LEFT : Paint.Align.RIGHT;
-                text(c, getString(R.string.action_refresh), refreshX, 320, 14, cyan, refreshAlign);
+                text(c, getString(R.string.action_refresh), refreshX, 320, 14, accent, refreshAlign);
             }
 
             float by = (getHeight() - top - bottom) / d - 32;

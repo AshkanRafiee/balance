@@ -17,7 +17,7 @@
             android:id="@+id/widget_total"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textColor="#67E8F9"
+            android:textColor="@color/accent"
             android:textSize="26sp"
             android:textStyle="bold" />
 
@@ -27,7 +27,7 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="6dp"
             android:text="@string/unit_toman"
-            android:textColor="#94A3B8"
+            android:textColor="@color/muted"
             android:textSize="12sp" />
 
         <LinearLayout
@@ -63,7 +63,7 @@
         android:layout_height="match_parent"
         android:layout_weight="1"
         android:layout_marginTop="2dp"
-        android:divider="#1E293B"
+        android:divider="@color/divider"
         android:dividerHeight="1dp"
         android:scrollbars="none" />
 </LinearLayout>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#F1F5F9</color>
+    <color name="status_bar">#F1F5F9</color>
+    <color name="nav_bar">#F1F5F9</color>
+    <color name="panel">#FFFFFF</color>
+    <color name="hero">#EEF2FF</color>
+    <color name="fg">#1E293B</color>
+    <color name="muted">#64748B</color>
+    <color name="subtitle">#475569</color>
+    <color name="accent">#0891B2</color>
+    <color name="purple">#7C3AED</color>
+    <color name="link">#6D28D9</color>
+    <color name="footer">#64748B</color>
+    <color name="divider">#CBD5E1</color>
+    <color name="bank_name">#334155</color>
+    <color name="empty">#64748B</color>
+    <color name="widget_bg">#FFFFFF</color>
+</resources>

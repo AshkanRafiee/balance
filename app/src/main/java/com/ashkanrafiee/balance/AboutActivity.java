@@ -3,7 +3,6 @@ package com.ashkanrafiee.balance;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
-import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -16,11 +15,11 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 public final class AboutActivity extends Activity {
-    final int bg = Color.rgb(8, 13, 22);
-    final int card = Color.rgb(17, 27, 43);
-    final int muted = Color.rgb(148, 163, 184);
-    final int cyan = Color.rgb(103, 232, 249);
-    final int purple = Color.rgb(167, 139, 250);
+    int bg, card, muted, accent, purple, heroColor, link, footerColor, fg;
+
+    int color(int res) {
+        return getResources().getColor(res, getTheme());
+    }
 
     int dp(float n) {
         return (int) (n * getResources().getDisplayMetrics().density + .5f);
@@ -55,6 +54,15 @@ public final class AboutActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        bg = color(R.color.bg);
+        card = color(R.color.panel);
+        muted = color(R.color.muted);
+        accent = color(R.color.accent);
+        purple = color(R.color.purple);
+        heroColor = color(R.color.hero);
+        link = color(R.color.link);
+        footerColor = color(R.color.footer);
+        fg = color(R.color.fg);
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
         boolean rtl = getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
@@ -80,13 +88,13 @@ public final class AboutActivity extends Activity {
 
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        TextView back = text(rtl ? "›" : "‹", 34, Color.WHITE);
+        TextView back = text(rtl ? "›" : "‹", 34, fg);
         back.setGravity(Gravity.CENTER);
         back.setOnClickListener(v -> finish());
         bar.addView(back, new LinearLayout.LayoutParams(dp(42), dp(48)));
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-2, -2);
         titleParams.setMarginStart(dp(10));
-        bar.addView(text(getString(R.string.about_title), 21, Color.WHITE), titleParams);
+        bar.addView(text(getString(R.string.about_title), 21, fg), titleParams);
         root.addView(bar, margin(0, 0, 0, 16));
 
         ScrollView scroll = new ScrollView(this);
@@ -99,16 +107,16 @@ public final class AboutActivity extends Activity {
         hero.setOrientation(LinearLayout.VERTICAL);
         hero.setGravity(Gravity.CENTER_HORIZONTAL);
         hero.setPadding(dp(20), dp(24), dp(20), dp(24));
-        hero.setBackground(rounded(Color.rgb(31, 42, 74), 22));
+        hero.setBackground(rounded(heroColor, 22));
         TextView mark = text("B", 25, bg);
         mark.setGravity(Gravity.CENTER);
         mark.setTypeface(null, Typeface.BOLD);
-        mark.setBackground(rounded(cyan, 16));
+        mark.setBackground(rounded(accent, 16));
         hero.addView(mark, new LinearLayout.LayoutParams(dp(56), dp(56)));
-        TextView title = text(getString(R.string.app_name), 24, Color.WHITE);
+        TextView title = text(getString(R.string.app_name), 24, fg);
         title.setPadding(0, dp(14), 0, dp(2));
         hero.addView(title);
-        hero.addView(text(getString(R.string.tagline_offline_bank_balance), 13, Color.rgb(201, 211, 230)));
+        hero.addView(text(getString(R.string.tagline_offline_bank_balance), 13, color(R.color.subtitle)));
         body.addView(hero, margin(0, 0, 0, 22));
 
         body.addView(section(getString(R.string.about_section_heading), getString(R.string.about_section_body)), margin(0, 0, 0, 10));
@@ -119,9 +127,9 @@ public final class AboutActivity extends Activity {
             "https://github.com/AshkanRafiee/balance"), margin(0, 0, 0, 8));
         body.addView(info(getString(R.string.about_privacy_label), getString(R.string.about_privacy_value)), margin(0, 0, 0, 20));
 
-        TextView footer = text(getString(R.string.about_footer, appVersion()), 11, Color.rgb(103, 115, 136));
-        footer.setGravity(Gravity.CENTER);
-        body.addView(footer);
+        TextView footerView = text(getString(R.string.about_footer, appVersion()), 11, footerColor);
+        footerView.setGravity(Gravity.CENTER);
+        body.addView(footerView);
     }
 
     TextView section(String h, String b) {
@@ -148,7 +156,7 @@ public final class AboutActivity extends Activity {
         box.setPadding(dp(16), dp(13), dp(16), dp(13));
         box.setBackground(rounded(card, 15));
         box.addView(text(h, 12, muted));
-        TextView v = text(value, 14, url != null ? Color.rgb(190, 184, 255) : Color.WHITE);
+        TextView v = text(value, 14, url != null ? link : fg);
         v.setPadding(0, dp(5), 0, 0);
         v.setMaxLines(2);
         v.setEllipsize(TextUtils.TruncateAt.END);
