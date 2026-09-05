@@ -1,0 +1,1 @@
+Added a home-screen widget that shows your bank balances, lets you hide amounts and refresh from the widget, follows the app language, and updates on a schedule.
