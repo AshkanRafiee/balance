@@ -1,0 +1,2 @@
+Balance now follows your device's light or dark theme, switching between a bright and a dark look automatically.
+The main screen, the About screen, and the home-screen widget all adapt instantly as you switch themes.
