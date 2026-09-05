@@ -18,6 +18,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     private static final String ACTION_ALARM = "com.ashkanrafiee.balance.WIDGET_ALARM";
     private static final String ACTION_BOOT_COMPLETED = "android.intent.action.BOOT_COMPLETED";
     private static final long REFRESH_INTERVAL = 10 * 60 * 1000L;
+    /** Request-code offsets, scoped by versionCode so app updates mint fresh PendingIntents. */
     static final int REQ_MASK = 1, REQ_REFRESH = 2;
     private static final int REQ_ALARM = 100;
     static final int REQ_ITEM_TAP = 201;
@@ -65,10 +66,6 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     }
 
     static void updateAll(Context context) {
-        updateAll(context, 0f);
-    }
-
-    static void updateAll(Context context, float rotation) {
         AppWidgetManager manager = AppWidgetManager.getInstance(context);
         int[] ids = manager.getAppWidgetIds(new ComponentName(context, BalanceWidgetProvider.class));
         if (ids.length == 0) return;
@@ -103,8 +100,17 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     static PendingIntent pending(Context context, String action, int requestCode) {
         Intent intent = new Intent(context, BalanceWidgetProvider.class);
         intent.setAction(action);
-        return PendingIntent.getBroadcast(context, requestCode, intent,
+        return PendingIntent.getBroadcast(context, requestCode + versionBase(context), intent,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    private static int versionBase(Context context) {
+        try {
+            return context.getPackageManager()
+                .getPackageInfo(context.getPackageName(), 0).versionCode * 1000;
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     private static boolean hasWidgets(Context context) {
@@ -113,10 +119,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     }
 
     private static PendingIntent alarmPending(Context context) {
-        Intent intent = new Intent(context, BalanceWidgetProvider.class);
-        intent.setAction(ACTION_ALARM);
-        return PendingIntent.getBroadcast(context, REQ_ALARM, intent,
-            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        return pending(context, ACTION_ALARM, REQ_ALARM);
     }
 
     static void scheduleAlarm(Context context) {
