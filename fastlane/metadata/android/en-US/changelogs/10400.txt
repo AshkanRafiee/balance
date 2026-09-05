@@ -1,1 +1,1 @@
-Added a home-screen widget that shows your bank balances, lets you hide amounts and refresh from the widget, follows the app language, and updates on a schedule. Tapping the widget never opens the app, hide and refresh buttons are right on the widget, refreshing spins the icon and updates the total, and the widget uses a cleaner total row.
+Added a home-screen widget so your bank balances are always a glance away. Hide amounts, refresh on demand, and it follows your language and keeps itself up to date.
