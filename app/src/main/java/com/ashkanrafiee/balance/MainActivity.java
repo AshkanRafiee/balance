@@ -17,13 +17,8 @@ import android.provider.Telephony;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Toast;
-import java.text.NumberFormat;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import org.json.JSONObject;
 
 public class MainActivity extends Activity {
     private static final int SMS_REQUEST = 10;
@@ -38,11 +33,17 @@ public class MainActivity extends Activity {
     public void onCreate(Bundle state) {
         super.onCreate(state);
         if (android.os.Build.VERSION.SDK_INT >= 30)
-            getWindow().setDecorFitsSystemWindows(true);
+            getWindow().setDecorFitsSystemWindows(false);
         getWindow().setStatusBarColor(Color.rgb(11, 18, 32));
         getWindow().setNavigationBarColor(Color.rgb(8, 13, 22));
         view = new BalanceView();
         setContentView(view);
+        view.setOnApplyWindowInsetsListener((v, insets) -> {
+            view.insetsTop = insets.getSystemWindowInsetTop();
+            view.insetsBottom = insets.getSystemWindowInsetBottom();
+            view.invalidate();
+            return insets;
+        });
         requestSms();
     }
 
@@ -86,6 +87,7 @@ public class MainActivity extends Activity {
         final LinkedHashMap<String, Bank> banks = new LinkedHashMap<>();
         final float d = getResources().getDisplayMetrics().density;
         boolean hidden, refreshing;
+        int insetsTop, insetsBottom;
         float scrollY = 0, lastY, downY, refreshAngle;
         boolean dragging;
         String status = getString(R.string.status_reading_sms);
@@ -96,26 +98,9 @@ public class MainActivity extends Activity {
             Color.rgb(16, 185, 129), Color.rgb(245, 158, 11),
             Color.rgb(244, 63, 94), Color.rgb(20, 184, 166)
         };
-        final Pattern balance = Pattern.compile(
-            "(?:\u0645\u0648\u062c\u0648\u062f\u06cc \u062d\u0633\u0627\u0628" +
-            "|\u0645\u0627\u0646\u062f\u0647 \u062d\u0633\u0627\u0628" +
-            "|\u0645\u0648\u062c\u0648\u062f\u06cc" +
-            "|\u0645\u0627\u0646\u062f\u0647" +
-            "|available balance|balance|bal)" +
-            "[^\\d]{0,12}?([0-9][0-9,]*)",
-            Pattern.CASE_INSENSITIVE);
-        final Pattern otp = Pattern.compile(
-            "(?<![\u0621-\u0640A-Za-z])" +
-            "(?:\u0631\u0645\u0632|\u067e\u0648\u06cc\u0627" +
-            "|\u06a9\u062f \\s*\u062a\u0627\u06cc\u06cc\u062f" +
-            "|\u06a9\u062f \\s*\u062a\u0623\u06cc\u06cc\u062f" +
-            "|otp|code)",
-            Pattern.CASE_INSENSITIVE);
-
         BalanceView() {
             super(MainActivity.this);
-            hidden = MainActivity.this.getSharedPreferences("balance_preferences", MODE_PRIVATE)
-                    .getBoolean("balances_hidden", false);
+            hidden = BalanceData.isHidden(MainActivity.this);
             p.setTypeface(android.graphics.Typeface.create("sans", 0));
             setBackgroundColor(Color.rgb(8, 13, 22));
         }
@@ -136,7 +121,7 @@ public class MainActivity extends Activity {
             invalidate();
             new Thread(() -> {
                 try {
-                    LinkedHashMap<String, Bank> saved = loadBalances();
+                    LinkedHashMap<String, Bank> saved = BalanceData.read(MainActivity.this);
                     int count = 0;
                     Cursor c = getContentResolver().query(
                         Telephony.Sms.Inbox.CONTENT_URI,
@@ -145,7 +130,7 @@ public class MainActivity extends Activity {
                     if (c != null) while (c.moveToNext()) {
                         String sender = c.getString(0), body = c.getString(1);
                         long date = c.getLong(2);
-                        long value = extract(body);
+                        long value = BalanceData.extract(body);
                         if (value < 0) continue;
                         String bank = BankRules.resolve(sender);
                         if (bank == null || value <= 0) continue;
@@ -155,7 +140,7 @@ public class MainActivity extends Activity {
                         count++;
                     }
                     if (c != null) c.close();
-                    saveBalances(saved);
+                    BalanceData.write(MainActivity.this, saved);
                     String message = count == 0
                         ? (saved.isEmpty()
                             ? getString(R.string.status_no_sms_found)
@@ -169,10 +154,11 @@ public class MainActivity extends Activity {
                         status = message;
                         refreshing = false;
                         invalidate();
+                        BalanceWidgetProvider.push(MainActivity.this);
                     });
                 } catch (Exception e) {
                     post(() -> {
-                        LinkedHashMap<String, Bank> saved = loadBalances();
+                        LinkedHashMap<String, Bank> saved = BalanceData.read(MainActivity.this);
                         banks.clear();
                         banks.putAll(saved);
                         total = 0;
@@ -180,72 +166,10 @@ public class MainActivity extends Activity {
                         status = banks.isEmpty() ? getString(R.string.status_sms_unreadable) : getString(R.string.status_loaded_from_saved);
                         refreshing = false;
                         invalidate();
+                        BalanceWidgetProvider.push(MainActivity.this);
                     });
                 }
             }).start();
-        }
-
-        LinkedHashMap<String, Bank> loadBalances() {
-            LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
-            try {
-                String json = getSharedPreferences("balance_data", MODE_PRIVATE)
-                    .getString("balances", null);
-                if (json != null) {
-                    JSONObject obj = new JSONObject(json);
-                    Iterator<String> keys = obj.keys();
-                    while (keys.hasNext()) {
-                        String bank = keys.next();
-                        JSONObject entry = obj.getJSONObject(bank);
-                        map.put(bank, new Bank(bank, entry.getLong("amount"),
-                            entry.getLong("date"), entry.getString("sender")));
-                    }
-                }
-            } catch (Exception e) { }
-            return map;
-        }
-
-        void saveBalances(LinkedHashMap<String, Bank> map) {
-            try {
-                JSONObject obj = new JSONObject();
-                for (java.util.Map.Entry<String, Bank> e : map.entrySet()) {
-                    Bank b = e.getValue();
-                    JSONObject entry = new JSONObject();
-                    entry.put("amount", b.amount);
-                    entry.put("date", b.date);
-                    entry.put("sender", b.sender);
-                    obj.put(e.getKey(), entry);
-                }
-                getSharedPreferences("balance_data", MODE_PRIVATE).edit()
-                    .putString("balances", obj.toString()).apply();
-            } catch (Exception e) { }
-        }
-
-        long extract(String raw) {
-            if (raw == null) return -1;
-            String s = digits(raw.replace("\u066C", ",").replace("\u060C", ","));
-            if (otp.matcher(s).find()) return -1;
-            Matcher m = balance.matcher(s);
-            String n = null;
-            while (m.find()) n = m.group(1);
-            if (n == null) return -1;
-            try { return Long.parseLong(n.replace(",", "")); }
-            catch (Exception e) { return -1; }
-        }
-
-        String digits(String s) {
-            StringBuilder b = new StringBuilder();
-            for (char c : s.toCharArray()) {
-                if (c >= '\u06F0' && c <= '\u06F9')
-                    b.append((char) ('0' + c - '\u06F0'));
-                else if (c >= '\u0660' && c <= '\u0669')
-                    b.append((char) ('0' + c - '\u0660'));
-                else b.append(c);
-            }
-            return b.toString();
-        }
-
-        String amount(long n) {
-            return NumberFormat.getNumberInstance(Locale.US).format(n / 10);
         }
 
         void value(Canvas c, long n, float x, float baseline, float width,
@@ -254,7 +178,7 @@ public class MainActivity extends Activity {
                 text(c, "\u2022\u2022\u2022\u2022\u2022\u2022", x, baseline, size, Color.WHITE, align);
                 return;
             }
-            String number = amount(n);
+            String number = BalanceData.toman(MainActivity.this, n);
             float current = size;
             while (current > 10 && measure(number, current) > width) current -= 1;
             text(c, number, x, baseline, current, Color.rgb(103, 232, 249), align);
@@ -267,7 +191,7 @@ public class MainActivity extends Activity {
                 text(c, "\u2022\u2022\u2022\u2022\u2022\u2022", x, baseline, 34, Color.WHITE, anchor);
                 return;
             }
-            String number = amount(n);
+            String number = BalanceData.toman(MainActivity.this, n);
             String unit = getString(R.string.unit_toman);
             float unitSize = 13, unitGap = 10, unitWidth = measure(unit, unitSize);
             float current = 34;
@@ -313,8 +237,9 @@ public class MainActivity extends Activity {
         protected void onDraw(Canvas c) {
             super.onDraw(c);
             boolean rtl = isRtl();
-            int top = 0, bottom = 0;
-            if (android.os.Build.VERSION.SDK_INT >= 23 && getRootWindowInsets() != null) {
+            int top = insetsTop, bottom = insetsBottom;
+            if (top == 0 && bottom == 0 && android.os.Build.VERSION.SDK_INT >= 23
+                    && getRootWindowInsets() != null) {
                 top = getRootWindowInsets().getSystemWindowInsetTop();
                 bottom = getRootWindowInsets().getSystemWindowInsetBottom();
             }
@@ -448,8 +373,9 @@ public class MainActivity extends Activity {
         @Override
         public boolean onTouchEvent(MotionEvent e) {
             boolean rtl = isRtl();
-            int top = 0, bottom = 0;
-            if (android.os.Build.VERSION.SDK_INT >= 23 && getRootWindowInsets() != null) {
+            int top = insetsTop, bottom = insetsBottom;
+            if (top == 0 && bottom == 0 && android.os.Build.VERSION.SDK_INT >= 23
+                    && getRootWindowInsets() != null) {
                 top = getRootWindowInsets().getSystemWindowInsetTop();
                 bottom = getRootWindowInsets().getSystemWindowInsetBottom();
             }
@@ -484,8 +410,8 @@ public class MainActivity extends Activity {
                 boolean onEye = rtl ? x <= 105 && y <= 185 : x >= getWidth() / d - 105 && y <= 185;
                 if (onEye) {
                     hidden = !hidden;
-                    MainActivity.this.getSharedPreferences("balance_preferences", MODE_PRIVATE)
-                        .edit().putBoolean("balances_hidden", hidden).apply();
+                    MainActivity.this.getSharedPreferences(BalanceData.PREFS_PREF, MODE_PRIVATE)
+                        .edit().putBoolean(BalanceData.KEY_HIDDEN, hidden).apply();
                     invalidate();
                 } else copyBalance(getString(R.string.total_label), total);
             } else if (y > 290 && y < 350 && (rtl ? x < 150 : x > getWidth() / d - 150)) {
@@ -507,13 +433,5 @@ public class MainActivity extends Activity {
         }
 
         float byForTouch(float h) { return h - 74; }
-    }
-
-    static final class Bank {
-        String name, sender;
-        long amount, date;
-        Bank(String n, long a, long d, String s) {
-            name = n; amount = a; date = d; sender = s;
-        }
     }
 }

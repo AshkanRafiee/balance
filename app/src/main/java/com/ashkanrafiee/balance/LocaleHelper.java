@@ -30,6 +30,7 @@ public final class LocaleHelper {
 
     public static void setLanguage(Context context, String tag) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_LANGUAGE, tag).apply();
+        BalanceWidgetProvider.push(context);
     }
 
     /** Wraps a base Context so its resources resolve using the saved language override, if any. */
