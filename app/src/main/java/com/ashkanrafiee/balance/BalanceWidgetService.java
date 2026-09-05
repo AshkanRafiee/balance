@@ -52,6 +52,8 @@ public class BalanceWidgetService extends RemoteViewsService {
             views.setTextViewText(R.id.widget_total,
                 hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : BalanceData.toman(c, total));
             views.setTextViewText(R.id.widget_unit, c.getString(R.string.unit_toman));
+            views.setOnClickPendingIntent(R.id.widget_header_root,
+                BalanceWidgetProvider.pending(c, BalanceWidgetProvider.ACTION_TAP, BalanceWidgetProvider.REQ_ITEM_TAP));
             return views;
         }
 
@@ -68,6 +70,8 @@ public class BalanceWidgetService extends RemoteViewsService {
                 hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : BalanceData.toman(c, b.amount));
             views.setInt(R.id.bank_name, "setGravity", Gravity.CENTER_VERTICAL | (rtl ? Gravity.RIGHT : Gravity.LEFT));
             views.setInt(R.id.bank_amount, "setGravity", Gravity.CENTER_VERTICAL | (rtl ? Gravity.LEFT : Gravity.RIGHT));
+            views.setOnClickPendingIntent(R.id.widget_item_root,
+                BalanceWidgetProvider.pending(c, BalanceWidgetProvider.ACTION_TAP, BalanceWidgetProvider.REQ_ITEM_TAP));
             return views;
         }
 
@@ -77,6 +81,8 @@ public class BalanceWidgetService extends RemoteViewsService {
             views.setInt(R.id.widget_empty, "setLayoutDirection",
                 c.getResources().getConfiguration().getLayoutDirection());
             views.setViewVisibility(R.id.widget_empty, View.VISIBLE);
+            views.setOnClickPendingIntent(R.id.widget_empty,
+                BalanceWidgetProvider.pending(c, BalanceWidgetProvider.ACTION_TAP, BalanceWidgetProvider.REQ_ITEM_TAP));
             return views;
         }
 

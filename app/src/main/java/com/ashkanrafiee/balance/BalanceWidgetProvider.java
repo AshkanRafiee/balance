@@ -14,11 +14,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class BalanceWidgetProvider extends AppWidgetProvider {
     static final String ACTION_REFRESH = "com.ashkanrafiee.balance.WIDGET_REFRESH";
     static final String ACTION_MASK = "com.ashkanrafiee.balance.WIDGET_MASK";
+    static final String ACTION_TAP = "com.ashkanrafiee.balance.WIDGET_TAP";
     private static final String ACTION_ALARM = "com.ashkanrafiee.balance.WIDGET_ALARM";
     private static final String ACTION_BOOT_COMPLETED = "android.intent.action.BOOT_COMPLETED";
     private static final long REFRESH_INTERVAL = 10 * 60 * 1000L;
     static final int REQ_MASK = 1, REQ_REFRESH = 2;
     private static final int REQ_ALARM = 100;
+    static final int REQ_ITEM_TAP = 201;
     private static final long MIN_SPIN_DURATION = 700L;
     private static final long MAX_SPIN_DURATION = 2500L;
     private static final AtomicBoolean REFRESHING = new AtomicBoolean(false);
@@ -84,6 +86,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         views.setContentDescription(R.id.widget_mask, c.getString(R.string.widget_action_mask));
         views.setContentDescription(R.id.widget_refresh, c.getString(R.string.widget_action_refresh));
         views.setFloat(R.id.widget_refresh, "setRotation", spin);
+        views.setOnClickPendingIntent(R.id.widget_root, pending(c, ACTION_TAP, REQ_ITEM_TAP));
         views.setOnClickPendingIntent(R.id.widget_mask, pending(c, ACTION_MASK, REQ_MASK));
         views.setOnClickPendingIntent(R.id.widget_refresh, pending(c, ACTION_REFRESH, REQ_REFRESH));
         return views;

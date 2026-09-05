@@ -7,11 +7,34 @@
     android:orientation="vertical"
     android:padding="16dp">
 
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1" />
+
+        <ImageButton
+            android:id="@+id/widget_mask"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:background="@android:color/transparent"
+            android:contentDescription="@string/widget_action_mask"
+            android:padding="3dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_visibility" />
+    </LinearLayout>
+
     <ListView
         android:id="@+id/widget_list"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_weight="1"
+        android:layout_marginTop="2dp"
         android:divider="#1E293B"
         android:dividerHeight="1dp"
         android:scrollbars="none" />
@@ -29,23 +52,12 @@
             android:layout_weight="1" />
 
         <ImageButton
-            android:id="@+id/widget_mask"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:background="@android:color/transparent"
-            android:contentDescription="@string/widget_action_mask"
-            android:padding="4dp"
-            android:scaleType="fitCenter"
-            android:src="@drawable/ic_visibility" />
-
-        <ImageButton
             android:id="@+id/widget_refresh"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:layout_marginStart="4dp"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
             android:background="@android:color/transparent"
             android:contentDescription="@string/widget_action_refresh"
-            android:padding="4dp"
+            android:padding="3dp"
             android:scaleType="fitCenter"
             android:src="@drawable/ic_refresh" />
     </LinearLayout>
