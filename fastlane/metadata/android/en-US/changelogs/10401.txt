@@ -1,1 +1,0 @@
-Fixed the widget's hide/refresh buttons so they reliably work again after app updates, and tightened access to saved balances.
