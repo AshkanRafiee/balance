@@ -16,53 +16,33 @@ public class BalanceWidgetService extends RemoteViewsService {
     }
 
     private static final class Factory implements RemoteViewsService.RemoteViewsFactory {
-        private static final int TYPE_HEADER = 0, TYPE_BANK = 1, TYPE_EMPTY = 2;
+        private static final int TYPE_BANK = 0, TYPE_EMPTY = 1;
         private final Context context;
-        private final List<Bank> banks = new ArrayList<>();
+        private volatile List<Bank> banks = new ArrayList<>();
 
         Factory(Context context) { this.context = context; }
 
         @Override public void onCreate() { }
 
         @Override public void onDataSetChanged() {
-            banks.clear();
-            banks.addAll(BalanceData.read(LocaleHelper.wrap(context)).values());
+            banks = new ArrayList<>(BalanceData.read(LocaleHelper.wrap(context)).values());
         }
 
         @Override public int getCount() {
-            return 1 + (banks.isEmpty() ? 1 : banks.size());
+            return banks.isEmpty() ? 1 : banks.size();
         }
 
         @Override public RemoteViews getViewAt(int i) {
-            if (i == 0) return headerViews();
-            if (banks.isEmpty()) return emptyViews();
-            return bankViews(i - 1);
+            List<Bank> snapshot = banks;
+            if (snapshot.isEmpty() || i < 0 || i >= snapshot.size()) return emptyViews();
+            return bankViews(snapshot.get(i));
         }
 
-        private RemoteViews headerViews() {
-            Context c = LocaleHelper.wrap(context);
-            String pkg = c.getPackageName();
-            int dir = c.getResources().getConfiguration().getLayoutDirection();
-            boolean hidden = BalanceData.isHidden(c);
-            RemoteViews views = new RemoteViews(pkg, R.layout.widget_balance_header);
-            views.setInt(R.id.widget_header_root, "setLayoutDirection", dir);
-            views.setTextViewText(R.id.widget_title, c.getString(R.string.app_name));
-            long total = 0;
-            for (Bank b : banks) total += b.amount;
-            views.setTextViewText(R.id.widget_total,
-                hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : BalanceData.toman(c, total));
-            views.setTextViewText(R.id.widget_unit, c.getString(R.string.unit_toman));
-            views.setOnClickPendingIntent(R.id.widget_header_root,
-                BalanceWidgetProvider.pending(c, BalanceWidgetProvider.ACTION_TAP, BalanceWidgetProvider.REQ_ITEM_TAP));
-            return views;
-        }
-
-        private RemoteViews bankViews(int index) {
+        private RemoteViews bankViews(Bank b) {
             Context c = LocaleHelper.wrap(context);
             int dir = c.getResources().getConfiguration().getLayoutDirection();
             boolean rtl = dir == View.LAYOUT_DIRECTION_RTL;
             boolean hidden = BalanceData.isHidden(c);
-            Bank b = banks.get(index);
             RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance_item);
             views.setInt(R.id.widget_item_root, "setLayoutDirection", dir);
             views.setTextViewText(R.id.bank_name, BankRules.displayName(c, b.name));
@@ -90,7 +70,7 @@ public class BalanceWidgetService extends RemoteViewsService {
 
         @Override public RemoteViews getLoadingView() { return null; }
 
-        @Override public int getViewTypeCount() { return 3; }
+        @Override public int getViewTypeCount() { return 2; }
 
         @Override public boolean hasStableIds() { return false; }
 

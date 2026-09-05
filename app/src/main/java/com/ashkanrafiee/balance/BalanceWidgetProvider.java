@@ -79,8 +79,16 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     static RemoteViews buildViews(Context context) {
         Context c = LocaleHelper.wrap(context);
         boolean hidden = BalanceData.isHidden(c);
+        long total = 0;
+        for (Bank b : BalanceData.read(c).values()) total += b.amount;
         RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance);
         views.setRemoteAdapter(R.id.widget_list, new Intent(c, BalanceWidgetService.class));
+        views.setInt(R.id.widget_root, "setLayoutDirection",
+            c.getResources().getConfiguration().getLayoutDirection());
+        views.setTextViewText(R.id.widget_title, c.getString(R.string.app_name));
+        views.setTextViewText(R.id.widget_total,
+            hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : BalanceData.toman(c, total));
+        views.setTextViewText(R.id.widget_unit, c.getString(R.string.unit_toman));
         views.setImageViewResource(R.id.widget_mask,
             hidden ? R.drawable.ic_visibility_off : R.drawable.ic_visibility);
         views.setContentDescription(R.id.widget_mask, c.getString(R.string.widget_action_mask));
