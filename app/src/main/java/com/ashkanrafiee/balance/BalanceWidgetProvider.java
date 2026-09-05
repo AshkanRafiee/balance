@@ -46,11 +46,12 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
                 while (!done.get() && SystemClock.uptimeMillis() - start < MAX_SPIN_DURATION) {
                     step++;
                     spin = (float) ((step * 45) % 360);
-                    updateAll(context);
+                    applySpin(context);
                     SystemClock.sleep(60);
                 }
                 while (SystemClock.uptimeMillis() - start < MIN_SPIN_DURATION) SystemClock.sleep(40);
                 spin = 0f;
+                applySpin(context);
                 updateAll(context);
             } finally {
                 REFRESHING.set(false);
@@ -69,8 +70,18 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         AppWidgetManager manager = AppWidgetManager.getInstance(context);
         int[] ids = manager.getAppWidgetIds(new ComponentName(context, BalanceWidgetProvider.class));
         if (ids.length == 0) return;
-        for (int id : ids) manager.updateAppWidget(id, buildViews(context));
         manager.notifyAppWidgetViewDataChanged(ids, R.id.widget_list);
+        for (int id : ids) manager.updateAppWidget(id, buildViews(context));
+    }
+
+    /** Rotates the refresh icon without touching any other part of the rendered widget. */
+    private static void applySpin(Context context) {
+        AppWidgetManager manager = AppWidgetManager.getInstance(context);
+        int[] ids = manager.getAppWidgetIds(new ComponentName(context, BalanceWidgetProvider.class));
+        if (ids.length == 0) return;
+        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_balance);
+        views.setFloat(R.id.widget_refresh, "setRotation", spin);
+        for (int id : ids) manager.updateAppWidget(id, views);
     }
 
     static RemoteViews buildViews(Context context) {
