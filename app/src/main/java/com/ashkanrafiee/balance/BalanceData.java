@@ -152,6 +152,18 @@ final class BalanceData {
         }
     }
 
+    /** Discards every saved balance and forgets the scan watermark, so the next scan behaves like a
+     *  fresh install and rebuilds only from the messages currently in the inbox. The hide/unmask
+     *  preference is untouched (it is a display choice, not balance data). */
+    static void reset(Context context) {
+        context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
+            .remove(KEY_BALANCES).apply();
+        context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
+            .remove(KEY_SCANNED_THROUGH)
+            .remove(KEY_RULES_VERSION)
+            .apply();
+    }
+
     static boolean isHidden(Context context) {
         return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
             .getBoolean(KEY_HIDDEN, false);
@@ -186,6 +198,7 @@ final class BalanceData {
         int matched = 0;
         long newest = 0;
         Set<String> matchedBanks = new HashSet<>();
+        int senderTarget = BankRules.supportedSenderCount();
         String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
         String[] args = selection != null ? new String[]{Long.toString(watermark)} : null;
         try (Cursor cursor = context.getContentResolver().query(
@@ -207,7 +220,7 @@ final class BalanceData {
                     matched++;
                     current.put(bank, new Bank(bank, value, date, sender));
                 }
-                if (full && matchedBanks.size() == BankRules.supportedSenderCount()) break;
+                if (full && matchedBanks.size() == senderTarget) break;
             }
         } catch (Exception e) {
             Log.w(TAG, "scan failed", e);

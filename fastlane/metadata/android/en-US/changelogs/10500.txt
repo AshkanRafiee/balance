@@ -8,3 +8,5 @@ Faster and more reliable balance updates:
 • Tapping the widget opens Balance, making it easy to review balances or grant permission.
 • Hardened the widget so only the system and the app itself can trigger a refresh or hide/show the balances.
 • Protected stored balances so they can never be accidentally wiped.
+• First scan is noticeably faster thanks to smarter matching of bank senders.
+• Added "Reset balances and rescan": long-press the refresh button to delete every saved balance and rebuild the list from the bank SMS currently in your inbox.

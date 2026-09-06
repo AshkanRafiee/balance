@@ -1,8 +1,10 @@
 package com.ashkanrafiee.balance;
 
 import android.content.Context;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -146,6 +148,23 @@ final class BankRules {
         return new HashSet<>(SUPPORTED_BANKS);
     }
 
+    /** Every rule alias, exactly in resolution order (RULES then OFFICIAL_EXTRA_RULES, pipe-split).
+     *  Test-only oracle input mirroring what scanSms feeds resolve(). */
+    static List<String> aliasList() {
+        List<String> all = new ArrayList<>();
+        for (String[] rule : RULES) for (String alias : rule[1].split("\\|")) all.add(alias);
+        for (String[] rule : OFFICIAL_EXTRA_RULES) for (String alias : rule[1].split("\\|")) all.add(alias);
+        return all;
+    }
+
+    /** The raw rule tables in resolution order. Test-only oracle input. */
+    static String[][] rulesTestOnly() {
+        String[][] all = new String[RULES.length + OFFICIAL_EXTRA_RULES.length][2];
+        System.arraycopy(RULES, 0, all, 0, RULES.length);
+        System.arraycopy(OFFICIAL_EXTRA_RULES, 0, all, RULES.length, OFFICIAL_EXTRA_RULES.length);
+        return all;
+    }
+
     /** Bank names an incoming SMS can actually reach: every rule alias resolves exactly the way a sender
      *  does, so aliases that collide and lose to an earlier rule (e.g. Tosee Credit Inst.'s +9830005816,
      *  claimed by Tosee Taavon) simply drop out instead of inflating the count. */
@@ -163,11 +182,55 @@ final class BankRules {
         }
     }
 
+    private static final class Alias {
+        final String bank;
+        final int index;
+        Alias(String bank, int index) {
+            this.bank = bank;
+            this.index = index;
+        }
+    }
+
+    /** Exact-match lookup: normalized alias -> first (lowest-index) rule that lists it. */
+    private static final Map<String, Alias> EXACT = new HashMap<>();
+
+    /** Suffix-match lookup: every digit suffix (len >= 5) of every digit alias -> first rule that lists it.
+     *  Lets the digits-only branch answer "a = alias or a.endsWith(alias)" in one lookup. */
+    private static final Map<String, Alias> SUFFIX_OF = new HashMap<>();
+
+    static {
+        int index = 0;
+        for (String[] rule : RULES)
+            for (String alias : rule[1].split("\\|")) registerAlias(normalize(alias), rule[0], index++);
+        for (String[] rule : OFFICIAL_EXTRA_RULES)
+            for (String alias : rule[1].split("\\|")) registerAlias(normalize(alias), rule[0], index++);
+    }
+
+    private static void registerAlias(String b, String bank, int index) {
+        if (b.isEmpty()) return;
+        if (EXACT.containsKey(b)) return;
+        EXACT.put(b, new Alias(bank, index));
+        if (!allDigits(b) || b.length() < 5) return;
+        for (int len = 5; len <= b.length(); len++)
+            SUFFIX_OF.putIfAbsent(b.substring(b.length() - len), new Alias(bank, index));
+    }
+
+    private static boolean allDigits(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c < '0' || c > '9') return false;
+        }
+        return true;
+    }
+
+    // Built after the alias-index block above: reachableBanks() -> resolve() needs EXACT/SUFFIX_OF ready.
+    private static final int REACHABLE_COUNT = reachableBanks().size();
+
     /** How many distinct supported bank senders an SMS can actually match. A full scan can stop once
      *  each has matched once: matchedBanks is always a subset of reachableBanks, so the sizes being
      *  equal means every supported bank has already been recorded. */
     static int supportedSenderCount() {
-        return reachableBanks().size();
+        return REACHABLE_COUNT;
     }
 
     private static int rulesVersion() {
@@ -181,17 +244,18 @@ final class BankRules {
         if (sender == null || sender.indexOf('*') >= 0 || sender.indexOf('#') >= 0) return null;
         String a = normalize(sender);
         if (a.isEmpty()) return null;
-        for (String[] rule : RULES) for (String alias : rule[1].split("\\|")) {
-            String b = normalize(alias);
-            if (a.equals(b)) return rule[0];
-            if (a.matches("\\d+") && b.matches("\\d+") && a.length() >= 5 && b.length() >= 5 && (a.endsWith(b) || b.endsWith(a))) return rule[0];
+        if (allDigits(a) && a.length() >= 5) {
+            Alias best = SUFFIX_OF.get(a);
+            int start = a.length() - 5;
+            for (int len = 5; len <= a.length(); len++) {
+                Alias e = EXACT.get(a.substring(start));
+                if (e != null && (best == null || e.index < best.index)) best = e;
+                start--;
+            }
+            return best == null ? null : best.bank;
         }
-        for (String[] rule : OFFICIAL_EXTRA_RULES) for (String alias : rule[1].split("\\|")) {
-            String b = normalize(alias);
-            if (a.equals(b)) return rule[0];
-            if (a.matches("\\d+") && b.matches("\\d+") && a.length() >= 5 && b.length() >= 5 && (a.endsWith(b) || b.endsWith(a))) return rule[0];
-        }
-        return null;
+        Alias e = EXACT.get(a);
+        return e == null ? null : e.bank;
     }
     static String normalize(String raw) {
         StringBuilder out = new StringBuilder();

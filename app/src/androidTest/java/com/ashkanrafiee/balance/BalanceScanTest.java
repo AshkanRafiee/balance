@@ -2,6 +2,7 @@ package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -331,6 +332,66 @@ public class BalanceScanTest {
         assertEquals(T + 400, date(find(saved, "Saman")));
         assertEquals(BankRules.VERSION, storedRulesVersion());
         assertEquals(T + 5000, watermark());
+    }
+
+    // ============================================================
+    // Hard reset and forced rescans
+    // ============================================================
+
+    @Test public void resetDeletesSavedBalancesWatermarkAndRulesVersion() throws Exception {
+        seed("5000973189", "\u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000", T + 1000);
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        BalanceData.scanSms(ctx, saved);
+        assertEquals(1, saved.size());
+
+        BalanceData.reset(ctx);
+
+        assertEquals(0, BalanceData.read(ctx).size());
+        assertEquals(0, watermark());
+        assertEquals(-1, storedRulesVersion());
+    }
+
+    @Test public void resetThenRescan_rebuildsOnlyFromCurrentlyAvailableMessages() throws Exception {
+        seed("5000973189", "\u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000", T + 1000);
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        BalanceData.scanSms(ctx, saved);
+        assertEquals(1, saved.size());
+
+        clearInbox();
+        seed("b.pasargad", "available balance 5,000,000", T + 500);
+
+        BalanceData.reset(ctx);
+        saved = new LinkedHashMap<>();
+        int matched = BalanceData.scanSms(ctx, saved);
+
+        assertEquals(1, matched);
+        assertEquals(1, saved.size());
+        assertEquals(5_000_000L, amount(find(saved, "Pasargad")));
+        assertNull(find(saved, "Tejarat"));
+        assertEquals(T + 500, watermark());
+        assertEquals(1, BalanceData.read(ctx).size());
+    }
+
+    @Test public void resetWithEmptyInbox_leavesStoreEmptyAndFullScanArmed() throws Exception {
+        seed("5000973189", "\u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000", T + 1000);
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        BalanceData.scanSms(ctx, saved);
+        assertEquals(1, saved.size());
+
+        clearInbox();
+        BalanceData.reset(ctx);
+        saved = new LinkedHashMap<>();
+        int matched = BalanceData.scanSms(ctx, saved);
+
+        assertEquals(0, matched);
+        assertEquals(0, saved.size());
+        assertEquals(0, BalanceData.read(ctx).size());
+        assertEquals(0, watermark());
+
+        seed("5000973189", "\u0645\u0648\u062C\u0648\u062F\u06CC: 2,000,000", T + 400);
+        int again = BalanceData.scanSms(ctx, saved);
+        assertEquals(1, again);
+        assertEquals(2_000_000L, amount(find(saved, "Tejarat")));
     }
 
     // ============================================================

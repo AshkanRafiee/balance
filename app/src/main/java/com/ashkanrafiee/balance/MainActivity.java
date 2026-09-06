@@ -8,6 +8,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -92,6 +94,15 @@ public class MainActivity extends Activity {
             }).show();
     }
 
+    void hardRefreshDialog() {
+        new android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_hard_refresh_title))
+            .setMessage(getString(R.string.dialog_hard_refresh_message))
+            .setNegativeButton(getString(R.string.dialog_hard_refresh_cancel), null)
+            .setPositiveButton(getString(R.string.dialog_hard_refresh_confirm), (d, w) -> view.refresh(true))
+            .show();
+    }
+
     private int resColor(int res) {
         return getResources().getColor(res, getTheme());
     }
@@ -104,6 +115,13 @@ public class MainActivity extends Activity {
         int insetsTop, insetsBottom;
         float scrollY = 0, lastY, downY, refreshAngle;
         boolean dragging;
+        boolean hardArmed;
+        boolean hardProbeFired;
+        final Handler handler = new Handler(Looper.getMainLooper());
+        final Runnable hardRefreshProbe = () -> {
+            hardProbeFired = true;
+            MainActivity.this.hardRefreshDialog();
+        };
         String status = getString(R.string.status_reading_sms);
         long total;
         float footerAboutStart, footerAboutEnd, footerLangStart, footerLangEnd, footerY;
@@ -129,7 +147,12 @@ public class MainActivity extends Activity {
             return getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
         }
 
-        void refresh() {
+        void refresh() { refresh(false); }
+
+        /** Refreshes from the SMS inbox. With {@code hard} set, saved balances are discarded first and
+         *  only the messages currently in the inbox are re-read, so banks whose SMS are no longer
+         *  available disappear. Callers must already have shown the consequence dialog. */
+        void refresh(boolean hard) {
             if (refreshing) return;
             if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
                 status = getString(R.string.status_permission_needed);
@@ -142,6 +165,7 @@ public class MainActivity extends Activity {
             new Thread(() -> {
                 final Context app = MainActivity.this.getApplicationContext();
                 try {
+                    if (hard) BalanceData.reset(app);
                     LinkedHashMap<String, Bank> saved = BalanceData.read(app);
                     int count = BalanceData.scanSms(app, saved);
                     String message = count == 0
@@ -382,11 +406,18 @@ public class MainActivity extends Activity {
             float x = e.getX() / d, y = (e.getY() - top) / d,
                 h = (getHeight() - top - bottom) / d;
             if (e.getAction() == MotionEvent.ACTION_DOWN) {
-                lastY = y; downY = y; dragging = false; return true;
+                lastY = y; downY = y; dragging = false;
+                hardArmed = y > 290 && y < 350 && (rtl ? x < 150 : x > getWidth() / d - 150);
+                hardProbeFired = false;
+                if (hardArmed) handler.postDelayed(hardRefreshProbe, 650);
+                else handler.removeCallbacks(hardRefreshProbe);
+                return true;
             }
             if (e.getAction() == MotionEvent.ACTION_MOVE) {
                 if (Math.abs(y - lastY) > 3) {
                     dragging = true;
+                    handler.removeCallbacks(hardRefreshProbe);
+                    hardArmed = false;
                     scrollY = Math.max(0, Math.min(
                         Math.max(0, banks.size() * 96 - (h - 440)),
                         scrollY + lastY - y));
@@ -396,6 +427,8 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (e.getAction() != MotionEvent.ACTION_UP) return true;
+            handler.removeCallbacks(hardRefreshProbe);
+            if (hardProbeFired) { hardProbeFired = false; hardArmed = false; return true; }
             if (dragging) {
                 if (downY < 360 && y - downY > 55) refresh();
                 return true;
