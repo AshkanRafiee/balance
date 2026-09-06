@@ -141,9 +141,33 @@ final class BankRules {
         for (String[] rule : OFFICIAL_EXTRA_RULES) SUPPORTED_BANKS.add(rule[0]);
     }
 
-    /** How many distinct supported bank senders exist; a full scan can stop once each has matched once. */
+    /** Every canonical bank name listed by a rule table (reachable or not). */
+    static Set<String> supportedNames() {
+        return new HashSet<>(SUPPORTED_BANKS);
+    }
+
+    /** Bank names an incoming SMS can actually reach: every rule alias resolves exactly the way a sender
+     *  does, so aliases that collide and lose to an earlier rule (e.g. Tosee Credit Inst.'s +9830005816,
+     *  claimed by Tosee Taavon) simply drop out instead of inflating the count. */
+    static Set<String> reachableBanks() {
+        Set<String> reachable = new HashSet<>();
+        collectReachable(RULES, reachable);
+        collectReachable(OFFICIAL_EXTRA_RULES, reachable);
+        return reachable;
+    }
+
+    private static void collectReachable(String[][] rules, Set<String> reachable) {
+        for (String[] rule : rules) for (String alias : rule[1].split("\\|")) {
+            String resolved = resolve(alias);
+            if (resolved != null) reachable.add(resolved);
+        }
+    }
+
+    /** How many distinct supported bank senders an SMS can actually match. A full scan can stop once
+     *  each has matched once: matchedBanks is always a subset of reachableBanks, so the sizes being
+     *  equal means every supported bank has already been recorded. */
     static int supportedSenderCount() {
-        return SUPPORTED_BANKS.size();
+        return reachableBanks().size();
     }
 
     private static int rulesVersion() {

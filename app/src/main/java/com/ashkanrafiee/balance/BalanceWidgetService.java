@@ -16,7 +16,6 @@ public class BalanceWidgetService extends RemoteViewsService {
     }
 
     private static final class Factory implements RemoteViewsService.RemoteViewsFactory {
-        private static final int TYPE_BANK = 0, TYPE_EMPTY = 1;
         private final Context context;
         private volatile List<Bank> banks = new ArrayList<>();
 
@@ -50,8 +49,7 @@ public class BalanceWidgetService extends RemoteViewsService {
                 hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : BalanceData.toman(c, b.amount));
             views.setInt(R.id.bank_name, "setGravity", Gravity.CENTER_VERTICAL | (rtl ? Gravity.RIGHT : Gravity.LEFT));
             views.setInt(R.id.bank_amount, "setGravity", Gravity.CENTER_VERTICAL | (rtl ? Gravity.LEFT : Gravity.RIGHT));
-            views.setOnClickPendingIntent(R.id.widget_item_root,
-                BalanceWidgetProvider.pending(c, BalanceWidgetProvider.ACTION_TAP, BalanceWidgetProvider.REQ_ITEM_TAP));
+            views.setOnClickPendingIntent(R.id.widget_item_root, BalanceWidgetProvider.openApp(c));
             return views;
         }
 
@@ -61,8 +59,7 @@ public class BalanceWidgetService extends RemoteViewsService {
             views.setInt(R.id.widget_empty, "setLayoutDirection",
                 c.getResources().getConfiguration().getLayoutDirection());
             views.setViewVisibility(R.id.widget_empty, View.VISIBLE);
-            views.setOnClickPendingIntent(R.id.widget_empty,
-                BalanceWidgetProvider.pending(c, BalanceWidgetProvider.ACTION_TAP, BalanceWidgetProvider.REQ_ITEM_TAP));
+            views.setOnClickPendingIntent(R.id.widget_empty, BalanceWidgetProvider.openApp(c));
             return views;
         }
 

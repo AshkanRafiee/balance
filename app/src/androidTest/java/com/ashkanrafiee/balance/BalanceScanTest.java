@@ -340,7 +340,10 @@ public class BalanceScanTest {
     @Test public void zz_scanWithoutSmsPermission_returnsZeroWithoutSideEffects() throws Exception {
         Context foreign = null;
         String[] candidates = {
-            "com.android.systemui", "com.android.launcher3", "com.google.android.googlequicksearchbox"};
+            "com.android.systemui", "com.android.launcher3", "com.google.android.googlequicksearchbox",
+            "com.android.documentsui", "com.android.camera2", "com.android.printspooler",
+            "com.android.settings", "com.android.deskclock", "com.android.phone",
+            "com.android.providers.contacts"};
         for (String p : candidates) {
             try {
                 Context c = ctx.createPackageContext(p, Context.CONTEXT_IGNORE_SECURITY);

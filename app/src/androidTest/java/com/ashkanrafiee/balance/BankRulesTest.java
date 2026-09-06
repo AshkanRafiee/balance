@@ -2,6 +2,7 @@ package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 
@@ -120,5 +121,36 @@ public class BankRulesTest {
         assertEquals("5000973189", BankRules.normalize("985000973189"));
         // A short "98"-prefixed string must not be stripped.
         assertEquals("98", BankRules.normalize("98"));
+    }
+
+    // ---- reachability / early-exit invariant ------------------------------------------
+    @Test public void reachableBanks_matchesSupportedSenderCount() {
+        assertEquals(BankRules.reachableBanks().size(), BankRules.supportedSenderCount());
+    }
+
+    @Test public void reachableBanks_subsetOfSupportedNames() {
+        for (String bank : BankRules.reachableBanks())
+            assertTrue("reachable bank not in supported list: " + bank,
+                BankRules.supportedNames().contains(bank));
+    }
+
+    @Test public void resolve_collidingCreditAlias_attributesSenderToFirstOwner() {
+        // +9830005816 is listed under both Tosee Taavon (first in rule order) and Tosee Credit Inst.;
+        // resolve() must always hand it to the first owner so attribution never flips.
+        assertEquals("Tosee Taavon", BankRules.resolve("+9830005816"));
+        assertEquals("Tosee Taavon", BankRules.resolve("9830005816"));
+    }
+
+    @Test public void reachableBanks_matchesActualResolverOutcome() {
+        // The reachable set mirrors what resolve() can actually return, so the early-exit count never
+        // over- or under-covers. Of the "Credit Inst." aliases, only Tosee Credit Inst.'s +9830005816
+        // loses its contest (Tosee Taavon claims it first in rule order) and drops out; Melal Credit
+        // Inst.'s +98200022222 and Noor Credit Inst.'s numbers still resolve to their own names.
+        java.util.Set<String> reachable = BankRules.reachableBanks();
+        assertTrue("Tosee Credit Inst. must not be reachable", !reachable.contains("Tosee Credit Inst."));
+        assertTrue("Melal Credit Inst. should be reachable", reachable.contains("Melal Credit Inst."));
+        assertTrue("Noor Credit Inst. should be reachable", reachable.contains("Noor Credit Inst."));
+        assertTrue("EDBI should be reachable", reachable.contains("EDBI"));
+        assertTrue("Tejarat should be reachable", reachable.contains("Tejarat"));
     }
 }

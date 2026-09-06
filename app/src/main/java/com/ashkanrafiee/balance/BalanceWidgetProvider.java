@@ -8,25 +8,27 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.SystemClock;
-import android.util.Log;
 import android.widget.RemoteViews;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class BalanceWidgetProvider extends AppWidgetProvider {
     static final String ACTION_REFRESH = "com.ashkanrafiee.balance.WIDGET_REFRESH";
     static final String ACTION_MASK = "com.ashkanrafiee.balance.WIDGET_MASK";
-    static final String ACTION_TAP = "com.ashkanrafiee.balance.WIDGET_TAP";
     private static final String ACTION_ALARM = "com.ashkanrafiee.balance.WIDGET_ALARM";
     private static final String ACTION_BOOT_COMPLETED = "android.intent.action.BOOT_COMPLETED";
     private static final String TAG = "BalanceWidget";
     private static final long REFRESH_INTERVAL = 10 * 60 * 1000L;
-    /** Request-code offsets, scoped by versionCode so app updates mint fresh PendingIntents. */
-    static final int REQ_MASK = 1, REQ_REFRESH = 2;
+    /** Request-code offsets for the interactive widget actions; scoped by versionCode so app updates
+     *  mint fresh PendingIntents. The repeating alarm uses the stable REQ_ALARM below instead, so it is
+     *  reused rather than re-minted on updates. */
+    static final int REQ_MASK = 1, REQ_REFRESH = 2, REQ_OPEN = 3;
     private static final int REQ_ALARM = 100;
-    static final int REQ_ITEM_TAP = 201;
     private static final long MIN_SPIN_DURATION = 700L;
     private static final AtomicBoolean REFRESHING = new AtomicBoolean(false);
     private static volatile float spin;
+    /** Widget frame cached for the spin loop so each frame only re-applies the rotation instead of
+     *  rebuilding (and re-decrypting) the whole widget on every tick. */
+    private static volatile RemoteViews spinBase;
 
     /** Re-scans SMS on a worker thread while spinning the refresh icon, then renders the final widget. */
     private static void refreshData(Context context) {
@@ -43,6 +45,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
                 }, "balance-scan").start();
 
                 long start = SystemClock.uptimeMillis();
+                spinBase = buildViews(context);
                 int step = 0;
                 while (!done.get()) {
                     step++;
@@ -53,6 +56,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
                 while (SystemClock.uptimeMillis() - start < MIN_SPIN_DURATION) SystemClock.sleep(40);
                 spin = 0f;
                 applySpin(context);
+                spinBase = null;
                 updateAll(context);
             } finally {
                 REFRESHING.set(false);
@@ -80,7 +84,8 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         AppWidgetManager manager = AppWidgetManager.getInstance(context);
         int[] ids = manager.getAppWidgetIds(new ComponentName(context, BalanceWidgetProvider.class));
         if (ids.length == 0) return;
-        RemoteViews views = buildViews(context);
+        RemoteViews views = spinBase;
+        if (views == null) return;
         views.setFloat(R.id.widget_refresh, "setRotation", spin);
         for (int id : ids) manager.updateAppWidget(id, views);
     }
@@ -102,10 +107,19 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         views.setContentDescription(R.id.widget_mask, c.getString(R.string.widget_action_mask));
         views.setContentDescription(R.id.widget_refresh, c.getString(R.string.widget_action_refresh));
         views.setFloat(R.id.widget_refresh, "setRotation", spin);
-        views.setOnClickPendingIntent(R.id.widget_root, pending(c, ACTION_TAP, REQ_ITEM_TAP));
+        views.setOnClickPendingIntent(R.id.widget_root, openApp(c));
         views.setOnClickPendingIntent(R.id.widget_mask, pending(c, ACTION_MASK, REQ_MASK));
         views.setOnClickPendingIntent(R.id.widget_refresh, pending(c, ACTION_REFRESH, REQ_REFRESH));
         return views;
+    }
+
+    /** Launches the main screen; used by the widget root and every list row, so a freshly added widget
+     *  (or one whose SMS permission was revoked) still has a working path to the permission UI. */
+    static PendingIntent openApp(Context context) {
+        Intent intent = new Intent(context, MainActivity.class);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return PendingIntent.getActivity(context, REQ_OPEN + versionBase(context), intent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     static PendingIntent pending(Context context, String action, int requestCode) {
@@ -115,13 +129,17 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
-    private static int versionBase(Context context) {
+    private static int versionCode(Context context) {
         try {
             return context.getPackageManager()
-                .getPackageInfo(context.getPackageName(), 0).versionCode * 1000;
+                .getPackageInfo(context.getPackageName(), 0).versionCode;
         } catch (Exception e) {
             return 0;
         }
+    }
+
+    private static int versionBase(Context context) {
+        return versionCode(context) * 1000;
     }
 
     private static boolean hasWidgets(Context context) {
@@ -144,8 +162,24 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     static void scheduleAlarm(Context context) {
         AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (am == null) return;
+        cancelLegacyAlarms(context);
         am.setRepeating(AlarmManager.RTC, System.currentTimeMillis() + REFRESH_INTERVAL,
             REFRESH_INTERVAL, alarmPending(context));
+    }
+
+    /** Versions up to 1.4.1 minted the repeating alarm at REQ_ALARM + versionCode * 1000, which survives
+     *  an upgrade as a stale second alarm. Cancel those legacy request codes before re-arming so an
+     *  upgraded install never fires the old and new alarms together. */
+    private static void cancelLegacyAlarms(Context context) {
+        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (am == null) return;
+        int vc = versionCode(context);
+        for (int v = vc; v >= Math.max(10000, vc - 4); v--) {
+            PendingIntent legacy = PendingIntent.getBroadcast(context, REQ_ALARM + v * 1000,
+                new Intent(context, BalanceWidgetProvider.class).setAction(ACTION_ALARM),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            am.cancel(legacy);
+        }
     }
 
     private static void cancelAlarm(Context context) {
@@ -179,24 +213,21 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     }
 
     /**
-     * Delivers the widget actions (refresh, mask, alarm) and system events.
-     * This receiver is exported (required for APPWIDGET_UPDATE/BOOT_COMPLETED). The three
-     * custom actions are only honored when the broadcast comes from our own uid, so a
-     * same-device app cannot force SMS rescans or toggle the privacy mask. APPWIDGET_UPDATE
-     * stays reachable through the launcher/host path (guarded by BIND_APPWIDGET), and the
-     * system events are harmless (they only reschedule the alarm or re-render local data).
+     * Delivers the widget actions (refresh, mask, alarm), the periodic-alarm wake-ups and the system
+     * events (APPWIDGET_UPDATE, BOOT_COMPLETED, CONFIGURATION_CHANGED).
+     *
+     * The receiver is NOT exported, so only the system (AppWidgetService, alarms fired from our own
+     * PendingIntents) and our own process can ever reach this code. No same-device app can craft an
+     * explicit broadcast to force an SMS rescan, toggle the privacy mask, or spam the periodic alarm -
+     * with a delivered broadcast the receiver thread carries the device-local uid anyway, so a
+     * Binder.getCallingUid() check inside onReceive cannot be trusted to reflect the sender. Explicit
+     * broadcasts from other apps fail to deliver outright, and unexported is the Google-documented
+     * configuration for BOOT_COMPLETED + app-widget receivers (system delivery is unaffected by it).
      */
     @Override
     public void onReceive(Context context, Intent intent) {
         String action = intent.getAction();
         if (action == null) return;
-        if (ACTION_REFRESH.equals(action) || ACTION_ALARM.equals(action) || ACTION_MASK.equals(action)) {
-            int uid = android.os.Binder.getCallingUid();
-            if (uid != android.os.Process.myUid()) {
-                Log.w(TAG, "ignoring " + action + " from uid " + uid);
-                return;
-            }
-        }
         super.onReceive(context, intent);
         if (ACTION_REFRESH.equals(action) || ACTION_ALARM.equals(action)) {
             if (ACTION_ALARM.equals(action)) scheduleAlarm(context);

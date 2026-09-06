@@ -4,7 +4,6 @@ import android.Manifest;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.content.res.Configuration;
 import android.database.Cursor;
 import android.provider.Telephony;
 import android.security.keystore.KeyGenParameterSpec;
@@ -158,16 +157,27 @@ final class BalanceData {
             .getBoolean(KEY_HIDDEN, false);
     }
 
-    /** Scans the inbox for balance messages and merges them into saved, then persists the result.
-     *  Returns how many bank balance messages were matched.
+    /** Scans the inbox for balance messages and merges them into the saved store, then persists the
+     *  result. Returns how many bank balance messages were matched.
+     *
+     *  This method is synchronized and re-reads the authoritative store INSIDE the lock: the caller's
+     *  map can be a stale snapshot taken the moment before an overlapping scan won the lock, so merging
+     *  into a fresh copy guarantees one scan can never overwrite a newer balance written by another (the
+     *  fresh copy is merged, persisted, and then copied back into the caller's map so its view stays
+     *  authoritative too). Balances are persisted BEFORE the watermark is advanced, so a process death
+     *  in between can only cause a harmless re-read of already-scanned rows, never a permanently skipped
+     *  message.
+     *
      *  Incremental reads only query messages newer than the last-scanned watermark, so refreshes stay
      *  fast no matter how large the inbox grows, and each bank only ever receives newer data. The full
      *  first scan (fresh install, or after the supported-bank list changes) reads the whole inbox so
-     *  every bank keeps its newest balance message, but stops as soon as every supported sender has
-     *  matched once. Senders are resolved before parsing, skipping the regex pass for the non-bank tail. */
+     *  every bank keeps its newest balance message, but stops as soon as every reachable supported
+     *  sender has matched once. Senders are resolved before parsing, skipping the regex pass for the
+     *  non-bank tail. */
     static synchronized int scanSms(Context context, LinkedHashMap<String, Bank> saved) {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
             return 0;
+        LinkedHashMap<String, Bank> current = read(context);
         SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
         long watermark = prefs.getLong(KEY_SCANNED_THROUGH, 0);
         int rulesVersion = BankRules.VERSION;
@@ -192,20 +202,22 @@ final class BalanceData {
                 long value = extract(cursor.getString(1));
                 if (value < 0) continue;
                 matchedBanks.add(bank);
-                Bank existing = saved.get(bank);
+                Bank existing = current.get(bank);
                 if (existing == null || date > existing.date) {
                     matched++;
-                    saved.put(bank, new Bank(bank, value, date, sender));
+                    current.put(bank, new Bank(bank, value, date, sender));
                 }
                 if (full && matchedBanks.size() == BankRules.supportedSenderCount()) break;
             }
         } catch (Exception e) {
             Log.w(TAG, "scan failed", e);
         }
+        write(context, current);
         SharedPreferences.Editor editor = prefs.edit().putInt(KEY_RULES_VERSION, rulesVersion);
         if (newest > watermark) editor.putLong(KEY_SCANNED_THROUGH, newest);
         editor.apply();
-        write(context, saved);
+        saved.clear();
+        saved.putAll(current);
         return matched;
     }
 
