@@ -1,0 +1,10 @@
+Balance now follows your device's light or dark theme, switching between a bright and a dark look automatically. The main screen, the About screen, and the home-screen widget all adapt instantly as you switch themes.
+
+Faster and more reliable balance updates:
+
+• Refreshing is much quicker — the app now reads only new SMS messages instead of the entire inbox.
+• Fixed a widget issue where the balance list could briefly disappear while a refresh was running.
+• Bank messages showing a zero balance are now recorded correctly.
+• Tapping the widget opens Balance, making it easy to review balances or grant permission.
+• Hardened the widget so only the system and the app itself can trigger a refresh or hide/show the balances.
+• Protected stored balances so they can never be accidentally wiped.

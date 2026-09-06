@@ -21,18 +21,17 @@ bash ./gradlew assembleDebug
 bash ./gradlew assembleRelease
 ```
 
-The release build is unsigned when signing variables are absent, which is suitable for source-based distribution builds. For a local signed release, provide the keystore through environment variables:
+The release build is unsigned when no keystore is configured, which is suitable for source-based distribution builds. For a locally signed release, put a `signing.properties` file next to `build.gradle`:
 
-```sh
-BALANCE_STORE_FILE=/path/to/balance-release.jks \
-BALANCE_STORE_TYPE=JKS \
-BALANCE_STORE_PASSWORD='...' \
-BALANCE_KEY_ALIAS='...' \
-BALANCE_KEY_PASSWORD='...' \
-bash ./gradlew assembleRelease
+```properties
+storeFile=/path/to/balance-release.jks
+storeType=JKS
+storePassword=...
+keyAlias=...
+keyPassword=...
 ```
 
-Keep the keystore and passwords outside version control.
+Keep the keystore and passwords outside version control (`signing.properties` and `*.jks` are gitignored). The included GitHub Actions workflow restores its own signing `signing.properties` from repository secrets when publishing a release.
 
 ## Privacy
 

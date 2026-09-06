@@ -19,7 +19,7 @@ import java.io.InputStream;
 import java.util.LinkedHashMap;
 
 /**
- * Systematic scan tests against the real SMS provider (LCB-style instrumented, no UI).
+ * Systematic scan tests against the real SMS provider (instrumented, no UI).
  *
  * Every test starts from a clean inbox + clean prefs, so the full-scan and
  * incremental-scan states are fully deterministic. Test messages are seeded

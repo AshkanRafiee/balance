@@ -9,7 +9,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-/** Bank sender resolution/normalization edge cases (LCB-style instrumented, pure logic, no UI). */
+/** Bank sender resolution/normalization edge cases (instrumented, pure logic, no UI). */
 @RunWith(AndroidJUnit4.class)
 public class BankRulesTest {
 

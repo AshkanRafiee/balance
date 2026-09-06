@@ -7,7 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-/** Balance amount extraction edge cases (LCB-style instrumented, pure logic, no UI). */
+/** Balance amount extraction edge cases (instrumented, pure logic, no UI). */
 @RunWith(AndroidJUnit4.class)
 public class BalanceExtractTest {
 
