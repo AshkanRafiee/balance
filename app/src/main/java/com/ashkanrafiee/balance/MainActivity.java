@@ -7,13 +7,11 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.database.Cursor;
+import android.os.Bundle;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.RectF;
-import android.os.Bundle;
-import android.provider.Telephony;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Toast;
@@ -145,25 +143,7 @@ public class MainActivity extends Activity {
                 final Context app = MainActivity.this.getApplicationContext();
                 try {
                     LinkedHashMap<String, Bank> saved = BalanceData.read(app);
-                    int count = 0;
-                    try (Cursor c = app.getContentResolver().query(
-                        Telephony.Sms.Inbox.CONTENT_URI,
-                        new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
-                        null, null, Telephony.Sms.DATE + " DESC")) {
-                        if (c != null) while (c.moveToNext()) {
-                            String sender = c.getString(0), body = c.getString(1);
-                            long date = c.getLong(2);
-                            long value = BalanceData.extract(body);
-                            if (value < 0) continue;
-                            String bank = BankRules.resolve(sender);
-                            if (bank == null || value <= 0) continue;
-                            Bank existing = saved.get(bank);
-                            if (existing == null || date > existing.date)
-                                saved.put(bank, new Bank(bank, value, date, sender));
-                            count++;
-                        }
-                    }
-                    BalanceData.write(app, saved);
+                    int count = BalanceData.scanSms(app, saved);
                     String message = count == 0
                         ? (saved.isEmpty()
                             ? getString(R.string.status_no_sms_found)

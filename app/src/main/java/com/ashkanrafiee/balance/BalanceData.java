@@ -2,6 +2,7 @@ package com.ashkanrafiee.balance;
 
 import android.Manifest;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.database.Cursor;
@@ -13,9 +14,11 @@ import android.util.Log;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.text.NumberFormat;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.crypto.Cipher;
@@ -29,6 +32,8 @@ final class BalanceData {
     static final String KEY_BALANCES = "balances";
     static final String PREFS_PREF = "balance_preferences";
     static final String KEY_HIDDEN = "balances_hidden";
+    static final String KEY_SCANNED_THROUGH = "scanned_through";
+    static final String KEY_RULES_VERSION = "rules_version";
 
     private static final String TAG = "BalanceData";
     private static final String KEYSTORE = "AndroidKeyStore";
@@ -147,29 +152,55 @@ final class BalanceData {
             .getBoolean(KEY_HIDDEN, false);
     }
 
-    /** Scans the SMS inbox and merges newer balances into the given map, then persists the result. */
-    static void scanSms(Context context, LinkedHashMap<String, Bank> saved) {
+    /** Scans the inbox for balance messages and merges them into saved, then persists the result.
+     *  Returns how many bank balance messages were matched.
+     *  Incremental reads only query messages newer than the last-scanned watermark, so refreshes stay
+     *  fast no matter how large the inbox grows, and each bank only ever receives newer data. The full
+     *  first scan (fresh install, or after the supported-bank list changes) reads the whole inbox so
+     *  every bank keeps its newest balance message, but stops as soon as every supported sender has
+     *  matched once. Senders are resolved before parsing, skipping the regex pass for the non-bank tail. */
+    static int scanSms(Context context, LinkedHashMap<String, Bank> saved) {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
-            return;
+            return 0;
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
+        long watermark = prefs.getLong(KEY_SCANNED_THROUGH, 0);
+        int rulesVersion = BankRules.VERSION;
+        boolean full = watermark == 0 || prefs.getInt(KEY_RULES_VERSION, -1) != rulesVersion;
+        if (full) watermark = 0;
+        int matched = 0;
+        long newest = 0;
+        Set<String> matchedBanks = new HashSet<>();
+        String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
+        String[] args = selection != null ? new String[]{Long.toString(watermark)} : null;
         try (Cursor cursor = context.getContentResolver().query(
             Telephony.Sms.Inbox.CONTENT_URI,
             new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
-            null, null, Telephony.Sms.DATE + " DESC")) {
-            if (cursor != null) while (cursor.moveToNext()) {
-                String sender = cursor.getString(0), body = cursor.getString(1);
+            selection, args, Telephony.Sms.DATE + " DESC")) {
+            if (cursor == null) return 0;
+            while (cursor.moveToNext()) {
                 long date = cursor.getLong(2);
-                long value = extract(body);
-                if (value < 0) continue;
+                if (newest < date) newest = date;
+                String sender = cursor.getString(0);
                 String bank = BankRules.resolve(sender);
-                if (bank == null || value <= 0) continue;
+                if (bank == null) continue;
+                long value = extract(cursor.getString(1));
+                if (value <= 0) continue;
+                matchedBanks.add(bank);
                 Bank existing = saved.get(bank);
-                if (existing == null || date > existing.date)
+                if (existing == null || date > existing.date) {
+                    matched++;
                     saved.put(bank, new Bank(bank, value, date, sender));
+                }
+                if (full && matchedBanks.size() == BankRules.supportedSenderCount()) break;
             }
         } catch (Exception e) {
             Log.w(TAG, "scan failed", e);
         }
+        SharedPreferences.Editor editor = prefs.edit().putInt(KEY_RULES_VERSION, rulesVersion);
+        if (newest > watermark) editor.putLong(KEY_SCANNED_THROUGH, newest);
+        editor.apply();
         write(context, saved);
+        return matched;
     }
 
     static long extract(String raw) {

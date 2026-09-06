@@ -2,8 +2,10 @@ package com.ashkanrafiee.balance;
 
 import android.content.Context;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 final class BankRules {
     /** Maps a canonical (English, storage-key) bank name to its localized display string resource. */
@@ -129,6 +131,27 @@ final class BankRules {
         {"Wepod", "+981000214|98500011|5000114|+985000114|985000114|981000214|1000214|9830009017|30009017"},
         {"Bankino", "20004860"}
     };
+
+    /** Version fingerprint of the rule tables, used to detect bank-list changes and force a full rescan. */
+    static final int VERSION = rulesVersion();
+
+    private static final Set<String> SUPPORTED_BANKS = new HashSet<>();
+    static {
+        for (String[] rule : RULES) SUPPORTED_BANKS.add(rule[0]);
+        for (String[] rule : OFFICIAL_EXTRA_RULES) SUPPORTED_BANKS.add(rule[0]);
+    }
+
+    /** How many distinct supported bank senders exist; a full scan can stop once each has matched once. */
+    static int supportedSenderCount() {
+        return SUPPORTED_BANKS.size();
+    }
+
+    private static int rulesVersion() {
+        int v = 0;
+        for (String[] rule : RULES) for (String alias : rule[1].split("\\|")) v = v * 31 + alias.hashCode();
+        for (String[] rule : OFFICIAL_EXTRA_RULES) for (String alias : rule[1].split("\\|")) v = v * 31 + alias.hashCode();
+        return v;
+    }
 
     static String resolve(String sender) {
         if (sender == null || sender.indexOf('*') >= 0 || sender.indexOf('#') >= 0) return null;
