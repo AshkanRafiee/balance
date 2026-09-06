@@ -106,7 +106,7 @@ final class BalanceData {
             boolean legacy = stored.indexOf('{') == 0;
             String json = legacy ? stored : decrypt(stored);
             parse(map, json);
-            if (legacy) write(context, map);
+            if (legacy && !map.isEmpty()) write(context, map);
         } catch (Exception e) {
             Log.w(TAG, "read failed", e);
             return map;
@@ -130,6 +130,12 @@ final class BalanceData {
 
     static void write(Context context, LinkedHashMap<String, Bank> map) {
         try {
+            String existing = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
+                .getString(KEY_BALANCES, null);
+            if (map.isEmpty() && existing != null) {
+                Log.w(TAG, "refusing to persist empty balances over existing data");
+                return;
+            }
             JSONObject obj = new JSONObject();
             for (java.util.Map.Entry<String, Bank> e : map.entrySet()) {
                 Bank b = e.getValue();
@@ -159,7 +165,7 @@ final class BalanceData {
      *  first scan (fresh install, or after the supported-bank list changes) reads the whole inbox so
      *  every bank keeps its newest balance message, but stops as soon as every supported sender has
      *  matched once. Senders are resolved before parsing, skipping the regex pass for the non-bank tail. */
-    static int scanSms(Context context, LinkedHashMap<String, Bank> saved) {
+    static synchronized int scanSms(Context context, LinkedHashMap<String, Bank> saved) {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
             return 0;
         SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
@@ -184,7 +190,7 @@ final class BalanceData {
                 String bank = BankRules.resolve(sender);
                 if (bank == null) continue;
                 long value = extract(cursor.getString(1));
-                if (value <= 0) continue;
+                if (value < 0) continue;
                 matchedBanks.add(bank);
                 Bank existing = saved.get(bank);
                 if (existing == null || date > existing.date) {

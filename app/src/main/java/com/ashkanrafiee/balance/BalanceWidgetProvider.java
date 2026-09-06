@@ -8,6 +8,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.SystemClock;
+import android.util.Log;
 import android.widget.RemoteViews;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -17,6 +18,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     static final String ACTION_TAP = "com.ashkanrafiee.balance.WIDGET_TAP";
     private static final String ACTION_ALARM = "com.ashkanrafiee.balance.WIDGET_ALARM";
     private static final String ACTION_BOOT_COMPLETED = "android.intent.action.BOOT_COMPLETED";
+    private static final String TAG = "BalanceWidget";
     private static final long REFRESH_INTERVAL = 10 * 60 * 1000L;
     /** Request-code offsets, scoped by versionCode so app updates mint fresh PendingIntents. */
     static final int REQ_MASK = 1, REQ_REFRESH = 2;
@@ -73,12 +75,12 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         for (int id : ids) manager.updateAppWidget(id, buildViews(context));
     }
 
-    /** Rotates the refresh icon without touching any other part of the rendered widget. */
+    /** Rotates the refresh icon on the fully rendered widget, so no other element is ever dropped. */
     private static void applySpin(Context context) {
         AppWidgetManager manager = AppWidgetManager.getInstance(context);
         int[] ids = manager.getAppWidgetIds(new ComponentName(context, BalanceWidgetProvider.class));
         if (ids.length == 0) return;
-        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_balance);
+        RemoteViews views = buildViews(context);
         views.setFloat(R.id.widget_refresh, "setRotation", spin);
         for (int id : ids) manager.updateAppWidget(id, views);
     }
@@ -128,7 +130,15 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     }
 
     private static PendingIntent alarmPending(Context context) {
-        return pending(context, ACTION_ALARM, REQ_ALARM);
+        Intent intent = new Intent(context, BalanceWidgetProvider.class);
+        intent.setAction(ACTION_ALARM);
+        return pendingRepeating(context, intent, REQ_ALARM);
+    }
+
+    /** Request code without the version base, so the repeating alarm is reused (not re-minted) on updates. */
+    private static PendingIntent pendingRepeating(Context context, Intent intent, int requestCode) {
+        return PendingIntent.getBroadcast(context, requestCode, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     static void scheduleAlarm(Context context) {
@@ -170,17 +180,24 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
 
     /**
      * Delivers the widget actions (refresh, mask, alarm) and system events.
-     * This receiver is exported (required for APPWIDGET_UPDATE/BOOT_COMPLETED), so a
-     * same-device app could in principle send an explicit broadcast for these actions.
-     * The impact is bounded to toggling the local hidden flag or triggering an SMS
-     * rescan; no balances are ever exposed to other apps (no INTERNET, MODE_PRIVATE),
-     * so we accept it rather than add sender-validation machinery.
+     * This receiver is exported (required for APPWIDGET_UPDATE/BOOT_COMPLETED). The three
+     * custom actions are only honored when the broadcast comes from our own uid, so a
+     * same-device app cannot force SMS rescans or toggle the privacy mask. APPWIDGET_UPDATE
+     * stays reachable through the launcher/host path (guarded by BIND_APPWIDGET), and the
+     * system events are harmless (they only reschedule the alarm or re-render local data).
      */
     @Override
     public void onReceive(Context context, Intent intent) {
-        super.onReceive(context, intent);
         String action = intent.getAction();
         if (action == null) return;
+        if (ACTION_REFRESH.equals(action) || ACTION_ALARM.equals(action) || ACTION_MASK.equals(action)) {
+            int uid = android.os.Binder.getCallingUid();
+            if (uid != android.os.Process.myUid()) {
+                Log.w(TAG, "ignoring " + action + " from uid " + uid);
+                return;
+            }
+        }
+        super.onReceive(context, intent);
         if (ACTION_REFRESH.equals(action) || ACTION_ALARM.equals(action)) {
             if (ACTION_ALARM.equals(action)) scheduleAlarm(context);
             refreshData(context);
