@@ -9,5 +9,8 @@ Features:
 - Toman display mode
 - Persistent privacy masking for balances
 - Pull-to-refresh with progress animation
+- Home-screen widget with quick refresh and privacy mask
+- Automatic light and dark theme that follows your device
+- Long-press Refresh to fully rescan from the bank SMS currently in your inbox
 
 SMS and financial data stay on the device. No account, cloud service, analytics, or network access is required.
