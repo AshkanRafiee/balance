@@ -127,6 +127,27 @@ final class BalanceData {
         return map;
     }
 
+    /** Serializes the supplied balances as the same JSON shape used for the local store. */
+    static String serialize(LinkedHashMap<String, Bank> map) throws Exception {
+        JSONObject obj = new JSONObject();
+        for (java.util.Map.Entry<String, Bank> e : map.entrySet()) {
+            Bank b = e.getValue();
+            JSONObject entry = new JSONObject();
+            entry.put("amount", b.amount);
+            entry.put("date", b.date);
+            entry.put("sender", b.sender);
+            obj.put(e.getKey(), entry);
+        }
+        return obj.toString();
+    }
+
+    /** Parses a balance JSON (as produced by {@link #serialize}) into a fresh map. */
+    static LinkedHashMap<String, Bank> deserialize(String json) {
+        LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
+        parse(map, json);
+        return map;
+    }
+
     static void write(Context context, LinkedHashMap<String, Bank> map) {
         try {
             String existing = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
@@ -135,16 +156,7 @@ final class BalanceData {
                 Log.w(TAG, "refusing to persist empty balances over existing data");
                 return;
             }
-            JSONObject obj = new JSONObject();
-            for (java.util.Map.Entry<String, Bank> e : map.entrySet()) {
-                Bank b = e.getValue();
-                JSONObject entry = new JSONObject();
-                entry.put("amount", b.amount);
-                entry.put("date", b.date);
-                entry.put("sender", b.sender);
-                obj.put(e.getKey(), entry);
-            }
-            String json = obj.toString();
+            String json = serialize(map);
             context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
                 .putString(KEY_BALANCES, encrypt(json)).apply();
         } catch (Exception e) {
