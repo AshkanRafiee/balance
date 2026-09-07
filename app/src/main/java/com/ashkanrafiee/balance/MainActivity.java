@@ -32,6 +32,7 @@ public class MainActivity extends Activity {
     private static final int REQ_CREATE_BACKUP = 20;
     private static final int REQ_PICK_RESTORE = 21;
     private BalanceView view;
+    private String pendingBackupPassword;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -128,8 +129,8 @@ public class MainActivity extends Activity {
         new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.backup_title))
             .setItems(options, (d, which) -> {
-                if (which == 0) pickBackupTarget();
-                else pickRestoreSource();
+                if (which == 0) askPassword(true);
+                else askPassword(false);
             })
             .show();
     }
@@ -158,13 +159,20 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
-        Uri uri = data.getData();
-        if (requestCode == REQ_CREATE_BACKUP) askPassword(uri, true);
-        else if (requestCode == REQ_PICK_RESTORE) askPassword(uri, false);
+        if (requestCode == REQ_CREATE_BACKUP) {
+            String password = pendingBackupPassword;
+            pendingBackupPassword = null;
+            if (resultCode != RESULT_OK || data == null || data.getData() == null || password == null) return;
+            createBackup(data.getData(), password);
+        } else if (requestCode == REQ_PICK_RESTORE) {
+            String password = pendingBackupPassword;
+            pendingBackupPassword = null;
+            if (resultCode != RESULT_OK || data == null || data.getData() == null || password == null) return;
+            restoreBackup(data.getData(), password);
+        }
     }
 
-    private void askPassword(Uri uri, boolean forBackup) {
+    private void askPassword(boolean forBackup) {
         EditText password = new EditText(this);
         password.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         password.setHint(getString(R.string.backup_password_hint));
@@ -208,8 +216,9 @@ public class MainActivity extends Activity {
                     return;
                 }
                 dlg.dismiss();
-                if (forBackup) createBackup(uri, value);
-                else restoreBackup(uri, value);
+                pendingBackupPassword = value;
+                if (forBackup) pickBackupTarget();
+                else pickRestoreSource();
             }));
         dlg.show();
     }
