@@ -1,0 +1,16 @@
+Balance can now back up your balances to a password-encrypted file and restore them on this device — or any other.
+
+Creating a backup:
+
+• Choose a strong password first, then pick where to save the file. Nothing is written until everything is ready.
+• Your balances are encrypted with your password before they leave the app, so the saved file is unreadable without it.
+• The app never stores your password anywhere — keep it somewhere safe. Without it, a backup can't be decrypted, so it can never be restored.
+
+Restoring a backup:
+
+• Pick a backup file, enter its password, and Balance merges the saved balances with what's already here.
+• Each bank keeps its most recent balance, and banks missing from the current list are added back.
+• Never overwrites a newer saved balance with an older backup.
+• A wrong password is caught right away and you can try again without re-selecting the file.
+
+Backup files saved by this version can also be restored later by future versions of Balance.
