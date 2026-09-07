@@ -121,6 +121,17 @@ public class MainActivity extends Activity {
         return (int) (v * getResources().getDisplayMetrics().density + .5f);
     }
 
+    /** [top, bottom] system-bar insets in px across every supported API level. */
+    private int[] systemBarInsets(android.view.WindowInsets ins) {
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            return new int[]{
+                ins.getInsets(android.view.WindowInsets.Type.statusBars()).top,
+                ins.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom,
+            };
+        }
+        return new int[]{ins.getSystemWindowInsetTop(), ins.getSystemWindowInsetBottom()};
+    }
+
     private void backupDialog() {
         String[] options = {
             getString(R.string.backup_action_create),
@@ -306,19 +317,52 @@ public class MainActivity extends Activity {
 
     private void showProgress(String message) {
         LinearLayout wrap = new LinearLayout(this);
-        wrap.setOrientation(LinearLayout.HORIZONTAL);
-        wrap.setGravity(Gravity.CENTER_VERTICAL);
-        int pad = dp(24);
-        wrap.setPadding(pad, dp(18), pad, dp(10));
-        wrap.addView(new ProgressBar(this));
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setGravity(Gravity.CENTER_HORIZONTAL);
+        int margin = dp(24);
+        wrap.setPadding(margin, dp(18), margin, dp(14));
         TextView tv = new TextView(this);
         tv.setText(message);
-        tv.setTextSize(14);
-        tv.setPadding(dp(16), 0, 0, 0);
+        tv.setTextSize(15);
+        tv.setTextColor(resColor(R.color.fg));
         wrap.addView(tv);
+        // An indeterminate frame animation that stays visibly moving on every
+        // supported Android version and theme, which matters while the decrypt
+        // work is running in the background.
+        ProgressBar bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        bar.setIndeterminate(true);
+        bar.setIndeterminateDrawable(getResources().getDrawable(
+            android.R.drawable.progress_indeterminate_horizontal, getTheme()));
+        bar.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(resColor(R.color.accent)));
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(6));
+        barLp.topMargin = dp(14);
+        bar.setLayoutParams(barLp);
+        wrap.addView(bar);
         progressDialog = new android.app.AlertDialog.Builder(this)
             .setView(wrap).setCancelable(false).create();
         progressDialog.show();
+        // The old password dialog was just dismissed with its soft keyboard still
+        // animating away. Pin this dialog to the exact middle of the screen:
+        // the window manager centers dialogs inside the area that excludes the
+        // status and navigation bars, so without a correction the card sits
+        // (statusBarHeight - navBarHeight) / 2 px off the true middle of the
+        // display. The a.y offset below (positive moves down from the center)
+        // restores an equal margin above and below the card on the full screen.
+        android.view.Window win = progressDialog.getWindow();
+        if (win != null) {
+            win.setLayout(dp(300), android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+            win.setGravity(Gravity.CENTER);
+            win.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+                | android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
+            android.view.WindowInsets ins = getWindow().getDecorView().getRootWindowInsets();
+            if (ins != null) {
+                int[] sb = systemBarInsets(ins);
+                android.view.WindowManager.LayoutParams a = win.getAttributes();
+                a.y = (sb[1] - sb[0]) / 2;
+                win.setAttributes(a);
+            }
+        }
     }
 
     private void dismissProgress() {
