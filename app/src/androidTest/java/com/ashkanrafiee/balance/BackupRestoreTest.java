@@ -227,6 +227,109 @@ public class BackupRestoreTest {
         }
     }
 
+    // ---- hostile header parameters must be bounded before any key derivation runs -------
+
+    private BackupManager.BackupException restoreExpecting(Mutator mutate, File f) throws Exception {
+        byte[] bytes = readFile(f);
+        byte[] mutated = mutate.apply(bytes);
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) {
+            out.write(mutated);
+        }
+        try {
+            BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
+            fail("hostile header must be rejected as unsupported");
+        } catch (BackupManager.BackupException e) {
+            return e;
+        }
+        return null;
+    }
+
+    private interface Mutator { byte[] apply(byte[] b) throws Exception; }
+
+    /** Rewrites a field inside one header section (e.g. "kdf"/"iterations") and re-serializes it. */
+    private byte[] rewriteHeaderField(byte[] bytes, String section, String field, Object value) throws Exception {
+        int headerLen = ((bytes[9] & 0xFF) << 24) | ((bytes[10] & 0xFF) << 16)
+            | ((bytes[11] & 0xFF) << 8) | (bytes[12] & 0xFF);
+        org.json.JSONObject h = new org.json.JSONObject(
+            new String(bytes, 13, headerLen, StandardCharsets.UTF_8));
+        h.getJSONObject(section).put(field, value);
+        byte[] newHeader = h.toString().getBytes(StandardCharsets.UTF_8);
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        out.write(bytes, 0, 9);
+        out.write((newHeader.length >> 24) & 0xFF);
+        out.write((newHeader.length >> 16) & 0xFF);
+        out.write((newHeader.length >> 8) & 0xFF);
+        out.write(newHeader.length & 0xFF);
+        out.write(newHeader);
+        out.write(bytes, 13 + headerLen, bytes.length - (13 + headerLen));
+        return out.toByteArray();
+    }
+
+    @Test public void hostileIterations_aboveCap_isRejectedBeforeDerivation() throws Exception {
+        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        File f = file("hostileIter.balance");
+        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        BackupManager.BackupException e = restoreExpecting(
+            b -> rewriteHeaderField(b, "kdf", "iterations", Integer.MAX_VALUE / 2), f);
+        assertEquals(R.string.backup_error_unsupported, e.resId);
+    }
+
+    @Test public void hostileZeroIterations_isRejected() throws Exception {
+        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        File f = file("hostileZeroIter.balance");
+        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        assertEquals(R.string.backup_error_unsupported,
+            restoreExpecting(b -> rewriteHeaderField(b, "kdf", "iterations", 0), f).resId);
+    }
+
+    @Test public void hostileHugeKeyBits_isRejectedBeforeDerivation() throws Exception {
+        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        File f = file("hostileKeyBits.balance");
+        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        assertEquals(R.string.backup_error_unsupported,
+            restoreExpecting(b -> rewriteHeaderField(b, "kdf", "keyBits", Integer.MAX_VALUE), f).resId);
+    }
+
+    @Test public void hostileOddKeyBits_isRejected() throws Exception {
+        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        File f = file("hostileOddKeyBits.balance");
+        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        assertEquals(R.string.backup_error_unsupported,
+            restoreExpecting(b -> rewriteHeaderField(b, "kdf", "keyBits", 123), f).resId);
+    }
+
+    @Test public void hostileTagBits_isRejected() throws Exception {
+        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        File f = file("hostileTagBits.balance");
+        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        assertEquals(R.string.backup_error_unsupported,
+            restoreExpecting(b -> rewriteHeaderField(b, "cipher", "tagBits", 256), f).resId);
+    }
+
+    @Test public void hostileIvLength_isRejected() throws Exception {
+        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        File f = file("hostileIv.balance");
+        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        assertEquals(R.string.backup_error_unsupported,
+            restoreExpecting(b -> rewriteHeaderField(b, "cipher", "iv",
+                android.util.Base64.encodeToString(new byte[16], android.util.Base64.NO_WRAP)), f).resId);
+    }
+
+    @Test public void oversizedFile_isRejected() throws Exception {
+        // Just past the 10 MB cap: a file far larger than any real backup must not be read into memory.
+        long over = 10L * 1024 * 1024 + 1;
+        File f = file("huge.balance");
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) {
+            out.write(new byte[(int) over]);
+        }
+        try {
+            BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
+            fail("oversized backup must be rejected");
+        } catch (BackupManager.BackupException e) {
+            assertEquals(R.string.backup_error_not_backup, e.resId);
+        }
+    }
+
     // ============================================================
     // Merge semantics (newest wins per bank, never summed)
     // ============================================================

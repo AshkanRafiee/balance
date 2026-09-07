@@ -54,6 +54,16 @@ final class BackupManager {
     private static final int SALT_BYTES = 16;
     private static final int IV_BYTES = 12;
     private static final int TAG_BITS = 128;
+    /** Upper bound on a restore's claimed KDF work. A hostile or corrupt header must never drive the app
+     *  into a multi-minute PBKDF2 burn (or a huge derived-key allocation) before the GCM tag is checked:
+     *  the value comes from the file, so it is validated before any key derivation runs. Ours is 600k;
+     *  anything farther above it is reported as unsupported rather than attempted. */
+    private static final int MAX_ITERATIONS = 6_000_000;
+    private static final int MIN_KEY_BITS = 128;
+    private static final int MAX_KEY_BITS = 256;
+    /** Restore refuses to read a backup file larger than this. The payload is a handful of balances, so
+     *  anything this big is not a genuine backup — and reading it fully into memory would be a DoS. */
+    private static final long MAX_BACKUP_BYTES = 10L * 1024 * 1024;
 
     /** Human-readable error carrying the string resource that describes it. */
     static final class BackupException extends Exception {
@@ -161,6 +171,16 @@ final class BackupManager {
             throw new BackupException(R.string.backup_error_unsupported);
         if (!KDF_ALGORITHM.equals(kdfAlgorithm))
             throw new BackupException(R.string.backup_error_unsupported);
+        // Every one of these arrives with the file: sanity-bound them BEFORE deriving any key, so a
+        // crafted header cannot trigger a huge PBKDF2 work factor or an absurd key length.
+        if (iterations <= 0 || iterations > MAX_ITERATIONS)
+            throw new BackupException(R.string.backup_error_unsupported);
+        if (keyBits < MIN_KEY_BITS || keyBits > MAX_KEY_BITS || keyBits % 64 != 0)
+            throw new BackupException(R.string.backup_error_unsupported);
+        if (tagBits != TAG_BITS)
+            throw new BackupException(R.string.backup_error_unsupported);
+        if (iv == null || iv.length != IV_BYTES)
+            throw new BackupException(R.string.backup_error_unsupported);
 
         String plain;
         try {
@@ -249,7 +269,13 @@ final class BackupManager {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             byte[] buf = new byte[8192];
             int n;
-            while ((n = is.read(buf)) >= 0) out.write(buf, 0, n);
+            long total = 0;
+            while ((n = is.read(buf)) >= 0) {
+                total += n;
+                if (total > MAX_BACKUP_BYTES)
+                    throw new BackupException(R.string.backup_error_not_backup);
+                out.write(buf, 0, n);
+            }
             return out.toByteArray();
         }
     }

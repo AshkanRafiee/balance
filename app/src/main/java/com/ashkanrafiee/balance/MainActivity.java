@@ -389,6 +389,7 @@ public class MainActivity extends Activity {
         final Handler handler = new Handler(Looper.getMainLooper());
         final Runnable hardRefreshProbe = () -> {
             hardProbeFired = true;
+            if (MainActivity.this.isFinishing() || MainActivity.this.isDestroyed()) return;
             MainActivity.this.hardRefreshDialog();
         };
         String status = getString(R.string.status_reading_sms);
@@ -445,23 +446,22 @@ public class MainActivity extends Activity {
             refreshing = true;
             status = getString(R.string.status_refreshing);
             invalidate();
+            // Resolve the status messages on the UI thread; the worker below must not call getString()
+            // off the main thread (it can hit a stale configuration after a recreate).
+            String statusNoSms = getString(R.string.status_no_sms_found);
+            String statusLoaded = getString(R.string.status_loaded_from_saved);
             new Thread(() -> {
                 final Context app = MainActivity.this.getApplicationContext();
                 try {
                     if (hard) BalanceData.reset(app);
                     LinkedHashMap<String, Bank> saved = BalanceData.read(app);
                     int count = BalanceData.scanSms(app, saved);
-                    String message = count == 0
-                        ? (saved.isEmpty()
-                            ? getString(R.string.status_no_sms_found)
-                            : getString(R.string.status_loaded_from_saved))
-                        : getResources().getQuantityString(R.plurals.status_updated_banks, count, count);
                     post(() -> {
                         banks.clear();
                         banks.putAll(saved);
                         total = 0;
                         for (Bank b : banks.values()) total += b.amount;
-                        status = message;
+                        status = buildStatus(count, saved.isEmpty(), statusNoSms, statusLoaded);
                         refreshing = false;
                         invalidate();
                         BalanceWidgetProvider.push(app);
@@ -473,13 +473,19 @@ public class MainActivity extends Activity {
                         banks.putAll(saved);
                         total = 0;
                         for (Bank b : banks.values()) total += b.amount;
-                        status = banks.isEmpty() ? getString(R.string.status_sms_unreadable) : getString(R.string.status_loaded_from_saved);
+                        status = banks.isEmpty() ? getString(R.string.status_sms_unreadable) : statusLoaded;
                         refreshing = false;
                         invalidate();
                         BalanceWidgetProvider.push(app);
                     });
                 }
             }).start();
+        }
+
+        private String buildStatus(int count, boolean empty, String noSms, String loaded) {
+            if (count == 0)
+                return empty ? noSms : loaded;
+            return getResources().getQuantityString(R.plurals.status_updated_banks, count, count);
         }
 
         void value(Canvas c, long n, float x, float baseline, float width,
