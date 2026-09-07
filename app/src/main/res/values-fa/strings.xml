@@ -22,9 +22,9 @@
     <string name="toast_unmask_to_copy">برای کپی کردن، ابتدا موجودی را نمایان کنید</string>
     <string name="toast_copied_balance">موجودی %1$s کپی شد</string>
 
-    <string name="footer_prefix">طراحی‌شده به‌صورت محلی  ·  Balance</string>
     <string name="footer_about">درباره</string>
     <string name="footer_language">زبان</string>
+    <string name="footer_backup">پشتیبان‌گیری</string>
 
     <string name="dialog_language_title">زبان برنامه</string>
     <string name="dialog_hard_refresh_title">بازنشانی موجودی‌ها و خواندن دوباره؟</string>
@@ -36,6 +36,31 @@
     <string name="widget_action_refresh">به‌روزرسانی</string>
     <string name="widget_action_mask">نمایش یا مخفی کردن موجودی</string>
     <string name="language_system_default">پیش‌فرض سیستم</string>
+
+    <string name="backup_title">پشتیبان‌گیری و بازیابی</string>
+    <string name="backup_action_create">ایجاد پشتیبان</string>
+    <string name="backup_action_restore">بازیابی پشتیبان</string>
+    <string name="backup_create_title">رمزگذاری و ذخیرهٔ پشتیبان</string>
+    <string name="backup_restore_title">بازیابی پشتیبان</string>
+    <string name="backup_password_hint">رمز عبور</string>
+    <string name="backup_password_confirm_hint">تکرار رمز عبور</string>
+    <string name="backup_password_info">این رمز عبور برای رمزگذاری فایل پشتیبان استفاده می‌شود و هرگز ذخیره نمی‌شود؛ بدون آن نمی‌توان پشتیبان را بازیابی کرد.</string>
+    <string name="backup_restore_info">رمز عبوری را که هنگام ایجاد این پشتیبان وارد کرده بودید بنویسید. بانک‌های بازیابی‌شده با داده‌های فعلی ادغام می‌شوند و جدیدترین موجودی هر بانک حفظ می‌شود.</string>
+    <string name="backup_progress_creating">در حال ساخت پشتیبان رمزگذاری‌شده…</string>
+    <string name="backup_progress_restoring">در حال رمزگشایی پشتیبان…</string>
+    <string name="backup_created">پشتیبان ذخیره شد</string>
+    <string name="backup_create_failed">پشتیبان‌گیری ناموفق بود</string>
+    <string name="backup_restored">بازیابی انجام شد</string>
+    <string name="backup_restore_failed">بازیابی ناموفق بود</string>
+    <string name="backup_restore_summary">%1$d بانک اضافه و %2$d بانک به‌روزرسانی شد</string>
+    <string name="backup_restore_summary_none">پشتیبان موجودی جدیدتری ندارد</string>
+    <string name="backup_restore_confirm">بازیابی</string>
+    <string name="backup_validate_empty">رمز عبور را وارد کنید</string>
+    <string name="backup_validate_mismatch">رمزهای عبور یکسان نیستند</string>
+    <string name="backup_error_not_backup">این فایل یک پشتیبان Balance نیست</string>
+    <string name="backup_error_unsupported">این پشتیبان از قالب پشتیبانی‌نشده استفاده می‌کند</string>
+    <string name="backup_error_password">رمز عبور اشتباه است یا پشتیبان خراب است</string>
+    <string name="backup_error_generic">عملیات پشتیبان‌گیری خطا داشت</string>
 
     <string name="about_title">درباره</string>
     <string name="tagline_offline_bank_balance">موجودی آفلاین بانکی</string>

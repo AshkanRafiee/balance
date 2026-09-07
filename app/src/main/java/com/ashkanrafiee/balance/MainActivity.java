@@ -7,6 +7,7 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -14,14 +15,22 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.RectF;
+import android.text.InputType;
+import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
 import android.widget.Toast;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
     private static final int SMS_REQUEST = 10;
+    private static final int REQ_CREATE_BACKUP = 20;
+    private static final int REQ_PICK_RESTORE = 21;
     private BalanceView view;
 
     @Override
@@ -103,6 +112,194 @@ public class MainActivity extends Activity {
             .show();
     }
 
+    // ====================================================================
+    // Encrypted backup / restore
+    // ====================================================================
+
+    private int dp(float v) {
+        return (int) (v * getResources().getDisplayMetrics().density + .5f);
+    }
+
+    private void backupDialog() {
+        String[] options = {
+            getString(R.string.backup_action_create),
+            getString(R.string.backup_action_restore)
+        };
+        new android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.backup_title))
+            .setItems(options, (d, which) -> {
+                if (which == 0) pickBackupTarget();
+                else pickRestoreSource();
+            })
+            .show();
+    }
+
+    private void pickBackupTarget() {
+        Intent create = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        create.addCategory(Intent.CATEGORY_OPENABLE);
+        create.setType("application/octet-stream");
+        create.putExtra(Intent.EXTRA_TITLE, backupFileName());
+        startActivityForResult(create, REQ_CREATE_BACKUP);
+    }
+
+    private void pickRestoreSource() {
+        Intent open = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        open.addCategory(Intent.CATEGORY_OPENABLE);
+        open.setType("*/*");
+        startActivityForResult(open, REQ_PICK_RESTORE);
+    }
+
+    private String backupFileName() {
+        String stamp = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
+            .format(new java.util.Date());
+        return "balance-backup-" + stamp + ".balance";
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        Uri uri = data.getData();
+        if (requestCode == REQ_CREATE_BACKUP) askPassword(uri, true);
+        else if (requestCode == REQ_PICK_RESTORE) askPassword(uri, false);
+    }
+
+    private void askPassword(Uri uri, boolean forBackup) {
+        EditText password = new EditText(this);
+        password.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        password.setHint(getString(R.string.backup_password_hint));
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(24), dp(8), dp(24), 0);
+        TextView info = new TextView(this);
+        info.setTextSize(13);
+        info.setText(forBackup ? getString(R.string.backup_password_info) : getString(R.string.backup_restore_info));
+        info.setPadding(0, 0, 0, dp(10));
+        layout.addView(info);
+        layout.addView(password);
+        EditText[] confirm = {null};
+        if (forBackup) {
+            confirm[0] = new EditText(this);
+            confirm[0].setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            confirm[0].setHint(getString(R.string.backup_password_confirm_hint));
+            layout.addView(confirm[0]);
+        }
+        EditText pw = password;
+        EditText cf = confirm[0];
+        android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+            .setTitle(forBackup
+                ? getString(R.string.backup_create_title)
+                : getString(R.string.backup_restore_title))
+            .setView(layout)
+            .setNegativeButton(getString(R.string.dialog_hard_refresh_cancel), null)
+            .setPositiveButton(forBackup
+                ? getString(R.string.backup_action_create)
+                : getString(R.string.backup_restore_confirm), null)
+            .create();
+        dlg.setOnShowListener(d -> dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
+            .setOnClickListener(v -> {
+                String value = pw.getText().toString();
+                if (value.isEmpty()) {
+                    Toast.makeText(MainActivity.this, getString(R.string.backup_validate_empty), Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (forBackup && !value.equals(cf.getText().toString())) {
+                    Toast.makeText(MainActivity.this, getString(R.string.backup_validate_mismatch), Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                dlg.dismiss();
+                if (forBackup) createBackup(uri, value);
+                else restoreBackup(uri, value);
+            }));
+        dlg.show();
+    }
+
+    private void createBackup(Uri uri, String password) {
+        showProgress(getString(R.string.backup_progress_creating));
+        new Thread(() -> {
+            final int[] error = {0};
+            try {
+                BackupManager.create(getApplicationContext(), uri, password);
+            } catch (BackupManager.BackupException e) {
+                error[0] = e.resId;
+            } catch (Exception e) {
+                android.util.Log.w("BalanceBackup", "create failed", e);
+                error[0] = R.string.backup_error_generic;
+            }
+            int err = error[0];
+            runOnUiThread(() -> {
+                dismissProgress();
+                if (err != 0) {
+                    Toast.makeText(MainActivity.this,
+                        getString(R.string.backup_create_failed) + "\n" + getString(err),
+                        Toast.LENGTH_LONG).show();
+                } else {
+                    Toast.makeText(MainActivity.this, getString(R.string.backup_created), Toast.LENGTH_SHORT).show();
+                }
+            });
+        }).start();
+    }
+
+    private void restoreBackup(Uri uri, String password) {
+        showProgress(getString(R.string.backup_progress_restoring));
+        new Thread(() -> {
+            final int[] error = {0};
+            final BackupManager.RestoreResult[] result = {null};
+            try {
+                result[0] = BackupManager.restore(getApplicationContext(), uri, password);
+            } catch (BackupManager.BackupException e) {
+                error[0] = e.resId;
+            } catch (Exception e) {
+                android.util.Log.w("BalanceBackup", "restore failed", e);
+                error[0] = R.string.backup_error_generic;
+            }
+            int err = error[0];
+            BackupManager.RestoreResult res = result[0];
+            runOnUiThread(() -> {
+                dismissProgress();
+                if (err != 0) {
+                    Toast.makeText(MainActivity.this,
+                        getString(R.string.backup_restore_failed) + "\n" + getString(err),
+                        Toast.LENGTH_LONG).show();
+                } else {
+                    view.loadSaved();
+                    String summary = res.changed()
+                        ? getString(R.string.backup_restore_summary, res.added, res.updated)
+                        : getString(R.string.backup_restore_summary_none);
+                    Toast.makeText(MainActivity.this,
+                        getString(R.string.backup_restored) + "\n" + summary,
+                        Toast.LENGTH_LONG).show();
+                }
+            });
+        }).start();
+    }
+
+    private android.app.AlertDialog progressDialog;
+
+    private void showProgress(String message) {
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.HORIZONTAL);
+        wrap.setGravity(Gravity.CENTER_VERTICAL);
+        int pad = dp(24);
+        wrap.setPadding(pad, dp(18), pad, dp(10));
+        wrap.addView(new ProgressBar(this));
+        TextView tv = new TextView(this);
+        tv.setText(message);
+        tv.setTextSize(14);
+        tv.setPadding(dp(16), 0, 0, 0);
+        wrap.addView(tv);
+        progressDialog = new android.app.AlertDialog.Builder(this)
+            .setView(wrap).setCancelable(false).create();
+        progressDialog.show();
+    }
+
+    private void dismissProgress() {
+        if (progressDialog != null) {
+            progressDialog.dismiss();
+            progressDialog = null;
+        }
+    }
+
     private int resColor(int res) {
         return getResources().getColor(res, getTheme());
     }
@@ -124,7 +321,8 @@ public class MainActivity extends Activity {
         };
         String status = getString(R.string.status_reading_sms);
         long total;
-        float footerAboutStart, footerAboutEnd, footerLangStart, footerLangEnd, footerY;
+        float footerAboutStart, footerAboutEnd, footerLangStart, footerLangEnd,
+            footerBackupStart, footerBackupEnd, footerY;
         final int fg = resColor(R.color.fg);
         final int muted = resColor(R.color.muted);
         final int accent = resColor(R.color.accent);
@@ -148,6 +346,19 @@ public class MainActivity extends Activity {
         }
 
         void refresh() { refresh(false); }
+
+        /** Reloads the saved balances (e.g. after a restore) without re-scanning SMS. */
+        void loadSaved() {
+            LinkedHashMap<String, Bank> saved = BalanceData.read(MainActivity.this);
+            banks.clear();
+            banks.putAll(saved);
+            total = 0;
+            for (Bank b : banks.values()) total += b.amount;
+            status = getString(R.string.status_loaded_from_saved);
+            refreshing = false;
+            invalidate();
+            BalanceWidgetProvider.push(MainActivity.this);
+        }
 
         /** Refreshes from the SMS inbox. With {@code hard} set, saved balances are discarded first and
          *  only the messages currently in the inbox are re-read, so banks whose SMS are no longer
@@ -345,26 +556,26 @@ public class MainActivity extends Activity {
 
             p.setTextSize(13);
             p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
-            String prefixText = fit(getString(R.string.footer_prefix), 13, w - 90);
             String aboutText = getString(R.string.footer_about);
             String langText = getString(R.string.footer_language);
+            String backupText = getString(R.string.footer_backup);
             String sep = "  \u00b7  ";
-            float prefixW = measure(prefixText, 13), aboutW = measure(aboutText, 13),
-                langW = measure(langText, 13), sepW = measure(sep, 13);
-            float totalW = prefixW + sepW + aboutW + sepW + langW;
+            float aboutW = measure(aboutText, 13), langW = measure(langText, 13),
+                backupW = measure(backupText, 13), sepW = measure(sep, 13);
+            float totalW = aboutW + sepW + langW + sepW + backupW;
             float x0 = (w - totalW) / 2;
             if (!rtl) {
-                text(c, prefixText, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += prefixW;
-                text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
                 footerAboutStart = x0; text(c, aboutText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += aboutW; footerAboutEnd = x0;
                 text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
                 footerLangStart = x0; text(c, langText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += langW; footerLangEnd = x0;
+                text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
+                footerBackupStart = x0; text(c, backupText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += backupW; footerBackupEnd = x0;
             } else {
+                footerBackupStart = x0; text(c, backupText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += backupW; footerBackupEnd = x0;
+                text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
                 footerLangStart = x0; text(c, langText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += langW; footerLangEnd = x0;
                 text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
                 footerAboutStart = x0; text(c, aboutText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += aboutW; footerAboutEnd = x0;
-                text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
-                text(c, prefixText, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += prefixW;
             }
             footerY = by;
             c.restore();
@@ -438,6 +649,8 @@ public class MainActivity extends Activity {
                     startActivity(new Intent(MainActivity.this, AboutActivity.class));
                 } else if (x >= footerLangStart - 10 && x <= footerLangEnd + 10) {
                     MainActivity.this.languageDialog();
+                } else if (x >= footerBackupStart - 10 && x <= footerBackupEnd + 10) {
+                    MainActivity.this.backupDialog();
                 }
             } else if (y >= 120 && y <= 270) {
                 boolean onEye = rtl ? x <= 105 && y <= 185 : x >= getWidth() / d - 105 && y <= 185;

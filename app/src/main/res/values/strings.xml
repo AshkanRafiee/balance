@@ -22,9 +22,9 @@
     <string name="toast_unmask_to_copy">Unmask the balance to copy it</string>
     <string name="toast_copied_balance">Copied %1$s balance</string>
 
-    <string name="footer_prefix">Local by design  ·  Balance</string>
     <string name="footer_about">About</string>
     <string name="footer_language">Language</string>
+    <string name="footer_backup">Backup</string>
 
     <string name="dialog_language_title">App language</string>
     <string name="dialog_hard_refresh_title">Reset balances and rescan?</string>
@@ -36,6 +36,31 @@
     <string name="widget_action_refresh">Refresh</string>
     <string name="widget_action_mask">Show or hide balances</string>
     <string name="language_system_default">System default</string>
+
+    <string name="backup_title">Backup &amp; Restore</string>
+    <string name="backup_action_create">Create backup</string>
+    <string name="backup_action_restore">Restore backup</string>
+    <string name="backup_create_title">Encrypt and save a backup</string>
+    <string name="backup_restore_title">Restore a backup</string>
+    <string name="backup_password_hint">Password</string>
+    <string name="backup_password_confirm_hint">Repeat password</string>
+    <string name="backup_password_info">This password encrypts the backup file. It is never stored, so without it the backup cannot be restored.</string>
+    <string name="backup_restore_info">Enter the password used when this backup was created. Restored banks are merged with your current data, keeping the newest balance for each bank.</string>
+    <string name="backup_progress_creating">Creating encrypted backup…</string>
+    <string name="backup_progress_restoring">Decrypting backup…</string>
+    <string name="backup_created">Backup saved</string>
+    <string name="backup_create_failed">Backup failed</string>
+    <string name="backup_restored">Restore finished</string>
+    <string name="backup_restore_failed">Restore failed</string>
+    <string name="backup_restore_summary">%1$d banks added, %2$d banks updated</string>
+    <string name="backup_restore_summary_none">The backup holds no newer balances</string>
+    <string name="backup_restore_confirm">Restore</string>
+    <string name="backup_validate_empty">Enter a password</string>
+    <string name="backup_validate_mismatch">Passwords do not match</string>
+    <string name="backup_error_not_backup">This file is not a Balance backup</string>
+    <string name="backup_error_unsupported">This backup uses an unsupported format</string>
+    <string name="backup_error_password">Wrong password or corrupted backup</string>
+    <string name="backup_error_generic">Backup operation failed</string>
 
     <string name="about_title">About</string>
     <string name="tagline_offline_bank_balance">Offline bank balance</string>
