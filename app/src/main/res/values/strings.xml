@@ -44,7 +44,7 @@
     <string name="backup_restore_title">Restore a backup</string>
     <string name="backup_password_hint">Password</string>
     <string name="backup_password_confirm_hint">Repeat password</string>
-    <string name="backup_password_info">This password encrypts the backup file. It is never stored, so without it the backup cannot be restored.</string>
+    <string name="backup_password_info">Choose a strong password and keep it somewhere safe. The app does not store it anywhere, so if you forget it, this backup cannot be decrypted or restored later.</string>
     <string name="backup_restore_info">Enter the password used when this backup was created. Restored banks are merged with your current data, keeping the newest balance for each bank.</string>
     <string name="backup_progress_creating">Creating encrypted backup…</string>
     <string name="backup_progress_restoring">Decrypting backup…</string>

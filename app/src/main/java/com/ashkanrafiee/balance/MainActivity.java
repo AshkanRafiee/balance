@@ -129,8 +129,8 @@ public class MainActivity extends Activity {
         new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.backup_title))
             .setItems(options, (d, which) -> {
-                if (which == 0) askPassword(true);
-                else askPassword(false);
+                if (which == 0) askPassword(true, null);
+                else pickRestoreSource();
             })
             .show();
     }
@@ -165,20 +165,30 @@ public class MainActivity extends Activity {
             if (resultCode != RESULT_OK || data == null || data.getData() == null || password == null) return;
             createBackup(data.getData(), password);
         } else if (requestCode == REQ_PICK_RESTORE) {
-            String password = pendingBackupPassword;
-            pendingBackupPassword = null;
-            if (resultCode != RESULT_OK || data == null || data.getData() == null || password == null) return;
-            restoreBackup(data.getData(), password);
+            if (resultCode == RESULT_OK && data != null && data.getData() != null)
+                askPassword(false, data.getData());
         }
     }
 
-    private void askPassword(boolean forBackup) {
+    private void askPassword(boolean forBackup, Uri restoreUri) {
+        askPassword(forBackup, restoreUri, null);
+    }
+
+    private void askPassword(boolean forBackup, Uri restoreUri, String warning) {
         EditText password = new EditText(this);
         password.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         password.setHint(getString(R.string.backup_password_hint));
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(dp(24), dp(8), dp(24), 0);
+        if (warning != null) {
+            TextView error = new TextView(this);
+            error.setText(warning);
+            error.setTextColor(0xFFB91C1C);
+            error.setTextSize(13);
+            error.setPadding(0, 0, 0, dp(10));
+            layout.addView(error);
+        }
         TextView info = new TextView(this);
         info.setTextSize(13);
         info.setText(forBackup ? getString(R.string.backup_password_info) : getString(R.string.backup_restore_info));
@@ -216,9 +226,12 @@ public class MainActivity extends Activity {
                     return;
                 }
                 dlg.dismiss();
-                pendingBackupPassword = value;
-                if (forBackup) pickBackupTarget();
-                else pickRestoreSource();
+                if (forBackup) {
+                    pendingBackupPassword = value;
+                    pickBackupTarget();
+                } else {
+                    restoreBackup(restoreUri, value);
+                }
             }));
         dlg.show();
     }
@@ -267,9 +280,15 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 dismissProgress();
                 if (err != 0) {
-                    Toast.makeText(MainActivity.this,
-                        getString(R.string.backup_restore_failed) + "\n" + getString(err),
-                        Toast.LENGTH_LONG).show();
+                    if (err == R.string.backup_error_password) {
+                        // Wrong password (or a corrupted backup): let the user retry the
+                        // password for the same file instead of forcing a new file pick.
+                        askPassword(false, uri, getString(R.string.backup_error_password));
+                    } else {
+                        Toast.makeText(MainActivity.this,
+                            getString(R.string.backup_restore_failed) + "\n" + getString(err),
+                            Toast.LENGTH_LONG).show();
+                    }
                 } else {
                     view.loadSaved();
                     String summary = res.changed()

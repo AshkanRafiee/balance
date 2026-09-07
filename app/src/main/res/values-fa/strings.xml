@@ -44,7 +44,7 @@
     <string name="backup_restore_title">بازیابی پشتیبان</string>
     <string name="backup_password_hint">رمز عبور</string>
     <string name="backup_password_confirm_hint">تکرار رمز عبور</string>
-    <string name="backup_password_info">این رمز عبور برای رمزگذاری فایل پشتیبان استفاده می‌شود و هرگز ذخیره نمی‌شود؛ بدون آن نمی‌توان پشتیبان را بازیابی کرد.</string>
+    <string name="backup_password_info">رمز عبور قوی انتخاب کنید و آن را جای امنی نگه دارید. برنامه آن را در هیچ‌جا ذخیره نمی‌کند؛ اگر آن را فراموش کنید، این پشتیبان بعداً قابل رمزگشایی و بازیابی نیست.</string>
     <string name="backup_restore_info">رمز عبوری را که هنگام ایجاد این پشتیبان وارد کرده بودید بنویسید. بانک‌های بازیابی‌شده با داده‌های فعلی ادغام می‌شوند و جدیدترین موجودی هر بانک حفظ می‌شود.</string>
     <string name="backup_progress_creating">در حال ساخت پشتیبان رمزگذاری‌شده…</string>
     <string name="backup_progress_restoring">در حال رمزگشایی پشتیبان…</string>
