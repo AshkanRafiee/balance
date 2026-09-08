@@ -1,0 +1,3 @@
+Persian bank names are now shorter and cleaner — the bank word (بانک) is no longer repeated in front of every bank name. For example بانک تجارت now shows as تجارت, and پست بانک ایران shows as پست ایران. Other institutional qualifiers such as مؤسسه اعتباری and قرض‌الحسنه are kept where they are part of the bank's proper name.
+
+Updated screenshots in the app listing.
