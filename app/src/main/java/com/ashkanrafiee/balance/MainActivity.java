@@ -15,6 +15,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.RectF;
+import android.graphics.drawable.Drawable;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -660,7 +661,18 @@ public class MainActivity extends Activity {
         }
 
         /** Uses the canonical (English) name so a bank's badge color and initials stay stable across languages. */
+        /** Uses the canonical (English) name so a bank's badge stays stable across languages: the bank's
+         *  brand icon on a neutral plate when one is available, otherwise the colored square with the
+         *  bank's initials. */
         void bankBadge(Canvas c, String canonicalName, float x, float centerY) {
+            int iconRes = BankIcon.iconFor(canonicalName);
+            if (iconRes != 0) {
+                round(c, x - 18, centerY - 18, x + 18, centerY + 18, 12, resColor(R.color.bank_plate));
+                Drawable icon = getResources().getDrawable(iconRes, getTheme());
+                icon.setBounds((int) (x - 14), (int) (centerY - 14), (int) (x + 14), (int) (centerY + 14));
+                icon.draw(c);
+                return;
+            }
             int color = bankColors[Math.floorMod(canonicalName.hashCode(), bankColors.length)];
             round(c, x - 18, centerY - 18, x + 18, centerY + 18, 12, color);
             text(c, bankInitials(canonicalName), x, centerY + 5, 11, Color.WHITE, Paint.Align.CENTER);

@@ -14,6 +14,7 @@
     <color name="footer">#677388</color>
     <color name="divider">#1E293B</color>
     <color name="bank_name">#E5E7EB</color>
+    <color name="bank_plate">#1F2B40</color>
     <color name="empty">#6B7280</color>
     <color name="widget_bg">#0B1220</color>
 </resources>
