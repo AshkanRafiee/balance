@@ -667,9 +667,8 @@ public class MainActivity extends Activity {
         void bankBadge(Canvas c, String canonicalName, float x, float centerY) {
             int iconRes = BankIcon.iconFor(canonicalName);
             if (iconRes != 0) {
-                round(c, x - 18, centerY - 18, x + 18, centerY + 18, 12, resColor(R.color.bank_plate));
                 Drawable icon = getResources().getDrawable(iconRes, getTheme());
-                icon.setBounds((int) (x - 14), (int) (centerY - 14), (int) (x + 14), (int) (centerY + 14));
+                icon.setBounds((int) (x - 16), (int) (centerY - 16), (int) (x + 16), (int) (centerY + 16));
                 icon.draw(c);
                 return;
             }
