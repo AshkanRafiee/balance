@@ -8,9 +8,9 @@
     <string name="unit_toman">Toman</string>
     <string name="total_label">Total</string>
 
-    <string name="status_reading_sms">Reading bank SMS on this device...</string>
+    <string name="status_reading_sms">Reading bank SMS on this device…</string>
     <string name="status_permission_needed">SMS permission is needed to read balances</string>
-    <string name="status_refreshing">Refreshing balances...</string>
+    <string name="status_refreshing">Refreshing balances…</string>
     <string name="status_no_sms_found">No supported bank balance SMS found yet</string>
     <string name="status_loaded_from_saved">Balances loaded from saved data</string>
     <string name="status_sms_unreadable">SMS could not be read</string>

@@ -8,9 +8,9 @@
     <string name="unit_toman">تومان</string>
     <string name="total_label">مجموع</string>
 
-    <string name="status_reading_sms">در حال خواندن پیامک‌های بانکی این دستگاه...</string>
+    <string name="status_reading_sms">در حال خواندن پیامک‌های بانکی این دستگاه…</string>
     <string name="status_permission_needed">برای خواندن موجودی به اجازهٔ دسترسی به پیامک نیاز است</string>
-    <string name="status_refreshing">در حال به‌روزرسانی موجودی‌ها...</string>
+    <string name="status_refreshing">در حال به‌روزرسانی موجودی‌ها…</string>
     <string name="status_no_sms_found">هنوز پیامک موجودی از بانک‌های پشتیبانی‌شده یافت نشد</string>
     <string name="status_loaded_from_saved">موجودی‌ها از داده‌های ذخیره‌شده بارگذاری شد</string>
     <string name="status_sms_unreadable">پیامک‌ها خوانده نشد</string>
