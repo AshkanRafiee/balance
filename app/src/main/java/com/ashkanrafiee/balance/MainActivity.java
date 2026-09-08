@@ -660,10 +660,8 @@ public class MainActivity extends Activity {
             c.restore();
         }
 
-        /** Uses the canonical (English) name so a bank's badge color and initials stay stable across languages. */
         /** Uses the canonical (English) name so a bank's badge stays stable across languages: the bank's
-         *  brand icon on a neutral plate when one is available, otherwise the colored square with the
-         *  bank's initials. */
+         *  brand icon when one is available, otherwise the colored square with the bank's initials. */
         void bankBadge(Canvas c, String canonicalName, float x, float centerY) {
             int iconRes = BankIcon.iconFor(canonicalName);
             if (iconRes != 0) {
@@ -764,7 +762,13 @@ public class MainActivity extends Activity {
                     }
                 }
             }
+            performClick();
             return true;
+        }
+
+        @Override
+        public boolean performClick() {
+            return super.performClick();
         }
 
         float byForTouch(float h) { return h - 74; }
