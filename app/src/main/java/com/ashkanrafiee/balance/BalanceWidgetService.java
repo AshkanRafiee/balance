@@ -49,6 +49,9 @@ public class BalanceWidgetService extends RemoteViewsService {
                 hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : BalanceData.toman(c, b.amount));
             views.setInt(R.id.bank_name, "setGravity", Gravity.CENTER_VERTICAL | (rtl ? Gravity.RIGHT : Gravity.LEFT));
             views.setInt(R.id.bank_amount, "setGravity", Gravity.CENTER_VERTICAL | (rtl ? Gravity.LEFT : Gravity.RIGHT));
+            int iconRes = BankIcon.iconFor(b.name);
+            views.setViewVisibility(R.id.bank_icon, iconRes != 0 ? View.VISIBLE : View.GONE);
+            if (iconRes != 0) views.setImageViewResource(R.id.bank_icon, iconRes);
             views.setOnClickPendingIntent(R.id.widget_item_root, BalanceWidgetProvider.openApp(c));
             return views;
         }
