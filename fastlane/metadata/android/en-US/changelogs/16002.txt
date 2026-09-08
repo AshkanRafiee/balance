@@ -1,0 +1,5 @@
+Each bank now shows its own brand icon in the list, so you can recognize a bank at a glance.
+
+• Every supported bank with an icon displays its official logo on a neutral plate next to the balance.
+• Banks without a dedicated icon keep the colored badge with the bank's initials, so no card ever looks empty.
+• The same brand icons appear on the home screen widget.
