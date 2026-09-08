@@ -12,11 +12,14 @@ final class BankIcon {
     private static final Map<String, Integer> ICON_RES = new HashMap<>();
     static {
         ICON_RES.put("Ansar", R.drawable.bank_ansar);
+        ICON_RES.put("Bankino", R.drawable.bank_bankino);
+        ICON_RES.put("Blu", R.drawable.bank_blu);
         ICON_RES.put("Dey", R.drawable.bank_dey);
         ICON_RES.put("Eghtesad Novin", R.drawable.bank_eghtesad_novin);
         ICON_RES.put("Gardeshgari", R.drawable.bank_gardeshgari);
         ICON_RES.put("Ghavamin", R.drawable.bank_ghavamin);
         ICON_RES.put("Hekmat", R.drawable.bank_hekmat);
+        ICON_RES.put("Industry & Mine", R.drawable.bank_industry_mine);
         ICON_RES.put("Zamin", R.drawable.bank_zamin);
         ICON_RES.put("Karafarin", R.drawable.bank_karafarin);
         ICON_RES.put("Keshavarzi", R.drawable.bank_keshavarzi);
