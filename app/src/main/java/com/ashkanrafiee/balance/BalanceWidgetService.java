@@ -40,15 +40,14 @@ public class BalanceWidgetService extends RemoteViewsService {
         private RemoteViews bankViews(Bank b) {
             Context c = LocaleHelper.wrap(context);
             int dir = c.getResources().getConfiguration().getLayoutDirection();
-            boolean rtl = dir == View.LAYOUT_DIRECTION_RTL;
             boolean hidden = BalanceData.isHidden(c);
             RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance_item);
             views.setInt(R.id.widget_item_root, "setLayoutDirection", dir);
             views.setTextViewText(R.id.bank_name, BankRules.displayName(c, b.name));
             views.setTextViewText(R.id.bank_amount,
                 hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : BalanceData.toman(c, b.amount));
-            views.setInt(R.id.bank_name, "setGravity", Gravity.CENTER_VERTICAL | (rtl ? Gravity.RIGHT : Gravity.LEFT));
-            views.setInt(R.id.bank_amount, "setGravity", Gravity.CENTER_VERTICAL | (rtl ? Gravity.LEFT : Gravity.RIGHT));
+            views.setInt(R.id.bank_name, "setGravity", Gravity.CENTER_VERTICAL | Gravity.START);
+            views.setInt(R.id.bank_amount, "setGravity", Gravity.CENTER_VERTICAL | Gravity.END);
             int iconRes = BankIcon.iconFor(b.name);
             views.setViewVisibility(R.id.bank_icon, iconRes != 0 ? View.VISIBLE : View.GONE);
             if (iconRes != 0) views.setImageViewResource(R.id.bank_icon, iconRes);
