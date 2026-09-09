@@ -396,7 +396,7 @@ public class MainActivity extends Activity {
         String status = getString(R.string.status_reading_sms);
         long total;
         float footerAboutStart, footerAboutEnd, footerLangStart, footerLangEnd,
-            footerBackupStart, footerBackupEnd, footerY;
+            footerBackupStart, footerBackupEnd, footerHistoryStart, footerHistoryEnd, footerY;
         final int fg = resColor(R.color.fg);
         final int muted = resColor(R.color.muted);
         final int accent = resColor(R.color.accent);
@@ -638,23 +638,30 @@ public class MainActivity extends Activity {
             String aboutText = getString(R.string.footer_about);
             String langText = getString(R.string.footer_language);
             String backupText = getString(R.string.footer_backup);
+            String historyText = getString(R.string.footer_history);
             String sep = "  \u00b7  ";
             float aboutW = measure(aboutText, 13), langW = measure(langText, 13),
-                backupW = measure(backupText, 13), sepW = measure(sep, 13);
-            float totalW = aboutW + sepW + langW + sepW + backupW;
-            float x0 = (w - totalW) / 2;
+                backupW = measure(backupText, 13), historyW = measure(historyText, 13),
+                sepW = measure(sep, 13);
+            float totalW = aboutW + langW + backupW + historyW + sepW * 3;
+            float scale = Math.min(1, (w - 64) / totalW);
+            float x0 = (w - totalW * scale) / 2;
             if (!rtl) {
-                footerAboutStart = x0; text(c, aboutText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += aboutW; footerAboutEnd = x0;
-                text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
-                footerLangStart = x0; text(c, langText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += langW; footerLangEnd = x0;
-                text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
-                footerBackupStart = x0; text(c, backupText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += backupW; footerBackupEnd = x0;
+                footerHistoryStart = x0; text(c, historyText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += historyW * scale; footerHistoryEnd = x0;
+                text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
+                footerBackupStart = x0; text(c, backupText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += backupW * scale; footerBackupEnd = x0;
+                text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
+                footerLangStart = x0; text(c, langText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += langW * scale; footerLangEnd = x0;
+                text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
+                footerAboutStart = x0; text(c, aboutText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += aboutW * scale; footerAboutEnd = x0;
             } else {
-                footerBackupStart = x0; text(c, backupText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += backupW; footerBackupEnd = x0;
-                text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
-                footerLangStart = x0; text(c, langText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += langW; footerLangEnd = x0;
-                text(c, sep, x0, by + 4, 13, muted, Paint.Align.LEFT); x0 += sepW;
-                footerAboutStart = x0; text(c, aboutText, x0, by + 4, 13, purple, Paint.Align.LEFT); x0 += aboutW; footerAboutEnd = x0;
+                footerAboutStart = x0; text(c, aboutText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += aboutW * scale; footerAboutEnd = x0;
+                text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
+                footerLangStart = x0; text(c, langText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += langW * scale; footerLangEnd = x0;
+                text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
+                footerBackupStart = x0; text(c, backupText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += backupW * scale; footerBackupEnd = x0;
+                text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
+                footerHistoryStart = x0; text(c, historyText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += historyW * scale; footerHistoryEnd = x0;
             }
             footerY = by;
             c.restore();
@@ -738,6 +745,8 @@ public class MainActivity extends Activity {
                     MainActivity.this.languageDialog();
                 } else if (x >= footerBackupStart - 10 && x <= footerBackupEnd + 10) {
                     MainActivity.this.backupDialog();
+                } else if (x >= footerHistoryStart - 10 && x <= footerHistoryEnd + 10) {
+                    startActivity(new Intent(MainActivity.this, HistoryActivity.class));
                 }
             } else if (y >= 120 && y <= 270) {
                 boolean onEye = rtl ? x <= 105 && y <= 185 : x >= getWidth() / d - 105 && y <= 185;
