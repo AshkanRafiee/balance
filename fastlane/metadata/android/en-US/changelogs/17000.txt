@@ -1,7 +1,10 @@
-New transaction history screen (beta) summarizes every money movement across your banks.
+New transaction history screen (experimental) summarizes every money movement across your banks.
 
-• Marked as "History (Beta)" in the footer — the feature is under active development.
+• Marked as "History (Experimental)" in the footer — the feature is under active development.
 • See the net sum plus separate deposits and withdrawals totals for today, this Persian month, and this year.
 • The breakdown is grouped by Persian year and month; tap a year or a month to expand or collapse it, down to individual days.
+• A movement is only recorded when the bank message states the resulting balance, and OTP-style payment prompts are ignored — only settled transactions end up in history.
+• Duplicate deliveries of the same SMS (even with slightly different timestamps or reference numbers) are counted once, while separate movements of the same value stay distinct.
+• History is scanned on its own, independently of the main balance view: it refreshes automatically and never blocks the balances, and older messages are backfilled too.
 • Footer buttons are reordered so the most-used actions come first.
 • Bank icons now keep their correct colors in dark theme.

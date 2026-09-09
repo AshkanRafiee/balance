@@ -25,7 +25,7 @@
     <string name="footer_about">About</string>
     <string name="footer_language">Language</string>
     <string name="footer_backup">Backup</string>
-    <string name="footer_history">History (Beta)</string>
+    <string name="footer_history">History (Experimental)</string>
 
     <string name="dialog_language_title">App language</string>
     <string name="dialog_hard_refresh_title">Reset balances and rescan?</string>
@@ -80,6 +80,7 @@
     <string name="history_this_month">This month</string>
     <string name="history_this_year">This year</string>
     <string name="history_breakdown">BY YEAR</string>
+    <string name="history_updating">Updating history…</string>
     <string name="history_deposits">Deposits</string>
     <string name="history_withdrawals">Withdrawals</string>
 

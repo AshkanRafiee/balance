@@ -18,4 +18,8 @@
     <color name="widget_bg">#0B1220</color>
     <color name="bank_logo_ink">#E2E8F0</color>
     <color name="negative">#F87171</color>
+    <color name="history_year">#FBBF24</color>
+    <color name="history_today_bg">#0E2A3A</color>
+    <color name="history_month_bg">#2A2140</color>
+    <color name="history_year_bg">#332611</color>
 </resources>

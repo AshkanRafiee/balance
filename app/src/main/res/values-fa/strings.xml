@@ -80,6 +80,7 @@
     <string name="history_this_month">این ماه</string>
     <string name="history_this_year">امسال</string>
     <string name="history_breakdown">بر اساس سال</string>
+    <string name="history_updating">در حال بهروزرسانی تاریخچه…</string>
     <string name="history_deposits">واریزها</string>
     <string name="history_withdrawals">برداشتها</string>
 
