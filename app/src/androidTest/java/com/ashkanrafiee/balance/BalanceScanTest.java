@@ -3,6 +3,7 @@ package com.ashkanrafiee.balance;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.fail;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -57,11 +58,23 @@ public class BalanceScanTest {
             byte[] buf = new byte[2048];
             while (is.read(buf) >= 0) { }
         }
-        Thread.sleep(700);
+        Thread.sleep(200);
     }
 
     private void clearInbox() throws Exception {
         exec("am start -n com.ashkanrafiee.smsinject/.MainActivity -e action clear");
+        // Clearing is async across processes: wait until the inbox is actually empty so the next
+        // test never sees a leftover row, regardless of device load.
+        long deadline = System.currentTimeMillis() + 15_000;
+        while (System.currentTimeMillis() < deadline) {
+            try (android.database.Cursor c = ctx.getContentResolver().query(
+                    android.provider.Telephony.Sms.Inbox.CONTENT_URI,
+                    new String[]{android.provider.Telephony.Sms._ID}, null, null, null)) {
+                if (c == null || !c.moveToFirst()) return;
+            }
+            Thread.sleep(150);
+        }
+        fail("SMS inbox did not clear in time");
     }
 
     private void seed(String sender, String body, long base) throws Exception {
@@ -69,6 +82,27 @@ public class BalanceScanTest {
                 body.getBytes(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP);
         exec("am start -n com.ashkanrafiee.smsinject/.MainActivity -e sender " + sender
                 + " -e body64 " + b64 + " -e base " + base);
+        awaitSms(sender, body);
+    }
+
+    /** Polls the real inbox until the exact seeded message is visible, so that the scan that follows
+     *  in the same test is deterministic even when the system is slow. */
+    private void awaitSms(String sender, String body) throws Exception {
+        long deadline = System.currentTimeMillis() + 15_000;
+        while (System.currentTimeMillis() < deadline) {
+            try (android.database.Cursor c = ctx.getContentResolver().query(
+                    android.provider.Telephony.Sms.Inbox.CONTENT_URI,
+                    new String[]{android.provider.Telephony.Sms.ADDRESS, android.provider.Telephony.Sms.BODY},
+                    null, null, null)) {
+                if (c != null) {
+                    while (c.moveToNext()) {
+                        if (sender.equals(c.getString(0)) && body.equals(c.getString(1))) return;
+                    }
+                }
+            }
+            Thread.sleep(150);
+        }
+        fail("seeded SMS did not arrive in time: sender=" + sender);
     }
 
     private SharedPreferences prefs() {
