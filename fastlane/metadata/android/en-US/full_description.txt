@@ -10,7 +10,10 @@ Features:
 - Persistent privacy masking for balances
 - Pull-to-refresh with progress animation
 - Home-screen widget with quick refresh and privacy mask
+- Transaction history with deposit and withdrawal tracking per day, month and year
 - Automatic light and dark theme that follows your device
 - Long-press Refresh to fully rescan from the bank SMS currently in your inbox
+- Encrypted storage on device
+- Password-protected backup and restore
 
-SMS and financial data stay on the device. No account, cloud service, analytics, or network access is required.
+SMS and financial data stay on the device, encrypted. No account, cloud service, analytics, or network access is required.
