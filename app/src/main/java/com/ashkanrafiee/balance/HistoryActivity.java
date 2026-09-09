@@ -5,6 +5,7 @@ import android.content.Context;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
@@ -139,6 +140,12 @@ public final class HistoryActivity extends Activity {
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-2, -2);
         titleParams.setMarginStart(dp(10));
         bar.addView(text(getString(R.string.history_title), 21, fg), titleParams);
+        LinearLayout.LayoutParams badgeParams = new LinearLayout.LayoutParams(-2, -2);
+        badgeParams.setMarginStart(dp(8));
+        TextView badge = text(getString(R.string.history_experimental), 11, muted);
+        badge.setPadding(dp(6), dp(2), dp(6), dp(2));
+        badge.setBackground(rounded(card, 8));
+        bar.addView(badge, badgeParams);
         LinearLayout.LayoutParams barSpacer = new LinearLayout.LayoutParams(0, 0, 1);
         bar.addView(new View(this), barSpacer);
         refreshView = text("\u27f3", 22, fg);
@@ -165,20 +172,28 @@ public final class HistoryActivity extends Activity {
     private static final String KEY_EXPANDED_MONTHS = "expanded_months";
     private static final String KEY_EXPANDED_DAYS = "expanded_days";
 
-    /** The refresh glyph in the header, rotated while a history scan is in flight. */
+    /** The refresh glyph in the header, rotated while a history scan is in flight (or for a short
+     *  beat after a tap, so a fast scan still reports an update visually). */
     private TextView refreshView;
     private android.animation.ObjectAnimator refreshSpin;
+    private final android.os.Handler refreshHandler = new android.os.Handler(Looper.getMainLooper());
+    private final Runnable stopSpinRunnable = this::stopSpin;
+    private static final long MIN_SPIN_MS = 1000;
+    private long spinSince;
 
-    /** Kicks off a background history rescan if one is not already running. */
+    /** Kicks off a background history rescan if one is not already running. The glyph always starts
+     *  spinning: when a scan is already in flight, that scan's completion stops it. */
     private void startRefresh() {
+        startSpin();
         if (BalanceData.HISTORY_SCANNING) return;
         new Thread(() -> BalanceData.scanHistory(HistoryActivity.this)).start();
-        startSpin();
     }
 
     /** Starts the rotating refresh indicator; rotations stop once a scan completes. */
     private void startSpin() {
         if (refreshView == null || refreshSpin != null) return;
+        spinSince = android.os.SystemClock.uptimeMillis();
+        refreshHandler.removeCallbacks(stopSpinRunnable);
         refreshSpin = android.animation.ObjectAnimator.ofFloat(refreshView, "rotation", 0f, 360f);
         refreshSpin.setDuration(900);
         refreshSpin.setRepeatCount(android.animation.ValueAnimator.INFINITE);
@@ -187,7 +202,22 @@ public final class HistoryActivity extends Activity {
     }
 
     private void stopSpin() {
-        if (refreshSpin == null) return;
+        stopSpin(false);
+    }
+
+    /** Stops the rotation immediately, or lets it complete at least a full turn so a scan that
+     *  finished in a few frames still gives visible feedback. */
+    private void stopSpin(boolean immediate) {
+        if (refreshSpin == null) {
+            refreshHandler.removeCallbacks(stopSpinRunnable);
+            return;
+        }
+        refreshHandler.removeCallbacks(stopSpinRunnable);
+        long elapsed = android.os.SystemClock.uptimeMillis() - spinSince;
+        if (!immediate && elapsed < MIN_SPIN_MS) {
+            refreshHandler.postDelayed(stopSpinRunnable, MIN_SPIN_MS - elapsed);
+            return;
+        }
         refreshSpin.cancel();
         refreshSpin = null;
         refreshView.setRotation(0f);
@@ -214,7 +244,7 @@ public final class HistoryActivity extends Activity {
     @Override
     protected void onPause() {
         BalanceData.removeHistoryListener(onHistoryChanged);
-        stopSpin();
+        stopSpin(true);
         super.onPause();
     }
 

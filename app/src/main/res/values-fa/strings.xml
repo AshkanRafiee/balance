@@ -75,6 +75,7 @@
     <string name="about_footer">نسخهٔ %1$s · Balance</string>
 
     <string name="history_title">تاریخچه</string>
+    <string name="history_experimental">آزمایشی</string>
     <string name="history_empty">هنوز تراکنشی یافت نشده است. تاریخچهٔ تراکنش‌ها هنگام خواندن پیامک‌های بانکی ساخته می‌شود.</string>
     <string name="history_today">امروز</string>
     <string name="history_this_month">این ماه</string>
