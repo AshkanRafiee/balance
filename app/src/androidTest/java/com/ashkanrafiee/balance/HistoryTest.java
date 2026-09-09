@@ -21,33 +21,33 @@ public class HistoryTest {
     // ---- transaction extraction: deposits ----------------------------------------------
     @Test public void txn_deposit_variz() {
         assertEquals(5000000L, (long) BalanceData.extractTransaction(
-            "\u0645\u0628\u0644\u063A 5,000,000 \u0631\u06CC\u0627\u0644 \u0628\u0647 \u062D\u0633\u0627\u0628 \u0634\u0645\u0627 \u0648\u0627\u0631\u06CC\u0632 \u0634\u062F"));
+            "\u0645\u0628\u0644\u063A 5,000,000 \u0631\u06CC\u0627\u0644 \u0628\u0647 \u062D\u0633\u0627\u0628 \u0634\u0645\u0627 \u0648\u0627\u0631\u06CC\u0632 \u0634\u062F\u060C \u0645\u0648\u062C\u0648\u062F\u06CC: 10,000,000 \u0631\u06CC\u0627\u0644"));
     }
 
     @Test public void txn_deposit_beHesab() {
         assertEquals(1200000L, (long) BalanceData.extractTransaction(
-            "\u0645\u0628\u0644\u063A 1,200,000 \u0631\u06CC\u0627\u0644 \u0628\u0647 \u062D\u0633\u0627\u0628 \u0634\u0645\u0627 \u0648\u0627\u0631\u062F \u0634\u062F"));
+            "\u0645\u0628\u0644\u063A 1,200,000 \u0631\u06CC\u0627\u0644 \u0628\u0647 \u062D\u0633\u0627\u0628 \u0634\u0645\u0627 \u0648\u0627\u0631\u062F \u0634\u062F\u060C \u0645\u0648\u062C\u0648\u062F\u06CC: 40,000,000 \u0631\u06CC\u0627\u0644"));
     }
 
     @Test public void txn_deposit_persianDigits() {
         assertEquals(250000L, (long) BalanceData.extractTransaction(
-            "\u0645\u0628\u0644\u063A \u06F2\u06F5\u06F0\u06F0\u06F0\u06F0 \u0631\u06CC\u0627\u0644 \u0648\u0627\u0631\u06CC\u0632"));
+            "\u0645\u0628\u0644\u063A \u06F2\u06F5\u06F0\u06F0\u06F0\u06F0 \u0631\u06CC\u0627\u0644 \u0648\u0627\u0631\u06CC\u0632\u060C \u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000 \u0631\u06CC\u0627\u0644"));
     }
 
     // ---- transaction extraction: withdrawals -------------------------------------------
     @Test public void txn_withdrawal_kharid() {
         assertEquals(-1200000L, (long) BalanceData.extractTransaction(
-            "\u062E\u0631\u06CC\u062F \u0628\u0647 \u0645\u0628\u0644\u063A 1,200,000 \u0631\u06CC\u0627\u0644"));
+            "\u062E\u0631\u06CC\u062F \u0628\u0647 \u0645\u0628\u0644\u063A 1,200,000 \u0631\u06CC\u0627\u0644\u060C \u0645\u0648\u062C\u0648\u062F\u06CC: 5,000,000 \u0631\u06CC\u0627\u0644"));
     }
 
     @Test public void txn_withdrawal_bardasht() {
         assertEquals(-200000L, (long) BalanceData.extractTransaction(
-            "\u0645\u0628\u0644\u063A 200,000 \u0631\u06CC\u0627\u0644 \u0628\u0631\u062F\u0627\u0634\u062A"));
+            "\u0645\u0628\u0644\u063A 200,000 \u0631\u06CC\u0627\u0644 \u0628\u0631\u062F\u0627\u0634\u062A\u060C \u0645\u0648\u062C\u0648\u062F\u06CC: 800,000 \u0631\u06CC\u0627\u0644"));
     }
 
     @Test public void txn_withdrawal_entegal() {
         assertEquals(-3000000L, (long) BalanceData.extractTransaction(
-            "\u0627\u0646\u062A\u0642\u0627\u0644 \u0648\u062C\u0647 \u0628\u0647 \u0645\u0628\u0644\u063A 3,000,000 \u0631\u06CC\u0627\u0644"));
+            "\u0627\u0646\u062A\u0642\u0627\u0644 \u0648\u062C\u0647 \u0628\u0647 \u0645\u0628\u0644\u063A 3,000,000 \u0631\u06CC\u0627\u0644\u060C \u0645\u0648\u062C\u0648\u062F\u06CC: 7,000,000 \u0631\u06CC\u0627\u0644"));
     }
 
     // ---- transaction extraction: must not misfire --------------------------------------
@@ -57,7 +57,18 @@ public class HistoryTest {
     }
 
     @Test public void txn_noDirectionKeyword_isNull() {
-        assertNull(BalanceData.extractTransaction("\u0645\u0628\u0644\u063A 5,000 \u0631\u06CC\u0627\u0644 \u062A\u0646\u0647\u0627"));
+        assertNull(BalanceData.extractTransaction(
+            "\u0645\u0628\u0644\u063A 5,000 \u0631\u06CC\u0627\u0644 \u062A\u0646\u0647\u0627\u060C \u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000 \u0631\u06CC\u0627\u0644"));
+    }
+
+    // ---- transaction extraction: finality ----------------------------------------------
+    @Test public void txn_movementWithoutBalance_isNull() {
+        // Amount + direction but no resulting balance: an OTP/payment prompt or unconfirmed state,
+        // the movement did not necessarily settle — never count it as history.
+        assertNull(BalanceData.extractTransaction(
+            "\u0645\u0628\u0644\u063A 200,000 \u0631\u06CC\u0627\u0644 \u062E\u0631\u06CC\u062F \u0627\u0646\u062C\u0627\u0645 \u0634\u062F"));
+        assertNull(BalanceData.extractTransaction(
+            "\u067E\u0631\u062F\u0627\u062E\u062A \u0628\u0647 \u0645\u0628\u0644\u063A 1,200,000 \u0631\u06CC\u0627\u0644 \u062F\u0631 \u0627\u0646\u062A\u0638\u0627\u0631 \u062A\u0627\u06CC\u06CC\u062F"));
     }
 
     @Test public void txn_otp_isNull() {
@@ -243,6 +254,78 @@ public class HistoryTest {
         assertEquals(-300000L, lists.yearWit);
         assertEquals(700000L, lists.years.get(0).sum);
         assertEquals(700000L, lists.years.get(0).months.get(0).sum);
+    }
+
+    // ---- message fingerprints (exact-duplicate detection) -------------------------
+    @Test public void messageSig_sameMessage_sameFingerprint() {
+        String a = BalanceData.messageSig("500095",
+            "\u0645\u0628\u0644\u063A 200,000 \u0631\u06CC\u0627\u0644 \u0628\u0647 \u062D\u0633\u0627\u0628 \u0634\u0645\u0627 \u0648\u0627\u0631\u06CC\u0632 \u0634\u062F");
+        String b = BalanceData.messageSig("500095",
+            "\u0645\u0628\u0644\u063A 200,000 \u0631\u06CC\u0627\u0644 \u0628\u0647 \u062D\u0633\u0627\u0628 \u0634\u0645\u0627 \u0648\u0627\u0631\u06CC\u0632 \u0634\u062F");
+        assertEquals(a, b);
+    }
+
+    @Test public void messageSig_digitStyleDoesNotChangeFingerprint() {
+        String ascii = BalanceData.messageSig("500095", "\u0645\u0628\u0644\u063A 200,000 \u0631\u06CC\u0627\u0644 \u0648\u0627\u0631\u06CC\u0632 \u0634\u062F");
+        String farsi = BalanceData.messageSig("500095", "\u0645\u0628\u0644\u063A \u06F2\u06F0\u06F0\u060C\u06F0\u06F0\u06F0 \u0631\u06CC\u0627\u0644 \u0648\u0627\u0631\u06CC\u0632 \u0634\u062F");
+        assertEquals(ascii, farsi);
+    }
+
+    @Test public void messageSig_whitespaceVariants_sameFingerprint() {
+        String a = BalanceData.messageSig("500095", "\u0645\u0628\u0644\u063A 200,000 \u0631\u06CC\u0627\u0644\u0648\u0627\u0631\u06CC\u0632");
+        String b = BalanceData.messageSig("500095", "\u0645\u0628\u0644\u063A  200,000  \u0631\u06CC\u0627\u0644\u0648\u0627\u0631\u06CC\u0632");
+        assertEquals(a, b);
+    }
+
+    @Test public void messageSig_differentAmounts_differentFingerprint() {
+        String a = BalanceData.messageSig("500095", "\u0645\u0628\u0644\u063A 200,000 \u0631\u06CC\u0627\u0644 \u0648\u0627\u0631\u06CC\u0632 \u0634\u062F");
+        String b = BalanceData.messageSig("500095", "\u0645\u0628\u0644\u063A 300,000 \u0631\u06CC\u0627\u0644 \u0648\u0627\u0631\u06CC\u0632 \u0634\u062F");
+        assertFalse(a.equals(b));
+    }
+
+    @Test public void messageSig_differentSender_differentFingerprint() {
+        String a = BalanceData.messageSig("500095", "\u0645\u0628\u0644\u063A 200,000 \u0631\u06CC\u0627\u0644 \u0648\u0627\u0631\u06CC\u0632 \u0634\u062F");
+        String b = BalanceData.messageSig("b.pasargad", "\u0645\u0628\u0644\u063A 200,000 \u0631\u06CC\u0627\u0644 \u0648\u0627\u0631\u06CC\u0632 \u0634\u062F");
+        assertFalse(a.equals(b));
+    }
+
+    @Test public void messageSig_nullBody_isNull() {
+        assertNull(BalanceData.messageSig("500095", null));
+    }
+
+    @Test public void messageSig_sameMovementSameBalance_dedupsAcrossRefAndTime() {
+        // Two copies of the same delivery: identical amount + resulting balance, differing only in
+        // the volatile trailing metadata (reference number). Must hash alike.
+        String a = BalanceData.messageSig("b.pasargad",
+            "\u0645\u0628\u0644\u063A 200,000 \u0631\u06CC\u0627\u0644 \u0628\u0627 \u06A9\u0627\u0631\u062A 1234 \u062E\u0631\u06CC\u062F \u0634\u062F\u060C \u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000 \u0631\u06CC\u0627\u0644");
+        String b = BalanceData.messageSig("b.pasargad",
+            "\u0645\u0628\u0644\u063A 200,000 \u0631\u06CC\u0627\u0644 \u0628\u0627 \u06A9\u0627\u0631\u062A 9876 \u062E\u0631\u06CC\u062F \u0634\u062F\u060C \u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000 \u0631\u06CC\u0627\u0644");
+        assertEquals(a, b);
+    }
+
+    @Test public void messageSig_sameAmountDifferentBalance_isDistinct() {
+        // Two genuine movements of the same value move the balance between them; they must NOT collide
+        // even when the rest of the wording is identical.
+        String a = BalanceData.messageSig("Saman",
+            "\u0645\u0628\u0644\u063A 200,000 \u0631\u06CC\u0627\u0644 \u0648\u0627\u0631\u06CC\u0632 \u0634\u062F\u060C \u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000 \u0631\u06CC\u0627\u0644");
+        String b = BalanceData.messageSig("Saman",
+            "\u0645\u0628\u0644\u063A 200,000 \u0631\u06CC\u0627\u0644 \u0648\u0627\u0631\u06CC\u0632 \u0634\u062F\u060C \u0645\u0648\u062C\u0648\u062F\u06CC: 1,200,000 \u0631\u06CC\u0627\u0644");
+        assertFalse(a.equals(b));
+    }
+
+    @Test public void messageSig_differentDirectionSameAbsBalance_isDistinct() {
+        // A deposit and a refund can both leave the same balance; the direction is folded in only via
+        // the message text when no balance appears, so these two are treated as separate movements.
+        String a = BalanceData.messageSig("Saman",
+            "\u0645\u0628\u0644\u063A 300,000 \u0631\u06CC\u0627\u0644 \u0648\u0627\u0631\u06CC\u0632 \u0634\u062F\u060C \u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000 \u0631\u06CC\u0627\u0644");
+        String b = BalanceData.messageSig("Saman",
+            "\u0645\u0628\u0644\u063A 300,000 \u0631\u06CC\u0627\u0644 \u0628\u0631\u062F\u0627\u0634\u062A \u0634\u062F\u060C \u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000 \u0631\u06CC\u0627\u0644");
+        assertFalse(a.equals(b));
+    }
+
+    @Test public void txIdentityKey_prefersSignature_overLegacyTriple() {
+        assertEquals("s:abc", BalanceData.txIdentityKey(new Transaction("Saman", 5, 100, "abc")));
+        assertEquals("Saman|5|100", BalanceData.txIdentityKey(new Transaction("Saman", 5, 100)));
     }
 
     @Test public void buildLists_doesNotMutateInput() {
