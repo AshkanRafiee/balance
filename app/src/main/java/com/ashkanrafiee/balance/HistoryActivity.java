@@ -82,6 +82,17 @@ public final class HistoryActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        if (state != null) {
+            java.util.ArrayList<String> y = state.getStringArrayList(KEY_EXPANDED_YEARS);
+            java.util.ArrayList<String> m = state.getStringArrayList(KEY_EXPANDED_MONTHS);
+            java.util.ArrayList<String> d = state.getStringArrayList(KEY_EXPANDED_DAYS);
+            if (y != null) expandedYears.addAll(y);
+            if (m != null) expandedMonths.addAll(m);
+            if (d != null) expandedDays.addAll(d);
+            // Restored state already reflects the user's choices, so the current period must not be
+            // force-expanded again by seedExpanded().
+            expandedSeeded = !expandedYears.isEmpty() && !expandedMonths.isEmpty() && !expandedDays.isEmpty();
+        }
         bg = color(R.color.bg);
         card = color(R.color.panel);
         muted = color(R.color.muted);
@@ -139,6 +150,18 @@ public final class HistoryActivity extends Activity {
     }
 
     private final Runnable onHistoryChanged = () -> runOnUiThread(this::render);
+
+    private static final String KEY_EXPANDED_YEARS = "expanded_years";
+    private static final String KEY_EXPANDED_MONTHS = "expanded_months";
+    private static final String KEY_EXPANDED_DAYS = "expanded_days";
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putStringArrayList(KEY_EXPANDED_YEARS, new java.util.ArrayList<>(expandedYears));
+        outState.putStringArrayList(KEY_EXPANDED_MONTHS, new java.util.ArrayList<>(expandedMonths));
+        outState.putStringArrayList(KEY_EXPANDED_DAYS, new java.util.ArrayList<>(expandedDays));
+    }
 
     @Override
     protected void onResume() {
@@ -524,7 +547,7 @@ public final class HistoryActivity extends Activity {
         row.addView(dep, new LinearLayout.LayoutParams(-2, -2));
         LinearLayout.LayoutParams witParams = new LinearLayout.LayoutParams(-2, -2);
         witParams.setMarginStart(dp(16));
-        TextView wit = text(signedToman(-withdrawals), 13, negativeColor);
+        TextView wit = text(signedToman(withdrawals), 13, negativeColor);
         wit.setTypeface(null, Typeface.BOLD);
         row.addView(wit, witParams);
         return row;
