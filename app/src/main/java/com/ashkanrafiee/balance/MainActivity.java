@@ -469,9 +469,9 @@ public class MainActivity extends Activity {
                     });
                 } catch (Exception e) {
                     post(() -> {
-                        LinkedHashMap<String, Bank> saved = BalanceData.read(app);
+                        LinkedHashMap<String, Bank> saved2 = BalanceData.read(app);
                         banks.clear();
-                        banks.putAll(saved);
+                        banks.putAll(saved2);
                         total = 0;
                         for (Bank b : banks.values()) total += b.amount;
                         status = banks.isEmpty() ? getString(R.string.status_sms_unreadable) : statusLoaded;
@@ -480,6 +480,9 @@ public class MainActivity extends Activity {
                         BalanceWidgetProvider.push(app);
                     });
                 }
+                // History is re-scanned independently of balances, on this same worker thread so it
+                // never stutters the UI; an open history screen re-renders via the change listener.
+                BalanceData.scanHistory(app);
             }).start();
         }
 

@@ -23,14 +23,21 @@ import java.util.Set;
 
 /**
  * Shows the transaction history parsed from supported bank SMS: the net sum of transactions for
- * today, this Persian (Jalali) month and this Persian year, plus a year-by-year breakdown that
- * drills down into months and days. Sums always reflect money <em>movements</em> (deposits minus
- * withdrawals), never remaining balances. All date boundaries follow the Persian calendar.
+ * today, this Persian (Jalali) month and this Persian year (three summary squares), plus a year-by-
+ * year breakdown that drills down into months and days. Sums always reflect money <em>movements</em>
+ * (deposits minus withdrawals), never remaining balances. All date boundaries follow the Persian
+ * calendar.
+ *
+ * <p>The screen kicks off a background history re-scan whenever it opens and re-renders on the
+ * result, showing a pulsing "Updating…" pill while a scan is in flight.
  */
 public final class HistoryActivity extends Activity {
     private static final String MONTH_TAG = "history_month";
     private static final String YEAR_TAG = "history_year";
+    private static final String UPDATING_TAG = "history_updating";
     private int bg, card, muted, accent, fg, divider, positiveColor, negativeColor;
+    private int todayColor, monthColor, yearColor, todayBg, monthBg, yearBg;
+    private LinearLayout body;
 
     int color(int res) {
         return getResources().getColor(res, getTheme());
@@ -82,6 +89,12 @@ public final class HistoryActivity extends Activity {
         divider = color(R.color.divider);
         positiveColor = color(R.color.accent);
         negativeColor = color(R.color.negative);
+        todayColor = color(R.color.accent);
+        monthColor = color(R.color.purple);
+        yearColor = color(R.color.history_year);
+        todayBg = color(R.color.history_today_bg);
+        monthBg = color(R.color.history_month_bg);
+        yearBg = color(R.color.history_year_bg);
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
         boolean rtl = isRtl();
@@ -117,32 +130,65 @@ public final class HistoryActivity extends Activity {
         root.addView(bar, margin(0, 0, 0, 16));
 
         ScrollView scroll = new ScrollView(this);
-        LinearLayout body = new LinearLayout(this);
+        body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(body, new ScrollView.LayoutParams(-1, -1));
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        render();
+    }
 
+    private final Runnable onHistoryChanged = () -> runOnUiThread(this::render);
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        BalanceData.addHistoryListener(onHistoryChanged);
+        // Trigger a re-scan in the background (a no-op if the app's own refresh already started one)
+        // so fresh messages are reflected as soon as the screen opens without blocking the UI.
+        new Thread(() -> BalanceData.scanHistory(HistoryActivity.this)).start();
+    }
+
+    @Override
+    protected void onPause() {
+        BalanceData.removeHistoryListener(onHistoryChanged);
+        super.onPause();
+    }
+
+    /** Re-reads the saved history and rebuilds the whole screen from it. */
+    private void render() {
         List<Transaction> txs = BalanceData.readTransactions(this);
         Lists lists = buildLists(txs);
+        body.removeAllViews();
+        boolean scanning = BalanceData.HISTORY_SCANNING;
         if (lists.years.isEmpty()) {
             TextView empty = text(getString(R.string.history_empty), 14, muted);
             empty.setGravity(Gravity.CENTER);
             empty.setPadding(0, dp(48), 0, 0);
             body.addView(empty, margin(0, 0, 0, 16));
-            return;
+        } else {
+            body.addView(statsRow(lists), margin(0, 0, 0, 18));
+            body.addView(text(getString(R.string.history_breakdown), 14, muted), margin(2, 0, 0, 8));
+            allYears = lists.years;
+            seedExpanded();
+            renderYears(body, allYears);
         }
+        if (scanning) {
+            TextView pill = text(getString(R.string.history_updating), 13, accent);
+            pill.setTag(UPDATING_TAG);
+            pill.setPadding(dp(10), dp(6), dp(10), dp(6));
+            pill.setBackground(rounded(card, 15));
+            body.addView(pill, margin(0, lists.years.isEmpty() ? 6 : 8, 0, 0));
+            pulse(pill);
+        }
+    }
 
-        body.addView(summaryCard(getString(R.string.history_today), lists.today,
-            lists.todayDep, lists.todayWit), margin(0, 0, 0, 10));
-        body.addView(summaryCard(getString(R.string.history_this_month), lists.month,
-            lists.monthDep, lists.monthWit), margin(0, 0, 0, 10));
-        body.addView(summaryCard(getString(R.string.history_this_year), lists.year,
-            lists.yearDep, lists.yearWit), margin(0, 0, 0, 20));
-
-        body.addView(text(getString(R.string.history_breakdown), 14, muted), margin(2, 0, 0, 8));
-        allYears = lists.years;
-        seedExpanded();
-        renderYears(body, allYears);
+    /** A soft pulsing animation so an in-flight update is visibly "alive". */
+    private void pulse(View v) {
+        android.view.animation.AlphaAnimation a = new android.view.animation.AlphaAnimation(1f, 0.3f);
+        a.setDuration(550);
+        a.setRepeatMode(android.view.animation.Animation.REVERSE);
+        a.setRepeatCount(android.view.animation.Animation.INFINITE);
+        v.startAnimation(a);
     }
 
     /** The sets of year and month keys currently expanded in the breakdown. The current year and
@@ -193,6 +239,38 @@ public final class HistoryActivity extends Activity {
         expandedMonths.add(now.year + "/" + now.month);
     }
 
+    /** The today / this month / this year net sums as three colored squares on one row, leaving the
+     *  vertical space below free for the year breakdown. */
+    private LinearLayout statsRow(Lists lists) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams cellParams = new LinearLayout.LayoutParams(-1, -2, 1);
+        cellParams.setMarginStart(dp(4));
+        cellParams.setMarginEnd(dp(4));
+        row.addView(statsSquare(getString(R.string.history_today), lists.today,
+            todayColor, todayBg), cellParams);
+        row.addView(statsSquare(getString(R.string.history_this_month), lists.month,
+            monthColor, monthBg), cellParams);
+        row.addView(statsSquare(getString(R.string.history_this_year), lists.year,
+            yearColor, yearBg), cellParams);
+        return row;
+    }
+
+    private LinearLayout statsSquare(String label, long value, int color, int bgColor) {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setPadding(dp(12), dp(10), dp(12), dp(12));
+        cell.setBackground(rounded(bgColor, 15));
+        TextView l = text(label, 12, color);
+        l.setTypeface(null, Typeface.BOLD);
+        cell.addView(l);
+        TextView v = text(signedToman(value), 24, color);
+        v.setTypeface(null, Typeface.BOLD);
+        v.setPadding(0, dp(4), 0, 0);
+        cell.addView(v);
+        return cell;
+    }
+
     /** A collapsible year card: header with the year, net sum, deposit/withdrawal subtotals and a
      *  chevron. The year's month cards are shown only while expanded. */
     private LinearLayout yearCard(YearGroup y) {
@@ -210,17 +288,17 @@ public final class HistoryActivity extends Activity {
             if (open) expandedYears.remove(y.key()); else expandedYears.add(y.key());
             renderYears((LinearLayout) box.getParent(), allYears);
         });
-        TextView chevron = text(open ? "\u25be" : "\u25b8", 15, muted);
+        TextView chevron = text(open ? "\u25be" : "\u25b8", 16, muted);
         head.addView(chevron, new LinearLayout.LayoutParams(-2, -2));
         LinearLayout.LayoutParams yearParams = new LinearLayout.LayoutParams(-2, -2);
         yearParams.setMarginStart(dp(8));
         String yTitle = LocaleHelper.currentTag(this).equals("fa") ? faDigits(y.year) : String.valueOf(y.year);
-        TextView title = text(yTitle, 15, fg);
+        TextView title = text(yTitle, 17, fg);
         title.setTypeface(null, Typeface.BOLD);
         head.addView(title, yearParams);
         LinearLayout.LayoutParams spacer = new LinearLayout.LayoutParams(-2, -2, 1);
         head.addView(new View(this), spacer);
-        TextView sum = text(signedToman(y.sum), 15, valueColor(y.sum));
+        TextView sum = text(signedToman(y.sum), 17, valueColor(y.sum));
         sum.setTypeface(null, Typeface.BOLD);
         head.addView(sum);
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
@@ -254,15 +332,15 @@ public final class HistoryActivity extends Activity {
             if (open) expandedMonths.remove(m.key()); else expandedMonths.add(m.key());
             renderMonths(monthsHost, months);
         });
-        TextView chevron = text(open ? "\u25be" : "\u25b8", 14, muted);
+        TextView chevron = text(open ? "\u25be" : "\u25b8", 15, muted);
         head.addView(chevron, new LinearLayout.LayoutParams(-2, -2));
         LinearLayout.LayoutParams dateParams = new LinearLayout.LayoutParams(-2, -2);
         dateParams.setMarginStart(dp(8));
-        TextView date = text(monthName(m.month), 14, fg);
+        TextView date = text(monthName(m.month), 16, fg);
         head.addView(date, dateParams);
         LinearLayout.LayoutParams spacer = new LinearLayout.LayoutParams(-2, -2, 1);
         head.addView(new View(this), spacer);
-        TextView sum = text(signedToman(m.sum), 14, valueColor(m.sum));
+        TextView sum = text(signedToman(m.sum), 16, valueColor(m.sum));
         sum.setTypeface(null, Typeface.BOLD);
         head.addView(sum);
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
@@ -271,7 +349,7 @@ public final class HistoryActivity extends Activity {
         if (open) {
             LinearLayout inner = new LinearLayout(this);
             inner.setOrientation(LinearLayout.VERTICAL);
-            inner.setPadding(dp(16), 0, dp(16), dp(13));
+            inner.setPadding(dp(24), 0, dp(24), dp(13));
             for (DayGroup day : m.days) inner.addView(dayCard(day));
             box.addView(inner, new LinearLayout.LayoutParams(-1, -2));
         }
@@ -406,22 +484,6 @@ public final class HistoryActivity extends Activity {
         return new int[]{c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH)};
     }
 
-    private LinearLayout summaryCard(String label, long value, long deposits, long withdrawals) {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(16), dp(13), dp(16), dp(13));
-        box.setBackground(rounded(card, 15));
-        box.addView(text(label, 12, muted));
-        TextView v = text(signedToman(value), 22, valueColor(value));
-        v.setTypeface(null, Typeface.BOLD);
-        v.setPadding(0, dp(5), 0, 0);
-        box.addView(v);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
-        params.topMargin = dp(8);
-        box.addView(depWitRow(deposits, withdrawals, 0), params);
-        return box;
-    }
-
     /** Two aligned sub-rows: Deposits ... +amount and Withdrawals ... -amount. The hPad indents the
      *  whole block from the surrounding container's start edge. */
     private LinearLayout depWitRow(long deposits, long withdrawals, int hPad) {
@@ -439,11 +501,11 @@ public final class HistoryActivity extends Activity {
     private LinearLayout subRow(String label, String amount, int color) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        TextView l = text(label, 12, muted);
+        TextView l = text(label, 13, muted);
         row.addView(l, new LinearLayout.LayoutParams(-2, -2));
         LinearLayout.LayoutParams spacer = new LinearLayout.LayoutParams(-2, -2, 1);
         row.addView(new View(this), spacer);
-        TextView a = text(amount, 12, color);
+        TextView a = text(amount, 13, color);
         a.setTypeface(null, Typeface.BOLD);
         row.addView(a);
         return row;
@@ -456,12 +518,12 @@ public final class HistoryActivity extends Activity {
 
         LinearLayout head = new LinearLayout(this);
         head.setGravity(Gravity.CENTER_VERTICAL);
-        TextView date = text(persianDate(g.date), 14, fg);
+        TextView date = text(persianDate(g.date), 16, fg);
         head.addView(date, new LinearLayout.LayoutParams(-2, -2));
         LinearLayout.LayoutParams spacer = new LinearLayout.LayoutParams(-2, -2, 1);
         head.addView(new View(this), spacer);
         TextView sum = text(signedToman(g.sum) + (g.txs.size() > 1 ? " (" + g.txs.size() + ")" : ""),
-            14, valueColor(g.sum));
+            16, valueColor(g.sum));
         sum.setTypeface(null, Typeface.BOLD);
         head.addView(sum);
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
@@ -470,11 +532,11 @@ public final class HistoryActivity extends Activity {
             LinearLayout row = new LinearLayout(this);
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setPadding(0, dp(9), 0, 0);
-            TextView name = text(BankRules.displayName(this, t.bank), 13, muted);
+            TextView name = text(BankRules.displayName(this, t.bank), 14, muted);
             row.addView(name, new LinearLayout.LayoutParams(-2, -2));
             LinearLayout.LayoutParams rowSpacer = new LinearLayout.LayoutParams(-2, -2, 1);
             row.addView(new View(this), rowSpacer);
-            row.addView(text(signedToman(t.amount), 13, valueColor(t.amount)));
+            row.addView(text(signedToman(t.amount), 14, valueColor(t.amount)));
             box.addView(row);
         }
         return box;
