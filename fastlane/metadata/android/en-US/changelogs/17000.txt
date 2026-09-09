@@ -1,0 +1,7 @@
+New transaction history screen (beta) summarizes every money movement across your banks.
+
+• Marked as "History (Beta)" in the footer — the feature is under active development.
+• See the net sum plus separate deposits and withdrawals totals for today, this Persian month, and this year.
+• The breakdown is grouped by Persian year and month; tap a year or a month to expand or collapse it, down to individual days.
+• Footer buttons are reordered so the most-used actions come first.
+• Bank icons now keep their correct colors in dark theme.
