@@ -484,30 +484,20 @@ public final class HistoryActivity extends Activity {
         return new int[]{c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH)};
     }
 
-    /** Two aligned sub-rows: Deposits ... +amount and Withdrawals ... -amount. The hPad indents the
-     *  whole block from the surrounding container's start edge. */
+    /** One horizontal row of the deposit and withdrawal subtotals as signed, colored numbers. The
+     *  sign and color already identify the direction, so no labels are needed. */
     private LinearLayout depWitRow(long deposits, long withdrawals, int hPad) {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(hPad, 0, hPad, 0);
-        box.addView(subRow(getString(R.string.history_deposits), tomanNoSign(deposits), positiveColor),
-            new LinearLayout.LayoutParams(-1, -2));
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
-        params.topMargin = dp(5);
-        box.addView(subRow(getString(R.string.history_withdrawals), tomanNoSign(withdrawals), negativeColor), params);
-        return box;
-    }
-
-    private LinearLayout subRow(String label, String amount, int color) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        TextView l = text(label, 13, muted);
-        row.addView(l, new LinearLayout.LayoutParams(-2, -2));
-        LinearLayout.LayoutParams spacer = new LinearLayout.LayoutParams(-2, -2, 1);
-        row.addView(new View(this), spacer);
-        TextView a = text(amount, 13, color);
-        a.setTypeface(null, Typeface.BOLD);
-        row.addView(a);
+        row.setPadding(hPad, 0, hPad, 0);
+        TextView dep = text(signedToman(deposits), 13, positiveColor);
+        dep.setTypeface(null, Typeface.BOLD);
+        row.addView(dep, new LinearLayout.LayoutParams(-2, -2));
+        LinearLayout.LayoutParams witParams = new LinearLayout.LayoutParams(-2, -2);
+        witParams.setMarginStart(dp(16));
+        TextView wit = text(signedToman(-withdrawals), 13, negativeColor);
+        wit.setTypeface(null, Typeface.BOLD);
+        row.addView(wit, witParams);
         return row;
     }
 
@@ -528,17 +518,21 @@ public final class HistoryActivity extends Activity {
         head.addView(sum);
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
 
-        for (Transaction t : g.txs) {
-            LinearLayout row = new LinearLayout(this);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(0, dp(9), 0, 0);
-            TextView name = text(BankRules.displayName(this, t.bank), 14, muted);
-            row.addView(name, new LinearLayout.LayoutParams(-2, -2));
-            LinearLayout.LayoutParams rowSpacer = new LinearLayout.LayoutParams(-2, -2, 1);
-            row.addView(new View(this), rowSpacer);
-            row.addView(text(signedToman(t.amount), 14, valueColor(t.amount)));
-            box.addView(row);
+        // The day's movements as signed, colored numbers laid out horizontally — the sign and color
+        // already show which are deposits and which are withdrawals.
+        LinearLayout nums = new LinearLayout(this);
+        nums.setGravity(Gravity.CENTER_VERTICAL);
+        for (int i = 0; i < g.txs.size(); i++) {
+            Transaction t = g.txs.get(i);
+            TextView tv = text(signedToman(t.amount), 14, valueColor(t.amount));
+            tv.setTypeface(null, Typeface.BOLD);
+            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-2, -2);
+            if (i > 0) p.setMarginStart(dp(16));
+            nums.addView(tv, p);
         }
+        LinearLayout.LayoutParams numsParams = new LinearLayout.LayoutParams(-1, -2);
+        numsParams.topMargin = dp(6);
+        box.addView(nums, numsParams);
         return box;
     }
 
@@ -585,10 +579,5 @@ public final class HistoryActivity extends Activity {
         String mag = BalanceData.toman(this, Math.abs(n));
         if (n == 0) return mag;
         return (n < 0 ? "\u2212" : "+") + mag;
-    }
-
-    /** Formats an absolute rial amount as unsigned toman. */
-    private String tomanNoSign(long n) {
-        return BalanceData.toman(this, Math.abs(n));
     }
 }
