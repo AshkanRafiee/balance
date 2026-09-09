@@ -13,9 +13,11 @@ import android.util.Log;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.text.NumberFormat;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -24,11 +26,13 @@ import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 final class BalanceData {
     static final String PREFS_DATA = "balance_data";
     static final String KEY_BALANCES = "balances";
+    static final String KEY_TRANSACTIONS = "transactions";
     static final String PREFS_PREF = "balance_preferences";
     static final String KEY_HIDDEN = "balances_hidden";
     static final String KEY_SCANNED_THROUGH = "scanned_through";
@@ -54,6 +58,20 @@ final class BalanceData {
         "|\u06a9\u062f \\s*\u062a\u0623\u06cc\u06cc\u062f" +
         "|otp|code)",
         Pattern.CASE_INSENSITIVE);
+    /** The transaction amount in a money-movement message follows the "مبلغ" (amount) label. */
+    private static final Pattern amountLabel = Pattern.compile(
+        "(?:\u0645\u0628\u0644\u063A)[^\\d]{0,12}?([0-9][0-9,]*)");
+    private static final String[] DEPOSIT_KEYWORDS = {
+        "\u0648\u0627\u0631\u06cc\u0632", "\u062f\u0631\u06cc\u0627\u0641\u062a",
+        "\u0628\u0633\u062a\u0627\u0646\u06a9\u0627\u0631", "\u0627\u0641\u0632\u0627\u06cc\u0634",
+        "\u0639\u0648\u062f\u062a", "\u0628\u0631\u06af\u0634\u062a",
+        "\u0628\u0647 \u062d\u0633\u0627\u0628", "\u0646\u0634\u0633\u062a"};
+    private static final String[] WITHDRAWAL_KEYWORDS = {
+        "\u0628\u0631\u062f\u0627\u0634\u062a", "\u062e\u0631\u06cc\u062f",
+        "\u062e\u0631\u06cc\u062f\u0627\u0631\u06cc", "\u067e\u0631\u062f\u0627\u062e\u062a",
+        "\u0628\u062f\u0647\u06a9\u0627\u0631", "\u06a9\u0627\u0647\u0634",
+        "\u0627\u0646\u062a\u0642\u0627\u0644", "\u062d\u0648\u0627\u0644\u0647",
+        "\u06a9\u0627\u0631\u0645\u0632\u062f", "\u0642\u0628\u0636"};
 
     private BalanceData() {}
 
@@ -148,6 +166,70 @@ final class BalanceData {
         return map;
     }
 
+    /** Reads all saved transactions, newest last, in the order they were appended. */
+    static List<Transaction> readTransactions(Context context) {
+        try {
+            String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
+                .getString(KEY_TRANSACTIONS, null);
+            if (stored == null) return new ArrayList<>();
+            String json = stored.indexOf('{') == 0 ? stored : decrypt(stored);
+            List<Transaction> list = parseTransactions(json);
+            if (stored.indexOf('{') == 0 && !list.isEmpty()) writeTransactions(context, list);
+            return list;
+        } catch (Exception e) {
+            Log.w(TAG, "readTransactions failed", e);
+            return new ArrayList<>();
+        }
+    }
+
+    /** Persists the supplied transactions encrypted under {@link #KEY_TRANSACTIONS}. */
+    static void writeTransactions(Context context, List<Transaction> txs) {
+        try {
+            if (txs.isEmpty()) {
+                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
+                    .remove(KEY_TRANSACTIONS).apply();
+                return;
+            }
+            context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
+                .putString(KEY_TRANSACTIONS, encrypt(serializeTransactions(txs))).apply();
+        } catch (Exception e) {
+            Log.w(TAG, "writeTransactions failed", e);
+        }
+    }
+
+    /** Serializes transactions to the JSON shape used for the local store and the backup payload. */
+    static String serializeTransactions(List<Transaction> txs) throws Exception {
+        JSONArray arr = new JSONArray();
+        for (Transaction t : txs) {
+            arr.put(new JSONObject()
+                .put("bank", t.bank)
+                .put("date", t.date)
+                .put("amount", t.amount));
+        }
+        return new JSONObject().put(KEY_TRANSACTIONS, arr).toString();
+    }
+
+    /** Parses a transaction JSON (as produced by {@link #serializeTransactions}) into a fresh list. */
+    static List<Transaction> deserializeTransactions(String json) {
+        return parseTransactions(json);
+    }
+
+    private static List<Transaction> parseTransactions(String json) {
+        List<Transaction> list = new ArrayList<>();
+        try {
+            JSONArray arr = new JSONObject(json).optJSONArray(KEY_TRANSACTIONS);
+            if (arr == null) return list;
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject e = arr.getJSONObject(i);
+                list.add(new Transaction(e.getString("bank"), e.getLong("date"),
+                    e.getLong("amount")));
+            }
+        } catch (Exception ex) {
+            Log.w(TAG, "parseTransactions failed", ex);
+        }
+        return list;
+    }
+
     static void write(Context context, LinkedHashMap<String, Bank> map) {
         try {
             String existing = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
@@ -169,7 +251,7 @@ final class BalanceData {
      *  preference is untouched (it is a display choice, not balance data). */
     static void reset(Context context) {
         context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-            .remove(KEY_BALANCES).apply();
+            .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).apply();
         context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
             .remove(KEY_SCANNED_THROUGH)
             .remove(KEY_RULES_VERSION)
@@ -202,6 +284,9 @@ final class BalanceData {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
             return 0;
         LinkedHashMap<String, Bank> current = read(context);
+        List<Transaction> storedTxs = readTransactions(context);
+        Set<String> seenTxs = new HashSet<>();
+        for (Transaction t : storedTxs) seenTxs.add(t.bank + "|" + t.date + "|" + t.amount);
         SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
         long watermark = prefs.getLong(KEY_SCANNED_THROUGH, 0);
         int rulesVersion = BankRules.VERSION;
@@ -227,6 +312,11 @@ final class BalanceData {
                 long value = extract(cursor.getString(1));
                 if (value < 0) continue;
                 matchedBanks.add(bank);
+                Long txn = extractTransaction(cursor.getString(1));
+                if (txn != null) {
+                    String key = bank + "|" + date + "|" + txn;
+                    if (seenTxs.add(key)) storedTxs.add(new Transaction(bank, date, txn));
+                }
                 Bank existing = current.get(bank);
                 if (existing == null || date > existing.date) {
                     matched++;
@@ -238,6 +328,7 @@ final class BalanceData {
             Log.w(TAG, "scan failed", e);
         }
         write(context, current);
+        writeTransactions(context, storedTxs);
         SharedPreferences.Editor editor = prefs.edit().putInt(KEY_RULES_VERSION, rulesVersion);
         if (newest > watermark) editor.putLong(KEY_SCANNED_THROUGH, newest);
         editor.apply();
@@ -258,8 +349,46 @@ final class BalanceData {
         catch (Exception e) { return -1; }
     }
 
-    static String digits(String s) {
-        StringBuilder b = new StringBuilder();
+    /** Parses a signed transaction amount (in rials) from a bank message, or null if the message does
+     *  not describe a money movement. A transaction is only recognized when the message carries the
+     *  "مبلغ" (amount) label together with a deposit/withdrawal keyword, so a pure balance report
+     *  (which only restates the remaining amount) or an ambiguous movement is never misclassified.
+     *  Returns a negative value for a withdrawal and a positive one for a deposit. */
+    static Long extractTransaction(String raw) {
+        if (raw == null) return null;
+        String s = digits(raw.replace("\u066C", ",").replace("\u060C", ","));
+        if (otp.matcher(s).find()) return null;
+        String n = normalizeLetters(s);
+        Matcher m = amountLabel.matcher(n);
+        String amountStr = null;
+        while (m.find()) amountStr = m.group(1);
+        if (amountStr == null) return null;
+        long amount;
+        try {
+            amount = Long.parseLong(amountStr.replace(",", ""));
+        } catch (Exception e) {
+            return null;
+        }
+        if (amount <= 0) return null;
+        boolean deposit = false;
+        for (String k : DEPOSIT_KEYWORDS) if (n.contains(k)) { deposit = true; break; }
+        boolean withdrawal = false;
+        for (String k : WITHDRAWAL_KEYWORDS) if (n.contains(k)) { withdrawal = true; break; }
+        if (deposit == withdrawal) return null;
+        return deposit ? amount : -amount;
+    }
+
+    private static String normalizeLetters(String s) {
+        StringBuilder b = new StringBuilder(s.length());
+        for (char c : s.toCharArray()) {
+            if (c == '\u064A' || c == '\u06CC') b.append('\u06CC');
+            else if (c == '\u0643') b.append('\u06A9');
+            else b.append(c);
+        }
+        return b.toString();
+    }
+
+    static String digits(String s) {        StringBuilder b = new StringBuilder();
         for (char c : s.toCharArray()) {
             if (c >= '\u06F0' && c <= '\u06F9')
                 b.append((char) ('0' + c - '\u06F0'));

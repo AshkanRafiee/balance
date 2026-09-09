@@ -10,8 +10,12 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.spec.KeySpec;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.SecretKeyFactory;
@@ -46,7 +50,8 @@ final class BackupManager {
     private static final String TAG = "BackupManager";
     private static final byte[] MAGIC = {'B', 'A', 'L', 'N', 'C', 'E', 'B', 'K'};
     private static final int FORMAT_VERSION = 1;
-    private static final int PAYLOAD_FORMAT = 1;
+    /** Payload shape: 1 = balances only, 2 = balances + transactions. Older backups (1) are still read. */
+    private static final int PAYLOAD_FORMAT = 2;
     private static final String KDF_ALGORITHM = "PBKDF2WithHmacSHA256";
     private static final String CIPHER_ALGORITHM = "AES/GCM/NoPadding";
     private static final int ITERATIONS = 600_000;
@@ -64,6 +69,11 @@ final class BackupManager {
     /** Restore refuses to read a backup file larger than this. The payload is a handful of balances, so
      *  anything this big is not a genuine backup — and reading it fully into memory would be a DoS. */
     private static final long MAX_BACKUP_BYTES = 10L * 1024 * 1024;
+    /** Upper bound on the transactions a restore will merge. The history buffer is read fully into
+     *  memory and written back as one blob, so a crafted (but validly encrypted) backup must never be
+     *  able to push it past a sane size. A genuine backup holds at most one transaction per SMS, so
+     *  anything close to this cap is not a real history. */
+    private static final int MAX_TRANSACTIONS = 200_000;
 
     /** Human-readable error carrying the string resource that describes it. */
     static final class BackupException extends Exception {
@@ -83,11 +93,14 @@ final class BackupManager {
 
     private BackupManager() {}
 
-    /** Builds an encrypted backup of the current balances and writes it to {@code uri}. */
+    /** Builds an encrypted backup of the current balances and transaction history and writes it to
+     *  {@code uri}. */
     static void create(Context context, Uri uri, String password) throws Exception {
         String payload = new JSONObject()
             .put("payloadFormat", PAYLOAD_FORMAT)
             .put("balances", new JSONObject(BalanceData.serialize(BalanceData.read(context))))
+            .put("transactions", new JSONObject(
+                BalanceData.serializeTransactions(BalanceData.readTransactions(context))))
             .toString();
 
         byte[] salt = randomBytes(SALT_BYTES);
@@ -124,8 +137,17 @@ final class BackupManager {
     }
 
     /** Reads an encrypted backup, merges it with the current balances (newest wins per bank) and
-     *  persists the merged result. Returns what the merge changed. */
+     *  persists the merged result. Returns what the merge changed.
+     *
+     *  <p>Synchronized on {@link BalanceData} so a restore can never interleave with a background
+     *  {@link BalanceData#scanSms} scan: both do a read-modify-write over the shared store, and an
+     *  interleaving would let one of them persist a stale snapshot and silently drop the other's
+     *  freshly scanned transactions. */
     static RestoreResult restore(Context context, Uri uri, String password) throws Exception {
+        synchronized (BalanceData.class) { return restoreLocked(context, uri, password); }
+    }
+
+    private static RestoreResult restoreLocked(Context context, Uri uri, String password) throws Exception {
         byte[] file = readUri(context, uri);
         if (file.length < MAGIC.length + 1 + 4) throw new BackupException(R.string.backup_error_not_backup);
         for (int i = 0; i < MAGIC.length; i++)
@@ -198,9 +220,16 @@ final class BackupManager {
         }
 
         LinkedHashMap<String, Bank> backup;
+        List<Transaction> backupTxs = new ArrayList<>();
         try {
             JSONObject payload = new JSONObject(plain);
-            backup = BalanceData.deserialize(payload.getJSONObject("balances").toString());
+            if (payload.has("balances"))
+                backup = BalanceData.deserialize(payload.getJSONObject("balances").toString());
+            else
+                backup = new LinkedHashMap<>();
+            if (payload.has("transactions"))
+                backupTxs = BalanceData.deserializeTransactions(
+                    payload.getJSONObject("transactions").toString());
         } catch (Exception e) {
             Log.w(TAG, "payload parse failed", e);
             throw new BackupException(R.string.backup_error_password);
@@ -223,6 +252,18 @@ final class BackupManager {
             }
         }
         BalanceData.write(context, merged);
+
+        // Transaction history is merged as a union (deduped), never dropped, so restoring onto the
+        // same device does not lose locally-scanned movements and a newer backup cannot destroy older
+        // ones. The roster is capped so a hostile backup cannot bloat the in-memory history.
+        List<Transaction> currentTxs = BalanceData.readTransactions(context);
+        if (backupTxs.size() > MAX_TRANSACTIONS)
+            backupTxs = backupTxs.subList(0, MAX_TRANSACTIONS);
+        Set<String> seen = new HashSet<>();
+        for (Transaction t : currentTxs) seen.add(t.bank + "|" + t.date + "|" + t.amount);
+        for (Transaction t : backupTxs)
+            if (seen.add(t.bank + "|" + t.date + "|" + t.amount)) currentTxs.add(t);
+        BalanceData.writeTransactions(context, currentTxs);
         return result;
     }
 
