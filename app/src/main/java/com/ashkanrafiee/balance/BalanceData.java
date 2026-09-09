@@ -15,11 +15,13 @@ import java.security.KeyStore;
 import java.security.MessageDigest;
 import java.text.NumberFormat;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -40,9 +42,10 @@ final class BalanceData {
     static final String KEY_RULES_VERSION = "rules_version";
     static final String KEY_HISTORY_THROUGH = "history_through";
     static final String KEY_HISTORY_RULES_VERSION = "history_rules_version";
+    static final String KEY_HISTORY_LAST_BALANCE = "history_last_balance";
 
     /** Bumped whenever the movement-message recognition rules change, forcing a full history re-scan. */
-    static final int HISTORY_RULES_VERSION = 1;
+    static final int HISTORY_RULES_VERSION = 2;
 
     /** True while a history re-scan is running, so a second trigger (app open + history open) is a
      *  no-op instead of a duplicate pass. */
@@ -70,9 +73,22 @@ final class BalanceData {
         "|\u06a9\u062f \\s*\u062a\u0623\u06cc\u06cc\u062f" +
         "|otp|code)",
         Pattern.CASE_INSENSITIVE);
-    /** The transaction amount in a money-movement message follows the "مبلغ" (amount) label. */
+    /** The transaction amount in a money-movement message. Most banks write it after the "مبلغ"
+     *  (amount) label, possibly with an explicit sign (some banks, e.g. Parsian, write "مبلغ:500,000-"
+     *  where the trailing minus marks a withdrawal). */
     private static final Pattern amountLabel = Pattern.compile(
-        "(?:\u0645\u0628\u0644\u063A)[^\\d]{0,12}?([0-9][0-9,]*)");
+        "(?:\u0645\u0628\u0644\u063A)[^\\d]{0,12}?([+-]?\\s*[0-9][0-9,]*\\s*[+-]?)");
+    /** The amount written directly after a deposit/withdrawal label, as Tejarat does with
+     *  "برداشت: 70,014,000 ریال". Matching one of these also resolves the direction: a label that
+     *  feeds the amount is authoritative, so a payment-method word like "پرداخت" in the same message
+     *  does not make a deposit look ambiguous. */
+    private static final Pattern depositLabel = Pattern.compile(
+        "(?:\u0648\u0627\u0631\u06CC\u0632)[^\\d]{0,12}?([0-9][0-9,]*)");
+    private static final Pattern withdrawalLabel = Pattern.compile(
+        "(?:\u0628\u0631\u062F\u0627\u0634\u062A)[^\\d]{0,12}?([0-9][0-9,]*)");
+    /** A bare number standing next to "ریال" (e.g. Blu's "400,000 ریال از حساب شما پرید"). The stated
+     *  resulting balance is removed first, so this captures the moved amount rather than the balance. */
+    private static final Pattern rialAmount = Pattern.compile("([0-9][0-9,]*)\\s*\u0631\u06CC\u0627\u0644");
     private static final String[] DEPOSIT_KEYWORDS = {
         "\u0648\u0627\u0631\u06cc\u0632", "\u062f\u0631\u06cc\u0627\u0641\u062a",
         "\u0628\u0633\u062a\u0627\u0646\u06a9\u0627\u0631", "\u0627\u0641\u0632\u0627\u06cc\u0634",
@@ -267,7 +283,7 @@ final class BalanceData {
      *  preference is untouched (it is a display choice, not app data). */
     static void reset(Context context) {
         context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-            .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).apply();
+            .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).remove(KEY_HISTORY_LAST_BALANCE).apply();
         context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
             .remove(KEY_SCANNED_THROUGH)
             .remove(KEY_RULES_VERSION)
@@ -385,35 +401,59 @@ final class BalanceData {
                 new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
                 selection, args, Telephony.Sms.DATE + " DESC")) {
                 if (cursor == null) return 0;
+                List<Object[]> rows = new ArrayList<>();
                 while (cursor.moveToNext()) {
                     long date = cursor.getLong(2);
                     if (date > newest) newest = date;
                     String sender = cursor.getString(0);
                     String bank = BankRules.resolve(sender);
                     if (bank == null) continue;
-                    String body = cursor.getString(1);
-                    Long txn = extractTransaction(body);
-                    if (txn == null) continue;
-                    // The message fingerprint is the primary identity: it folds sender + movement
-                    // amount + resulting balance (falling back to the normalized body), so it is
-                    // independent of time. A bank sending the same SMS twice is one transaction even
-                    // if the copies differ in timestamp or reference number, while two genuine
-                    // movements of the same value — whose messages report different resulting
-                    // balances — stay distinct. The legacy bank|date|amount triple is only consulted
-                    // for entries saved before fingerprints existed, so an upgrade re-scan never
-                    // duplicates them.
-                    String legacyKey = bank + "|" + date + "|" + txn;
-                    if (seenLegacy.contains(legacyKey)) continue;
-                    String sig = messageSig(sender, body);
-                    if (sig != null) {
-                        if (seenSigs.contains(sig)) continue;
-                        seenSigs.add(sig);
-                        stored.add(new Transaction(bank, date, txn, sig));
-                    } else if (!seenSigs.contains(legacyKey)) {
-                        stored.add(new Transaction(bank, date, txn, null));
-                    }
-                    added++;
+                    rows.add(new Object[]{bank, sender, cursor.getString(1), date});
                 }
+                // Oldest first, so the balance-delta fallback chain below follows time. On a full scan
+                // the chain starts from the oldest kept message; on an incremental scan it is seeded
+                // from the last balance persisted by the previous scan.
+                rows.sort((a, b) -> Long.compare((Long) a[3], (Long) b[3]));
+                Map<String, Long> lastBalance = full ? new HashMap<>() : loadLastBalances(context);
+                List<Transaction> fresh = new ArrayList<>();
+                for (Object[] row : rows) {
+                    String bank = (String) row[0];
+                    String sender = (String) row[1];
+                    String body = (String) row[2];
+                    long date = (Long) row[3];
+                    Long last = lastBalance.get(bank);
+                    Transaction t = parseMovement(bank, sender, body, date,
+                        last != null, last != null ? last : 0);
+                    if (t != null) {
+                        // The message fingerprint is the primary identity: it folds sender + movement
+                        // amount + resulting balance (falling back to the normalized body), so it is
+                        // independent of time. A bank sending the same SMS twice is one transaction even
+                        // if the copies differ in timestamp or reference number, while two genuine
+                        // movements of the same value — whose messages report different resulting
+                        // balances — stay distinct. The legacy bank|date|amount triple is only consulted
+                        // for entries saved before fingerprints existed, so an upgrade re-scan never
+                        // duplicates them.
+                        String legacyKey = bank + "|" + date + "|" + t.amount;
+                        if (seenLegacy.contains(legacyKey)) continue;
+                        String sig = t.sig;
+                        if (sig != null) {
+                            if (seenSigs.contains(sig)) continue;
+                            seenSigs.add(sig);
+                        } else if (seenSigs.contains(legacyKey)) {
+                            continue;
+                        }
+                        fresh.add(t);
+                        added++;
+                    }
+                    // Remember the last stated balance per bank so the next movement can be measured
+                    // against it, across scans. OTP messages and balance-less prompts return -1 here
+                    // and leave the chain untouched.
+                    long bal = extract(body);
+                    if (bal >= 0) lastBalance.put(bank, bal);
+                }
+                // Append newest-first, preserving the append order previous versions produced.
+                for (int i = fresh.size() - 1; i >= 0; i--) stored.add(fresh.get(i));
+                saveLastBalances(context, lastBalance);
             } catch (Exception e) {
                 Log.w(TAG, "history scan failed", e);
             }
@@ -504,37 +544,158 @@ final class BalanceData {
     }
 
     /** Parses a signed transaction amount (in rials) from a bank message, or null if the message does
-     *  not describe a completed money movement. A transaction is only recognized when the message
-     *  carries the "مبلغ" (amount) label together with exactly one deposit/withdrawal keyword AND the
-     *  resulting balance — the balance is the proof that the movement actually settled, so OTP payment
-     *  prompts or authorization messages (which carry an amount but no final state) are never counted.
-     *  Returns a negative value for a withdrawal and a positive one for a deposit. */
+     *  not describe a completed money movement. The amount is recognized, in order: after the "مبلغ"
+     *  (amount) label — where an explicit "+"/"-" sign is authoritative (e.g. Parsian's
+     *  "مبلغ:500,000-"), after a deposit/withdrawal label ("واریز:"/"برداشت:", Tejarat), or as a bare
+     *  number standing next to "ریال" that is not the stated resulting balance (Blu). The direction is
+     *  taken from the explicit sign, the direction label, or exactly one of the deposit/withdrawal
+     *  keywords. Finally the message must also carry the resulting balance — the proof that the
+     *  movement settled — so OTP payment prompts or authorization messages are never counted. Returns a
+     *  negative value for a withdrawal and a positive one for a deposit. */
     static Long extractTransaction(String raw) {
         if (raw == null) return null;
         String s = digits(raw.replace("\u066C", ",").replace("\u060C", ","));
         if (otp.matcher(s).find()) return null;
         String n = normalizeLetters(s);
-        Matcher m = amountLabel.matcher(n);
-        String amountStr = null;
-        while (m.find()) amountStr = m.group(1);
-        if (amountStr == null) return null;
-        long amount;
-        try {
-            amount = Long.parseLong(amountStr.replace(",", ""));
-        } catch (Exception e) {
-            return null;
+
+        long amount = -1;
+        int sign = 0;
+        int labelDir = 0;
+
+        // 1) Amount following the "مبلغ" label, with an optional explicit sign.
+        String g = lastGroup(amountLabel, n);
+        if (g != null) {
+            String t = g.trim();
+            if (t.startsWith("-") || t.endsWith("-")) sign = -1;
+            else if (t.startsWith("+") || t.endsWith("+")) sign = 1;
+            t = t.replace("+", "").replace("-", "").trim();
+            amount = toLong(t);
         }
+
+        // 2) Amount written right after a "واریز:"/"برداشت:" label.
+        if (amount <= 0) {
+            String d = lastGroup(depositLabel, n);
+            String w = lastGroup(withdrawalLabel, n);
+            if (d == null && w != null) {
+                amount = toLong(w);
+                labelDir = -1;
+            } else if (w == null && d != null) {
+                amount = toLong(d);
+                labelDir = 1;
+            }
+        }
+
+        // 3) A bare number adjacent to "ریال", excluding the resulting balance itself.
+        if (amount <= 0) {
+            Matcher mb = balance.matcher(n);
+            while (mb.find()) {
+                String v = mb.group(1);
+                n = n.replace(v, "").replace(v.replace(",", ""), "");
+            }
+            Matcher mc = rialAmount.matcher(n);
+            long best = -1;
+            while (mc.find()) best = Math.max(best, toLong(mc.group(1)));
+            if (best > 0) amount = best;
+        }
+
         if (amount <= 0) return null;
-        boolean deposit = false;
-        for (String k : DEPOSIT_KEYWORDS) if (n.contains(k)) { deposit = true; break; }
-        boolean withdrawal = false;
-        for (String k : WITHDRAWAL_KEYWORDS) if (n.contains(k)) { withdrawal = true; break; }
-        if (deposit == withdrawal) return null;
+
+        int direction;
+        if (sign != 0) direction = sign;
+        else if (labelDir != 0) direction = labelDir;
+        else {
+            boolean deposit = containsAny(n, DEPOSIT_KEYWORDS);
+            boolean withdrawal = containsAny(n, WITHDRAWAL_KEYWORDS);
+            if (deposit == withdrawal) return null;
+            direction = deposit ? 1 : -1;
+        }
         // After the amount and a single direction are identified, the movement is only added to
         // history if the message also states the resulting balance; without it the message is a
         // prompt/OTP or unconfirmed state, so it must not be recorded.
         if (extract(raw) < 0) return null;
-        return deposit ? amount : -amount;
+        return direction > 0 ? amount : -amount;
+    }
+
+    /** Parses one bank message into a transaction, using {@link #extractTransaction} when the message
+     *  can be matched by the amount/direction/sign rules. When those rules cannot extract a movement
+     *  but the message still states a resulting balance and carries a movement keyword, the amount is
+     *  derived by comparing that balance with the previous one seen for the same bank
+     *  (balance-delta = balance − previous balance). The delta fallback keeps history working for
+     *  bank message layouts the rules do not know yet, while the movement-keyword and finality guards
+     *  keep plain "موجودی …" informational messages and OTP prompts out of history. Returns null when
+     *  the message is not a settled money movement. */
+    static Transaction parseMovement(String bank, String sender, String body, long date,
+                                     boolean hasPrev, long prevBalance) {
+        if (body == null) return null;
+        Long txn = extractTransaction(body);
+        if (txn == null) {
+            String n = normalizeLetters(digits(body.replace("\u066C", ",").replace("\u060C", ",")));
+            if (!containsAny(n, DEPOSIT_KEYWORDS) && !containsAny(n, WITHDRAWAL_KEYWORDS)) return null;
+            long bal = extract(body);
+            if (bal < 0 || !hasPrev) return null;
+            long delta = bal - prevBalance;
+            if (delta == 0) return null;
+            txn = delta;
+        }
+        return new Transaction(bank, date, txn, messageSig(sender, body));
+    }
+
+    /** The last number captured by the given pattern in the string, or null if it matched nothing. */
+    private static String lastGroup(Pattern p, String s) {
+        Matcher m = p.matcher(s);
+        String g = null;
+        while (m.find()) g = m.group(1);
+        return g;
+    }
+
+    private static boolean containsAny(String s, String[] keys) {
+        for (String k : keys) if (s.contains(k)) return true;
+        return false;
+    }
+
+    private static long toLong(String s) {
+        try {
+            return Long.parseLong(s.replace(",", ""));
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /** The last stated balance per bank, persisted so an incremental scan can delta the first new
+     *  message against it instead of the very first message in the scan window. */
+    private static Map<String, Long> loadLastBalances(Context context) {
+        Map<String, Long> map = new HashMap<>();
+        try {
+            String raw = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
+                .getString(KEY_HISTORY_LAST_BALANCE, null);
+            if (raw == null) return map;
+            String json = raw.indexOf('{') == 0 ? raw : decrypt(raw);
+            JSONObject obj = new JSONObject(json);
+            Iterator<String> it = obj.keys();
+            while (it.hasNext()) {
+                String b = it.next();
+                map.put(b, obj.getLong(b));
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "loadLastBalances failed", e);
+        }
+        return map;
+    }
+
+    private static void saveLastBalances(Context context, Map<String, Long> map) {
+        try {
+            JSONObject obj = new JSONObject();
+            for (Map.Entry<String, Long> e : map.entrySet()) obj.put(e.getKey(), e.getValue().longValue());
+            if (map.isEmpty()) {
+                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
+                    .remove(KEY_HISTORY_LAST_BALANCE).apply();
+                return;
+            }
+            context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
+                .putString(KEY_HISTORY_LAST_BALANCE, encrypt(obj.toString())).apply();
+        } catch (Exception ex) {
+            Log.w(TAG, "saveLastBalances failed", ex);
+        }
     }
 
     private static String normalizeLetters(String s) {

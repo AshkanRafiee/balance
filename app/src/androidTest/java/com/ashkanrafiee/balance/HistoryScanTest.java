@@ -29,6 +29,33 @@ public class HistoryScanTest {
 
     private static final long T = 1_000_000_000L;
 
+    private static final String TEJARAT_WITHDRAWAL =
+        "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n"
+        + "\u062D\u0633\u0627\u0628: 0135399698887 \n"
+        + "\u0628\u0631\u062F\u0627\u0634\u062A: 70,014,000 \u0631\u06CC\u0627\u0644 \n"
+        + "\u0627\u0632 \u0637\u0631\u06CC\u0642: \u0633\u0627\u0645\u0627\u0646\u0647 \u067E\u0644 (\u067E\u0631\u062F\u0627\u062E\u062A \u0644\u062D\u0638\u0647 \u0627\u06CC)  \n"
+        + "\u0645\u0627\u0646\u062F\u0647: 1,209,288 \u0631\u06CC\u0627\u0644 \n"
+        + "1405/06/07\n20:16";
+    private static final String TEJARAT_DEPOSIT =
+        "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n"
+        + "\u062D\u0633\u0627\u0628: 0135399698887 \n"
+        + "\u0648\u0627\u0631\u06CC\u0632: 115,000,000 \u0631\u06CC\u0627\u0644 \n"
+        + "\u0627\u0632 \u0637\u0631\u06CC\u0642: \u0633\u0627\u0645\u0627\u0646\u0647 \u067E\u0644 (\u067E\u0631\u062F\u0627\u062E\u062A \u0644\u062D\u0638\u0647 \u0627\u06CC)  \n"
+        + "\u0645\u0627\u0646\u062F\u0647: 361,919,288 \u0631\u06CC\u0627\u0644 \n"
+        + "1405/06/06\n00:08";
+    private static final String BLU_WITHDRAWAL =
+        "\u0628\u0644\u0648\n"
+        + "\u0628\u0631\u062F\u0627\u0634\u062A \u067E\u0648\u0644\n"
+        + "\u0627\u0634\u06A9\u0627\u0646 \u0639\u0632\u06CC\u0632\u060C 400,000 \u0631\u06CC\u0627\u0644 \u0627\u0632 \u062D\u0633\u0627\u0628 \u0634\u0645\u0627 \u067E\u0631\u06CC\u062F.\n"
+        + "\u0645\u0648\u062C\u0648\u062F\u06CC: 57,086,241 \u0631\u06CC\u0627\u0644\n"
+        + "\u06F2\u06F3:\u06F2\u06F8\n"
+        + "\u06F1\u06F4\u06F0\u06F5.\u06F0\u06F6.\u06F1\u06F5";
+    private static final String PARSIAN_WITHDRAWAL =
+        "30103348179608\n"
+        + "\u0645\u0628\u0644\u063A:500,000-\n"
+        + "\u0645\u0627\u0646\u062F\u0647:1,076,220\n"
+        + "05/26\n08:22";
+
     private Context ctx;
 
     @Before public void setUp() throws Exception {
@@ -184,6 +211,27 @@ public class HistoryScanTest {
         List<Transaction> txs = BalanceData.readTransactions(ctx);
         assertEquals(500000L, txs.get(0).amount);
         assertEquals(200000L, txs.get(1).amount);
+    }
+
+    // ============================================================
+    // Real-world bank formats (Tejarat / Blu / Parsian)
+    // ============================================================
+
+    @Test public void realBankFormats_everyMovementAcrossAllThreeBanks() throws Exception {
+        seed("TejaratBank", TEJARAT_WITHDRAWAL, T);
+        seed("+989999987641", BLU_WITHDRAWAL, T + 500);
+        seed("PARSIANBANK", PARSIAN_WITHDRAWAL, T + 1000);
+        seed("TejaratBank", TEJARAT_DEPOSIT, T + 1500);
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(4, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(4, txs.size());
+        assertEquals(115000000L, txs.get(0).amount);   // Tejarat deposit (newest)
+        assertEquals(-500000L, txs.get(1).amount);     // Parsian
+        assertEquals(-400000L, txs.get(2).amount);     // Blu
+        assertEquals(-70014000L, txs.get(3).amount);   // Tejarat withdrawal (oldest)
     }
 
     // ============================================================

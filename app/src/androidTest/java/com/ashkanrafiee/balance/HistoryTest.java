@@ -86,6 +86,85 @@ public class HistoryTest {
             "\u0645\u0628\u0644\u063A 100 \u0648\u0627\u0631\u06CC\u0632 \u0648 \u0628\u0631\u062F\u0627\u0634\u062A"));
     }
 
+    // ---- real-world bank formats (from Tejarat / Blu / Parsian SMS) --------------------
+    @Test public void txn_tejarat_bardashtLabel() {
+        assertEquals(-70014000L, (long) BalanceData.extractTransaction(
+            "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n"
+            + "\u062D\u0633\u0627\u0628: 0135399698887 \n"
+            + "\u0628\u0631\u062F\u0627\u0634\u062A: 70,014,000 \u0631\u06CC\u0627\u0644 \n"
+            + "\u0627\u0632 \u0637\u0631\u06CC\u0642: \u0633\u0627\u0645\u0627\u0646\u0647 \u067E\u0644 (\u067E\u0631\u062F\u0627\u062E\u062A \u0644\u062D\u0638\u0647 \u0627\u06CC)  \n"
+            + "\u0645\u0627\u0646\u062F\u0647: 1,209,288 \u0631\u06CC\u0627\u0644 \n"
+            + "1405/06/07\n20:16"));
+    }
+
+    @Test public void txn_tejarat_varizLabel_pardakhtWord_isDeposit() {
+        // "پرداخت لحظه ای" is a payment-method name, not a withdrawal keyword; the amount written
+        // right after "واریز:" must decide the direction instead of the keyword sets.
+        assertEquals(115000000L, (long) BalanceData.extractTransaction(
+            "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n"
+            + "\u062D\u0633\u0627\u0628: 0135399698887 \n"
+            + "\u0648\u0627\u0631\u06CC\u0632: 115,000,000 \u0631\u06CC\u0627\u0644 \n"
+            + "\u0627\u0632 \u0637\u0631\u06CC\u0642: \u0633\u0627\u0645\u0627\u0646\u0647 \u067E\u0644 (\u067E\u0631\u062F\u0627\u062E\u062A \u0644\u062D\u0638\u0647 \u0627\u06CC)  \n"
+            + "\u0645\u0627\u0646\u062F\u0647: 361,919,288 \u0631\u06CC\u0627\u0644 \n"
+            + "1405/06/06\n00:08"));
+    }
+
+    @Test public void txn_blu_bareRialAmount() {
+        assertEquals(-400000L, (long) BalanceData.extractTransaction(
+            "\u0628\u0644\u0648\n"
+            + "\u0628\u0631\u062F\u0627\u0634\u062A \u067E\u0648\u0644\n"
+            + "\u0627\u0634\u06A9\u0627\u0646 \u0639\u0632\u06CC\u0632\u060C 400,000 \u0631\u06CC\u0627\u0644 \u0627\u0632 \u062D\u0633\u0627\u0628 \u0634\u0645\u0627 \u067E\u0631\u06CC\u062F.\n"
+            + "\u0645\u0648\u062C\u0648\u062F\u06CC: 57,086,241 \u0631\u06CC\u0627\u0644\n"
+            + "\u06F2\u06F3:\u06F2\u06F8\n"
+            + "\u06F1\u06F4\u06F0\u06F5.\u06F0\u06F6.\u06F1\u06F5"));
+    }
+
+    @Test public void txn_parsian_trailingMinusSign() {
+        assertEquals(-500000L, (long) BalanceData.extractTransaction(
+            "30103348179608\n"
+            + "\u0645\u0628\u0644\u063A:500,000-\n"
+            + "\u0645\u0627\u0646\u062F\u0647:1,076,220\n"
+            + "05/26\n08:22"));
+    }
+
+    // ---- balance-delta fallback -------------------------------------------------------
+    @Test public void delta_amountWhenRegexCannotParse_withdrawal() {
+        Transaction t = BalanceData.parseMovement("Blu", "+989999987641",
+            "\u0627\u0646\u062A\u0642\u0627\u0644 \u0648\u062C\u0647 \u0627\u0646\u062C\u0627\u0645 \u0634\u062F\n"
+            + "\u0645\u0627\u0646\u062F\u0647: 1,800,000 \u0631\u06CC\u0627\u0644", 1L, true, 2_500_000L);
+        assertEquals(-700000L, t.amount);
+    }
+
+    @Test public void delta_amountWhenRegexCannotParse_deposit() {
+        Transaction t = BalanceData.parseMovement("Blu", "+989999987641",
+            "\u0648\u0627\u0631\u06CC\u0632 \u0648\u062C\u0647 \u0627\u0632 \u0633\u0627\u0645\u0627\u0646\u0647\n"
+            + "\u0645\u0648\u062C\u0648\u062F\u06CC: 2,000,000 \u0631\u06CC\u0627\u0644", 1L, true, 1_300_000L);
+        assertEquals(700000L, t.amount);
+    }
+
+    @Test public void delta_noMovementKeyword_isNull() {
+        assertNull(BalanceData.parseMovement("Blu", "+989999987641",
+            "\u0645\u0648\u062C\u0648\u062F\u06CC: 5,000,000 \u0631\u06CC\u0627\u0644", 1L, true, 4_000_000L));
+    }
+
+    @Test public void delta_zeroDelta_isNull() {
+        assertNull(BalanceData.parseMovement("Blu", "+989999987641",
+            "\u0627\u0646\u062A\u0642\u0627\u0644 \u0648\u062C\u0647 \u0627\u0646\u062C\u0627\u0645 \u0634\u062F\n"
+            + "\u0645\u0627\u0646\u062F\u0647: 1,800,000 \u0631\u06CC\u0627\u0644", 1L, true, 1_800_000L));
+    }
+
+    @Test public void delta_otp_isNull() {
+        assertNull(BalanceData.parseMovement("Blu", "+989999987641",
+            "\u062E\u0631\u06CC\u062F\n\u0645\u0628\u0644\u063A: 400,000\n\u0631\u0645\u0632: 826129\n"
+            + "\u0645\u0648\u062C\u0648\u062F\u06CC: 57,086,241", 1L, true, 56_086_241L));
+    }
+
+    @Test public void delta_noPreviousBalance_isNull() {
+        assertNull(BalanceData.parseMovement("Blu", "+989999987641",
+            "\u0627\u0646\u062A\u0642\u0627\u0644 \u0648\u062C\u0647 \u0627\u0646\u062C\u0627\u0645 \u0634\u062F\n"
+            + "\u0645\u0627\u0646\u062F\u0647: 1,800,000 \u0631\u06CC\u0627\u0644", 1L, false, 0));
+    }
+
     // ---- Persian calendar: known anchors -----------------------------------------------
     @Test public void jalali_anchor_farvardin1_1403() {
         // 1403/01/01 (Nowruz) == 2024-03-20
