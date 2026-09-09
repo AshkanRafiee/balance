@@ -24,15 +24,16 @@ import java.util.Set;
 /**
  * Shows the transaction history parsed from supported bank SMS: the net sum of transactions for
  * today, this Persian (Jalali) month and this Persian year (three summary squares), plus a year-by-
- * year breakdown that drills down into months and days. Sums always reflect money <em>movements</em>
- * (deposits minus withdrawals), never remaining balances. All date boundaries follow the Persian
- * calendar.
+ * year breakdown that drills down into months and expandable days. Sums always reflect money
+ * <em>movements</em> (deposits minus withdrawals), never remaining balances. All date boundaries
+ * follow the Persian calendar.
  *
  * <p>The screen kicks off a background history re-scan whenever it opens and re-renders on the
  * result, showing a pulsing "Updating…" pill while a scan is in flight.
  */
 public final class HistoryActivity extends Activity {
     private static final String MONTH_TAG = "history_month";
+    private static final String DAY_TAG = "history_day";
     private static final String YEAR_TAG = "history_year";
     private static final String UPDATING_TAG = "history_updating";
     private int bg, card, muted, accent, fg, divider, positiveColor, negativeColor;
@@ -191,10 +192,11 @@ public final class HistoryActivity extends Activity {
         v.startAnimation(a);
     }
 
-    /** The sets of year and month keys currently expanded in the breakdown. The current year and
-     *  current month start expanded. */
+    /** The sets of year, month and day keys currently expanded in the breakdown. The current year,
+     *  current month and its days start expanded. */
     private final Set<String> expandedYears = new java.util.LinkedHashSet<>();
     private final Set<String> expandedMonths = new java.util.LinkedHashSet<>();
+    private final Set<String> expandedDays = new java.util.LinkedHashSet<>();
 
     /** Cached reference to the year list so year-header taps can re-render the whole section. */
     private List<YearGroup> allYears;
@@ -226,17 +228,41 @@ public final class HistoryActivity extends Activity {
         }
     }
 
+    /** Renders a year's day cards into its days container (used by the open month). */
+    private void renderDays(LinearLayout daysHost, List<DayGroup> days) {
+        for (int i = daysHost.getChildCount() - 1; i >= 0; i--) {
+            View v = daysHost.getChildAt(i);
+            if (DAY_TAG.equals(v.getTag())) daysHost.removeViewAt(i);
+        }
+        for (DayGroup d : days) {
+            LinearLayout card = dayCard(d, daysHost, days);
+            card.setTag(DAY_TAG);
+            daysHost.addView(card);
+        }
+    }
+
     private JalaliCalendar nowJalali() {
         Calendar c = Calendar.getInstance(Locale.getDefault());
         return JalaliCalendar.fromGregorian(c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH));
     }
 
-    /** Expands the current year and current month by default, so the freshest history is visible
-     *  without any interaction. */
+    /** Expands the current year, current month and its days by default once per screen, so the
+     *  freshest history is visible without any interaction without undoing later collapses. */
+    private boolean expandedSeeded;
+
     private void seedExpanded() {
+        if (expandedSeeded) return;
+        expandedSeeded = true;
         JalaliCalendar now = nowJalali();
         expandedYears.add(String.valueOf(now.year));
         expandedMonths.add(now.year + "/" + now.month);
+        for (YearGroup y : allYears) {
+            if (y.year != now.year) continue;
+            for (MonthGroup m : y.months) {
+                if (m.month != now.month) continue;
+                for (DayGroup d : m.days) expandedDays.add(d.key());
+            }
+        }
     }
 
     /** The today / this month / this year net sums as three colored squares on one row, leaving the
@@ -350,7 +376,7 @@ public final class HistoryActivity extends Activity {
             LinearLayout inner = new LinearLayout(this);
             inner.setOrientation(LinearLayout.VERTICAL);
             inner.setPadding(dp(24), 0, dp(24), dp(13));
-            for (DayGroup day : m.days) inner.addView(dayCard(day));
+            renderDays(inner, m.days);
             box.addView(inner, new LinearLayout.LayoutParams(-1, -2));
         }
         return box;
@@ -371,6 +397,9 @@ public final class HistoryActivity extends Activity {
         final List<Transaction> txs = new ArrayList<>();
         DayGroup(JalaliCalendar date) {
             this.date = date;
+        }
+        String key() {
+            return date.year + "/" + date.month + "/" + date.day;
         }
     }
 
@@ -501,15 +530,29 @@ public final class HistoryActivity extends Activity {
         return row;
     }
 
-    private LinearLayout dayCard(DayGroup g) {
+    /** A collapsible day card: header with the date, net sum (plus transaction count) and a chevron.
+     *  The day's transactions — newest first — are listed only while expanded, so a day can hold many
+     *  movements without overflowing. */
+    private LinearLayout dayCard(DayGroup g, LinearLayout daysHost, List<DayGroup> days) {
+        boolean open = expandedDays.contains(g.key());
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(0, dp(12), 0, 0);
 
         LinearLayout head = new LinearLayout(this);
         head.setGravity(Gravity.CENTER_VERTICAL);
+        head.setClickable(true);
+        head.setFocusable(true);
+        head.setOnClickListener(v -> {
+            if (open) expandedDays.remove(g.key()); else expandedDays.add(g.key());
+            renderDays(daysHost, days);
+        });
+        TextView chevron = text(open ? "\u25be" : "\u25b8", 15, muted);
+        head.addView(chevron, new LinearLayout.LayoutParams(-2, -2));
+        LinearLayout.LayoutParams dateParams = new LinearLayout.LayoutParams(-2, -2);
+        dateParams.setMarginStart(dp(8));
         TextView date = text(persianDate(g.date), 16, fg);
-        head.addView(date, new LinearLayout.LayoutParams(-2, -2));
+        head.addView(date, dateParams);
         LinearLayout.LayoutParams spacer = new LinearLayout.LayoutParams(-2, -2, 1);
         head.addView(new View(this), spacer);
         TextView sum = text(signedToman(g.sum) + (g.txs.size() > 1 ? " (" + g.txs.size() + ")" : ""),
@@ -518,21 +561,24 @@ public final class HistoryActivity extends Activity {
         head.addView(sum);
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
 
-        // The day's movements as signed, colored numbers laid out horizontally — the sign and color
-        // already show which are deposits and which are withdrawals.
-        LinearLayout nums = new LinearLayout(this);
-        nums.setGravity(Gravity.CENTER_VERTICAL);
-        for (int i = 0; i < g.txs.size(); i++) {
-            Transaction t = g.txs.get(i);
-            TextView tv = text(signedToman(t.amount), 14, valueColor(t.amount));
-            tv.setTypeface(null, Typeface.BOLD);
-            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-2, -2);
-            if (i > 0) p.setMarginStart(dp(16));
-            nums.addView(tv, p);
+        if (open) {
+            LinearLayout rows = new LinearLayout(this);
+            rows.setOrientation(LinearLayout.VERTICAL);
+            rows.setPadding(0, dp(2), 0, 0);
+            for (Transaction t : g.txs) {
+                LinearLayout row = new LinearLayout(this);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                TextView name = text(BankRules.displayName(this, t.bank), 14, muted);
+                row.addView(name, new LinearLayout.LayoutParams(-2, -2));
+                LinearLayout.LayoutParams rowSpacer = new LinearLayout.LayoutParams(-2, -2, 1);
+                row.addView(new View(this), rowSpacer);
+                TextView amt = text(signedToman(t.amount), 14, valueColor(t.amount));
+                amt.setTypeface(null, Typeface.BOLD);
+                row.addView(amt);
+                rows.addView(row, margin(0, dp(4), 0, 0));
+            }
+            box.addView(rows, new LinearLayout.LayoutParams(-1, -2));
         }
-        LinearLayout.LayoutParams numsParams = new LinearLayout.LayoutParams(-1, -2);
-        numsParams.topMargin = dp(6);
-        box.addView(nums, numsParams);
         return box;
     }
 
