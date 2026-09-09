@@ -18,7 +18,10 @@ import org.junit.runner.RunWith;
 import java.io.File;
 import java.io.FileInputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 
 /**
  * Tests for the encrypted backup / restore feature: file format, tamper and wrong-password
@@ -405,5 +408,61 @@ public class BackupRestoreTest {
         assertEquals(0, res.added);
         assertEquals(0, res.updated);
         assertEquals(1_000_000L, BalanceData.read(ctx).get("Tejarat").amount);
+    }
+
+    // ============================================================
+    // Transaction history merge on restore (union, deduped)
+    // ============================================================
+
+    @Test public void merge_transactions_dedupesDuplicateSiglessEntries() throws Exception {
+        // A backup can hold identical legacy entries (same bank/date/amount, no fingerprint. Restore
+        // must not double them even though they carry no identity fingerprint.
+        List<Transaction> backupTxs = new ArrayList<>();
+        backupTxs.add(new Transaction("Tejarat", T + 1000, -500_000L));
+        backupTxs.add(new Transaction("Tejarat", T + 1000, -500_000L));
+        BalanceData.writeTransactions(ctx, backupTxs);
+        Uri u = uri("txn1.balance");
+        BackupManager.create(ctx, u, PASSWORD);
+
+        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+
+        BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
+        List<Transaction> out = BalanceData.readTransactions(ctx);
+        assertEquals(1, out.size());
+        assertEquals(-500_000L, out.get(0).amount);
+    }
+
+    @Test public void merge_transactions_unionKeepsCurrentAndAddsNewMovements() throws Exception {
+        // Backup device history: a Tejarat deposit (fingerprinted) that the current device also has,
+        // plus a Pasargad movement the current device has never scanned.
+        List<Transaction> backupTxs = new ArrayList<>();
+        backupTxs.add(new Transaction("Tejarat", T + 100, 200_000L, "sig-A"));
+        backupTxs.add(new Transaction("Pasargad", T + 400, 300_000L, "sig-B"));
+        BalanceData.writeTransactions(ctx, backupTxs);
+        Uri u = uri("txn2.balance");
+        BackupManager.create(ctx, u, PASSWORD);
+
+        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        // Current device history: the same Tejarat deposit (same fingerprint) and a local-only Melat
+        // withdrawal. Restore must not duplicate Tejarat and must keep Melat.
+        BalanceData.writeTransactions(ctx, Arrays.asList(
+            new Transaction("Tejarat", T + 100, 200_000L, "sig-A"),
+            new Transaction("Melat", T + 200, -50_000L, "sig-C")));
+
+        BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
+
+        List<Transaction> out = BalanceData.readTransactions(ctx);
+        assertEquals(3, out.size());
+        long tejarat = 0, pasargad = 0, melat = 0;
+        for (Transaction t : out) {
+            switch (t.bank) {
+                case "Tejarat": tejarat++; break;
+                case "Pasargad": pasargad++; break;
+                case "Melat": melat++; break;
+            }
+        }
+        assertEquals(1, tejarat);   // deduped across device and backup
+        assertEquals(1, pasargad);  // new movement added from the backup
+        assertEquals(1, melat);     // current history never dropped
     }
 }
