@@ -408,7 +408,7 @@ public final class HistoryActivity extends Activity {
     /** Aggregated history data: today/month/year net sums plus deposit/withdrawal subtotals
      *  and the year-by-year breakdown (each year holds its months, each month its days). */
     static final class Lists {
-        long today, month, year;
+        long today, month, year, total;
         long todayDep, monthDep, yearDep;
         long todayWit, monthWit, yearWit;
         final List<YearGroup> years = new ArrayList<>();
@@ -477,6 +477,7 @@ public final class HistoryActivity extends Activity {
         Map<String, YearGroup> yearIndex = new HashMap<>();
         Map<String, MonthGroup> monthIndex = new HashMap<>();
         for (Transaction t : sorted) {
+            lists.total += t.amount;
             int[] g = gDate(t.date);
             JalaliCalendar jc = JalaliCalendar.fromGregorian(g[0], g[1], g[2]);
             boolean todayMatch = sameDay(jc, today);

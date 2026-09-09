@@ -79,6 +79,8 @@
     <string name="history_today">Today</string>
     <string name="history_this_month">This month</string>
     <string name="history_this_year">This year</string>
+    <string name="history_total">All time</string>
+    <string name="history_refresh">Refresh</string>
     <string name="history_breakdown">BY YEAR</string>
     <string name="history_updating">Updating history…</string>
 

@@ -256,6 +256,20 @@ public class HistoryTest {
         assertEquals(700000L, lists.years.get(0).months.get(0).sum);
     }
 
+    @Test public void sums_totalCoversAllYears() {
+        // The all-time total must span every year, not just the current one:
+        // 1404 (Esfand 29, +1M) plus 1405 (Farvardin 1, -500k).
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Saman", epoch(2026, 3, 20), 1000000L));
+        txs.add(new Transaction("Saman", epoch(2026, 3, 21), -500000L));
+        HistoryActivity.Lists lists = HistoryActivity.buildLists(txs);
+        assertEquals(500000L, lists.total);
+        assertEquals(2, lists.years.size());
+        assertEquals(500000L, lists.years.get(0).sum + lists.years.get(1).sum);
+        // The current-year sum excludes past years, so it is not the total.
+        assertEquals(-500000L, lists.year);
+    }
+
     // ---- message fingerprints (exact-duplicate detection) -------------------------
     @Test public void messageSig_sameMessage_sameFingerprint() {
         String a = BalanceData.messageSig("500095",
