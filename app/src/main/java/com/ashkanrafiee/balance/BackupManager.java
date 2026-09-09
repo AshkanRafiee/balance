@@ -260,9 +260,17 @@ final class BackupManager {
         if (backupTxs.size() > MAX_TRANSACTIONS)
             backupTxs = backupTxs.subList(0, MAX_TRANSACTIONS);
         Set<String> seen = new HashSet<>();
-        for (Transaction t : currentTxs) seen.add(t.bank + "|" + t.date + "|" + t.amount);
-        for (Transaction t : backupTxs)
-            if (seen.add(t.bank + "|" + t.date + "|" + t.amount)) currentTxs.add(t);
+        for (Transaction t : currentTxs) seen.add(BalanceData.txIdentityKey(t));
+        for (Transaction t : backupTxs) {
+            String legacyKey = t.bank + "|" + t.date + "|" + t.amount;
+            if (seen.contains(legacyKey)) continue;
+            String sigKey = t.sig != null ? "s:" + t.sig : null;
+            if (sigKey != null) {
+                if (seen.contains(sigKey)) continue;
+                seen.add(sigKey);
+            }
+            currentTxs.add(t);
+        }
         BalanceData.writeTransactions(context, currentTxs);
         return result;
     }

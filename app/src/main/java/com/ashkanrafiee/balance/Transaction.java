@@ -12,10 +12,17 @@ final class Transaction {
     final long date;
     /** Signed amount in rials: positive for a deposit, negative for a withdrawal. */
     final long amount;
+    /** Deterministic fingerprint of the source SMS, used to reject exact duplicate redeliveries. */
+    final String sig;
 
     Transaction(String bank, long date, long amount) {
+        this(bank, date, amount, null);
+    }
+
+    Transaction(String bank, long date, long amount, String sig) {
         this.bank = bank;
         this.date = date;
         this.amount = amount;
+        this.sig = sig;
     }
 }

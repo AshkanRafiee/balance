@@ -12,6 +12,7 @@ import android.util.Base64;
 import android.util.Log;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
+import java.security.MessageDigest;
 import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -37,6 +38,17 @@ final class BalanceData {
     static final String KEY_HIDDEN = "balances_hidden";
     static final String KEY_SCANNED_THROUGH = "scanned_through";
     static final String KEY_RULES_VERSION = "rules_version";
+    static final String KEY_HISTORY_THROUGH = "history_through";
+    static final String KEY_HISTORY_RULES_VERSION = "history_rules_version";
+
+    /** Bumped whenever the movement-message recognition rules change, forcing a full history re-scan. */
+    static final int HISTORY_RULES_VERSION = 1;
+
+    /** True while a history re-scan is running, so a second trigger (app open + history open) is a
+     *  no-op instead of a duplicate pass. */
+    static volatile boolean HISTORY_SCANNING;
+
+    private static final List<Runnable> historyListeners = new ArrayList<>();
 
     private static final String TAG = "BalanceData";
     private static final String KEYSTORE = "AndroidKeyStore";
@@ -197,14 +209,17 @@ final class BalanceData {
         }
     }
 
-    /** Serializes transactions to the JSON shape used for the local store and the backup payload. */
+    /** Serializes transactions to the JSON shape used for the local store and the backup payload. The
+     *  message fingerprint is optional and skipped when absent, so backups stay readable both ways. */
     static String serializeTransactions(List<Transaction> txs) throws Exception {
         JSONArray arr = new JSONArray();
         for (Transaction t : txs) {
-            arr.put(new JSONObject()
+            JSONObject e = new JSONObject()
                 .put("bank", t.bank)
                 .put("date", t.date)
-                .put("amount", t.amount));
+                .put("amount", t.amount);
+            if (t.sig != null) e.put("sig", t.sig);
+            arr.put(e);
         }
         return new JSONObject().put(KEY_TRANSACTIONS, arr).toString();
     }
@@ -221,8 +236,9 @@ final class BalanceData {
             if (arr == null) return list;
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject e = arr.getJSONObject(i);
+                String sig = e.has("sig") && !e.isNull("sig") ? e.getString("sig") : null;
                 list.add(new Transaction(e.getString("bank"), e.getLong("date"),
-                    e.getLong("amount")));
+                    e.getLong("amount"), sig));
             }
         } catch (Exception ex) {
             Log.w(TAG, "parseTransactions failed", ex);
@@ -246,15 +262,17 @@ final class BalanceData {
         }
     }
 
-    /** Discards every saved balance and forgets the scan watermark, so the next scan behaves like a
-     *  fresh install and rebuilds only from the messages currently in the inbox. The hide/unmask
-     *  preference is untouched (it is a display choice, not balance data). */
+    /** Discards every saved balance and transaction and forgets both scan watermarks, so the next scans
+     *  behave like a fresh install and rebuild from the messages currently in the inbox. The hide/unmask
+     *  preference is untouched (it is a display choice, not app data). */
     static void reset(Context context) {
         context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
             .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).apply();
         context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
             .remove(KEY_SCANNED_THROUGH)
             .remove(KEY_RULES_VERSION)
+            .remove(KEY_HISTORY_THROUGH)
+            .remove(KEY_HISTORY_RULES_VERSION)
             .apply();
     }
 
@@ -284,9 +302,6 @@ final class BalanceData {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
             return 0;
         LinkedHashMap<String, Bank> current = read(context);
-        List<Transaction> storedTxs = readTransactions(context);
-        Set<String> seenTxs = new HashSet<>();
-        for (Transaction t : storedTxs) seenTxs.add(t.bank + "|" + t.date + "|" + t.amount);
         SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
         long watermark = prefs.getLong(KEY_SCANNED_THROUGH, 0);
         int rulesVersion = BankRules.VERSION;
@@ -312,11 +327,6 @@ final class BalanceData {
                 long value = extract(cursor.getString(1));
                 if (value < 0) continue;
                 matchedBanks.add(bank);
-                Long txn = extractTransaction(cursor.getString(1));
-                if (txn != null) {
-                    String key = bank + "|" + date + "|" + txn;
-                    if (seenTxs.add(key)) storedTxs.add(new Transaction(bank, date, txn));
-                }
                 Bank existing = current.get(bank);
                 if (existing == null || date > existing.date) {
                     matched++;
@@ -328,13 +338,157 @@ final class BalanceData {
             Log.w(TAG, "scan failed", e);
         }
         write(context, current);
-        writeTransactions(context, storedTxs);
         SharedPreferences.Editor editor = prefs.edit().putInt(KEY_RULES_VERSION, rulesVersion);
         if (newest > watermark) editor.putLong(KEY_SCANNED_THROUGH, newest);
         editor.apply();
         saved.clear();
         saved.putAll(current);
         return matched;
+    }
+
+    /** Scans the inbox for money-movement messages and appends them to the saved transaction history,
+     *  deduped so an exact duplicate message is never counted twice. Returns how many NEW transactions
+     *  were recorded.
+     *
+     *  <p>This has its own watermark and rules version, entirely separate from {@link #scanSms}, so a
+     *  balance refresh never waits on (or is bounded by) the history scan. The first scan after a fresh
+     *  install (or after {@link #reset}) reads the WHOLE inbox instead of stopping at the newest message
+     *  per bank, so older movements that the balance scan skips are still captured into history.
+     *
+     *  <p>Persistence is committed before the watermark advances, so a process death mid-scan only causes
+     *  a harmless re-read of already-deduped messages. A scan that is already running is reported as a
+     *  no-op so concurrent triggers (app open + history open) collapse into a single pass. */
+    static synchronized int scanHistory(Context context) {
+        if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
+            return 0;
+        if (HISTORY_SCANNING) return 0;
+        HISTORY_SCANNING = true;
+        try {
+            List<Transaction> stored = readTransactions(context);
+            Set<String> seenSigs = new HashSet<>();
+            Set<String> seenLegacy = new HashSet<>();
+            for (Transaction t : stored) {
+                if (t.sig != null) seenSigs.add(t.sig);
+                else seenLegacy.add(t.bank + "|" + t.date + "|" + t.amount);
+            }
+            SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
+            long hwm = prefs.getLong(KEY_HISTORY_THROUGH, 0);
+            boolean full = hwm == 0
+                || prefs.getInt(KEY_HISTORY_RULES_VERSION, -1) != HISTORY_RULES_VERSION;
+            if (full) hwm = 0;
+            int added = 0;
+            long newest = 0;
+            String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
+            String[] args = selection != null ? new String[]{Long.toString(hwm)} : null;
+            try (Cursor cursor = context.getContentResolver().query(
+                Telephony.Sms.Inbox.CONTENT_URI,
+                new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
+                selection, args, Telephony.Sms.DATE + " DESC")) {
+                if (cursor == null) return 0;
+                while (cursor.moveToNext()) {
+                    long date = cursor.getLong(2);
+                    if (date > newest) newest = date;
+                    String sender = cursor.getString(0);
+                    String bank = BankRules.resolve(sender);
+                    if (bank == null) continue;
+                    String body = cursor.getString(1);
+                    Long txn = extractTransaction(body);
+                    if (txn == null) continue;
+                    // The message fingerprint is the primary identity: it folds sender + movement
+                    // amount + resulting balance (falling back to the normalized body), so it is
+                    // independent of time. A bank sending the same SMS twice is one transaction even
+                    // if the copies differ in timestamp or reference number, while two genuine
+                    // movements of the same value — whose messages report different resulting
+                    // balances — stay distinct. The legacy bank|date|amount triple is only consulted
+                    // for entries saved before fingerprints existed, so an upgrade re-scan never
+                    // duplicates them.
+                    String legacyKey = bank + "|" + date + "|" + txn;
+                    if (seenLegacy.contains(legacyKey)) continue;
+                    String sig = messageSig(sender, body);
+                    if (sig != null) {
+                        if (seenSigs.contains(sig)) continue;
+                        seenSigs.add(sig);
+                        stored.add(new Transaction(bank, date, txn, sig));
+                    } else if (!seenSigs.contains(legacyKey)) {
+                        stored.add(new Transaction(bank, date, txn, null));
+                    }
+                    added++;
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "history scan failed", e);
+            }
+            writeTransactions(context, stored);
+            SharedPreferences.Editor editor = prefs.edit();
+            if (full) editor.putInt(KEY_HISTORY_RULES_VERSION, HISTORY_RULES_VERSION);
+            if (newest > 0) editor.putLong(KEY_HISTORY_THROUGH, newest);
+            editor.apply();
+            return added;
+        } finally {
+            HISTORY_SCANNING = false;
+            notifyHistoryChanged();
+        }
+    }
+
+    /** Notifies registered listeners that a history re-scan finished, so an open history screen can
+     *  re-render with the fresh data and drop its updating indicator. */
+    static void addHistoryListener(Runnable r) {
+        synchronized (historyListeners) { historyListeners.add(r); }
+    }
+
+    static void removeHistoryListener(Runnable r) {
+        synchronized (historyListeners) { historyListeners.remove(r); }
+    }
+
+    private static void notifyHistoryChanged() {
+        List<Runnable> copy;
+        synchronized (historyListeners) { copy = new ArrayList<>(historyListeners); }
+        for (Runnable r : copy) {
+            try { r.run(); } catch (Throwable t) { Log.w(TAG, "history listener failed", t); }
+        }
+    }
+
+    /** A deterministic fingerprint of a money-movement message. Two copies of the same movement (a
+     *  mistaken double delivery, possibly with different timestamps or reference numbers) must hash
+     *  alike, while two genuinely distinct movements of the same value — which move the account
+     *  balance between them — must not collide.
+     *
+     *  <p>A bank message reports both the moved amount and the resulting balance, so the fingerprint
+     *  folds {@code sender + signed amount + resulting balance}. That is content-derived but ignores
+     *  the volatile metadata (timestamps, transaction/reference numbers) that makes duplicate copies
+     *  no longer textually identical. Only completed movements carry a resulting balance; the OTP
+     *  rejection and the balance-required rule in {@link #extractTransaction} keep prompts out of
+     *  history entirely. Messages without a stated balance fall back to the whole normalized body. */
+    static String messageSig(String sender, String body) {
+        if (body == null) return null;
+        String s = normalizeLetters(digits(body.replace("\u066C", ",").replace("\u060C", ",")))
+            .trim().replaceAll("\\s+", " ");
+        if (s.isEmpty()) return null;
+        String fold;
+        long balance = extract(body);
+        Long txn = extractTransaction(body);
+        if (txn != null && balance >= 0) {
+            fold = sender + "|" + txn + "|" + balance;
+        } else {
+            fold = sender + "|" + s;
+        }
+        try {
+            byte[] h = MessageDigest.getInstance("SHA-256")
+                .digest(fold.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(32);
+            for (int i = 0; i < 16; i++) {
+                int b = h[i] & 0xFF;
+                sb.append(Character.forDigit(b >>> 4, 16)).append(Character.forDigit(b & 0xF, 16));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return fold;
+        }
+    }
+
+    /** Uniquely identifies a stored transaction for dedup: the message fingerprint when known, or the
+     *  legacy bank/date/amount triple for entries written before signatures existed. */
+    static String txIdentityKey(Transaction t) {
+        return t.sig != null ? "s:" + t.sig : t.bank + "|" + t.date + "|" + t.amount;
     }
 
     static long extract(String raw) {
@@ -350,9 +504,10 @@ final class BalanceData {
     }
 
     /** Parses a signed transaction amount (in rials) from a bank message, or null if the message does
-     *  not describe a money movement. A transaction is only recognized when the message carries the
-     *  "مبلغ" (amount) label together with a deposit/withdrawal keyword, so a pure balance report
-     *  (which only restates the remaining amount) or an ambiguous movement is never misclassified.
+     *  not describe a completed money movement. A transaction is only recognized when the message
+     *  carries the "مبلغ" (amount) label together with exactly one deposit/withdrawal keyword AND the
+     *  resulting balance — the balance is the proof that the movement actually settled, so OTP payment
+     *  prompts or authorization messages (which carry an amount but no final state) are never counted.
      *  Returns a negative value for a withdrawal and a positive one for a deposit. */
     static Long extractTransaction(String raw) {
         if (raw == null) return null;
@@ -375,6 +530,10 @@ final class BalanceData {
         boolean withdrawal = false;
         for (String k : WITHDRAWAL_KEYWORDS) if (n.contains(k)) { withdrawal = true; break; }
         if (deposit == withdrawal) return null;
+        // After the amount and a single direction are identified, the movement is only added to
+        // history if the message also states the resulting balance; without it the message is a
+        // prompt/OTP or unconfirmed state, so it must not be recorded.
+        if (extract(raw) < 0) return null;
         return deposit ? amount : -amount;
     }
 
