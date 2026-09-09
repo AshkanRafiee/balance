@@ -139,6 +139,16 @@ public final class HistoryActivity extends Activity {
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-2, -2);
         titleParams.setMarginStart(dp(10));
         bar.addView(text(getString(R.string.history_title), 21, fg), titleParams);
+        LinearLayout.LayoutParams barSpacer = new LinearLayout.LayoutParams(0, 0, 1);
+        bar.addView(new View(this), barSpacer);
+        refreshView = text("\u27f3", 22, fg);
+        refreshView.setGravity(Gravity.CENTER);
+        refreshView.setPadding(dp(12), dp(8), dp(12), dp(8));
+        refreshView.setClickable(true);
+        refreshView.setFocusable(true);
+        refreshView.setContentDescription(getString(R.string.history_refresh));
+        refreshView.setOnClickListener(v -> startRefresh());
+        bar.addView(refreshView, new LinearLayout.LayoutParams(-2, -2));
         root.addView(bar, margin(0, 0, 0, 16));
 
         ScrollView scroll = new ScrollView(this);
@@ -155,6 +165,34 @@ public final class HistoryActivity extends Activity {
     private static final String KEY_EXPANDED_MONTHS = "expanded_months";
     private static final String KEY_EXPANDED_DAYS = "expanded_days";
 
+    /** The refresh glyph in the header, rotated while a history scan is in flight. */
+    private TextView refreshView;
+    private android.animation.ObjectAnimator refreshSpin;
+
+    /** Kicks off a background history rescan if one is not already running. */
+    private void startRefresh() {
+        if (BalanceData.HISTORY_SCANNING) return;
+        new Thread(() -> BalanceData.scanHistory(HistoryActivity.this)).start();
+        startSpin();
+    }
+
+    /** Starts the rotating refresh indicator; rotations stop once a scan completes. */
+    private void startSpin() {
+        if (refreshView == null || refreshSpin != null) return;
+        refreshSpin = android.animation.ObjectAnimator.ofFloat(refreshView, "rotation", 0f, 360f);
+        refreshSpin.setDuration(900);
+        refreshSpin.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        refreshSpin.setInterpolator(new android.view.animation.LinearInterpolator());
+        refreshSpin.start();
+    }
+
+    private void stopSpin() {
+        if (refreshSpin == null) return;
+        refreshSpin.cancel();
+        refreshSpin = null;
+        refreshView.setRotation(0f);
+    }
+
     @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
@@ -167,6 +205,7 @@ public final class HistoryActivity extends Activity {
     protected void onResume() {
         super.onResume();
         BalanceData.addHistoryListener(onHistoryChanged);
+        startSpin();
         // Trigger a re-scan in the background (a no-op if the app's own refresh already started one)
         // so fresh messages are reflected as soon as the screen opens without blocking the UI.
         new Thread(() -> BalanceData.scanHistory(HistoryActivity.this)).start();
@@ -175,6 +214,7 @@ public final class HistoryActivity extends Activity {
     @Override
     protected void onPause() {
         BalanceData.removeHistoryListener(onHistoryChanged);
+        stopSpin();
         super.onPause();
     }
 
@@ -190,7 +230,7 @@ public final class HistoryActivity extends Activity {
             empty.setPadding(0, dp(48), 0, 0);
             body.addView(empty, margin(0, 0, 0, 16));
         } else {
-            body.addView(statsRow(lists), margin(0, 0, 0, 18));
+            body.addView(statsCards(lists), margin(0, 0, 0, 18));
             body.addView(text(getString(R.string.history_breakdown), 14, muted), margin(2, 0, 0, 8));
             allYears = lists.years;
             seedExpanded();
@@ -203,7 +243,23 @@ public final class HistoryActivity extends Activity {
             pill.setBackground(rounded(card, 15));
             body.addView(pill, margin(0, lists.years.isEmpty() ? 6 : 8, 0, 0));
             pulse(pill);
+        } else {
+            stopSpin();
         }
+    }
+
+    /** The all-time total pictured on its own row above the today / this month / this year squares. */
+    private LinearLayout statsCards(Lists lists) {
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams totalParams = new LinearLayout.LayoutParams(-1, -2);
+        totalParams.setMarginStart(dp(4));
+        totalParams.setMarginEnd(dp(4));
+        col.addView(statsSquare(getString(R.string.history_total), lists.total, yearColor, yearBg), totalParams);
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+        rowParams.topMargin = dp(8);
+        col.addView(statsRow(lists), rowParams);
+        return col;
     }
 
     /** A soft pulsing animation so an in-flight update is visibly "alive". */
