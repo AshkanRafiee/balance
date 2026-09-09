@@ -4,7 +4,7 @@
     android:viewportWidth="48"
     android:viewportHeight="48">
     <path
-        android:fillColor="#FF000000"
+        android:fillColor="@color/bank_logo_ink"
         android:pathData="M11.41 12.8c1.05 0 1.9-0.85 1.9-1.9C13.31 9.85 12.46 9 11.41 9c-1.05 0-1.9 0.85-1.9 1.9 0 1.05 0.85 1.9 1.9 1.9Z"/>
     <path
         android:fillColor="#FF4E91E6"

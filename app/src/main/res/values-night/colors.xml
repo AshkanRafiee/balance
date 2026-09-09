@@ -16,4 +16,6 @@
     <color name="bank_name">#E5E7EB</color>
     <color name="empty">#6B7280</color>
     <color name="widget_bg">#0B1220</color>
+    <color name="bank_logo_ink">#E2E8F0</color>
+    <color name="negative">#F87171</color>
 </resources>
