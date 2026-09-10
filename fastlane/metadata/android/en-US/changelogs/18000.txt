@@ -1,0 +1,7 @@
+Exclude any bank from the total balance calculation with its three-dot menu.
+ 
+• Tap the three-dot menu on a bank row and choose "Exclude from total" — the bank keeps its entry but no longer counts toward the total.
+• Excluded banks are dimmed, their amount is struck through, and an "Excluded from total" label appears under the name, so the state is visible at a glance.
+• The exclusion is reversible anytime from the same menu ("Include in total") and survives app restarts.
+• The widget total and list respect exclusions too.
+• The bank row menu also offers "Copy balance"; tapping the row itself still copies the balance as before.
