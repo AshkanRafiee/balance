@@ -94,7 +94,8 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         Context c = LocaleHelper.wrap(context);
         boolean hidden = BalanceData.isHidden(c);
         long total = 0;
-        for (Bank b : BalanceData.read(c).values()) total += b.amount;
+        for (java.util.Map.Entry<String, Bank> e : BalanceData.read(c).entrySet())
+            if (!BalanceData.isExcluded(c, e.getKey())) total += e.getValue().amount;
         RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance);
         views.setRemoteAdapter(R.id.widget_list, new Intent(c, BalanceWidgetService.class));
         views.setInt(R.id.widget_root, "setLayoutDirection",

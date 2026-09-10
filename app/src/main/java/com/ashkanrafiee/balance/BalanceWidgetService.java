@@ -8,6 +8,7 @@ import android.widget.RemoteViews;
 import android.widget.RemoteViewsService;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 public class BalanceWidgetService extends RemoteViewsService {
     @Override
@@ -24,7 +25,11 @@ public class BalanceWidgetService extends RemoteViewsService {
         @Override public void onCreate() { }
 
         @Override public void onDataSetChanged() {
-            banks = new ArrayList<>(BalanceData.read(LocaleHelper.wrap(context)).values());
+            Set<String> excluded = BalanceData.getExcluded(LocaleHelper.wrap(context));
+            List<Bank> all = new ArrayList<>(BalanceData.read(LocaleHelper.wrap(context)).values());
+            List<Bank> filtered = new ArrayList<>();
+            for (Bank b : all) if (!excluded.contains(b.name)) filtered.add(b);
+            banks = filtered;
         }
 
         @Override public int getCount() {
