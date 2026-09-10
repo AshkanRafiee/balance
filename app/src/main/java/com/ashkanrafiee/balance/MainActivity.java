@@ -27,6 +27,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Set;
 
 public class MainActivity extends Activity {
     private static final int SMS_REQUEST = 10;
@@ -380,6 +381,7 @@ public class MainActivity extends Activity {
     private final class BalanceView extends View {
         final Paint p = new Paint(3);
         final LinkedHashMap<String, Bank> banks = new LinkedHashMap<>();
+        final java.util.Set<String> excluded = new java.util.HashSet<>();
         final float d = getResources().getDisplayMetrics().density;
         boolean hidden, refreshing;
         int insetsTop, insetsBottom;
@@ -421,13 +423,21 @@ public class MainActivity extends Activity {
 
         void refresh() { refresh(false); }
 
+        /** Recomputes the total from included banks only. */
+        void recalcTotal() {
+            total = 0;
+            for (java.util.Map.Entry<String, Bank> e : banks.entrySet())
+                if (!excluded.contains(e.getKey())) total += e.getValue().amount;
+        }
+
         /** Reloads the saved balances (e.g. after a restore) without re-scanning SMS. */
         void loadSaved() {
             LinkedHashMap<String, Bank> saved = BalanceData.read(MainActivity.this);
             banks.clear();
             banks.putAll(saved);
-            total = 0;
-            for (Bank b : banks.values()) total += b.amount;
+            excluded.clear();
+            excluded.addAll(BalanceData.getExcluded(MainActivity.this));
+            recalcTotal();
             status = getString(R.string.status_loaded_from_saved);
             refreshing = false;
             invalidate();
@@ -460,8 +470,9 @@ public class MainActivity extends Activity {
                     post(() -> {
                         banks.clear();
                         banks.putAll(saved);
-                        total = 0;
-                        for (Bank b : banks.values()) total += b.amount;
+                        excluded.clear();
+                        excluded.addAll(BalanceData.getExcluded(app));
+                        recalcTotal();
                         status = buildStatus(count, saved.isEmpty(), statusNoSms, statusLoaded);
                         refreshing = false;
                         invalidate();
@@ -472,8 +483,9 @@ public class MainActivity extends Activity {
                         LinkedHashMap<String, Bank> saved2 = BalanceData.read(app);
                         banks.clear();
                         banks.putAll(saved2);
-                        total = 0;
-                        for (Bank b : banks.values()) total += b.amount;
+                        excluded.clear();
+                        excluded.addAll(BalanceData.getExcluded(app));
+                        recalcTotal();
                         status = banks.isEmpty() ? getString(R.string.status_sms_unreadable) : statusLoaded;
                         refreshing = false;
                         invalidate();
@@ -493,7 +505,7 @@ public class MainActivity extends Activity {
         }
 
         void value(Canvas c, long n, float x, float baseline, float width,
-                   float size, Paint.Align align) {
+                   float size, Paint.Align align, boolean strikethrough) {
             if (hidden) {
                 text(c, "\u2022\u2022\u2022\u2022\u2022\u2022", x, baseline, size, fg, align);
                 return;
@@ -503,6 +515,19 @@ public class MainActivity extends Activity {
             while (current > 10 && measure(number, current) > width) current -= 1;
             text(c, number, x, baseline, current, accent, align);
             text(c, getString(R.string.unit_toman), x, baseline + 19, 11, muted, align);
+            if (strikethrough) {
+                float numW = measure(number, current);
+                float lineX1 = align == Paint.Align.RIGHT ? x - numW : x;
+                float lineX2 = align == Paint.Align.RIGHT ? x : x + numW;
+                p.setColor(muted);
+                p.setStrokeWidth(2f);
+                c.drawLine(lineX1, baseline - 5, lineX2, baseline - 5, p);
+            }
+        }
+
+        void value(Canvas c, long n, float x, float baseline, float width,
+                   float size, Paint.Align align) {
+            value(c, n, x, baseline, width, size, align, false);
         }
 
         void totalValue(Canvas c, long n, float x, float baseline, float width, boolean rtl) {
@@ -620,18 +645,31 @@ public class MainActivity extends Activity {
                 float statusX = rtl ? w - 48 : 48;
                 text(c, fit(status, 15, w - 96), statusX, y + 56, 15, muted, edgeAlign);
             } else for (Bank b : banks.values()) {
-                round(c, 24, y, w - 24, y + 82, 20, panel);
+                boolean excluded = this.excluded.contains(b.name);
+                int cardColor = excluded ? bg : panel;
+                round(c, 24, y, w - 24, y + 82, 20, cardColor);
                 String displayName = BankRules.displayName(MainActivity.this, b.name);
-                float valueWidth = Math.min(170, Math.max(125, w * .40f));
-                float valueLeft = w - 48 - valueWidth;
+                float valueWidth = Math.min(150, Math.max(115, w * .38f));
+                float valueLeft = w - 60 - valueWidth;
                 float badgeX = rtl ? w - 55 : 55;
                 float nameX = rtl ? w - 88 : 88;
-                float valueX = rtl ? 48 : w - 48;
+                float valueX = rtl ? 60 : w - 60;
+                float menuX = rtl ? 36 : w - 36;
                 Paint.Align nameAlign = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
                 Paint.Align valueAlign = rtl ? Paint.Align.LEFT : Paint.Align.RIGHT;
                 bankBadge(c, b.name, badgeX, y + 41);
-                text(c, fit(displayName, 17, Math.max(40, valueLeft - 100)), nameX, y + 36, 17, fg, nameAlign);
-                value(c, b.amount, valueX, y + 35, valueWidth, 17, valueAlign);
+                p.setColor(muted);
+                for (int dot = -1; dot <= 1; dot++)
+                    c.drawCircle(menuX, y + 41 + dot * 4.5f, 1.8f, p);
+                text(c, fit(displayName, 17, Math.max(40, valueLeft - 100)), nameX, y + 36, 17,
+                    excluded ? muted : fg, nameAlign);
+                if (excluded) {
+                    value(c, b.amount, valueX, y + 35, valueWidth, 17, valueAlign, true);
+                    String exLabel = getString(R.string.excluded_label);
+                    text(c, exLabel, nameX, y + 68, 11, muted, nameAlign);
+                } else {
+                    value(c, b.amount, valueX, y + 35, valueWidth, 17, valueAlign);
+                }
                 y += 96;
             }
             c.restore();
@@ -702,6 +740,34 @@ public class MainActivity extends Activity {
             Toast.makeText(MainActivity.this, getString(R.string.toast_copied_balance, label), Toast.LENGTH_SHORT).show();
         }
 
+        void showBankMenu(Bank bank) {
+            String displayName = BankRules.displayName(MainActivity.this, bank.name);
+            boolean isExcluded = excluded.contains(bank.name);
+            String[] options = {
+                getString(isExcluded ? R.string.action_include : R.string.action_exclude),
+                getString(R.string.action_copy_balance)
+            };
+            new android.app.AlertDialog.Builder(MainActivity.this)
+                .setTitle(displayName)
+                .setItems(options, (d, which) -> {
+                    if (which == 0) {
+                        BalanceData.toggleExcluded(MainActivity.this, bank.name);
+                        excluded.clear();
+                        excluded.addAll(BalanceData.getExcluded(MainActivity.this));
+                        recalcTotal();
+                        invalidate();
+                        BalanceWidgetProvider.push(MainActivity.this);
+                        Toast.makeText(MainActivity.this,
+                            getString(excluded.contains(bank.name)
+                                ? R.string.toast_excluded : R.string.toast_included),
+                            Toast.LENGTH_SHORT).show();
+                    } else {
+                        copyBalance(displayName, bank.amount);
+                    }
+                })
+                .show();
+        }
+
         @Override
         public boolean onTouchEvent(MotionEvent e) {
             boolean rtl = isRtl();
@@ -768,7 +834,12 @@ public class MainActivity extends Activity {
                     int i = 0;
                     for (Bank bank : banks.values()) {
                         if (i++ == index) {
-                            copyBalance(BankRules.displayName(MainActivity.this, bank.name), bank.amount);
+                            boolean onMenu = rtl
+                                ? x >= 16 && x <= 56
+                                : x >= getWidth() / d - 56 && x <= getWidth() / d - 16;
+                            if (onMenu) showBankMenu(bank);
+                            else copyBalance(
+                                BankRules.displayName(MainActivity.this, bank.name), bank.amount);
                             break;
                         }
                     }
