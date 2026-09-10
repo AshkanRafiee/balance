@@ -128,4 +128,11 @@
     <string name="bank_edbi">EDBI</string>
     <string name="bank_melal_credit_inst">Melal Credit Inst.</string>
     <string name="bank_noor_credit_inst">Noor Credit Inst.</string>
+
+    <string name="action_exclude">Exclude from total</string>
+    <string name="action_include">Include in total</string>
+    <string name="action_copy_balance">Copy balance</string>
+    <string name="excluded_label">Excluded from total</string>
+    <string name="toast_excluded">Excluded from total</string>
+    <string name="toast_included">Included in total</string>
 </resources>

@@ -43,6 +43,7 @@ final class BalanceData {
     static final String KEY_HISTORY_THROUGH = "history_through";
     static final String KEY_HISTORY_RULES_VERSION = "history_rules_version";
     static final String KEY_HISTORY_LAST_BALANCE = "history_last_balance";
+    static final String KEY_EXCLUDED = "excluded_banks";
 
     /** Bumped whenever the movement-message recognition rules change, forcing a full history re-scan. */
     static final int HISTORY_RULES_VERSION = 2;
@@ -289,12 +290,43 @@ final class BalanceData {
             .remove(KEY_RULES_VERSION)
             .remove(KEY_HISTORY_THROUGH)
             .remove(KEY_HISTORY_RULES_VERSION)
+            .remove(KEY_EXCLUDED)
             .apply();
     }
 
     static boolean isHidden(Context context) {
         return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
             .getBoolean(KEY_HIDDEN, false);
+    }
+
+    static Set<String> getExcluded(Context context) {
+        Set<String> set = new HashSet<>();
+        try {
+            String raw = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+                .getString(KEY_EXCLUDED, null);
+            if (raw == null) return set;
+            JSONArray arr = new JSONArray(raw);
+            for (int i = 0; i < arr.length(); i++) set.add(arr.getString(i));
+        } catch (Exception e) { }
+        return set;
+    }
+
+    static void setExcluded(Context context, Set<String> excluded) {
+        JSONArray arr = new JSONArray();
+        for (String name : excluded) arr.put(name);
+        context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
+            .putString(KEY_EXCLUDED, arr.toString()).apply();
+    }
+
+    static boolean isExcluded(Context context, String bankName) {
+        return getExcluded(context).contains(bankName);
+    }
+
+    static void toggleExcluded(Context context, String bankName) {
+        Set<String> excluded = getExcluded(context);
+        if (excluded.contains(bankName)) excluded.remove(bankName);
+        else excluded.add(bankName);
+        setExcluded(context, excluded);
     }
 
     /** Scans the inbox for balance messages and merges them into the saved store, then persists the

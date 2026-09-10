@@ -128,4 +128,11 @@
     <string name="bank_edbi">توسعه صادرات ایران</string>
     <string name="bank_melal_credit_inst">مؤسسه اعتباری ملل</string>
     <string name="bank_noor_credit_inst">مؤسسه اعتباری نور</string>
+
+    <string name="action_exclude">خارج کردن از مجموع</string>
+    <string name="action_include">لحاظ کردن در مجموع</string>
+    <string name="action_copy_balance">کپی موجودی</string>
+    <string name="excluded_label">خارج شده از مجموع</string>
+    <string name="toast_excluded">از مجموع خارج شد</string>
+    <string name="toast_included">در مجموع لحاظ شد</string>
 </resources>
