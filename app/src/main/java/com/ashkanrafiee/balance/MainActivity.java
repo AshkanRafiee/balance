@@ -646,7 +646,7 @@ public class MainActivity extends Activity {
                 round(c, 24, y, w - 24, y + 96, 22, panel);
                 float statusX = rtl ? w - 48 : 48;
                 text(c, fit(status, 15, w - 96), statusX, y + 56, 15, muted, edgeAlign);
-            } else for (Bank b : banks.values()) {
+            } else for (Bank b : BalanceData.orderForDisplay(banks, excluded)) {
                 boolean excluded = this.excluded.contains(b.name);
                 int cardColor = excluded ? bg : panel;
                 round(c, 24, y, w - 24, y + 82, 20, cardColor);
@@ -834,7 +834,7 @@ public class MainActivity extends Activity {
                 float rowOffset = (y - 352 + scrollY) % 96;
                 if (rowOffset < 82 && index >= 0 && index < banks.size()) {
                     int i = 0;
-                    for (Bank bank : banks.values()) {
+                    for (Bank bank : BalanceData.orderForDisplay(banks, excluded)) {
                         if (i++ == index) {
                             boolean onMenu = rtl
                                 ? x >= 16 && x <= 56

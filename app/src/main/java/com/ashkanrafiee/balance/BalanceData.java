@@ -329,6 +329,19 @@ final class BalanceData {
         setExcluded(context, excluded);
     }
 
+    /** Orders the supplied banks for display: included banks first (keeping their input order), followed
+     *  by excluded banks (also keeping their input order). The input map's own order is never modified. */
+    static List<Bank> orderForDisplay(Map<String, Bank> banks, Set<String> excluded) {
+        List<Bank> included = new ArrayList<>();
+        List<Bank> excludedBanks = new ArrayList<>();
+        for (Bank b : banks.values()) {
+            if (excluded.contains(b.name)) excludedBanks.add(b);
+            else included.add(b);
+        }
+        included.addAll(excludedBanks);
+        return included;
+    }
+
     /** Scans the inbox for balance messages and merges them into the saved store, then persists the
      *  result. Returns how many bank balance messages were matched.
      *
