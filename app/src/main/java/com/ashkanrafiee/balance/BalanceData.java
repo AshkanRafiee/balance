@@ -46,9 +46,9 @@ final class BalanceData {
     static final String KEY_EXCLUDED = "excluded_banks";
     static final String KEY_SORT = "sort_mode";
 
-    /** Sort modes for the bank list. Two of them (balance / update date) each have a reverse variant
-     *  so re-selecting the same sort flips its direction. */
-    static final int SORT_DEFAULT = 0;
+    /** Sort modes for the bank list. Each pair (balance / update date) has a reverse variant so
+     *  re-selecting the same sort flips its direction. The list is always sorted; fresh installs
+     *  default to highest balance first. */
     static final int SORT_BALANCE_HIGH = 1;
     static final int SORT_BALANCE_LOW = 2;
     static final int SORT_DATE_RECENT = 3;
@@ -342,7 +342,7 @@ final class BalanceData {
      *  followed by excluded banks (also sorted among themselves). The input map's own order is
      *  never modified. */
     static List<Bank> orderForDisplay(Map<String, Bank> banks, Set<String> excluded) {
-        return orderForDisplay(banks, excluded, SORT_DEFAULT);
+        return orderForDisplay(banks, excluded, SORT_BALANCE_HIGH);
     }
 
     static List<Bank> orderForDisplay(Map<String, Bank> banks, Set<String> excluded, int sort) {
@@ -377,9 +377,9 @@ final class BalanceData {
         }
     }
 
-    /** The persisted bank-list sort mode, {@link #SORT_DEFAULT} when never chosen. */
+    /** The persisted bank-list sort mode, {@link #SORT_BALANCE_HIGH} when never chosen. */
     static int getSort(Context context) {
-        return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).getInt(KEY_SORT, SORT_DEFAULT);
+        return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).getInt(KEY_SORT, SORT_BALANCE_HIGH);
     }
 
     static void setSort(Context context, int mode) {

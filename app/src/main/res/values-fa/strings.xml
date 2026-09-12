@@ -146,7 +146,6 @@
 
     <string name="action_sort">مرتب‌سازی</string>
     <string name="sort_dialog_title">مرتب‌سازی بانک‌ها</string>
-    <string name="sort_default">ترتیب پیش‌فرض</string>
     <string name="sort_balance_prompt">بر اساس موجودی</string>
     <string name="sort_date_prompt">بر اساس تاریخ به‌روزرسانی</string>
     <string name="sort_balance_high_reverse">موجودی: زیاد به کم — دوباره بزنید تا برعکس شود</string>

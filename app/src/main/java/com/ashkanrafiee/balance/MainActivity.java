@@ -787,14 +787,11 @@ public class MainActivity extends Activity {
             String dateLabel = dateRecent ? getString(R.string.sort_date_recent_reverse)
                 : dateOldest ? getString(R.string.sort_date_oldest_reverse)
                 : getString(R.string.sort_date_prompt);
-            String[] options = {
-                getString(R.string.sort_default), balanceLabel, dateLabel
-            };
+            String[] options = { balanceLabel, dateLabel };
             new android.app.AlertDialog.Builder(MainActivity.this)
                 .setTitle(getString(R.string.sort_dialog_title))
                 .setItems(options, (dialogInterface, which) -> {
-                    if (which == 0) sortMode = BalanceData.SORT_DEFAULT;
-                    else if (which == 1) sortMode = balHigh ? BalanceData.SORT_BALANCE_LOW
+                    if (which == 0) sortMode = balHigh ? BalanceData.SORT_BALANCE_LOW
                         : BalanceData.SORT_BALANCE_HIGH;
                     else sortMode = dateRecent ? BalanceData.SORT_DATE_OLDEST
                         : BalanceData.SORT_DATE_RECENT;

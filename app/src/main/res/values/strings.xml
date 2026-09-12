@@ -146,7 +146,6 @@
 
     <string name="action_sort">Sort</string>
     <string name="sort_dialog_title">Sort banks</string>
-    <string name="sort_default">Default order</string>
     <string name="sort_balance_prompt">By balance</string>
     <string name="sort_date_prompt">By update date</string>
     <string name="sort_balance_high_reverse">Balance: high to low — tap again to reverse</string>

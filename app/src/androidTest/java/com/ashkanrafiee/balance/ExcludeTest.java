@@ -159,47 +159,50 @@ public class ExcludeTest {
         return names;
     }
 
-    private static List<Bank> bankList() {
-        return new ArrayList<>(banks().values());
-    }
-
     private static Set<String> setOf(String... names) {
         Set<String> set = new HashSet<>();
         for (String n : names) set.add(n);
         return set;
     }
 
-    @Test public void orderForDisplay_noExcluded_keepsOriginalOrder() {
-        assertEquals(names(bankList()), names(BalanceData.orderForDisplay(banks(), setOf())));
+    @Test public void orderForDisplay_noExcluded_defaultsToBalanceHigh() {
+        List<String> expected = new ArrayList<>();
+        expected.add("Melli");
+        expected.add("Saman");
+        expected.add("Tejarat");
+        assertEquals(expected, names(BalanceData.orderForDisplay(banks(), setOf())));
     }
 
     @Test public void orderForDisplay_singleExcluded_movesItToEnd() {
         List<String> expected = new ArrayList<>();
-        expected.add("Tejarat");
         expected.add("Melli");
+        expected.add("Tejarat");
         expected.add("Saman");
         assertEquals(expected, names(BalanceData.orderForDisplay(banks(), setOf("Saman"))));
     }
 
     @Test public void orderForDisplay_firstBankExcluded_movesItToEnd() {
         List<String> expected = new ArrayList<>();
-        expected.add("Saman");
         expected.add("Melli");
+        expected.add("Saman");
         expected.add("Tejarat");
         assertEquals(expected, names(BalanceData.orderForDisplay(banks(), setOf("Tejarat"))));
     }
 
-    @Test public void orderForDisplay_multipleExcluded_keepRelativeEndOrder() {
+    @Test public void orderForDisplay_multipleExcluded_sortedAtEnd() {
         List<String> expected = new ArrayList<>();
         expected.add("Tejarat");
-        expected.add("Saman");
         expected.add("Melli");
+        expected.add("Saman");
         assertEquals(expected, names(BalanceData.orderForDisplay(banks(), setOf("Melli", "Saman"))));
     }
 
-    @Test public void orderForDisplay_allExcluded_keepsOriginalOrder() {
-        assertEquals(names(bankList()),
-            names(BalanceData.orderForDisplay(banks(), setOf("Tejarat", "Saman", "Melli"))));
+    @Test public void orderForDisplay_allExcluded_sortedByBalance() {
+        List<String> expected = new ArrayList<>();
+        expected.add("Melli");
+        expected.add("Saman");
+        expected.add("Tejarat");
+        assertEquals(expected, names(BalanceData.orderForDisplay(banks(), setOf("Tejarat", "Saman", "Melli"))));
     }
 
     @Test public void orderForDisplay_emptyMap_returnsEmpty() {

@@ -36,8 +36,8 @@ public class SortTest {
 
     // ---- getSort / setSort persistence ----
 
-    @Test public void getSort_freshInstall_returnsDefault() {
-        assertEquals(BalanceData.SORT_DEFAULT, BalanceData.getSort(ctx));
+    @Test public void getSort_freshInstall_defaultsToBalanceHigh() {
+        assertEquals(BalanceData.SORT_BALANCE_HIGH, BalanceData.getSort(ctx));
     }
 
     @Test public void setSort_persistsAndReadsBack() {
@@ -47,17 +47,22 @@ public class SortTest {
         assertEquals(BalanceData.SORT_DATE_OLDEST, BalanceData.getSort(ctx));
     }
 
-    @Test public void setSort_default_clearsToDefault() {
-        BalanceData.setSort(ctx, BalanceData.SORT_BALANCE_LOW);
-        BalanceData.setSort(ctx, BalanceData.SORT_DEFAULT);
-        assertEquals(BalanceData.SORT_DEFAULT, BalanceData.getSort(ctx));
+    @Test public void setSort_anyMode_readsBackAsChosen() {
+        for (int mode : new int[]{BalanceData.SORT_BALANCE_HIGH, BalanceData.SORT_BALANCE_LOW,
+                BalanceData.SORT_DATE_RECENT, BalanceData.SORT_DATE_OLDEST}) {
+            BalanceData.setSort(ctx, mode);
+            assertEquals(mode, BalanceData.getSort(ctx));
+        }
     }
 
-    // ---- orderForDisplay default preserves insertion order ----
+    // ---- orderForDisplay two-arg overload defaults to balance high ----
 
-    @Test public void orderForDisplay_default_keepsOriginalOrder() {
-        assertEquals(names(bankList()),
-            names(BalanceData.orderForDisplay(banks(), setOf(), BalanceData.SORT_DEFAULT)));
+    @Test public void orderForDisplay_defaultOverload_usesBalanceHigh() {
+        List<String> expected = new ArrayList<>();
+        expected.add("Melli");
+        expected.add("Saman");
+        expected.add("Tejarat");
+        assertEquals(expected, names(BalanceData.orderForDisplay(banks(), setOf())));
     }
 
     // ---- balance sort ----
@@ -153,10 +158,6 @@ public class SortTest {
         List<String> names = new ArrayList<>();
         for (Bank b : list) names.add(b.name);
         return names;
-    }
-
-    private static List<Bank> bankList() {
-        return new ArrayList<>(banks().values());
     }
 
     private static Set<String> setOf(String... names) {
