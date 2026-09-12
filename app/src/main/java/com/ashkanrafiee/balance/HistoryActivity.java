@@ -578,7 +578,8 @@ public final class HistoryActivity extends Activity {
             if (track != null) {
                 LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, dp(6));
                 tp.setMarginStart(dp(30));
-                tp.setMarginEnd(dp(4));
+                tp.setMarginEnd(dp(30));
+                tp.bottomMargin = dp(10);
                 tp.topMargin = dp(6);
                 box.addView(track, tp);
             }
