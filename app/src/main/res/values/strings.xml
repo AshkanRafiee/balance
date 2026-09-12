@@ -83,7 +83,16 @@
     <string name="history_total">All time</string>
     <string name="history_refresh">Refresh</string>
     <string name="history_breakdown">BY YEAR</string>
-    <string name="history_updating">Updating history…</string>
+    <string name="history_back">Back</string>
+    <string name="history_yesterday">Yesterday</string>
+    <string name="history_expanded">Expanded</string>
+    <string name="history_collapsed">Collapsed</string>
+    <string name="history_deposit">Deposit</string>
+    <string name="history_withdrawal">Withdrawal</string>
+    <plurals name="history_n_tx">
+        <item quantity="one">%1$d transaction</item>
+        <item quantity="other">%1$d transactions</item>
+    </plurals>
 
     <string name="bank_pasargad">Pasargad</string>
     <string name="bank_eghtesad_novin">Eghtesad Novin</string>

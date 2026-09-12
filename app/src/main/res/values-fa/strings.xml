@@ -83,7 +83,16 @@
     <string name="history_total">مجموع کل</string>
     <string name="history_refresh">تازهسازی</string>
     <string name="history_breakdown">بر اساس سال</string>
-    <string name="history_updating">در حال بهروزرسانی تاریخچه…</string>
+    <string name="history_back">بازگشت</string>
+    <string name="history_yesterday">دیروز</string>
+    <string name="history_expanded">باز شده</string>
+    <string name="history_collapsed">بسته شده</string>
+    <string name="history_deposit">واریز</string>
+    <string name="history_withdrawal">برداشت</string>
+    <plurals name="history_n_tx">
+        <item quantity="one">%1$d تراکنش</item>
+        <item quantity="other">%1$d تراکنش</item>
+    </plurals>
 
     <string name="bank_pasargad">پاسارگاد</string>
     <string name="bank_eghtesad_novin">اقتصاد نوین</string>

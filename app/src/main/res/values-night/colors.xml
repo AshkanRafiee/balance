@@ -19,7 +19,15 @@
     <color name="bank_logo_ink">#E2E8F0</color>
     <color name="negative">#F87171</color>
     <color name="history_year">#FBBF24</color>
-    <color name="history_today_bg">#0E2A3A</color>
-    <color name="history_month_bg">#2A2140</color>
-    <color name="history_year_bg">#332611</color>
+    <color name="history_hero_top">#1A2740</color>
+    <color name="history_hero_bottom">#111B2B</color>
+    <color name="history_rail">#38BDF8</color>
+    <color name="history_open_bg">#0D1624</color>
+    <color name="history_chip_bg">#0E1626</color>
+    <color name="history_dep_bg">#123524</color>
+    <color name="history_dep_fg">#4ADE80</color>
+    <color name="history_wit_bg">#3A1420</color>
+    <color name="history_wit_fg">#F87171</color>
+    <color name="history_badge_fg">#7DD3FC</color>
+    <color name="history_badge_bg">#0E2A3A</color>
 </resources>
