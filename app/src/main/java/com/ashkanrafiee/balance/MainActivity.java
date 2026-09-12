@@ -190,6 +190,7 @@ public class MainActivity extends Activity {
     private void askPassword(boolean forBackup, Uri restoreUri, String warning) {
         EditText password = new EditText(this);
         password.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        password.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
         password.setHint(getString(R.string.backup_password_hint));
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -212,6 +213,7 @@ public class MainActivity extends Activity {
         if (forBackup) {
             confirm[0] = new EditText(this);
             confirm[0].setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            confirm[0].setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
             confirm[0].setHint(getString(R.string.backup_password_confirm_hint));
             layout.addView(confirm[0]);
         }

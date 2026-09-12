@@ -195,7 +195,7 @@ final class BalanceData {
         return map;
     }
 
-    /** Reads all saved transactions, newest last, in the order they were appended. */
+    /** Reads all saved transactions, newest first, the order in which they were appended. */
     static List<Transaction> readTransactions(Context context) {
         try {
             String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
@@ -258,7 +258,7 @@ final class BalanceData {
                     e.getLong("amount"), sig));
             }
         } catch (Exception ex) {
-            Log.w(TAG, "parseTransactions failed", ex);
+            Log.w(TAG, "parseTransactions failed");
         }
         return list;
     }

@@ -231,7 +231,7 @@ final class BackupManager {
                 backupTxs = BalanceData.deserializeTransactions(
                     payload.getJSONObject("transactions").toString());
         } catch (Exception e) {
-            Log.w(TAG, "payload parse failed", e);
+            Log.w(TAG, "payload parse failed");
             throw new BackupException(R.string.backup_error_password);
         }
 
