@@ -1,0 +1,8 @@
+Redesigned transaction history: a full Persian year–month–day breakdown with deposits and withdrawals for every period.
+
+• History is now organized into bordered year cards — tap a year to reveal its months, tap a month to reveal its days, and tap a day to list its individual transactions.
+• Every year, month and day header shows the period's net sum alongside green deposit and red withdrawal totals.
+• A proportion bar under each year shows at a glance how deposits and withdrawals balance out.
+• Individual days are labeled "Today" and "Yesterday" with friendly Persian names.
+• Groups keep their own open/closed state while browsing, with clear caret arrows and readable hierarchy.
+• Movement parsing is unchanged: only settled transactions with a stated resulting balance are recorded, and payment prompts are ignored.
