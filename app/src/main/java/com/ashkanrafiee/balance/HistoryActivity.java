@@ -35,14 +35,14 @@ import java.util.Set;
  * withdrawals), never remaining balances. All date boundaries follow the Persian calendar.
  *
  * <p>The screen kicks off a background history re-scan whenever it opens and re-renders on the
- * result, showing a spinning-indicator pill while a scan is in flight.
+ * result, spinning the refresh glyph while a scan is in flight.
  */
 public final class HistoryActivity extends Activity {
     private static final String MONTH_TAG = "history_month";
     private static final String DAY_TAG = "history_day";
     private static final String YEAR_TAG = "history_year";
 
-    private int bg, card, muted, accent, fg, divider, purple, negativeColor, positiveColor;
+    private int bg, card, muted, accent, fg, divider, negativeColor, positiveColor;
     private int todayColor, monthColor, yearColor;
     private int heroTop, heroBottom, rail, openBg, chipBg;
     private int depBg, depFg, witBg, witFg, badgeFg, badgeBg;
@@ -163,9 +163,10 @@ public final class HistoryActivity extends Activity {
             if (y != null) expandedYears.addAll(y);
             if (m != null) expandedMonths.addAll(m);
             if (d != null) expandedDays.addAll(d);
-            // Restored state already reflects the user's choices, so the current period must not be
-            // force-expanded again by seedExpanded().
-            expandedSeeded = !expandedYears.isEmpty() && !expandedMonths.isEmpty() && !expandedDays.isEmpty();
+            // Track the seeded flag explicitly: the user may have deliberately collapsed every
+            // level, so empty sets must not trigger a fresh force-expansion on the next rotation.
+            expandedSeeded = state.getBoolean(KEY_EXPANDED_SEEDED, false);
+            pendingScroll = state.getInt(KEY_SCROLL_Y, 0);
         }
         bg = color(R.color.bg);
         card = color(R.color.panel);
@@ -173,7 +174,6 @@ public final class HistoryActivity extends Activity {
         accent = color(R.color.accent);
         fg = color(R.color.fg);
         divider = color(R.color.divider);
-        purple = color(R.color.purple);
         positiveColor = color(R.color.accent);
         negativeColor = color(R.color.negative);
         todayColor = color(R.color.accent);
@@ -216,10 +216,15 @@ public final class HistoryActivity extends Activity {
         root.addView(buildHeader(), margin(0, 0, 0, 14));
         body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(body, new ScrollView.LayoutParams(-1, -1));
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        scrollView = new ScrollView(this);
+        scrollView.addView(body, new ScrollView.LayoutParams(-1, -1));
+        root.addView(scrollView, new LinearLayout.LayoutParams(-1, 0, 1));
         render();
+        if (pendingScroll > 0) {
+            int offset = pendingScroll;
+            scrollView.post(() -> scrollView.scrollTo(0, offset));
+            pendingScroll = 0;
+        }
     }
 
     /** Refreshes the cached "today" and "yesterday" Jalali dates once per render. */
@@ -324,6 +329,8 @@ public final class HistoryActivity extends Activity {
     private static final String KEY_EXPANDED_YEARS = "expanded_years";
     private static final String KEY_EXPANDED_MONTHS = "expanded_months";
     private static final String KEY_EXPANDED_DAYS = "expanded_days";
+    private static final String KEY_EXPANDED_SEEDED = "expanded_seeded";
+    private static final String KEY_SCROLL_Y = "scroll_y";
 
     /** The sets of year, month and day keys currently expanded in the breakdown. The current year,
      *  current month and its days start expanded. */
@@ -333,6 +340,12 @@ public final class HistoryActivity extends Activity {
 
     /** Cached reference to the year list so year-header taps can re-render the whole section. */
     private List<YearGroup> allYears;
+
+    /** Scroll container, kept so the list position survives rotation. */
+    private ScrollView scrollView;
+
+    /** Scroll offset pending restore until the rebuilt list is laid out. */
+    private int pendingScroll;
 
     /** Expands the current year, current month and its days by default once per screen, so the
      *  freshest history is visible without any interaction without undoing later collapses. */
@@ -365,6 +378,8 @@ public final class HistoryActivity extends Activity {
         outState.putStringArrayList(KEY_EXPANDED_YEARS, new java.util.ArrayList<>(expandedYears));
         outState.putStringArrayList(KEY_EXPANDED_MONTHS, new java.util.ArrayList<>(expandedMonths));
         outState.putStringArrayList(KEY_EXPANDED_DAYS, new java.util.ArrayList<>(expandedDays));
+        outState.putBoolean(KEY_EXPANDED_SEEDED, expandedSeeded);
+        if (scrollView != null) outState.putInt(KEY_SCROLL_Y, scrollView.getScrollY());
     }
 
     private final Runnable onHistoryChanged = () -> runOnUiThread(this::render);
