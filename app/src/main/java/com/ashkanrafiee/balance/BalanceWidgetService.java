@@ -16,6 +16,19 @@ public class BalanceWidgetService extends RemoteViewsService {
         return new Factory(getApplicationContext());
     }
 
+    /** The ordered bank list the widget shows: only included banks, in exactly the same order the main
+     *  app shows them (persisted sort mode), with excluded banks dropped entirely so the widget stays
+     *  a glanceable summary of the total. */
+    static List<Bank> widgetBanks(Context context) {
+        Context c = LocaleHelper.wrap(context);
+        Set<String> excluded = BalanceData.getExcluded(c);
+        List<Bank> ordered = new ArrayList<>(BalanceData.orderForDisplay(
+            BalanceData.read(c), excluded, BalanceData.getSort(c)));
+        List<Bank> included = new ArrayList<>();
+        for (Bank b : ordered) if (!excluded.contains(b.name)) included.add(b);
+        return included;
+    }
+
     private static final class Factory implements RemoteViewsService.RemoteViewsFactory {
         private final Context context;
         private volatile List<Bank> banks = new ArrayList<>();
@@ -25,11 +38,7 @@ public class BalanceWidgetService extends RemoteViewsService {
         @Override public void onCreate() { }
 
         @Override public void onDataSetChanged() {
-            Set<String> excluded = BalanceData.getExcluded(LocaleHelper.wrap(context));
-            List<Bank> all = new ArrayList<>(BalanceData.read(LocaleHelper.wrap(context)).values());
-            List<Bank> filtered = new ArrayList<>();
-            for (Bank b : all) if (!excluded.contains(b.name)) filtered.add(b);
-            banks = filtered;
+            banks = widgetBanks(context);
         }
 
         @Override public int getCount() {
