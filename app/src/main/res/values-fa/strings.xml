@@ -4,7 +4,6 @@
     <string name="subtitle_offline_bank_balances">موجودی آفلاین بانک‌ها</string>
     <string name="total_balance_label">مجموع موجودی</string>
     <string name="section_banks">بانک‌ها</string>
-    <string name="action_refresh">به‌روزرسانی</string>
     <string name="unit_toman">تومان</string>
     <string name="total_label">مجموع</string>
 

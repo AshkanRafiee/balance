@@ -385,6 +385,7 @@ public class MainActivity extends Activity {
         final LinkedHashMap<String, Bank> banks = new LinkedHashMap<>();
         final java.util.Set<String> excluded = new java.util.HashSet<>();
         final float d = getResources().getDisplayMetrics().density;
+        Drawable refreshIcon;
         boolean hidden, refreshing;
         int insetsTop, insetsBottom;
         int sortMode;
@@ -603,6 +604,12 @@ public class MainActivity extends Activity {
             text(c, getString(R.string.app_name), edgeX, 58, 25, fg, edgeAlign);
             text(c, fit(getString(R.string.subtitle_offline_bank_balances), 14, w - 64), edgeX, 86, 14, muted, edgeAlign);
 
+            drawRefreshIcon(c, accent);
+            if (refreshing) {
+                refreshAngle = (refreshAngle + 18) % 360;
+                postInvalidateOnAnimation();
+            }
+
             round(c, 24, 120, w - 24, 270, 28, panel);
             float totalLabelX = rtl ? w - 48 : 48;
             text(c, getString(R.string.total_balance_label), totalLabelX, 158, 13, muted, edgeAlign);
@@ -621,20 +628,6 @@ public class MainActivity extends Activity {
                 p.setStrokeWidth(2.5f);
                 if (rtl) c.drawLine(43, 142, 77, 170, p);
                 else c.drawLine(w - 77, 142, w - 43, 170, p);
-            }
-
-            float refreshCX = w / 2f;
-            RectF refreshArc = new RectF(refreshCX - 14, 133, refreshCX + 14, 161);
-            if (refreshing) {
-                p.setStyle(Paint.Style.STROKE);
-                p.setStrokeWidth(3);
-                p.setColor(accent);
-                c.drawArc(refreshArc, refreshAngle, 270, false, p);
-                p.setStyle(Paint.Style.FILL);
-                refreshAngle = (refreshAngle + 14) % 360;
-                postInvalidateOnAnimation();
-            } else {
-                text(c, getString(R.string.action_refresh), refreshCX, 150, 13, accent, Paint.Align.CENTER);
             }
 
             float banksHeaderX = rtl ? w - 28 : 28;
@@ -754,10 +747,30 @@ public class MainActivity extends Activity {
             }
         }
 
-        /** The refresh control sits on the top center of the total card. */
+        /** Draws the rounded-arrow refresh icon (the same glyph the widget's refresh button uses) top-right
+         *  of the app bar, opposite the app title. While a refresh runs, {@code refreshAngle} spins the
+         *  whole icon around its center. */
+        void drawRefreshIcon(Canvas c, int accent) {
+            float w = getWidth() / d;
+            float cx = isRtl() ? 56 : w - 56;
+            float cy = 76;
+            if (refreshIcon == null) {
+                refreshIcon = getContext().getDrawable(R.drawable.ic_refresh).mutate();
+                refreshIcon.setTint(accent);
+            }
+            int half = 13;
+            refreshIcon.setBounds((int) (cx - half), (int) (cy - half), (int) (cx + half), (int) (cy + half));
+            c.save();
+            c.rotate(refreshing ? refreshAngle : 0f, cx, cy);
+            refreshIcon.draw(c);
+            c.restore();
+        }
+
+        /** The refresh control sits on the top-right, opposite the app title and subtitle (top-left in RTL). */
         boolean isOnRefresh(float x, float y) {
-            float cx = getWidth() / d / 2f;
-            return y >= 130 && y <= 165 && Math.abs(x - cx) <= 72;
+            boolean rtl = isRtl();
+            return rtl ? x <= 110 && y >= 36 && y <= 100
+                : x >= getWidth() / d - 110 && y >= 36 && y <= 100;
         }
 
         /** Picks a sort. Selecting the active category again reverses its direction, which the dialog
