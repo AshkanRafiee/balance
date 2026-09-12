@@ -44,6 +44,15 @@ final class BalanceData {
     static final String KEY_HISTORY_RULES_VERSION = "history_rules_version";
     static final String KEY_HISTORY_LAST_BALANCE = "history_last_balance";
     static final String KEY_EXCLUDED = "excluded_banks";
+    static final String KEY_SORT = "sort_mode";
+
+    /** Sort modes for the bank list. Two of them (balance / update date) each have a reverse variant
+     *  so re-selecting the same sort flips its direction. */
+    static final int SORT_DEFAULT = 0;
+    static final int SORT_BALANCE_HIGH = 1;
+    static final int SORT_BALANCE_LOW = 2;
+    static final int SORT_DATE_RECENT = 3;
+    static final int SORT_DATE_OLDEST = 4;
 
     /** Bumped whenever the movement-message recognition rules change, forcing a full history re-scan. */
     static final int HISTORY_RULES_VERSION = 2;
@@ -329,17 +338,52 @@ final class BalanceData {
         setExcluded(context, excluded);
     }
 
-    /** Orders the supplied banks for display: included banks first (keeping their input order), followed
-     *  by excluded banks (also keeping their input order). The input map's own order is never modified. */
+    /** Orders the supplied banks for display: included banks first (sorted by the given mode),
+     *  followed by excluded banks (also sorted among themselves). The input map's own order is
+     *  never modified. */
     static List<Bank> orderForDisplay(Map<String, Bank> banks, Set<String> excluded) {
+        return orderForDisplay(banks, excluded, SORT_DEFAULT);
+    }
+
+    static List<Bank> orderForDisplay(Map<String, Bank> banks, Set<String> excluded, int sort) {
         List<Bank> included = new ArrayList<>();
         List<Bank> excludedBanks = new ArrayList<>();
         for (Bank b : banks.values()) {
             if (excluded.contains(b.name)) excludedBanks.add(b);
             else included.add(b);
         }
+        sortBanks(included, sort);
+        sortBanks(excludedBanks, sort);
         included.addAll(excludedBanks);
         return included;
+    }
+
+    private static void sortBanks(List<Bank> banks, int sort) {
+        switch (sort) {
+            case SORT_BALANCE_HIGH:
+                banks.sort((a, b) -> Long.compare(b.amount, a.amount));
+                break;
+            case SORT_BALANCE_LOW:
+                banks.sort((a, b) -> Long.compare(a.amount, b.amount));
+                break;
+            case SORT_DATE_RECENT:
+                banks.sort((a, b) -> Long.compare(b.date, a.date));
+                break;
+            case SORT_DATE_OLDEST:
+                banks.sort((a, b) -> Long.compare(a.date, b.date));
+                break;
+            default:
+                break;
+        }
+    }
+
+    /** The persisted bank-list sort mode, {@link #SORT_DEFAULT} when never chosen. */
+    static int getSort(Context context) {
+        return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).getInt(KEY_SORT, SORT_DEFAULT);
+    }
+
+    static void setSort(Context context, int mode) {
+        context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit().putInt(KEY_SORT, mode).apply();
     }
 
     /** Scans the inbox for balance messages and merges them into the saved store, then persists the

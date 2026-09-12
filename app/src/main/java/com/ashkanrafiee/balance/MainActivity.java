@@ -387,6 +387,7 @@ public class MainActivity extends Activity {
         final float d = getResources().getDisplayMetrics().density;
         boolean hidden, refreshing;
         int insetsTop, insetsBottom;
+        int sortMode;
         float scrollY = 0, lastY, downY, refreshAngle;
         boolean dragging;
         boolean hardArmed;
@@ -415,6 +416,7 @@ public class MainActivity extends Activity {
         BalanceView() {
             super(MainActivity.this);
             hidden = BalanceData.isHidden(MainActivity.this);
+            sortMode = BalanceData.getSort(MainActivity.this);
             p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
             setBackgroundColor(bg);
         }
@@ -621,9 +623,8 @@ public class MainActivity extends Activity {
                 else c.drawLine(w - 77, 142, w - 43, 170, p);
             }
 
-            float banksHeaderX = rtl ? w - 28 : 28;
-            text(c, getString(R.string.section_banks), banksHeaderX, 320, 22, fg, edgeAlign);
-            RectF refreshArc = rtl ? new RectF(30, 297, 58, 325) : new RectF(w - 58, 297, w - 30, 325);
+            float refreshCX = w / 2f;
+            RectF refreshArc = new RectF(refreshCX - 14, 133, refreshCX + 14, 161);
             if (refreshing) {
                 p.setStyle(Paint.Style.STROKE);
                 p.setStrokeWidth(3);
@@ -633,10 +634,14 @@ public class MainActivity extends Activity {
                 refreshAngle = (refreshAngle + 14) % 360;
                 postInvalidateOnAnimation();
             } else {
-                float refreshX = rtl ? 28 : w - 28;
-                Paint.Align refreshAlign = rtl ? Paint.Align.LEFT : Paint.Align.RIGHT;
-                text(c, getString(R.string.action_refresh), refreshX, 320, 14, accent, refreshAlign);
+                text(c, getString(R.string.action_refresh), refreshCX, 150, 13, accent, Paint.Align.CENTER);
             }
+
+            float banksHeaderX = rtl ? w - 28 : 28;
+            text(c, getString(R.string.section_banks), banksHeaderX, 320, 22, fg, edgeAlign);
+            float sortX = rtl ? 28 : w - 28;
+            Paint.Align sortAlign = rtl ? Paint.Align.LEFT : Paint.Align.RIGHT;
+            text(c, sortLabel(), sortX, 320, 14, accent, sortAlign);
 
             float by = (getHeight() - top - bottom) / d - 32;
             c.save();
@@ -646,7 +651,7 @@ public class MainActivity extends Activity {
                 round(c, 24, y, w - 24, y + 96, 22, panel);
                 float statusX = rtl ? w - 48 : 48;
                 text(c, fit(status, 15, w - 96), statusX, y + 56, 15, muted, edgeAlign);
-            } else for (Bank b : BalanceData.orderForDisplay(banks, excluded)) {
+            } else for (Bank b : BalanceData.orderForDisplay(banks, excluded, sortMode)) {
                 boolean excluded = this.excluded.contains(b.name);
                 int cardColor = excluded ? bg : panel;
                 round(c, 24, y, w - 24, y + 82, 20, cardColor);
@@ -732,6 +737,60 @@ public class MainActivity extends Activity {
             return name.substring(0, Math.min(2, name.length())).toUpperCase(Locale.US);
         }
 
+        /** The compact sort button label shown next to the "Banks" header; the arrow shows direction,
+         *  so re-tapping the sort dialog's matching option reads as reversing that direction. */
+        String sortLabel() {
+            switch (sortMode) {
+                case BalanceData.SORT_BALANCE_HIGH:
+                    return getString(R.string.sort_label_balance) + " \u2193";
+                case BalanceData.SORT_BALANCE_LOW:
+                    return getString(R.string.sort_label_balance) + " \u2191";
+                case BalanceData.SORT_DATE_RECENT:
+                    return getString(R.string.sort_label_date) + " \u2193";
+                case BalanceData.SORT_DATE_OLDEST:
+                    return getString(R.string.sort_label_date) + " \u2191";
+                default:
+                    return getString(R.string.action_sort);
+            }
+        }
+
+        /** The refresh control sits on the top center of the total card. */
+        boolean isOnRefresh(float x, float y) {
+            float cx = getWidth() / d / 2f;
+            return y >= 130 && y <= 165 && Math.abs(x - cx) <= 72;
+        }
+
+        /** Picks a sort. Selecting the active category again reverses its direction, which the dialog
+         *  rows communicate explicitly ("… — tap again to reverse"). Excluded banks stay at the bottom
+         *  of the list in every mode. */
+        void showSortDialog() {
+            boolean balHigh = sortMode == BalanceData.SORT_BALANCE_HIGH;
+            boolean balLow = sortMode == BalanceData.SORT_BALANCE_LOW;
+            boolean dateRecent = sortMode == BalanceData.SORT_DATE_RECENT;
+            boolean dateOldest = sortMode == BalanceData.SORT_DATE_OLDEST;
+            String balanceLabel = balHigh ? getString(R.string.sort_balance_high_reverse)
+                : balLow ? getString(R.string.sort_balance_low_reverse)
+                : getString(R.string.sort_balance_prompt);
+            String dateLabel = dateRecent ? getString(R.string.sort_date_recent_reverse)
+                : dateOldest ? getString(R.string.sort_date_oldest_reverse)
+                : getString(R.string.sort_date_prompt);
+            String[] options = {
+                getString(R.string.sort_default), balanceLabel, dateLabel
+            };
+            new android.app.AlertDialog.Builder(MainActivity.this)
+                .setTitle(getString(R.string.sort_dialog_title))
+                .setItems(options, (dialogInterface, which) -> {
+                    if (which == 0) sortMode = BalanceData.SORT_DEFAULT;
+                    else if (which == 1) sortMode = balHigh ? BalanceData.SORT_BALANCE_LOW
+                        : BalanceData.SORT_BALANCE_HIGH;
+                    else sortMode = dateRecent ? BalanceData.SORT_DATE_OLDEST
+                        : BalanceData.SORT_DATE_RECENT;
+                    BalanceData.setSort(MainActivity.this, sortMode);
+                    invalidate();
+                })
+                .show();
+        }
+
         void copyBalance(String label, long value) {
             if (hidden) {
                 Toast.makeText(MainActivity.this, getString(R.string.toast_unmask_to_copy), Toast.LENGTH_SHORT).show();
@@ -783,7 +842,7 @@ public class MainActivity extends Activity {
                 h = (getHeight() - top - bottom) / d;
             if (e.getAction() == MotionEvent.ACTION_DOWN) {
                 lastY = y; downY = y; dragging = false;
-                hardArmed = y > 290 && y < 350 && (rtl ? x < 150 : x > getWidth() / d - 150);
+                hardArmed = isOnRefresh(x, y);
                 hardProbeFired = false;
                 if (hardArmed) handler.postDelayed(hardRefreshProbe, 650);
                 else handler.removeCallbacks(hardRefreshProbe);
@@ -819,6 +878,8 @@ public class MainActivity extends Activity {
                 } else if (x >= footerHistoryStart - 10 && x <= footerHistoryEnd + 10) {
                     startActivity(new Intent(MainActivity.this, HistoryActivity.class));
                 }
+            } else if (isOnRefresh(x, y)) {
+                refresh();
             } else if (y >= 120 && y <= 270) {
                 boolean onEye = rtl ? x <= 105 && y <= 185 : x >= getWidth() / d - 105 && y <= 185;
                 if (onEye) {
@@ -828,13 +889,13 @@ public class MainActivity extends Activity {
                     invalidate();
                 } else copyBalance(getString(R.string.total_label), total);
             } else if (y > 290 && y < 350 && (rtl ? x < 150 : x > getWidth() / d - 150)) {
-                refresh();
+                showSortDialog();
             } else if (y >= 352 && y < byForTouch(h)) {
                 int index = (int) ((y - 352 + scrollY) / 96);
                 float rowOffset = (y - 352 + scrollY) % 96;
                 if (rowOffset < 82 && index >= 0 && index < banks.size()) {
                     int i = 0;
-                    for (Bank bank : BalanceData.orderForDisplay(banks, excluded)) {
+                    for (Bank bank : BalanceData.orderForDisplay(banks, excluded, sortMode)) {
                         if (i++ == index) {
                             boolean onMenu = rtl
                                 ? x >= 16 && x <= 56

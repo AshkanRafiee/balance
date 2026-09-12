@@ -144,4 +144,16 @@
     <string name="excluded_label">Excluded from total</string>
     <string name="toast_excluded">Excluded from total</string>
     <string name="toast_included">Included in total</string>
+
+    <string name="action_sort">Sort</string>
+    <string name="sort_dialog_title">Sort banks</string>
+    <string name="sort_default">Default order</string>
+    <string name="sort_balance_prompt">By balance</string>
+    <string name="sort_date_prompt">By update date</string>
+    <string name="sort_balance_high_reverse">Balance: high to low — tap again to reverse</string>
+    <string name="sort_balance_low_reverse">Balance: low to high — tap again to reverse</string>
+    <string name="sort_date_recent_reverse">Date: newest first — tap again to reverse</string>
+    <string name="sort_date_oldest_reverse">Date: oldest first — tap again to reverse</string>
+    <string name="sort_label_balance">Balance</string>
+    <string name="sort_label_date">Date</string>
 </resources>
