@@ -16,7 +16,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
@@ -1095,11 +1094,13 @@ public final class HistoryActivity extends Activity {
         return "fa".equals(LocaleHelper.currentTag(this)) ? faDigitsString(s) : s;
     }
 
-    private String faDigits(long n) {
-        return NumberFormat.getNumberInstance(new Locale("fa")).format(n);
+    /** Converts a calendar number (year, day) to Persian digits without any thousands grouping —
+     *  grouping separators belong to prices, not calendar numerals like "۱۴۰۳". */
+    public static String faDigits(long n) {
+        return faDigitsString(Long.toString(n));
     }
 
-    private String faDigitsString(String s) {
+    public static String faDigitsString(String s) {
         StringBuilder b = new StringBuilder(s.length());
         for (char c : s.toCharArray()) {
             if (c >= '0' && c <= '9') b.append((char) ('\u06f0' + c - '0'));

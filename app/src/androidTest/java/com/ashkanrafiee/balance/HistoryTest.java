@@ -429,4 +429,24 @@ public class HistoryTest {
         HistoryActivity.buildLists(txs);
         assertEquals(copy, txs);
     }
+
+    // ---- Persian calendar numerals have no thousands grouping ----
+
+    @Test public void faDigits_year_hasNoGroupingSeparator() {
+        // A Jalali year like 1403 must read "۱۴۰۳", never "۱٬۴۰۳".
+        assertEquals("\u06f1\u06f4\u06f0\u06f3", HistoryActivity.faDigits(1403));
+        assertEquals("\u06f1\u06f4\u06f0\u06f5", HistoryActivity.faDigits(1405));
+        assertEquals("\u06f1\u06f3\u06f9\u06f9", HistoryActivity.faDigits(1399));
+    }
+
+    @Test public void faDigits_day_hasNoGroupingSeparator() {
+        assertEquals("\u06f1\u06f2", HistoryActivity.faDigits(12));
+        assertEquals("\u06f5", HistoryActivity.faDigits(5));
+        assertEquals("\u06f0", HistoryActivity.faDigits(0));
+    }
+
+    @Test public void faDigitsString_timeOnlyReplacesDigits() {
+        assertEquals("\u06f1\u06f2:\u06f3\u06f4", HistoryActivity.faDigitsString("12:34"));
+        assertEquals("-", HistoryActivity.faDigitsString("-"));
+    }
 }
