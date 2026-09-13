@@ -1,0 +1,10 @@
+Sort your banks any way you like, and keep the widget in step.
+
+• A new Sort button next to the "Banks" header orders the list by balance or by update date; tap the active option again to reverse it, high-to-low or newest-first.
+• Banks now default to highest balance first, and the old "Default" order is gone.
+• Your sort choice is remembered across app restarts.
+• Excluded banks always sit at the end of the list, no matter how you sort.
+• The refresh action moved to the top of the total card; the old refresh text was replaced by a spinner in the app bar while balances update.
+• The widget now mirrors the app's bank order and hides excluded banks entirely, so the widget and the app always tell the same story.
+• Persian numerals in the History screen no longer insert thousands separators.
+• The History button in the footer is simply "History" now — the Experimental note lives on the History page itself.
