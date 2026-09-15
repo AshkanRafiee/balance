@@ -1,0 +1,6 @@
+Per-bank transaction history: tap any bank card to see only that bank's transactions.
+
+• Tapping a bank on the main screen opens a full history view filtered to that bank, with the bank's badge, name and a "Bank" chip in the header so you always know what you are looking at.
+• The copy-to-clipboard action moved to the three-dot menu on the main screen.
+• All history figures — year, month and day totals, per-transaction amounts and hero sums — now auto-size to the space they have, so nothing clips on narrow screens or at large system font sizes.
+• RTL layout is fully supported: per-bank rows, year-month-day cards and hero values all respect text direction and available width.
