@@ -500,10 +500,10 @@ public final class HistoryActivity extends Activity {
         hero.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
         // The lifetime total.
-        TextView total = bold(signedToman(lists.total), 30, valueColor(lists.total));
+        TextView total = bold(signedToman(lists.total), 32, valueColor(lists.total));
         total.setGravity(Gravity.START);
         total.setSingleLine(true);
-        autoSize(total, 12, 30);
+        autoSize(total, 12, 32);
         hero.addView(total, margin(0, 2, 0, 0));
 
         // Hairline divider.
@@ -536,17 +536,22 @@ public final class HistoryActivity extends Activity {
         return v;
     }
 
-    /** One period stat: colored label over the signed net value, auto-sized to its column. */
+    /** One period stat: colored label over the signed net value, auto-sized to its column. The
+     *  label and value shrink to the available column width (also covering system font scale),
+     *  and grow up to their maximum only where room allows, so sums stay legible on every screen. */
     private LinearLayout statsCell(String label, long value, int color) {
         LinearLayout cell = new LinearLayout(this);
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setGravity(Gravity.CENTER_HORIZONTAL);
         TextView l = text(label, 12, color, MEDIUM);
-        cell.addView(l, new LinearLayout.LayoutParams(-2, -2));
-        TextView v = bold(signedToman(value), 18, color);
+        l.setSingleLine(true);
+        l.setGravity(Gravity.CENTER_HORIZONTAL);
+        autoSize(l, 9, 12);
+        cell.addView(l, new LinearLayout.LayoutParams(-1, -2));
+        TextView v = bold(signedToman(value), 20, color);
         v.setSingleLine(true);
         v.setGravity(Gravity.CENTER_HORIZONTAL);
-        autoSize(v, 10, 18);
+        autoSize(v, 8, 20);
         LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(-1, -2);
         vp.topMargin = dp(5);
         cell.addView(v, vp);
@@ -617,6 +622,9 @@ public final class HistoryActivity extends Activity {
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
         TextView sum = bold(signedToman(y.sum), 16, valueColor(y.sum));
+        sum.setSingleLine(true);
+        sum.setMaxWidth(dp(150));
+        autoSize(sum, 11, 16);
         head.addView(sum, sumParams);
         head.setContentDescription(state(yTitle, y.sum, open));
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
@@ -699,6 +707,9 @@ public final class HistoryActivity extends Activity {
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
         TextView sum = bold(signedToman(m.sum), 14, valueColor(m.sum));
+        sum.setSingleLine(true);
+        sum.setMaxWidth(dp(130));
+        autoSize(sum, 10, 14);
         head.addView(sum, sumParams);
         head.setContentDescription(state(monthName(m.month), m.sum, open));
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
@@ -786,6 +797,9 @@ public final class HistoryActivity extends Activity {
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
         TextView sum = bold(signedToman(g.sum), 13, valueColor(g.sum));
+        sum.setSingleLine(true);
+        sum.setMaxWidth(dp(120));
+        autoSize(sum, 10, 13);
         head.addView(sum, sumParams);
         head.setContentDescription(state(persianDate(g.date), g.sum, open));
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
@@ -838,6 +852,9 @@ public final class HistoryActivity extends Activity {
         row.addView(col, colLp);
 
         TextView amt = bold(signedToman(t.amount), 13, valueColor(t.amount));
+        amt.setSingleLine(true);
+        amt.setMaxWidth(dp(110));
+        autoSize(amt, 10, 13);
         row.addView(amt, new LinearLayout.LayoutParams(-2, -2));
         return row;
     }
