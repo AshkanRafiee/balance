@@ -18,6 +18,16 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Pull-to-refresh and animated refresh indicator
 - English and Persian (فارسی) interface, with automatic system-language detection and localized bank names
 
+## Download
+
+Balance can be installed from any of these sources:
+
+- **GitHub** — the fastest way to get the latest updates is installing the signed APK directly from the [GitHub Releases](https://github.com/ashkanrafiee/balance/releases) page. Pair it with [Obtainium](https://obtainium.imranr.dev/) to receive and install updates automatically.
+- **F-Droid** — the preferred store edition for users who like app stores; get it from the [F-Droid listing](https://f-droid.org/en/packages/com.ashkanrafiee.balance/).
+- **Myket and Cafe Bazaar** — alternative store editions, handy for users less familiar with the options above:
+  - [Cafe Bazaar](https://cafebazaar.ir/app/com.ashkanrafiee.balance)
+  - [Myket](https://myket.ir/app/com.ashkanrafiee.balance)
+
 ## Build
 
 ```sh
