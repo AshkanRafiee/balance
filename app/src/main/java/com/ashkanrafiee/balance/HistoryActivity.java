@@ -165,17 +165,32 @@ public final class HistoryActivity extends Activity {
     private void applyFit(TextView v, int maxSp, int minSp, int capDp) {
         int avail;
         View p = v.getParent() instanceof View ? (View) v.getParent() : null;
+        boolean fills = v.getLayoutParams() instanceof LinearLayout.LayoutParams
+            && ((LinearLayout.LayoutParams) v.getLayoutParams()).width
+                == LinearLayout.LayoutParams.MATCH_PARENT;
         if (capDp > 0) {
             avail = dp(capDp);
+        } else if (fills && p != null && p.getWidth() > 0) {
+            // A fill-width view (hero total, stat labels/values) spans the whole column, so its
+            // own laid-out width is the budget — using parent-relative maths here would read as
+            // zero in RTL and skip the fit entirely.
+            avail = v.getWidth() - v.getCompoundPaddingLeft() - v.getCompoundPaddingRight();
         } else if (p != null && p.getWidth() > 0) {
-            // Space still left for the view on the reading side of its parent, regardless of how
-            // wide its wrap-content siblings already are (key for RTL too).
+            // Space still left for a wrap-content sum on the reading side of its parent, regardless
+            // of how wide its siblings already are (key for RTL too).
             if (isRtl()) {
                 avail = v.getLeft() - p.getPaddingLeft();
             } else {
                 avail = p.getWidth() - p.getPaddingRight() - v.getLeft();
             }
             avail -= v.getCompoundPaddingLeft() + v.getCompoundPaddingRight();
+            // A wrap-content sum can be measured overlarge on its first pass (pushing past the
+            // content edge), leaving zero or negative room here; never bail on that — hand it the
+            // widest slice that still keeps it inside the card so the text can shrink into place.
+            if (avail <= 0) {
+                int content = p.getWidth() - p.getPaddingLeft() - p.getPaddingRight();
+                avail = Math.max(1, content / 3);
+            }
         } else {
             avail = v.getWidth() - v.getCompoundPaddingLeft() - v.getCompoundPaddingRight();
         }
