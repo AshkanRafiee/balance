@@ -141,11 +141,82 @@ public final class HistoryActivity extends Activity {
         return p;
     }
 
-    /** Enables uniform auto-sizing between {@code min} and {@code max} sp (API 26+, our floor). */
-    private void autoSize(TextView v, int min, int max) {
-        v.setAutoSizeTextTypeWithDefaults(TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM);
-        v.setAutoSizeTextTypeUniformWithConfiguration(
-            min, max, 1, TypedValue.COMPLEX_UNIT_SP);
+    /** Converts an sp value to px honouring the device density and system font scale. */
+    private float sp(float valueSp) {
+        return TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_SP, valueSp, getResources().getDisplayMetrics());
+    }
+
+    /** Fits the view's single-line text to the available width by measuring the actual glyphs, so
+     *  sums can never overflow their column or slide under a neighbour at any font scale. Sizes up
+     *  to {@code maxSp} sp where there is room, and lets the text shrink all the way down until it
+     *  fits — if even the {@code minSp} floor is too wide the text keeps shrinking, because a
+     *  slightly smaller digit is always better than a clipped one. When {@code capDp} is positive
+     *  the text is fitted to that explicit width; otherwise it is fitted to whatever the parent
+     *  actually leaves for it, which is what keeps header sums on-screen at large fonts. */
+    private void fitToWidth(TextView v, int maxSp, int minSp, int capDp) {
+        v.setSingleLine(true);
+        v.setAutoSizeTextTypeWithDefaults(TextView.AUTO_SIZE_TEXT_TYPE_NONE);
+        v.addOnLayoutChangeListener(
+            (view, l, t, r, b, ol, ot, or, ob) -> applyFit(v, maxSp, minSp, capDp));
+        v.post(() -> applyFit(v, maxSp, minSp, capDp));
+    }
+
+    private void applyFit(TextView v, int maxSp, int minSp, int capDp) {
+        int avail;
+        View p = v.getParent() instanceof View ? (View) v.getParent() : null;
+        if (capDp > 0) {
+            avail = dp(capDp);
+        } else if (p != null && p.getWidth() > 0) {
+            // Space still left for the view on the reading side of its parent, regardless of how
+            // wide its wrap-content siblings already are (key for RTL too).
+            if (isRtl()) {
+                avail = v.getLeft() - p.getPaddingLeft();
+            } else {
+                avail = p.getWidth() - p.getPaddingRight() - v.getLeft();
+            }
+            avail -= v.getCompoundPaddingLeft() + v.getCompoundPaddingRight();
+        } else {
+            avail = v.getWidth() - v.getCompoundPaddingLeft() - v.getCompoundPaddingRight();
+        }
+        if (avail <= 0) return;
+        String s = v.getText().toString();
+        if (s.isEmpty()) return;
+        android.graphics.Paint paint = new android.graphics.Paint(v.getPaint());
+        float maxPx = sp(maxSp);
+        float minPx = sp(minSp);
+        paint.setTextSize(maxPx);
+        if (paint.measureText(s) <= avail) {
+            fitPx(v, maxPx);
+            return;
+        }
+        paint.setTextSize(minPx);
+        if (paint.measureText(s) <= avail) {
+            // Binary search the largest size (in px) that still fits.
+            float lo = minPx, hi = maxPx;
+            for (int i = 0; i < 16; i++) {
+                float mid = (lo + hi) / 2f;
+                paint.setTextSize(mid);
+                if (paint.measureText(s) <= avail) lo = mid; else hi = mid;
+            }
+            fitPx(v, lo);
+            return;
+        }
+        // Even the floor is too wide: shrink below it until the digits fit completely.
+        float size = minPx;
+        paint.setTextSize(size);
+        while (size > 1f && paint.measureText(s) > avail) {
+            size *= 0.95f;
+            paint.setTextSize(size);
+        }
+        fitPx(v, size);
+    }
+
+    /** Applies a final pixel text size that actually differs from the current one, so repeated
+     *  layout passes converge instead of re-queueing changes forever. */
+    private void fitPx(TextView v, float px) {
+        if (Math.abs(v.getTextSize() - px) < 0.5f) return;
+        v.setTextSize(TypedValue.COMPLEX_UNIT_PX, px);
     }
 
     // ====================================================================
@@ -502,8 +573,7 @@ public final class HistoryActivity extends Activity {
         // The lifetime total.
         TextView total = bold(signedToman(lists.total), 32, valueColor(lists.total));
         total.setGravity(Gravity.START);
-        total.setSingleLine(true);
-        autoSize(total, 12, 32);
+        fitToWidth(total, 32, 12, 0);
         hero.addView(total, margin(0, 2, 0, 0));
 
         // Hairline divider.
@@ -544,14 +614,12 @@ public final class HistoryActivity extends Activity {
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setGravity(Gravity.CENTER_HORIZONTAL);
         TextView l = text(label, 12, color, MEDIUM);
-        l.setSingleLine(true);
         l.setGravity(Gravity.CENTER_HORIZONTAL);
-        autoSize(l, 9, 12);
+        fitToWidth(l, 12, 9, 0);
         cell.addView(l, new LinearLayout.LayoutParams(-1, -2));
         TextView v = bold(signedToman(value), 20, color);
-        v.setSingleLine(true);
         v.setGravity(Gravity.CENTER_HORIZONTAL);
-        autoSize(v, 8, 20);
+        fitToWidth(v, 20, 8, 0);
         LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(-1, -2);
         vp.topMargin = dp(5);
         cell.addView(v, vp);
@@ -622,9 +690,7 @@ public final class HistoryActivity extends Activity {
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
         TextView sum = bold(signedToman(y.sum), 16, valueColor(y.sum));
-        sum.setSingleLine(true);
-        sum.setMaxWidth(dp(150));
-        autoSize(sum, 11, 16);
+        fitToWidth(sum, 16, 11, 0);
         head.addView(sum, sumParams);
         head.setContentDescription(state(yTitle, y.sum, open));
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
@@ -707,9 +773,7 @@ public final class HistoryActivity extends Activity {
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
         TextView sum = bold(signedToman(m.sum), 14, valueColor(m.sum));
-        sum.setSingleLine(true);
-        sum.setMaxWidth(dp(130));
-        autoSize(sum, 10, 14);
+        fitToWidth(sum, 14, 10, 0);
         head.addView(sum, sumParams);
         head.setContentDescription(state(monthName(m.month), m.sum, open));
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
@@ -797,9 +861,7 @@ public final class HistoryActivity extends Activity {
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
         TextView sum = bold(signedToman(g.sum), 13, valueColor(g.sum));
-        sum.setSingleLine(true);
-        sum.setMaxWidth(dp(120));
-        autoSize(sum, 10, 13);
+        fitToWidth(sum, 13, 10, 0);
         head.addView(sum, sumParams);
         head.setContentDescription(state(persianDate(g.date), g.sum, open));
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
@@ -852,9 +914,7 @@ public final class HistoryActivity extends Activity {
         row.addView(col, colLp);
 
         TextView amt = bold(signedToman(t.amount), 13, valueColor(t.amount));
-        amt.setSingleLine(true);
-        amt.setMaxWidth(dp(110));
-        autoSize(amt, 10, 13);
+        fitToWidth(amt, 13, 10, 0);
         row.addView(amt, new LinearLayout.LayoutParams(-2, -2));
         return row;
     }
