@@ -6,13 +6,17 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 
 ## Features
 
-- Local SMS parsing only
+- Local SMS parsing only — no account, cloud service, analytics, or internet permission
 - Latest balance per supported bank, without accumulating repeated messages
-- Combined total balance
-- Persistent masked-balance and currency preferences
+- Combined total balance, with the option to exclude individual banks from the total
+- Transaction history with deposits and withdrawals, broken down by day, month and year
+- Per-bank history: tap any bank card to see just that bank's transactions
+- Bank sorting by balance or update time, mirrored in the list and the home-screen widget
+- Home-screen widget with the same bank order, totals, and privacy mask as the app
+- Password-encrypted backup and restore
+- Auto light/dark theme, persistent masked-balance and currency preferences
 - Pull-to-refresh and animated refresh indicator
 - English and Persian (فارسی) interface, with automatic system-language detection and localized bank names
-- No account, cloud service, analytics, or internet permission
 
 ## Build
 
