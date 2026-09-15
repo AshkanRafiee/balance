@@ -41,6 +41,9 @@ public final class HistoryActivity extends Activity {
     private static final String DAY_TAG = "history_day";
     private static final String YEAR_TAG = "history_year";
 
+    /** Intent extra: when set, the screen shows the history of this canonical bank name only. */
+    static final String EXTRA_BANK = "bank_filter";
+
     private int bg, card, muted, accent, fg, divider, negativeColor, positiveColor;
     private int todayColor, monthColor, yearColor;
     private int heroTop, heroBottom, rail, openBg, chipBg;
@@ -52,6 +55,8 @@ public final class HistoryActivity extends Activity {
     };
     private LinearLayout body;
     private JalaliCalendar todayJalali, yesterdayJalali;
+    /** Optional canonical bank name; when set, only that bank's transactions are shown. */
+    private String bankFilter;
 
     /** The refresh glyph in the header, rotated while a history scan is in flight (or for a short
      *  beat after a tap, so a fast scan still reports an update visually). */
@@ -167,6 +172,7 @@ public final class HistoryActivity extends Activity {
             expandedSeeded = state.getBoolean(KEY_EXPANDED_SEEDED, false);
             pendingScroll = state.getInt(KEY_SCROLL_Y, 0);
         }
+        bankFilter = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_BANK);
         bg = color(R.color.bg);
         card = color(R.color.panel);
         muted = color(R.color.muted);
@@ -251,15 +257,32 @@ public final class HistoryActivity extends Activity {
 
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-2, -2);
         titleParams.setMarginStart(dp(10));
-        TextView title = text(getString(R.string.history_title), 22, fg, MEDIUM);
-        bar.addView(title, titleParams);
+        if (bankFilter != null) {
+            // Per-bank view: a bank badge plus the bank's name identifies exactly whose filtered
+            // history this is, and the "Bank" chip flags it as not the full history.
+            View badge = bankBadge(bankFilter);
+            LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(dp(32), dp(32));
+            badgeLp.setMarginStart(dp(4));
+            bar.addView(badge, badgeLp);
+            TextView title = text(BankRules.displayName(this, bankFilter), 22, fg, MEDIUM);
+            bar.addView(title, titleParams);
+            TextView chip = text(getString(R.string.history_bank_chip), 11, badgeFg, MEDIUM);
+            chip.setPadding(dp(8), dp(3), dp(8), dp(3));
+            chip.setBackground(rounded(badgeBg, 9));
+            LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(-2, -2);
+            chipParams.setMarginStart(dp(8));
+            bar.addView(chip, chipParams);
+        } else {
+            TextView title = text(getString(R.string.history_title), 22, fg, MEDIUM);
+            bar.addView(title, titleParams);
 
-        LinearLayout.LayoutParams badgeParams = new LinearLayout.LayoutParams(-2, -2);
-        badgeParams.setMarginStart(dp(8));
-        TextView badge = text(getString(R.string.history_experimental), 11, badgeFg, MEDIUM);
-        badge.setPadding(dp(8), dp(3), dp(8), dp(3));
-        badge.setBackground(rounded(badgeBg, 9));
-        bar.addView(badge, badgeParams);
+            LinearLayout.LayoutParams badgeParams = new LinearLayout.LayoutParams(-2, -2);
+            badgeParams.setMarginStart(dp(8));
+            TextView badge = text(getString(R.string.history_experimental), 11, badgeFg, MEDIUM);
+            badge.setPadding(dp(8), dp(3), dp(8), dp(3));
+            badge.setBackground(rounded(badgeBg, 9));
+            bar.addView(badge, badgeParams);
+        }
 
         LinearLayout.LayoutParams barSpacer = new LinearLayout.LayoutParams(0, 0, 1);
         bar.addView(new View(this), barSpacer);
@@ -407,8 +430,7 @@ public final class HistoryActivity extends Activity {
     /** Re-reads the saved history and rebuilds the whole screen from it. */
     private void render() {
         refreshDates();
-        List<Transaction> txs = BalanceData.readTransactions(this);
-        Lists lists = buildLists(txs);
+        Lists lists = buildLists(filtered(BalanceData.readTransactions(this)));
         body.removeAllViews();
         if (lists.years.isEmpty()) {
             emptyState();
@@ -422,6 +444,20 @@ public final class HistoryActivity extends Activity {
         stopSpin();
     }
 
+    /** Isolates the saved transactions that belong to {@link #bankFilter}, returning the input
+     *  unchanged when no filter is set (the plain full-history view). */
+    private List<Transaction> filtered(List<Transaction> txs) {
+        return bankFilter == null ? txs : filterByBank(txs, bankFilter);
+    }
+
+    /** Returns only the transactions whose bank equals {@code bank}, preserving input order.
+     *  Kept static so the instrumented tests can cover the per-bank filter directly. */
+    static List<Transaction> filterByBank(List<Transaction> txs, String bank) {
+        List<Transaction> only = new ArrayList<>();
+        for (Transaction t : txs) if (bank.equals(t.bank)) only.add(t);
+        return only;
+    }
+
     private void emptyState() {
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
@@ -431,7 +467,10 @@ public final class HistoryActivity extends Activity {
         icon.setImageResource(R.drawable.ic_history_empty);
         icon.setColorFilter(muted);
         wrap.addView(icon);
-        TextView msg = text(getString(R.string.history_empty), 14, muted);
+        String empty = bankFilter == null
+            ? getString(R.string.history_empty)
+            : getString(R.string.history_empty_bank, BankRules.displayName(this, bankFilter));
+        TextView msg = text(empty, 14, muted);
         msg.setGravity(Gravity.CENTER);
         msg.setPadding(dp(8), dp(18), dp(8), 0);
         wrap.addView(msg, new LinearLayout.LayoutParams(-2, -2));
@@ -771,22 +810,28 @@ public final class HistoryActivity extends Activity {
         return box;
     }
 
-    /** One movement: bank badge, bank name with time, and the signed amount. */
+    /** One movement: bank badge, bank name with time, and the signed amount. In a per-bank view
+     *  every row is the same bank, so the time alone identifies it and the badge/name are dropped. */
     private LinearLayout txRow(Transaction t) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPaddingRelative(dp(4), dp(3), dp(4), dp(3));
 
-        View badge = bankBadge(t.bank);
-        row.addView(badge, new LinearLayout.LayoutParams(dp(30), dp(30)));
+        boolean perBank = bankFilter != null;
+        if (!perBank) {
+            View badge = bankBadge(t.bank);
+            row.addView(badge, new LinearLayout.LayoutParams(dp(30), dp(30)));
+        }
 
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
-        TextView name = text(BankRules.displayName(this, t.bank), 13, fg);
-        col.addView(name, new LinearLayout.LayoutParams(-2, -2));
-        TextView time = text(timeText(t.date), 11, muted);
+        if (!perBank) {
+            TextView name = text(BankRules.displayName(this, t.bank), 13, fg);
+            col.addView(name, new LinearLayout.LayoutParams(-2, -2));
+        }
+        TextView time = text(timeText(t.date), perBank ? 13 : 11, perBank ? fg : muted);
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-2, -2);
-        tp.topMargin = dp(2);
+        if (!perBank) tp.topMargin = dp(2);
         col.addView(time, tp);
         LinearLayout.LayoutParams colLp = new LinearLayout.LayoutParams(0, -2, 1);
         colLp.setMarginStart(dp(9));

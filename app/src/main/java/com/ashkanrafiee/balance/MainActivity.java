@@ -911,8 +911,11 @@ public class MainActivity extends Activity {
                                 ? x >= 16 && x <= 56
                                 : x >= getWidth() / d - 56 && x <= getWidth() / d - 16;
                             if (onMenu) showBankMenu(bank);
-                            else copyBalance(
-                                BankRules.displayName(MainActivity.this, bank.name), bank.amount);
+                            else {
+                                Intent history = new Intent(MainActivity.this, HistoryActivity.class);
+                                history.putExtra(HistoryActivity.EXTRA_BANK, bank.name);
+                                startActivity(history);
+                            }
                             break;
                         }
                     }

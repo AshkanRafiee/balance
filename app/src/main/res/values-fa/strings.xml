@@ -75,7 +75,9 @@
 
     <string name="history_title">تاریخچه</string>
     <string name="history_experimental">آزمایشی</string>
+    <string name="history_bank_chip">بانک</string>
     <string name="history_empty">هنوز تراکنشی یافت نشده است. تاریخچهٔ تراکنش‌ها هنگام خواندن پیامک‌های بانکی ساخته می‌شود.</string>
+    <string name="history_empty_bank">هنوز تراکنشی برای %1$s یافت نشده است. تاریخچهٔ تراکنش‌ها هنگام خواندن پیامک‌های بانکی ساخته می‌شود.</string>
     <string name="history_today">امروز</string>
     <string name="history_this_month">این ماه</string>
     <string name="history_this_year">امسال</string>

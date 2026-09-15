@@ -471,6 +471,37 @@ public class HistoryTest {
         assertEquals(copy, txs);
     }
 
+    // ---- per-bank history filter ---------------------------------------------
+
+    @Test public void filterByBank_isolatesOneBank_totalsMatch() {
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Saman", epoch(2026, 9, 10), 1000000L));
+        txs.add(new Transaction("Mellat", epoch(2026, 9, 10), -500000L));
+        txs.add(new Transaction("Saman", epoch(2026, 9, 11), 2000000L));
+        List<Transaction> only = HistoryActivity.filterByBank(txs, "Saman");
+        assertEquals(2, only.size());
+        for (HistoryActivity.DayGroup g : HistoryActivity.buildLists(only).years.get(0).months.get(0).days) {
+            for (Transaction t : g.txs) assertEquals("Saman", t.bank);
+        }
+        assertEquals(3000000L, HistoryActivity.buildLists(only).total);
+    }
+
+    @Test public void filterByBank_unknownBank_isEmpty() {
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Saman", epoch(2026, 9, 10), 1000000L));
+        assertTrue(HistoryActivity.filterByBank(txs, "Sepah").isEmpty());
+        assertTrue(HistoryActivity.filterByBank(new ArrayList<>(), "Saman").isEmpty());
+    }
+
+    @Test public void filterByBank_keepsInputUnchanged() {
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Saman", epoch(2026, 9, 10), 1000000L));
+        txs.add(new Transaction("Mellat", epoch(2026, 9, 10), -500000L));
+        List<Transaction> copy = new ArrayList<>(txs);
+        HistoryActivity.filterByBank(txs, "Saman");
+        assertEquals(copy, txs);
+    }
+
     // ---- Persian calendar numerals have no thousands grouping ----
 
     @Test public void faDigits_year_hasNoGroupingSeparator() {
