@@ -1,0 +1,5 @@
+Resalat bank movements are now captured when the bank sends them as a bare signed amount.
+
+• Resalat (بانک رسالت) sometimes reports a movement with just the amount and its sign on the first line — for example "-200,000,000" for a withdrawal or "+5,000,000" for a deposit — with the resulting balance on the last line.
+• The leading sign now sets the direction, so such messages appear in History with the correct withdrawal or deposit amount.
+• This update triggers a one-time full History re-scan, so already-received Resalat messages are counted too.
