@@ -134,6 +134,25 @@ public class HistoryScanTest {
         fail("seeded SMS did not arrive in time: sender=" + sender);
     }
 
+    /** Runs an injector transaction scenario (action tx) and waits until all of its messages are in the
+     *  inbox. The injector writes the messages from its own process, so the wait makes the scan that
+     *  follows deterministic. */
+    private void seedTxScenario(String scenario, int expectedRows) throws Exception {
+        exec("am start -n com.ashkanrafiee.smsinject/.MainActivity -e action tx -e scenario " + scenario);
+        long deadline = System.currentTimeMillis() + 15_000;
+        while (System.currentTimeMillis() < deadline) {
+            int count = 0;
+            try (android.database.Cursor c = ctx.getContentResolver().query(
+                    android.provider.Telephony.Sms.Inbox.CONTENT_URI,
+                    new String[]{android.provider.Telephony.Sms._ID}, null, null, null)) {
+                if (c != null) while (c.moveToNext()) count++;
+            }
+            if (count >= expectedRows) return;
+            Thread.sleep(150);
+        }
+        fail("tx scenario " + scenario + " messages did not arrive in time");
+    }
+
     private SharedPreferences prefs() {
         return ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE);
     }
@@ -263,6 +282,38 @@ public class HistoryScanTest {
 
         assertEquals(1, added);
         assertEquals(1, BalanceData.readTransactions(ctx).size());
+    }
+
+    @Test public void injectorTxScenario_resalatMovements_areRecorded() throws Exception {
+        // The sms-injector's "resalat" scenario seeds only Resalat's bare-signed-amount layout, in
+        // chronological order: -200M, then -40k, then a +5M deposit.
+        seedTxScenario("resalat", 3);
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(3, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(3, txs.size());
+        assertEquals(5000000L, txs.get(0).amount);        // newest first
+        assertEquals(-40000L, txs.get(1).amount);
+        assertEquals(-200000000L, txs.get(2).amount);
+    }
+
+    @Test public void injectorTxScenario_demo_includesResalatMovements() throws Exception {
+        // The shared "demo" scenario carries movements for every bank (incl. Resalat), so History
+        // spans all supported senders instead of only the ones a single test seeds.
+        seedTxScenario("demo", 13);
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(13, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(13, txs.size());
+        long resalatWithdrawals = 0;
+        for (Transaction t : txs) {
+            if ("Resalat".equals(t.bank) && t.amount < 0) resalatWithdrawals++;
+        }
+        assertEquals(2, resalatWithdrawals);
     }
 
     // ============================================================
