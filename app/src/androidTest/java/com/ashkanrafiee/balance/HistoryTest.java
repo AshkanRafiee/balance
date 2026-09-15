@@ -127,6 +127,47 @@ public class HistoryTest {
             + "05/26\n08:22"));
     }
 
+    // ---- real-world bank formats (Resalat bare signed amounts) -----------------------
+    @Test public void txn_resalat_bareSignedAmount_withdrawal() {
+        assertEquals(-200000000L, (long) BalanceData.extractTransaction(
+            "-200,000,000  \n"
+            + "06/22_20:37 \n"
+            + "\u0645\u0627\u0646\u062F\u0647: 2,279,545,033"));
+    }
+
+    @Test public void txn_resalat_bareSignedAmount_secondWithdrawal() {
+        assertEquals(-40000L, (long) BalanceData.extractTransaction(
+            "-40,000  \n"
+            + "06/22_20:37 \n"
+            + "\u0645\u0627\u0646\u062F\u0647: 2,279,505,033"));
+    }
+
+    @Test public void txn_resalat_bareSignedAmount_deposit() {
+        assertEquals(15000000L, (long) BalanceData.extractTransaction(
+            "+15,000,000\n"
+            + "06/22_20:37\n"
+            + "\u0645\u0627\u0646\u062F\u0647: 2,300,000,000"));
+    }
+
+    @Test public void txn_resalat_dateLineBeforeSignedAmount() {
+        assertEquals(-200000000L, (long) BalanceData.extractTransaction(
+            "1405/06/22 20:37\n"
+            + "-200,000,000\n"
+            + "\u0645\u0627\u0646\u062F\u0647: 2,279,545,033"));
+    }
+
+    @Test public void txn_resalat_persianDigits() {
+        assertEquals(-200000000L, (long) BalanceData.extractTransaction(
+            "-\u06F2\u06F0\u06F0\u060C\u06F0\u06F0\u06F0\u060C\u06F0\u06F0\u06F0\n"
+            + "\u06F0\u06F6/\u06F2\u06F2_\u06F2\u06F0:\u06F3\u06F7 \n"
+            + "\u0645\u0627\u0646\u062F\u0647: \u06F2\u060C\u06F2\u06F7\u06F9\u060C\u06F5\u06F4\u06F5\u060C\u06F0\u06F3\u06F3"));
+    }
+
+    @Test public void txn_signedAmountWithoutResultingBalance_isNull() {
+        assertNull(BalanceData.extractTransaction("-200,000,000 \u062E\u0631\u06CC\u062F \u0627\u0646\u062C\u0627\u0645 \u0634\u062F"));
+        assertNull(BalanceData.extractTransaction("-200,000,000\n06/22_20:37"));
+    }
+
     // ---- balance-delta fallback -------------------------------------------------------
     @Test public void delta_amountWhenRegexCannotParse_withdrawal() {
         Transaction t = BalanceData.parseMovement("Blu", "+989999987641",

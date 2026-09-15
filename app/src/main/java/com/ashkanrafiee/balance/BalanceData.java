@@ -55,7 +55,7 @@ final class BalanceData {
     static final int SORT_DATE_OLDEST = 4;
 
     /** Bumped whenever the movement-message recognition rules change, forcing a full history re-scan. */
-    static final int HISTORY_RULES_VERSION = 2;
+    static final int HISTORY_RULES_VERSION = 3;
 
     /** True while a history re-scan is running, so a second trigger (app open + history open) is a
      *  no-op instead of a duplicate pass. */
@@ -99,6 +99,11 @@ final class BalanceData {
     /** A bare number standing next to "ریال" (e.g. Blu's "400,000 ریال از حساب شما پرید"). The stated
      *  resulting balance is removed first, so this captures the moved amount rather than the balance. */
     private static final Pattern rialAmount = Pattern.compile("([0-9][0-9,]*)\\s*\u0631\u06CC\u0627\u0644");
+    /** A bare, signed amount standing at the start of the message, as Resalat writes it
+     *  ("-200,000,000" on its own line, resulting balance on the last). The explicit sign tells the
+     *  direction, so no label or keyword is needed. */
+    private static final Pattern signedAmount = Pattern.compile(
+        "^\\s*([+-])\\s*([0-9][0-9,]*)", Pattern.MULTILINE);
     private static final String[] DEPOSIT_KEYWORDS = {
         "\u0648\u0627\u0631\u06cc\u0632", "\u062f\u0631\u06cc\u0627\u0641\u062a",
         "\u0628\u0633\u062a\u0627\u0646\u06a9\u0627\u0631", "\u0627\u0641\u0632\u0627\u06cc\u0634",
@@ -635,8 +640,9 @@ final class BalanceData {
     /** Parses a signed transaction amount (in rials) from a bank message, or null if the message does
      *  not describe a completed money movement. The amount is recognized, in order: after the "مبلغ"
      *  (amount) label — where an explicit "+"/"-" sign is authoritative (e.g. Parsian's
-     *  "مبلغ:500,000-"), after a deposit/withdrawal label ("واریز:"/"برداشت:", Tejarat), or as a bare
-     *  number standing next to "ریال" that is not the stated resulting balance (Blu). The direction is
+     *  "مبلغ:500,000-"), after a deposit/withdrawal label ("واریز:"/"برداشت:", Tejarat), as a bare
+     *  number standing next to "ریال" that is not the stated resulting balance (Blu), or as a bare
+     *  signed amount opening the message (Resalat's "-200,000,000" first line). The direction is
      *  taken from the explicit sign, the direction label, or exactly one of the deposit/withdrawal
      *  keywords. Finally the message must also carry the resulting balance — the proof that the
      *  movement settled — so OTP payment prompts or authorization messages are never counted. Returns a
@@ -685,6 +691,16 @@ final class BalanceData {
             long best = -1;
             while (mc.find()) best = Math.max(best, toLong(mc.group(1)));
             if (best > 0) amount = best;
+        }
+
+        // 4) A bare signed amount at the start of the message (e.g. Resalat's "-200,000,000" first
+        //    line, with the resulting balance at the end). The explicit sign is the direction.
+        if (amount <= 0) {
+            Matcher ms = signedAmount.matcher(n);
+            if (ms.find()) {
+                sign = ms.group(1).equals("-") ? -1 : 1;
+                amount = toLong(ms.group(2));
+            }
         }
 
         if (amount <= 0) return null;

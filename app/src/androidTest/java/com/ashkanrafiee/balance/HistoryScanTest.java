@@ -55,6 +55,14 @@ public class HistoryScanTest {
         + "\u0645\u0628\u0644\u063A:500,000-\n"
         + "\u0645\u0627\u0646\u062F\u0647:1,076,220\n"
         + "05/26\n08:22";
+    private static final String RESALAT_WITHDRAWAL_1 =
+        "-200,000,000  \n"
+        + "06/22_20:37 \n"
+        + "\u0645\u0627\u0646\u062F\u0647: 2,279,545,033";
+    private static final String RESALAT_WITHDRAWAL_2 =
+        "-40,000  \n"
+        + "06/22_20:37 \n"
+        + "\u0645\u0627\u0646\u062F\u0647: 2,279,505,033";
 
     private Context ctx;
 
@@ -232,6 +240,29 @@ public class HistoryScanTest {
         assertEquals(-500000L, txs.get(1).amount);     // Parsian
         assertEquals(-400000L, txs.get(2).amount);     // Blu
         assertEquals(-70014000L, txs.get(3).amount);   // Tejarat withdrawal (oldest)
+    }
+
+    @Test public void realBankFormat_resalat_bareSignedAmounts_areRecorded() throws Exception {
+        seed("2000474701", RESALAT_WITHDRAWAL_1, T);
+        seed("2000474701", RESALAT_WITHDRAWAL_2, T + 500);
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(2, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(2, txs.size());
+        assertEquals(-40000L, txs.get(0).amount);        // newest first
+        assertEquals(-200000000L, txs.get(1).amount);    // oldest last
+    }
+
+    @Test public void realBankFormat_resalat_duplicateDelivery_countsOnce() throws Exception {
+        seed("2000474701", RESALAT_WITHDRAWAL_1, T);
+        seed("2000474701", RESALAT_WITHDRAWAL_1, T + 500);
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(1, added);
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
     }
 
     // ============================================================
