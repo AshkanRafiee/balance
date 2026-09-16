@@ -11,6 +11,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Combined total balance, with the option to exclude individual banks from the total
 - Transaction history with deposits and withdrawals, broken down by day, month and year
 - Full history from the total card, per-bank history from any bank card
+- Long-press the total card to copy the combined total, or long-press a bank card to copy that bank's balance
 - Bank sorting by balance or update time, mirrored in the list and the home-screen widget
 - Home-screen widget with the same bank order, totals, and privacy mask as the app
 - Password-encrypted backup and restore
