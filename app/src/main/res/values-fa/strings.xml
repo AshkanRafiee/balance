@@ -6,6 +6,7 @@
     <string name="section_banks">بانک‌ها</string>
     <string name="unit_toman">تومان</string>
     <string name="total_label">مجموع</string>
+    <string name="total_history_hint">برای دیدن تاریخچه لمس کنید</string>
 
     <string name="status_reading_sms">در حال خواندن پیامک‌های بانکی این دستگاه…</string>
     <string name="status_permission_needed">برای خواندن موجودی به اجازهٔ دسترسی به پیامک نیاز است</string>

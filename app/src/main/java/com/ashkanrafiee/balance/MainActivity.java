@@ -786,6 +786,8 @@ public class MainActivity extends Activity {
         boolean lockProbeFired;
         boolean eyeArmed;
         boolean eyeProbeFired;
+        boolean totalArmed;
+        boolean totalProbeFired;
         int downIcon = ICON_NONE;
         final Handler handler = new Handler(Looper.getMainLooper());
         final Runnable lockLongProbe = () -> {
@@ -797,6 +799,11 @@ public class MainActivity extends Activity {
             eyeProbeFired = true;
             if (MainActivity.this.isFinishing() || MainActivity.this.isDestroyed()) return;
             MainActivity.this.setAutoHideToggle();
+        };
+        final Runnable totalLongProbe = () -> {
+            totalProbeFired = true;
+            if (MainActivity.this.isFinishing() || MainActivity.this.isDestroyed()) return;
+            copyBalance(getString(R.string.total_label), this.total);
         };
         String status = getString(R.string.status_reading_sms);
         long total;
@@ -1026,6 +1033,7 @@ public class MainActivity extends Activity {
             float totalLabelX = rtl ? w - 48 : 48;
             text(c, getString(R.string.total_balance_label), totalLabelX, 158, 13, muted, edgeAlign);
             totalValue(c, total, totalLabelX, 220, w - 150, rtl);
+            text(c, getString(R.string.total_history_hint), w / 2f, 260, 11, muted, Paint.Align.CENTER);
             RectF eyeRect = rtl ? new RectF(45, 147, 75, 165) : new RectF(w - 75, 147, w - 45, 165);
             float eyeCenterX = rtl ? 60 : w - 60;
             p.setStyle(Paint.Style.STROKE);
@@ -1284,12 +1292,16 @@ public class MainActivity extends Activity {
                 downIcon = iconId(x, y);
                 lockArmed = downIcon == ICON_LOCK;
                 eyeArmed = downIcon == ICON_EYE;
+                totalArmed = downIcon == ICON_NONE && y >= 120 && y <= 270;
                 lockProbeFired = false;
                 eyeProbeFired = false;
+                totalProbeFired = false;
                 handler.removeCallbacks(lockLongProbe);
                 handler.removeCallbacks(eyeLongProbe);
+                handler.removeCallbacks(totalLongProbe);
                 if (lockArmed) handler.postDelayed(lockLongProbe, 480);
                 else if (eyeArmed) handler.postDelayed(eyeLongProbe, 500);
+                else if (totalArmed) handler.postDelayed(totalLongProbe, 500);
                 return true;
             }
             if (e.getAction() == MotionEvent.ACTION_MOVE) {
@@ -1297,8 +1309,10 @@ public class MainActivity extends Activity {
                     dragging = true;
                     handler.removeCallbacks(lockLongProbe);
                     handler.removeCallbacks(eyeLongProbe);
+                    handler.removeCallbacks(totalLongProbe);
                     lockArmed = false;
                     eyeArmed = false;
+                    totalArmed = false;
                     downIcon = ICON_NONE;
                     scrollY = Math.max(0, Math.min(
                         Math.max(0, banks.size() * 96 - (h - 440)),
@@ -1311,8 +1325,10 @@ public class MainActivity extends Activity {
             if (e.getAction() != MotionEvent.ACTION_UP) return true;
             handler.removeCallbacks(lockLongProbe);
             handler.removeCallbacks(eyeLongProbe);
+            handler.removeCallbacks(totalLongProbe);
             if (lockProbeFired) { lockProbeFired = false; lockArmed = false; return true; }
             if (eyeProbeFired) { eyeProbeFired = false; eyeArmed = false; return true; }
+            if (totalProbeFired) { totalProbeFired = false; totalArmed = false; return true; }
             if (dragging) {
                 if (downY < 360 && y - downY > 55 && scrollY == 0) refresh();
                 return true;
@@ -1335,7 +1351,7 @@ public class MainActivity extends Activity {
                     .edit().putBoolean(BalanceData.KEY_HIDDEN, hidden).apply();
                 invalidate();
             } else if (y >= 120 && y <= 270) {
-                copyBalance(getString(R.string.total_label), total);
+                startActivity(new Intent(MainActivity.this, HistoryActivity.class));
             } else if (y > 290 && y < 350 && (rtl ? x < 150 : x > getWidth() / d - 150)) {
                 showSortDialog();
             } else if (y >= 352 && y < byForTouch(h)) {

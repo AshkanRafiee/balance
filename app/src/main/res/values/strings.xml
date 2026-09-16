@@ -6,6 +6,7 @@
     <string name="section_banks">Banks</string>
     <string name="unit_toman">Toman</string>
     <string name="total_label">Total</string>
+    <string name="total_history_hint">Tap to open history</string>
 
     <string name="status_reading_sms">Reading bank SMS on this device…</string>
     <string name="status_permission_needed">SMS permission is needed to read balances</string>

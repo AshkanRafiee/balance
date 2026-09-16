@@ -10,7 +10,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Latest balance per supported bank, without accumulating repeated messages
 - Combined total balance, with the option to exclude individual banks from the total
 - Transaction history with deposits and withdrawals, broken down by day, month and year
-- Per-bank history: tap any bank card to see just that bank's transactions
+- Full history from the total card, per-bank history from any bank card
 - Bank sorting by balance or update time, mirrored in the list and the home-screen widget
 - Home-screen widget with the same bank order, totals, and privacy mask as the app
 - Password-encrypted backup and restore
