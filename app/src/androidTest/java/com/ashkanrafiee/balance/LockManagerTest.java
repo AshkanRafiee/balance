@@ -146,7 +146,8 @@ public class LockManagerTest {
     }
 
     /** When the app hands over to a system activity (the backup/restore file picker) the session
-     *  must stay open; only after the hold expires does a real return re-lock. */
+     *  must stay open; the moment the user returns the hold is consumed, so a genuine background
+     *  after that locks again immediately rather than riding out the grace window. */
     @Test public void holdUnlock_keepsTheSessionOpenAcrossASystemPicker() {
         LockManager.enable(ctx, "1234", true, false);
         LockManager.unlockSession();
@@ -164,12 +165,17 @@ public class LockManagerTest {
         assertFalse("Returning from the picker must not lock within the grace window",
             LockManager.isSessionLocked());
 
-        // A user who walked away past the grace window gets locked on the next return.
-        LockManager.registerActivityStop();
+        // The hold was consumed on return, so backgrounding right away locks again.
+        assertTrue("A stop right after returning must end the session",
+            LockManager.registerActivityStop());
+        assertTrue("Session must lock as soon as the hold is consumed",
+            LockManager.isSessionLocked());
+
+        // Reopening asks for the code: the old behavior still holds on a real background.
         LockManager.unlockSession();
         LockManager.expireHoldForTest();
         LockManager.registerActivityStart(ctx);
-        assertTrue("After the grace window a real return must lock", LockManager.isSessionLocked());
+        assertTrue("Reopening after a real background must lock", LockManager.isSessionLocked());
     }
 
     @Test public void fingerprint_state_isUnavailableWithoutBinding() {

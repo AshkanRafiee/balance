@@ -116,6 +116,9 @@ final class LockManager {
      *  pause the session is re-locked, so re-opening the app always asks for the code. */
     static void registerActivityStart(Context c) {
         if (activityCount.getAndIncrement() == 0 && isEnabled(c) && !holdingUnlock()) lockSession();
+        // The picker handoff is over once we are back in our own foreground; consume the hold
+        // so any later stop must lock again immediately instead of riding out the grace window.
+        consumeHold();
     }
 
     /** Called by every protected activity from {@code onStop}. When the last screen leaves the
@@ -131,7 +134,7 @@ final class LockManager {
 
     /** Marks the imminent takeover by a system activity (the backup/restore file picker), so the
      *  session stays open until the user returns or the hold expires. Call before launching the
-     *  document intent; the hold needs no explicit clearing. */
+     *  document intent; the hold clears automatically on the first return to the foreground. */
     static void holdUnlock() {
         holdUnlock = true;
         holdSince = android.os.SystemClock.elapsedRealtime();
@@ -140,6 +143,11 @@ final class LockManager {
     private static boolean holdingUnlock() {
         return holdUnlock
             && android.os.SystemClock.elapsedRealtime() - holdSince < HOLD_GRACE_MS;
+    }
+
+    private static void consumeHold() {
+        holdUnlock = false;
+        holdSince = 0;
     }
 
     /** Test hook: ages the hold out so a caller can exercise the post-grace path without waiting. */
@@ -309,11 +317,6 @@ final class LockManager {
         }
     }
 
-    /** Which system prompt the entrance screen should use on this build. */
-    static boolean fpUsesBiometricPrompt() {
-        return Build.VERSION.SDK_INT >= 28;
-    }
-
     static boolean isFingerprintEnabled(Context c) {
         return prefs(c).getString(KEY_LOCK_FP_CHAIN, null) != null;
     }
@@ -410,7 +413,7 @@ final class LockManager {
                             activity.getMainExecutor(), (d, w) -> cb.onFpFailed(-1))
                         .build();
                 } else {
-                    // Android 9 (API 29) only: its (Activity, Executor, callback) constructor is not
+                    // Android 10 (API 29) only: its (Activity, Executor, callback) constructor is not
                     // part of the modern public API surface, so it is reached reflectively on this
                     // one build. Android 8–9 keep the working FingerprintManager path above instead.
                     try {

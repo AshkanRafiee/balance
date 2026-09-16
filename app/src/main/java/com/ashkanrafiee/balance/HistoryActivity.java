@@ -372,7 +372,7 @@ public final class HistoryActivity extends Activity {
             c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH));
     }
 
-    /** The sticky top bar: back chevron, title, experimental badge and the spinning refresh glyph. */
+    /** The sticky top bar: back chevron, the screen title and, per-bank, the bank badge. */
     private LinearLayout buildHeader() {
         boolean rtl = isRtl();
         LinearLayout bar = new LinearLayout(this);
