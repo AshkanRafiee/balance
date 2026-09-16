@@ -390,14 +390,17 @@ public class MainActivity extends Activity {
         applyLockInput(code);
         applyLockInput(confirm);
         confirm.setHint(getString(R.string.lock_confirm_hint));
+        LinearLayout.LayoutParams codeLp = new LinearLayout.LayoutParams(-1, -2);
+        codeLp.topMargin = dp(12);
+        wrap.addView(code, codeLp);
         LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(-1, -2);
         inputLp.topMargin = dp(10);
         confirm.setLayoutParams(inputLp);
-        wrap.addView(code);
         wrap.addView(confirm);
 
         if (!changing && LockManager.fingerprintCapable(this)) {
             fpCheck = new android.widget.CheckBox(this);
+            fpCheck.setChecked(true);
             fpCheck.setText(getString(R.string.lock_fingerprint_option));
             fpCheck.setTextSize(14);
             fpCheck.setTextColor(resColor(R.color.fg));
