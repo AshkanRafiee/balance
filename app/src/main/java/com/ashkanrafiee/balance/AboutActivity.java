@@ -10,12 +10,14 @@ import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
 public final class AboutActivity extends Activity {
     int bg, card, muted, accent, purple, heroColor, link, footerColor, fg;
+    private LockOverlay lockOverlay;
 
     int color(int res) {
         return getResources().getColor(res, getTheme());
@@ -65,6 +67,7 @@ public final class AboutActivity extends Activity {
         fg = color(R.color.fg);
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
+        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(bg));
         boolean rtl = getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
 
         LinearLayout root = new LinearLayout(this);
@@ -84,7 +87,16 @@ public final class AboutActivity extends Activity {
             v.setPadding(dp(20), top + dp(14), dp(20), bottom + dp(14));
             return i;
         });
-        setContentView(root);
+        FrameLayout host = new FrameLayout(this);
+        setContentView(host);
+        host.addView(root, new FrameLayout.LayoutParams(-1, -1));
+
+        lockOverlay = new LockOverlay(this);
+        lockOverlay.setUnlockListener(this::updateSecureFlag);
+        lockOverlay.setCancelListener(() -> lockOverlay.hide());
+        host.addView(lockOverlay, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        lockOverlay.setVisibility(View.GONE);
 
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
@@ -130,6 +142,64 @@ public final class AboutActivity extends Activity {
         TextView footerView = text(getString(R.string.about_footer, appVersion()), 11, footerColor);
         footerView.setGravity(Gravity.CENTER);
         body.addView(footerView);
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        LockManager.registerActivityStart(this);
+        if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) {
+            lockOverlay.showLock();
+        } else {
+            lockOverlay.hide();
+        }
+        updateSecureFlag();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        LockManager.cancelPendingLock();
+        // The delayed lock may have engaged while we were paused on a ROM that skipped onStop;
+        // reflect it now that we are back in the foreground.
+        if (LockManager.isEnabled(this) && LockManager.isSessionLocked()
+                && lockOverlay != null && !lockOverlay.isShowing()) {
+            lockOverlay.showLock();
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        if (LockManager.isEnabled(this)) {
+            // Arm the lock now so it engages even on ROMs that delay or skip onStop; the next
+            // screen's start cancels it, so navigating between our own screens never locks.
+            LockManager.scheduleLock(this);
+            if (LockManager.isSessionLocked()) {
+                lockOverlay.showLock();
+                lockOverlay.setAutoFingerprintEnabled(false);
+            }
+        }
+        updateSecureFlag();
+        super.onPause();
+    }
+
+    @Override
+    protected void onStop() {
+        if (LockManager.isEnabled(this) && LockManager.registerActivityStop()) {
+            lockOverlay.showLock();
+            lockOverlay.setAutoFingerprintEnabled(false);
+        } else {
+            lockOverlay.hide();
+        }
+        updateSecureFlag();
+        super.onStop();
+    }
+
+    /** For as long as the lock is enabled the screen content stays hidden from recents and
+     *  screenshots, regardless of the current unlock state — see {@link MainActivity}. */
+    private void updateSecureFlag() {
+        if (LockManager.isEnabled(this)) getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+        else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
     }
 
     TextView section(String h, String b) {
