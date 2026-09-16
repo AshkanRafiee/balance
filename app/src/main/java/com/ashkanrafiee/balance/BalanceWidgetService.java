@@ -32,23 +32,36 @@ public class BalanceWidgetService extends RemoteViewsService {
     private static final class Factory implements RemoteViewsService.RemoteViewsFactory {
         private final Context context;
         private volatile List<Bank> banks = new ArrayList<>();
+        private volatile boolean locked;
 
         Factory(Context context) { this.context = context; }
 
         @Override public void onCreate() { }
 
         @Override public void onDataSetChanged() {
+            locked = LockManager.isEnabled(context);
             banks = widgetBanks(context);
         }
 
         @Override public int getCount() {
+            if (locked) return 1;
             return banks.isEmpty() ? 1 : banks.size();
         }
 
         @Override public RemoteViews getViewAt(int i) {
+            if (locked) return lockedViews();
             List<Bank> snapshot = banks;
             if (snapshot.isEmpty() || i < 0 || i >= snapshot.size()) return emptyViews();
             return bankViews(snapshot.get(i));
+        }
+
+        private RemoteViews lockedViews() {
+            Context c = LocaleHelper.wrap(context);
+            RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance_locked);
+            views.setInt(R.id.widget_root, "setLayoutDirection",
+                c.getResources().getConfiguration().getLayoutDirection());
+            views.setOnClickPendingIntent(R.id.widget_root, BalanceWidgetProvider.openApp(c));
+            return views;
         }
 
         private RemoteViews bankViews(Bank b) {
@@ -83,7 +96,7 @@ public class BalanceWidgetService extends RemoteViewsService {
 
         @Override public RemoteViews getLoadingView() { return null; }
 
-        @Override public int getViewTypeCount() { return 2; }
+        @Override public int getViewTypeCount() { return 3; }
 
         @Override public boolean hasStableIds() { return false; }
 

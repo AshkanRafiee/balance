@@ -30,8 +30,13 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
      *  rebuilding (and re-decrypting) the whole widget on every tick. */
     private static volatile RemoteViews spinBase;
 
-    /** Re-scans SMS on a worker thread while spinning the refresh icon, then renders the final widget. */
+    /** Re-scans SMS on a worker thread while spinning the refresh icon, then renders the final widget.
+     *  While the app lock is enabled the widget does not rescan and shows the locked state instead. */
     private static void refreshData(Context context) {
+        if (LockManager.isEnabled(context)) {
+            updateAll(context);
+            return;
+        }
         new Thread(() -> {
             if (!REFRESHING.compareAndSet(false, true)) return;
             try {
@@ -75,6 +80,11 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         AppWidgetManager manager = AppWidgetManager.getInstance(context);
         int[] ids = manager.getAppWidgetIds(new ComponentName(context, BalanceWidgetProvider.class));
         if (ids.length == 0) return;
+        if (LockManager.isEnabled(context)) {
+            // The lock hides the balances: no list data is bound and no refresh is kicked off.
+            for (int id : ids) manager.updateAppWidget(id, buildViews(context));
+            return;
+        }
         manager.notifyAppWidgetViewDataChanged(ids, R.id.widget_list);
         for (int id : ids) manager.updateAppWidget(id, buildViews(context));
     }
@@ -92,6 +102,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
 
     static RemoteViews buildViews(Context context) {
         Context c = LocaleHelper.wrap(context);
+        if (LockManager.isEnabled(c)) return lockedViews(c);
         boolean hidden = BalanceData.isHidden(c);
         long total = 0;
         for (java.util.Map.Entry<String, Bank> e : BalanceData.read(c).entrySet())
@@ -111,6 +122,16 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         views.setOnClickPendingIntent(R.id.widget_root, openApp(c));
         views.setOnClickPendingIntent(R.id.widget_mask, pending(c, ACTION_MASK, REQ_MASK));
         views.setOnClickPendingIntent(R.id.widget_refresh, pending(c, ACTION_REFRESH, REQ_REFRESH));
+        return views;
+    }
+
+    /** The locked widget: a lock glyph and a short message, still tappable to open the app. */
+    static RemoteViews lockedViews(Context context) {
+        Context c = LocaleHelper.wrap(context);
+        RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance_locked);
+        views.setInt(R.id.widget_root, "setLayoutDirection",
+            c.getResources().getConfiguration().getLayoutDirection());
+        views.setOnClickPendingIntent(R.id.widget_root, openApp(c));
         return views;
     }
 
