@@ -209,4 +209,6 @@
     <string name="lock_error_generic">Could not save the lock. Please try again.</string>
     <string name="lock_fingerprint_negative_button">Use PIN or password</string>
     <string name="widget_locked_message">Balance is locked — unlock the app to see your balances</string>
+    <string name="toast_auto_hide_on">Auto-mask turned on</string>
+    <string name="toast_auto_hide_off">Auto-mask turned off</string>
 </resources>

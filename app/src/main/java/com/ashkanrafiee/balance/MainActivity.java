@@ -94,6 +94,10 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        if (view != null && BalanceData.isAutoHide(this)) {
+            view.hidden = true;
+            view.invalidate();
+        }
         if (LockManager.isEnabled(this)) {
             lockOverlay.showLock();
             lockOverlay.setAutoFingerprintEnabled(false);
@@ -113,7 +117,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (view != null) view.refresh();
+        if (view != null) {
+            view.enforceAutoHide();
+            view.refresh();
+        }
     }
 
     /**
@@ -189,6 +196,18 @@ public class MainActivity extends Activity {
         LockManager.lockSession();
         updateSecureFlag();
         showLockOverlay();
+    }
+
+    /** Long-pressing the eye toggles auto-mask: when on, every app start and every return from the
+     *  background re-hides the balances so prying eyes never catch them off-screen. */
+    void setAutoHideToggle() {
+        if (view == null) return;
+        boolean on = !BalanceData.isAutoHide(this);
+        BalanceData.setAutoHide(this, on);
+        view.autoHide = on;
+        view.enforceAutoHide();
+        view.invalidate();
+        toast(on ? R.string.toast_auto_hide_on : R.string.toast_auto_hide_off);
     }
 
     /** Shows the lock entrance whenever the session is locked; hides it otherwise. */
@@ -721,7 +740,7 @@ public class MainActivity extends Activity {
     }
 
     private final class BalanceView extends View {
-        static final int ICON_NONE = 0, ICON_REFRESH = 1, ICON_LOCK = 2;
+        static final int ICON_NONE = 0, ICON_REFRESH = 1, ICON_LOCK = 2, ICON_EYE = 3;
         final Paint p = new Paint(3);
         final LinkedHashMap<String, Bank> banks = new LinkedHashMap<>();
         final java.util.Set<String> excluded = new java.util.HashSet<>();
@@ -729,6 +748,7 @@ public class MainActivity extends Activity {
         Drawable refreshIcon;
         Drawable lockIcon;
         boolean hidden, refreshing;
+        boolean autoHide;
         int insetsTop, insetsBottom;
         int sortMode;
         float scrollY = 0, lastY, downY, refreshAngle;
@@ -737,6 +757,8 @@ public class MainActivity extends Activity {
         boolean hardProbeFired;
         boolean lockArmed;
         boolean lockProbeFired;
+        boolean eyeArmed;
+        boolean eyeProbeFired;
         int downIcon = ICON_NONE;
         final Handler handler = new Handler(Looper.getMainLooper());
         final Runnable hardRefreshProbe = () -> {
@@ -749,6 +771,11 @@ public class MainActivity extends Activity {
             if (MainActivity.this.isFinishing() || MainActivity.this.isDestroyed()) return;
             MainActivity.this.lockSettingsFlow();
         };
+        final Runnable eyeLongProbe = () -> {
+            eyeProbeFired = true;
+            if (MainActivity.this.isFinishing() || MainActivity.this.isDestroyed()) return;
+            MainActivity.this.setAutoHideToggle();
+        };
         String status = getString(R.string.status_reading_sms);
         long total;
         float footerAboutStart, footerAboutEnd, footerLangStart, footerLangEnd,
@@ -756,6 +783,7 @@ public class MainActivity extends Activity {
         final int fg = resColor(R.color.fg);
         final int muted = resColor(R.color.muted);
         final int accent = resColor(R.color.accent);
+        final int blue = resColor(R.color.blue);
         final int purple = resColor(R.color.purple);
         final int panel = resColor(R.color.panel);
         final int bg = resColor(R.color.bg);
@@ -767,6 +795,8 @@ public class MainActivity extends Activity {
         BalanceView() {
             super(MainActivity.this);
             hidden = BalanceData.isHidden(MainActivity.this);
+            autoHide = BalanceData.isAutoHide(MainActivity.this);
+            if (autoHide) hidden = true;
             sortMode = BalanceData.getSort(MainActivity.this);
             p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
             setBackgroundColor(bg);
@@ -777,6 +807,16 @@ public class MainActivity extends Activity {
         }
 
         void refresh() { refresh(false); }
+
+        /** When auto-mask is on, the balances must start (and stay) masked; call this from the
+         *  lifecycle so every app open or return from the background re-hides them. */
+        void enforceAutoHide() {
+            autoHide = BalanceData.isAutoHide(MainActivity.this);
+            if (autoHide && !hidden) {
+                hidden = true;
+                invalidate();
+            }
+        }
 
         /** Recomputes the total from included banks only. */
         void recalcTotal() {
@@ -969,13 +1009,13 @@ public class MainActivity extends Activity {
             float eyeCenterX = rtl ? 60 : w - 60;
             p.setStyle(Paint.Style.STROKE);
             p.setStrokeWidth(2.5f);
-            p.setColor(accent);
+            p.setColor(autoHide ? blue : accent);
             c.drawOval(eyeRect, p);
             p.setStyle(Paint.Style.FILL);
-            p.setColor(accent);
+            p.setColor(autoHide ? blue : accent);
             c.drawCircle(eyeCenterX, 156, 5, p);
             if (hidden) {
-                p.setColor(accent);
+                p.setColor(autoHide ? blue : accent);
                 p.setStrokeWidth(2.5f);
                 if (rtl) c.drawLine(43, 142, 77, 170, p);
                 else c.drawLine(w - 77, 142, w - 43, 170, p);
@@ -1139,8 +1179,22 @@ public class MainActivity extends Activity {
             return isRtl() ? 72 : getWidth() / d - 72;
         }
 
+        /** The centre of the eye/mask toggle in the balance card (top-right, mirrored in RTL). */
+        float eyeCx() {
+            return isRtl() ? 60 : getWidth() / d - 60;
+        }
+
         private boolean iconHit(float x, float y, float cx) {
             return y >= 28 && y <= 80 && Math.abs(x - cx) <= 24;
+        }
+
+        /** A generous target around the eye: the glyph itself is small, so allow a wider band
+         *  inside the balance card and a little slack on the inner (non-edge) side. */
+        boolean eyeHit(float x, float y) {
+            boolean rtl = isRtl();
+            if (y < 135 || y > 185) return false;
+            float cx = eyeCx();
+            return rtl ? (x >= cx - 15 && x <= cx + 30) : (x >= cx - 30 && x <= cx + 15);
         }
 
         /** The app-bar control under a tap: refresh, lock, or nothing. The lock sits just inside the
@@ -1148,6 +1202,7 @@ public class MainActivity extends Activity {
         int iconId(float x, float y) {
             if (iconHit(x, y, refreshCx())) return ICON_REFRESH;
             if (iconHit(x, y, lockCx())) return ICON_LOCK;
+            if (eyeHit(x, y)) return ICON_EYE;
             return ICON_NONE;
         }
 
@@ -1233,12 +1288,16 @@ public class MainActivity extends Activity {
                 downIcon = iconId(x, y);
                 hardArmed = downIcon == ICON_REFRESH;
                 lockArmed = downIcon == ICON_LOCK;
+                eyeArmed = downIcon == ICON_EYE;
                 hardProbeFired = false;
                 lockProbeFired = false;
+                eyeProbeFired = false;
                 handler.removeCallbacks(hardRefreshProbe);
                 handler.removeCallbacks(lockLongProbe);
+                handler.removeCallbacks(eyeLongProbe);
                 if (hardArmed) handler.postDelayed(hardRefreshProbe, 650);
                 else if (lockArmed) handler.postDelayed(lockLongProbe, 480);
+                else if (eyeArmed) handler.postDelayed(eyeLongProbe, 500);
                 return true;
             }
             if (e.getAction() == MotionEvent.ACTION_MOVE) {
@@ -1246,8 +1305,10 @@ public class MainActivity extends Activity {
                     dragging = true;
                     handler.removeCallbacks(hardRefreshProbe);
                     handler.removeCallbacks(lockLongProbe);
+                    handler.removeCallbacks(eyeLongProbe);
                     hardArmed = false;
                     lockArmed = false;
+                    eyeArmed = false;
                     downIcon = ICON_NONE;
                     scrollY = Math.max(0, Math.min(
                         Math.max(0, banks.size() * 96 - (h - 440)),
@@ -1260,8 +1321,10 @@ public class MainActivity extends Activity {
             if (e.getAction() != MotionEvent.ACTION_UP) return true;
             handler.removeCallbacks(hardRefreshProbe);
             handler.removeCallbacks(lockLongProbe);
+            handler.removeCallbacks(eyeLongProbe);
             if (hardProbeFired) { hardProbeFired = false; hardArmed = false; return true; }
             if (lockProbeFired) { lockProbeFired = false; lockArmed = false; return true; }
+            if (eyeProbeFired) { eyeProbeFired = false; eyeArmed = false; return true; }
             if (dragging) {
                 if (downY < 360 && y - downY > 55) refresh();
                 return true;
@@ -1280,14 +1343,13 @@ public class MainActivity extends Activity {
                 refresh();
             } else if (downIcon == ICON_LOCK) {
                 MainActivity.this.onLockTap();
+            } else if (downIcon == ICON_EYE) {
+                hidden = !hidden;
+                MainActivity.this.getSharedPreferences(BalanceData.PREFS_PREF, MODE_PRIVATE)
+                    .edit().putBoolean(BalanceData.KEY_HIDDEN, hidden).apply();
+                invalidate();
             } else if (y >= 120 && y <= 270) {
-                boolean onEye = rtl ? x <= 105 && y <= 185 : x >= getWidth() / d - 105 && y <= 185;
-                if (onEye) {
-                    hidden = !hidden;
-                    MainActivity.this.getSharedPreferences(BalanceData.PREFS_PREF, MODE_PRIVATE)
-                        .edit().putBoolean(BalanceData.KEY_HIDDEN, hidden).apply();
-                    invalidate();
-                } else copyBalance(getString(R.string.total_label), total);
+                copyBalance(getString(R.string.total_label), total);
             } else if (y > 290 && y < 350 && (rtl ? x < 150 : x > getWidth() / d - 150)) {
                 showSortDialog();
             } else if (y >= 352 && y < byForTouch(h)) {

@@ -209,4 +209,6 @@
     <string name="lock_error_generic">ذخیرهٔ قفل انجام نشد. لطفاً دوباره تلاش کنید.</string>
     <string name="lock_fingerprint_negative_button">استفاده از رمز عددی یا رمز عبور</string>
     <string name="widget_locked_message">Balance قفل است — برای دیدن موجودی‌ها برنامه را باز کنید</string>
+    <string name="toast_auto_hide_on">ماسک خودکار فعال شد</string>
+    <string name="toast_auto_hide_off">ماسک خودکار غیرفعال شد</string>
 </resources>

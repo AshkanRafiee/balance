@@ -38,6 +38,7 @@ final class BalanceData {
     static final String KEY_TRANSACTIONS = "transactions";
     static final String PREFS_PREF = "balance_preferences";
     static final String KEY_HIDDEN = "balances_hidden";
+    static final String KEY_AUTO_HIDE = "balances_auto_hide";
     static final String KEY_SCANNED_THROUGH = "scanned_through";
     static final String KEY_RULES_VERSION = "rules_version";
     static final String KEY_HISTORY_THROUGH = "history_through";
@@ -311,6 +312,17 @@ final class BalanceData {
     static boolean isHidden(Context context) {
         return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
             .getBoolean(KEY_HIDDEN, false);
+    }
+
+    /** Whether balances are re-masked automatically whenever the app goes to the background. */
+    static boolean isAutoHide(Context context) {
+        return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+            .getBoolean(KEY_AUTO_HIDE, false);
+    }
+
+    static void setAutoHide(Context context, boolean on) {
+        context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_AUTO_HIDE, on).apply();
     }
 
     static Set<String> getExcluded(Context context) {
