@@ -202,9 +202,32 @@ public class LockManagerTest {
 
         LockManager.scheduleLock(ctx);
         LockManager.registerActivityStart(ctx);
+        assertFalse("The start must cancel the arm immediately", LockManager.isSessionLocked());
         SystemClock.sleep(LockManager.LOCK_DELAY_MS + 250);
         assertFalse("Navigating between our own screens must not lock",
             LockManager.isSessionLocked());
+    }
+
+    /** A ROM that skips one onStop leaves the start count skewed; the armed fallback must still
+     *  lock on the next real background instead of being cancelled by that stop. */
+    @Test public void skippedStop_doesNotDefeatTheArmedLock() {
+        LockManager.enable(ctx, "1234", true, false);
+        LockManager.unlockSession();
+        LockManager.registerActivityStart(ctx);
+        LockManager.unlockSession();
+
+        // Background with onStop skipped: the armed lock fires, then a return skews the count to 2.
+        LockManager.scheduleLock(ctx);
+        SystemClock.sleep(LockManager.LOCK_DELAY_MS + 250);
+        LockManager.registerActivityStart(ctx);
+        LockManager.unlockSession();
+        assertFalse(LockManager.isSessionLocked());
+
+        // The next background delivers onStop (count 2 -> 1, not the last); the arm must survive it.
+        LockManager.scheduleLock(ctx);
+        LockManager.registerActivityStop();
+        SystemClock.sleep(LockManager.LOCK_DELAY_MS + 250);
+        assertTrue("A skewed start count must not defeat the fallback lock", LockManager.isSessionLocked());
     }
 
     @Test public void fingerprint_state_isUnavailableWithoutBinding() {

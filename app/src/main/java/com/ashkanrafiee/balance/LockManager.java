@@ -92,11 +92,13 @@ final class LockManager {
     private static volatile boolean holdUnlock = false;
     private static volatile long holdSince = 0;
 
-    /** How long after a screen pauses the session locks. The short grace lets an in-app hand-off to
+    /** How long after a screen pauses the session locks. The grace lets an in-app hand-off to
      *  another protected screen cancel the lock before it lands, while still locking promptly on
-     *  ROMs that delay — or never deliver — {@code onStop}. */
-    static final long LOCK_DELAY_MS = 400L;
+     *  ROMs that delay — or never deliver — {@code onStop}. Kept comfortably above a normal
+     *  same-process screen transition so a slow device never locks mid-navigation. */
+    static final long LOCK_DELAY_MS = 700L;
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private static final Object pendingSync = new Object();
     private static Runnable pendingLock;
 
     private LockManager() {}
@@ -136,10 +138,17 @@ final class LockManager {
      *  whether this stop ended the foreground session, so the caller can flip its overlay to the
      *  lock entrance for the exit frame. */
     static boolean registerActivityStop() {
-        cancelPendingLock();
         int left = activityCount.decrementAndGet();
         boolean last = left <= 0 && !holdingUnlock();
-        if (last) lockSession();
+        if (last) {
+            cancelPendingLock();
+            lockSession();
+        }
+        // A non-last stop deliberately leaves any armed lock alone. Android normally pairs every
+        // start with a stop, but a ROM that skips one leaves the count permanently skewed; if the
+        // armed lock were cancelled here the app would then stay unlocked on every later
+        // background. The next screen's start already cancels the arm during a hand-off, so
+        // keeping it in the non-last case costs nothing and closes that hole.
         return last;
     }
 
@@ -148,19 +157,48 @@ final class LockManager {
      *  the next protected screen's start and by {@link #cancelPendingLock()}, so navigating between
      *  our own screens or returning quickly never locks. Call from {@code onPause}. */
     static void scheduleLock(final Context c) {
-        cancelPendingLock();
-        final Context app = c.getApplicationContext();
-        pendingLock = () -> {
-            pendingLock = null;
-            if (holdingUnlock() || !isEnabled(app)) return;
+        synchronized (pendingSync) {
+            cancelPendingLockLocked();
+            pendingLock = buildPendingLock(c.getApplicationContext());
+            mainHandler.postDelayed(pendingLock, LOCK_DELAY_MS);
+        }
+    }
+
+    private static Runnable buildPendingLock(final Context app) {
+        return () -> {
+            synchronized (pendingSync) {
+                pendingLock = null;
+            }
+            if (!isEnabled(app)) return;
+            if (holdingUnlock()) {
+                // A system picker is in front and the hold keeps the session open; arm again for
+                // when the hold lapses, so walking away with the picker open still locks even if
+                // the ROM never delivers our onStop.
+                long remain = HOLD_GRACE_MS - (android.os.SystemClock.elapsedRealtime() - holdSince);
+                scheduleLockAfter(app, Math.max(remain, LOCK_DELAY_MS));
+                return;
+            }
             lockSession();
         };
-        mainHandler.postDelayed(pendingLock, LOCK_DELAY_MS);
+    }
+
+    private static void scheduleLockAfter(final Context app, long delayMs) {
+        synchronized (pendingSync) {
+            cancelPendingLockLocked();
+            pendingLock = buildPendingLock(app);
+            mainHandler.postDelayed(pendingLock, delayMs);
+        }
     }
 
     /** Cancels a scheduled lock without touching the session state, so a screen coming back to the
      *  foreground keeps the session open. */
     static void cancelPendingLock() {
+        synchronized (pendingSync) {
+            cancelPendingLockLocked();
+        }
+    }
+
+    private static void cancelPendingLockLocked() {
         if (pendingLock != null) {
             mainHandler.removeCallbacks(pendingLock);
             pendingLock = null;

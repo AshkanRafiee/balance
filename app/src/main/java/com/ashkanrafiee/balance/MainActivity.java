@@ -244,7 +244,7 @@ public class MainActivity extends Activity {
      *  screen the moment the app leaves the foreground. Any dialog it replaces is dismissed, so a
      *  chained dialog can never leave an orphan floating above the lock. */
     private android.app.AlertDialog showDialog(android.app.AlertDialog dlg) {
-        if (activeDialog != null && activeDialog != dlg && activeDialog.isShowing()) {
+        if (activeDialog != null && activeDialog.isShowing()) {
             activeDialog.dismiss();
         }
         activeDialog = dlg;
