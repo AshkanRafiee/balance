@@ -41,6 +41,10 @@ public class MainActivity extends Activity {
     private String pendingBackupPassword;
     private LockOverlay lockOverlay;
     private Runnable pendingLockAction;
+    /** The last non-progress dialog shown, so it can be dismissed when the app leaves the
+     *  foreground. A dialog is its own window and would otherwise float - still interactive -
+     *  above the lock on return. */
+    private android.app.AlertDialog activeDialog;
     /** True while a lock enable/change/disable or fingerprint toggle is running in the background,
      *  so re-tapping the lock button or options can not open a second flow over the first. */
     private boolean lockChangeBusy = false;
@@ -102,12 +106,14 @@ public class MainActivity extends Activity {
             view.hidden = true;
             view.invalidate();
         }
-        // Reveal the entrance only when the session is already locked. A plain navigation to
-        // another screen (history) or a system picker (backup/restore) must not flash the lock;
-        // a true end-of-foreground is handled at onStop via registerActivityStop().
-        if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) {
-            lockOverlay.showLock();
-            lockOverlay.setAutoFingerprintEnabled(false);
+        if (LockManager.isEnabled(this)) {
+            // A dialog is a separate window and would otherwise stay on top of the lock, still
+            // clickable, when the app is re-opened; drop whatever is up as we leave the foreground.
+            dismissDialogs();
+            if (LockManager.isSessionLocked()) {
+                lockOverlay.showLock();
+                lockOverlay.setAutoFingerprintEnabled(false);
+            }
         }
         updateSecureFlag();
         super.onPause();
@@ -193,21 +199,21 @@ public class MainActivity extends Activity {
         String current = LocaleHelper.currentTag(this);
         int checkedIndex = 0;
         for (int i = 0; i < tags.length; i++) if (tags[i].equals(current)) { checkedIndex = i; break; }
-        new android.app.AlertDialog.Builder(this).setTitle(getString(R.string.dialog_language_title))
+        showDialog(new android.app.AlertDialog.Builder(this).setTitle(getString(R.string.dialog_language_title))
             .setSingleChoiceItems(labels, checkedIndex, (dialogInterface, which) -> {
                 LocaleHelper.setLanguage(this, tags[which]);
                 dialogInterface.dismiss();
                 recreate();
-            }).show();
+            }).create());
     }
 
     void hardRefreshDialog() {
-        new android.app.AlertDialog.Builder(this)
+        showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.dialog_hard_refresh_title))
             .setMessage(getString(R.string.dialog_hard_refresh_message))
             .setNegativeButton(getString(R.string.dialog_hard_refresh_cancel), null)
             .setPositiveButton(getString(R.string.dialog_hard_refresh_confirm), (d, w) -> view.refresh(true))
-            .show();
+            .create());
     }
 
     // ====================================================================
@@ -220,6 +226,30 @@ public class MainActivity extends Activity {
     private void updateSecureFlag() {
         if (LockManager.isEnabled(this)) getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
         else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+    }
+
+    /** Shows {@code dlg} and remembers it, so {@link #dismissDialogs()} can drop whatever is on
+     *  screen the moment the app leaves the foreground. Any dialog it replaces is dismissed, so a
+     *  chained dialog can never leave an orphan floating above the lock. */
+    private android.app.AlertDialog showDialog(android.app.AlertDialog dlg) {
+        if (activeDialog != null && activeDialog != dlg && activeDialog.isShowing()) {
+            activeDialog.dismiss();
+        }
+        activeDialog = dlg;
+        dlg.setOnDismissListener(d -> {
+            if (activeDialog == d) activeDialog = null;
+        });
+        dlg.show();
+        return dlg;
+    }
+
+    /** Dismisses the tracked dialog and any progress dialog. Safe to call when nothing is up. */
+    private void dismissDialogs() {
+        if (activeDialog != null) {
+            activeDialog.dismiss();
+            activeDialog = null;
+        }
+        dismissProgress();
     }
 
     /** Tapping the lock button engages the lock right away; a first tap on a fresh install opens the
@@ -259,12 +289,12 @@ public class MainActivity extends Activity {
 
     private void enableLockFlow() {
         if (lockChangeBusy || lockOverlay.isShowing()) return;
-        new android.app.AlertDialog.Builder(this)
+        showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.lock_enable_title))
             .setMessage(getString(R.string.lock_enable_message))
             .setNegativeButton(getString(R.string.lock_cancel), null)
             .setPositiveButton(getString(R.string.lock_continue), (d, w) -> setupCodeDialog(false))
-            .show();
+            .create());
     }
 
     /** Long-pressing the lock button asks for the current code first (verify mode), then opens the
@@ -286,7 +316,7 @@ public class MainActivity extends Activity {
                 ? R.string.lock_settings_fp_on : R.string.lock_settings_fp_off),
             getString(R.string.lock_settings_disable)
         };
-        new android.app.AlertDialog.Builder(this)
+        showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.lock_settings_title))
             .setItems(options, (d, which) -> {
                 if (which == 0) setupCodeDialog(true);
@@ -294,7 +324,7 @@ public class MainActivity extends Activity {
                 else confirmDisableLock();
             })
             .setNegativeButton(getString(R.string.lock_cancel), null)
-            .show();
+            .create());
     }
 
     private void toggleFingerprint() {
@@ -322,7 +352,7 @@ public class MainActivity extends Activity {
 
     private void confirmDisableLock() {
         if (lockChangeBusy) return;
-        new android.app.AlertDialog.Builder(this)
+        showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.lock_disable_title))
             .setMessage(getString(R.string.lock_disable_message))
             .setNegativeButton(getString(R.string.lock_cancel), null)
@@ -341,7 +371,7 @@ public class MainActivity extends Activity {
                     });
                 }).start();
             })
-            .show();
+            .create());
     }
 
     /** The shared PIN/password entry form used by the enable (fresh) and the change-code flows. The
@@ -479,7 +509,7 @@ public class MainActivity extends Activity {
                     }
                 }).start();
             }));
-        dlg.show();
+        showDialog(dlg);
     }
 
     private TextView segOption(String label) {
@@ -539,14 +569,14 @@ public class MainActivity extends Activity {
             getString(R.string.backup_action_restore),
             getString(R.string.data_action_reset)
         };
-        new android.app.AlertDialog.Builder(this)
+        showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.data_title))
             .setItems(options, (d, which) -> {
                 if (which == 0) askPassword(true, null);
                 else if (which == 1) pickRestoreSource();
                 else hardRefreshDialog();
             })
-            .show();
+            .create());
     }
 
     private void pickBackupTarget() {
@@ -651,7 +681,7 @@ public class MainActivity extends Activity {
                     restoreBackup(restoreUri, value);
                 }
             }));
-        dlg.show();
+        showDialog(dlg);
     }
 
     private void createBackup(Uri uri, String password) {
@@ -1243,7 +1273,7 @@ public class MainActivity extends Activity {
                 : dateOldest ? getString(R.string.sort_date_oldest_reverse)
                 : getString(R.string.sort_date_prompt);
             String[] options = { balanceLabel, dateLabel };
-            new android.app.AlertDialog.Builder(MainActivity.this)
+            showDialog(new android.app.AlertDialog.Builder(MainActivity.this)
                 .setTitle(getString(R.string.sort_dialog_title))
                 .setItems(options, (dialogInterface, which) -> {
                     if (which == 0) sortMode = balHigh ? BalanceData.SORT_BALANCE_LOW
@@ -1253,7 +1283,7 @@ public class MainActivity extends Activity {
                     BalanceData.setSort(MainActivity.this, sortMode);
                     invalidate();
                 })
-                .show();
+                .create());
         }
 
         void copyBalance(String label, long value) {
@@ -1273,7 +1303,7 @@ public class MainActivity extends Activity {
                 getString(isExcluded ? R.string.action_include : R.string.action_exclude),
                 getString(R.string.action_copy_balance)
             };
-            new android.app.AlertDialog.Builder(MainActivity.this)
+            showDialog(new android.app.AlertDialog.Builder(MainActivity.this)
                 .setTitle(displayName)
                 .setItems(options, (d, which) -> {
                     if (which == 0) {
@@ -1291,7 +1321,7 @@ public class MainActivity extends Activity {
                         copyBalance(displayName, bank.amount);
                     }
                 })
-                .show();
+                .create());
         }
 
         @Override
