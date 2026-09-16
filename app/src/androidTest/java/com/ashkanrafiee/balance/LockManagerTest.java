@@ -178,6 +178,35 @@ public class LockManagerTest {
         assertTrue("Reopening after a real background must lock", LockManager.isSessionLocked());
     }
 
+    /** A pause arms the lock; with no screen coming back it must engage shortly after, covering
+     *  ROMs whose {@code onStop} is delayed or never delivered. */
+    @Test public void scheduledLock_engagesWhenTheAppLeavesTheForeground() {
+        LockManager.enable(ctx, "1234", true, false);
+        LockManager.unlockSession();
+        LockManager.registerActivityStart(ctx);
+        LockManager.unlockSession();
+        assertFalse("Foreground session starts open", LockManager.isSessionLocked());
+
+        LockManager.scheduleLock(ctx);
+        SystemClock.sleep(LockManager.LOCK_DELAY_MS + 250);
+        assertTrue("A pause with no resume must lock the session", LockManager.isSessionLocked());
+    }
+
+    /** Navigating between our own screens pauses one and starts another; the start must cancel the
+     *  armed lock so the app never flashes the lock screen on an in-app hand-off. */
+    @Test public void scheduledLock_isCancelledByTheNextScreen() {
+        LockManager.enable(ctx, "1234", true, false);
+        LockManager.unlockSession();
+        LockManager.registerActivityStart(ctx);
+        LockManager.unlockSession();
+
+        LockManager.scheduleLock(ctx);
+        LockManager.registerActivityStart(ctx);
+        SystemClock.sleep(LockManager.LOCK_DELAY_MS + 250);
+        assertFalse("Navigating between our own screens must not lock",
+            LockManager.isSessionLocked());
+    }
+
     @Test public void fingerprint_state_isUnavailableWithoutBinding() {
         assertFalse(LockManager.isFingerprintEnabled(ctx));
         assertTrue(LockManager.fpStatus(ctx) == LockManager.FP_UNAVAILABLE);

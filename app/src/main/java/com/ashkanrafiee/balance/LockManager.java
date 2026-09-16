@@ -7,6 +7,8 @@ import android.hardware.biometrics.BiometricPrompt;
 import android.hardware.fingerprint.FingerprintManager;
 import android.os.Build;
 import android.os.CancellationSignal;
+import android.os.Handler;
+import android.os.Looper;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.security.keystore.KeyPermanentlyInvalidatedException;
@@ -90,6 +92,13 @@ final class LockManager {
     private static volatile boolean holdUnlock = false;
     private static volatile long holdSince = 0;
 
+    /** How long after a screen pauses the session locks. The short grace lets an in-app hand-off to
+     *  another protected screen cancel the lock before it lands, while still locking promptly on
+     *  ROMs that delay — or never deliver — {@code onStop}. */
+    static final long LOCK_DELAY_MS = 400L;
+    private static final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private static Runnable pendingLock;
+
     private LockManager() {}
 
     private static SharedPreferences prefs(Context c) {
@@ -115,6 +124,7 @@ final class LockManager {
     /** Called by every protected activity from {@code onStart}; when the first screen appears after a
      *  pause the session is re-locked, so re-opening the app always asks for the code. */
     static void registerActivityStart(Context c) {
+        cancelPendingLock();
         if (activityCount.getAndIncrement() == 0 && isEnabled(c) && !holdingUnlock()) lockSession();
         // The picker handoff is over once we are back in our own foreground; consume the hold
         // so any later stop must lock again immediately instead of riding out the grace window.
@@ -126,10 +136,35 @@ final class LockManager {
      *  whether this stop ended the foreground session, so the caller can flip its overlay to the
      *  lock entrance for the exit frame. */
     static boolean registerActivityStop() {
+        cancelPendingLock();
         int left = activityCount.decrementAndGet();
         boolean last = left <= 0 && !holdingUnlock();
         if (last) lockSession();
         return last;
+    }
+
+    /** Arms the lock to engage shortly after a screen pauses (see {@link #LOCK_DELAY_MS}). This is
+     *  what makes the lock reliable on devices whose ROM skips {@code onStop}; it is cancelled by
+     *  the next protected screen's start and by {@link #cancelPendingLock()}, so navigating between
+     *  our own screens or returning quickly never locks. Call from {@code onPause}. */
+    static void scheduleLock(final Context c) {
+        cancelPendingLock();
+        final Context app = c.getApplicationContext();
+        pendingLock = () -> {
+            pendingLock = null;
+            if (holdingUnlock() || !isEnabled(app)) return;
+            lockSession();
+        };
+        mainHandler.postDelayed(pendingLock, LOCK_DELAY_MS);
+    }
+
+    /** Cancels a scheduled lock without touching the session state, so a screen coming back to the
+     *  foreground keeps the session open. */
+    static void cancelPendingLock() {
+        if (pendingLock != null) {
+            mainHandler.removeCallbacks(pendingLock);
+            pendingLock = null;
+        }
     }
 
     /** Marks the imminent takeover by a system activity (the backup/restore file picker), so the
@@ -157,6 +192,7 @@ final class LockManager {
 
     /** Test hook: resets the process-wide session counters so a test starts from a known state. */
     static void resetSessionForTest() {
+        cancelPendingLock();
         activityCount.set(0);
         sessionLocked = false;
         holdUnlock = false;
