@@ -1,0 +1,7 @@
+Lock your app with a PIN, password or fingerprint.
+
+• New optional in-app lock: set a PIN, password or fingerprint in Settings, and Balance asks for it when you reopen the app. The lock also protects the home-screen widget and hides app content from screenshots and the recents list.
+• Balances and transaction history now refresh automatically the moment a new bank SMS arrives — the manual refresh buttons are gone.
+• Tap the total card to open your full history, or long-press it to copy the combined total.
+• Fingerprint unlocking is enabled by default when you set up the lock, and works on older devices too.
+• The lock entrance no longer flashes when you simply move between screens or pick a backup file.
