@@ -16,11 +16,13 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -35,6 +37,8 @@ public class MainActivity extends Activity {
     private static final int REQ_PICK_RESTORE = 21;
     private BalanceView view;
     private String pendingBackupPassword;
+    private LockOverlay lockOverlay;
+    private Runnable pendingLockAction;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -49,14 +53,44 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(resColor(R.color.status_bar));
         getWindow().setNavigationBarColor(resColor(R.color.nav_bar));
         view = new BalanceView();
-        setContentView(view);
+        FrameLayout host = new FrameLayout(this);
+        setContentView(host);
+        host.addView(view, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         view.setOnApplyWindowInsetsListener((v, insets) -> {
             view.insetsTop = insets.getSystemWindowInsetTop();
             view.insetsBottom = insets.getSystemWindowInsetBottom();
             view.invalidate();
             return insets;
         });
+        lockOverlay = new LockOverlay(this);
+        lockOverlay.setUnlockListener(() -> {
+            Runnable action = pendingLockAction;
+            pendingLockAction = null;
+            if (action != null) action.run();
+        });
+        lockOverlay.setCancelListener(() -> {
+            pendingLockAction = null;
+            lockOverlay.hide();
+        });
+        host.addView(lockOverlay, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        lockOverlay.setVisibility(View.GONE);
         requestSms();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        LockManager.registerActivityStart(this);
+        showLockOverlay();
+    }
+
+    @Override
+    protected void onStop() {
+        lockOverlay.hide();
+        LockManager.registerActivityStop();
+        super.onStop();
     }
 
     @Override
@@ -113,6 +147,239 @@ public class MainActivity extends Activity {
             .setNegativeButton(getString(R.string.dialog_hard_refresh_cancel), null)
             .setPositiveButton(getString(R.string.dialog_hard_refresh_confirm), (d, w) -> view.refresh(true))
             .show();
+    }
+
+    // ====================================================================
+    // App lock
+    // ====================================================================
+
+    /** Tapping the lock button engages the lock right away; a first tap on a fresh install opens the
+     *  enable dialog instead (long-press always ends up in the lock settings). */
+    void onLockTap() {
+        if (!LockManager.isEnabled(this)) {
+            enableLockFlow();
+            return;
+        }
+        LockManager.lockSession();
+        showLockOverlay();
+    }
+
+    /** Shows the lock entrance whenever the session is locked; hides it otherwise. */
+    void showLockOverlay() {
+        if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) {
+            pendingLockAction = null;
+            if (lockOverlay != null) lockOverlay.showLock();
+        } else if (lockOverlay != null) {
+            lockOverlay.hide();
+        }
+    }
+
+    private void enableLockFlow() {
+        new android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.lock_enable_title))
+            .setMessage(getString(R.string.lock_enable_message))
+            .setNegativeButton(getString(R.string.lock_cancel), null)
+            .setPositiveButton(getString(R.string.lock_continue), (d, w) -> setupCodeDialog(false))
+            .show();
+    }
+
+    /** Long-pressing the lock button asks for the current code first (verify mode), then opens the
+     *  settings; on a fresh install it simply jumps to the enable flow. */
+    void lockSettingsFlow() {
+        if (!LockManager.isEnabled(this)) {
+            enableLockFlow();
+            return;
+        }
+        pendingLockAction = () -> lockSettingsDialog();
+        lockOverlay.showVerify();
+    }
+
+    private void lockSettingsDialog() {
+        String[] options = {
+            getString(R.string.lock_settings_change),
+            getString(LockManager.isFingerprintEnabled(this)
+                ? R.string.lock_settings_fp_on : R.string.lock_settings_fp_off),
+            getString(R.string.lock_settings_disable)
+        };
+        new android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.lock_settings_title))
+            .setItems(options, (d, which) -> {
+                if (which == 0) setupCodeDialog(true);
+                else if (which == 1) toggleFingerprint();
+                else confirmDisableLock();
+            })
+            .setNegativeButton(getString(R.string.lock_cancel), null)
+            .show();
+    }
+
+    private void toggleFingerprint() {
+        if (LockManager.isFingerprintEnabled(this)) {
+            LockManager.setFingerprintEnabled(this, false);
+            toast(R.string.lock_fp_off_toast);
+            BalanceWidgetProvider.push(this);
+            return;
+        }
+        if (!LockManager.fingerprintCapable(this)) {
+            Toast.makeText(this, getString(R.string.lock_fp_no_enroll), Toast.LENGTH_LONG).show();
+            return;
+        }
+        new Thread(() -> {
+            boolean ok = LockManager.setFingerprintEnabled(this, true);
+            runOnUiThread(() ->
+                toast(ok ? R.string.lock_fp_on_toast : R.string.lock_fingerprint_unavailable));
+        }).start();
+    }
+
+    private void confirmDisableLock() {
+        new android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.lock_disable_title))
+            .setMessage(getString(R.string.lock_disable_message))
+            .setNegativeButton(getString(R.string.lock_cancel), null)
+            .setPositiveButton(getString(R.string.lock_disable_action), (d, w) -> {
+                new Thread(() -> {
+                    LockManager.disable(this);
+                    runOnUiThread(() -> {
+                        showLockOverlay();
+                        toast(R.string.lock_toast_disabled);
+                        BalanceWidgetProvider.push(this);
+                    });
+                }).start();
+            })
+            .show();
+    }
+
+    /** The shared PIN/password entry form used by the enable (fresh) and the change-code flows. The
+     *  hash derivation is deliberately slow, so it runs off the UI thread before the dialog closes. */
+    private void setupCodeDialog(final boolean changing) {
+        final boolean[] pin = {LockManager.isPinMode(this)};
+        final EditText code = new EditText(this);
+        final EditText confirm = new EditText(this);
+        android.widget.CheckBox fpCheck = null;
+
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(dp(24), dp(8), dp(24), 0);
+
+        final TextView pinOpt = segOption(getString(R.string.lock_pin_label));
+        final TextView passOpt = segOption(getString(R.string.lock_password_label));
+        LinearLayout seg = new LinearLayout(this);
+        seg.setOrientation(LinearLayout.HORIZONTAL);
+        seg.addView(pinOpt, new LinearLayout.LayoutParams(0, -2, 1));
+        seg.addView(passOpt, new LinearLayout.LayoutParams(0, -2, 1));
+        wrap.addView(seg);
+
+        final Runnable styleSeg = () -> {
+            styleSeg(pinOpt, pin[0]);
+            styleSeg(passOpt, !pin[0]);
+            boolean isPin = pin[0];
+            code.setInputType(isPin ? InputType.TYPE_CLASS_NUMBER
+                : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            confirm.setInputType(isPin ? InputType.TYPE_CLASS_NUMBER
+                : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            code.setHint(getString(isPin ? R.string.lock_pin_hint : R.string.lock_password_hint));
+        };
+        pinOpt.setOnClickListener(v -> { pin[0] = true; styleSeg.run(); });
+        passOpt.setOnClickListener(v -> { pin[0] = false; styleSeg.run(); });
+
+        applyLockInput(code);
+        applyLockInput(confirm);
+        confirm.setHint(getString(R.string.lock_confirm_hint));
+        LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(-1, -2);
+        inputLp.topMargin = dp(10);
+        confirm.setLayoutParams(inputLp);
+        wrap.addView(code);
+        wrap.addView(confirm);
+
+        if (!changing && LockManager.fingerprintCapable(this)) {
+            fpCheck = new android.widget.CheckBox(this);
+            fpCheck.setText(getString(R.string.lock_fingerprint_option));
+            fpCheck.setTextSize(14);
+            fpCheck.setTextColor(resColor(R.color.fg));
+            LinearLayout.LayoutParams fpLp = new LinearLayout.LayoutParams(-1, -2);
+            fpLp.topMargin = dp(14);
+            wrap.addView(fpCheck, fpLp);
+        } else if (!changing) {
+            TextView note = new TextView(this);
+            note.setText(getString(R.string.lock_fingerprint_unavailable));
+            note.setTextSize(12);
+            note.setTextColor(0xFFB91C1C);
+            LinearLayout.LayoutParams noteLp = new LinearLayout.LayoutParams(-1, -2);
+            noteLp.topMargin = dp(14);
+            wrap.addView(note, noteLp);
+        }
+
+        styleSeg.run();
+        final android.widget.CheckBox fp = fpCheck;
+        android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+            .setTitle(getString(changing ? R.string.lock_change_title : R.string.lock_setup_title))
+            .setView(wrap)
+            .setNegativeButton(getString(R.string.lock_cancel), null)
+            .setPositiveButton(getString(changing
+                ? R.string.lock_save_action : R.string.lock_enable_action), null)
+            .create();
+        dlg.setOnShowListener(d -> dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
+            .setOnClickListener(v -> {
+                final boolean isPin = pin[0];
+                String a = code.getText().toString().trim();
+                String b = confirm.getText().toString().trim();
+                if (a.isEmpty() || b.isEmpty()) {
+                    toast(R.string.lock_validate_empty);
+                    return;
+                }
+                if (!LockManager.validCode(a, isPin)) {
+                    toast(isPin ? R.string.lock_validate_pin_length
+                        : R.string.lock_validate_password_length);
+                    return;
+                }
+                if (!a.equals(b)) {
+                    toast(R.string.lock_validate_mismatch);
+                    return;
+                }
+                final boolean wantFp = fp != null && fp.isChecked();
+                final String value = a;
+                dlg.dismiss();
+                new Thread(() -> {
+                    if (changing) LockManager.changeCode(this, value, isPin);
+                    else LockManager.enable(this, value, isPin, wantFp);
+                    runOnUiThread(() -> {
+                        toast(changing ? R.string.lock_toast_code_changed : R.string.lock_toast_enabled);
+                        BalanceWidgetProvider.push(this);
+                    });
+                }).start();
+            }));
+        dlg.show();
+    }
+
+    private TextView segOption(String label) {
+        TextView t = new TextView(this);
+        t.setText(label);
+        t.setTextSize(15);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(dp(16), dp(10), dp(16), dp(10));
+        return t;
+    }
+
+    private void styleSeg(TextView t, boolean selected) {
+        t.setBackground(rounded(selected ? resColor(R.color.accent) : resColor(R.color.panel), 12));
+        t.setTextColor(selected ? Color.WHITE : resColor(R.color.muted));
+    }
+
+    private void applyLockInput(EditText e) {
+        e.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        e.setTextSize(16);
+        e.setTextColor(resColor(R.color.fg));
+        e.setHintTextColor(resColor(R.color.muted));
+    }
+
+    private GradientDrawable rounded(int color, float radius) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(dp(radius));
+        return g;
+    }
+
+    private void toast(int res) {
+        Toast.makeText(this, getString(res), Toast.LENGTH_SHORT).show();
     }
 
     // ====================================================================
@@ -381,11 +648,13 @@ public class MainActivity extends Activity {
     }
 
     private final class BalanceView extends View {
+        static final int ICON_NONE = 0, ICON_REFRESH = 1, ICON_LOCK = 2;
         final Paint p = new Paint(3);
         final LinkedHashMap<String, Bank> banks = new LinkedHashMap<>();
         final java.util.Set<String> excluded = new java.util.HashSet<>();
         final float d = getResources().getDisplayMetrics().density;
         Drawable refreshIcon;
+        Drawable lockIcon;
         boolean hidden, refreshing;
         int insetsTop, insetsBottom;
         int sortMode;
@@ -393,11 +662,19 @@ public class MainActivity extends Activity {
         boolean dragging;
         boolean hardArmed;
         boolean hardProbeFired;
+        boolean lockArmed;
+        boolean lockProbeFired;
+        int downIcon = ICON_NONE;
         final Handler handler = new Handler(Looper.getMainLooper());
         final Runnable hardRefreshProbe = () -> {
             hardProbeFired = true;
             if (MainActivity.this.isFinishing() || MainActivity.this.isDestroyed()) return;
             MainActivity.this.hardRefreshDialog();
+        };
+        final Runnable lockLongProbe = () -> {
+            lockProbeFired = true;
+            if (MainActivity.this.isFinishing() || MainActivity.this.isDestroyed()) return;
+            MainActivity.this.lockSettingsFlow();
         };
         String status = getString(R.string.status_reading_sms);
         long total;
@@ -605,6 +882,7 @@ public class MainActivity extends Activity {
             text(c, fit(getString(R.string.subtitle_offline_bank_balances), 14, w - 64), edgeX, 86, 14, muted, edgeAlign);
 
             drawRefreshIcon(c, accent);
+            drawLockIcon(c, accent);
             if (refreshing) {
                 refreshAngle = (refreshAngle + 18) % 360;
                 postInvalidateOnAnimation();
@@ -766,11 +1044,38 @@ public class MainActivity extends Activity {
             c.restore();
         }
 
-        /** The refresh control sits on the top-right, opposite the app title and subtitle (top-left in RTL). */
-        boolean isOnRefresh(float x, float y) {
-            boolean rtl = isRtl();
-            return rtl ? x <= 110 && y >= 36 && y <= 100
-                : x >= getWidth() / d - 110 && y >= 36 && y <= 100;
+        /** Draws the lock button just inside the refresh icon (the same glyph the locked widget shows),
+         *  top-right of the app bar. */
+        void drawLockIcon(Canvas c, int accent) {
+            float cx = lockCx();
+            float cy = 76;
+            if (lockIcon == null) {
+                lockIcon = getContext().getDrawable(R.drawable.ic_lock).mutate();
+                lockIcon.setTint(accent);
+            }
+            int half = 12;
+            lockIcon.setBounds((int) (cx - half), (int) (cy - half), (int) (cx + half), (int) (cy + half));
+            lockIcon.draw(c);
+        }
+
+        float refreshCx() {
+            return isRtl() ? 56 : getWidth() / d - 56;
+        }
+
+        float lockCx() {
+            return isRtl() ? 88 : getWidth() / d - 88;
+        }
+
+        private boolean iconHit(float x, float y, float cx) {
+            return y >= 36 && y <= 100 && Math.abs(x - cx) <= 24;
+        }
+
+        /** The app-bar control under a tap: refresh, lock, or nothing. The lock sits just inside the
+         *  refresh glyph, each with its own 24dp hit radius so the two never overlap. */
+        int iconId(float x, float y) {
+            if (iconHit(x, y, refreshCx())) return ICON_REFRESH;
+            if (iconHit(x, y, lockCx())) return ICON_LOCK;
+            return ICON_NONE;
         }
 
         /** Picks a sort. Selecting the active category again reverses its direction, which the dialog
@@ -852,17 +1157,25 @@ public class MainActivity extends Activity {
                 h = (getHeight() - top - bottom) / d;
             if (e.getAction() == MotionEvent.ACTION_DOWN) {
                 lastY = y; downY = y; dragging = false;
-                hardArmed = isOnRefresh(x, y);
+                downIcon = iconId(x, y);
+                hardArmed = downIcon == ICON_REFRESH;
+                lockArmed = downIcon == ICON_LOCK;
                 hardProbeFired = false;
+                lockProbeFired = false;
+                handler.removeCallbacks(hardRefreshProbe);
+                handler.removeCallbacks(lockLongProbe);
                 if (hardArmed) handler.postDelayed(hardRefreshProbe, 650);
-                else handler.removeCallbacks(hardRefreshProbe);
+                else if (lockArmed) handler.postDelayed(lockLongProbe, 480);
                 return true;
             }
             if (e.getAction() == MotionEvent.ACTION_MOVE) {
                 if (Math.abs(y - lastY) > 3) {
                     dragging = true;
                     handler.removeCallbacks(hardRefreshProbe);
+                    handler.removeCallbacks(lockLongProbe);
                     hardArmed = false;
+                    lockArmed = false;
+                    downIcon = ICON_NONE;
                     scrollY = Math.max(0, Math.min(
                         Math.max(0, banks.size() * 96 - (h - 440)),
                         scrollY + lastY - y));
@@ -873,7 +1186,9 @@ public class MainActivity extends Activity {
             }
             if (e.getAction() != MotionEvent.ACTION_UP) return true;
             handler.removeCallbacks(hardRefreshProbe);
+            handler.removeCallbacks(lockLongProbe);
             if (hardProbeFired) { hardProbeFired = false; hardArmed = false; return true; }
+            if (lockProbeFired) { lockProbeFired = false; lockArmed = false; return true; }
             if (dragging) {
                 if (downY < 360 && y - downY > 55) refresh();
                 return true;
@@ -888,8 +1203,10 @@ public class MainActivity extends Activity {
                 } else if (x >= footerHistoryStart - 10 && x <= footerHistoryEnd + 10) {
                     startActivity(new Intent(MainActivity.this, HistoryActivity.class));
                 }
-            } else if (isOnRefresh(x, y)) {
+            } else if (downIcon == ICON_REFRESH) {
                 refresh();
+            } else if (downIcon == ICON_LOCK) {
+                MainActivity.this.onLockTap();
             } else if (y >= 120 && y <= 270) {
                 boolean onEye = rtl ? x <= 105 && y <= 185 : x >= getWidth() / d - 105 && y <= 185;
                 if (onEye) {

@@ -12,6 +12,7 @@ import android.os.Looper;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -54,6 +55,7 @@ public final class HistoryActivity extends Activity {
         Color.rgb(244, 63, 94), Color.rgb(20, 184, 166)
     };
     private LinearLayout body;
+    private LockOverlay lockOverlay;
     private JalaliCalendar todayJalali, yesterdayJalali;
     /** Optional canonical bank name; when set, only that bank's transactions are shown. */
     private String bankFilter;
@@ -302,7 +304,9 @@ public final class HistoryActivity extends Activity {
             v.setPadding(dp(20), top + dp(14), dp(20), bottom + dp(14));
             return i;
         });
-        setContentView(root);
+        FrameLayout host = new FrameLayout(this);
+        setContentView(host);
+        host.addView(root, new FrameLayout.LayoutParams(-1, -1));
 
         root.addView(buildHeader(), margin(0, 0, 0, 14));
         body = new LinearLayout(this);
@@ -310,12 +314,36 @@ public final class HistoryActivity extends Activity {
         scrollView = new ScrollView(this);
         scrollView.addView(body, new ScrollView.LayoutParams(-1, -1));
         root.addView(scrollView, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        lockOverlay = new LockOverlay(this);
+        lockOverlay.setUnlockListener(() -> { });
+        lockOverlay.setCancelListener(() -> lockOverlay.hide());
+        host.addView(lockOverlay, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        lockOverlay.setVisibility(View.GONE);
+
         render();
         if (pendingScroll > 0) {
             int offset = pendingScroll;
             scrollView.post(() -> scrollView.scrollTo(0, offset));
             pendingScroll = 0;
         }
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        LockManager.registerActivityStart(this);
+        if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) {
+            lockOverlay.showLock();
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        lockOverlay.hide();
+        LockManager.registerActivityStop();
+        super.onStop();
     }
 
     /** Refreshes the cached "today" and "yesterday" Jalali dates once per render. */
