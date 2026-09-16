@@ -204,5 +204,8 @@
     <string name="lock_fp_on_toast">Fingerprint unlock enabled</string>
     <string name="lock_fp_off_toast">Fingerprint unlock disabled</string>
     <string name="lock_fp_no_enroll">No fingerprint is enrolled on this device. Add one in your device settings first.</string>
+    <string name="lock_progress_saving">Saving…</string>
+    <string name="lock_error_generic">Could not save the lock. Please try again.</string>
+    <string name="lock_fingerprint_negative_button">Use PIN or password</string>
     <string name="widget_locked_message">Balance is locked — unlock the app to see your balances</string>
 </resources>

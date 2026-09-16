@@ -39,6 +39,9 @@ public class MainActivity extends Activity {
     private String pendingBackupPassword;
     private LockOverlay lockOverlay;
     private Runnable pendingLockAction;
+    /** True while a lock enable/change/disable or fingerprint toggle is running in the background,
+     *  so re-tapping the lock button or options can not open a second flow over the first. */
+    private boolean lockChangeBusy = false;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -153,14 +156,24 @@ public class MainActivity extends Activity {
     // App lock
     // ====================================================================
 
+    /** While the lock is enabled the window is flagged SECURE, so recents thumbnails, live
+     *  snapshots and screenshots never show a frame of the data — even when the session is
+     *  temporarily unlocked. The flag is dropped the moment the lock is disabled. */
+    private void updateSecureFlag() {
+        if (LockManager.isEnabled(this)) getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+        else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+    }
+
     /** Tapping the lock button engages the lock right away; a first tap on a fresh install opens the
      *  enable dialog instead (long-press always ends up in the lock settings). */
     void onLockTap() {
+        if (lockChangeBusy || lockOverlay.isShowing()) return;
         if (!LockManager.isEnabled(this)) {
             enableLockFlow();
             return;
         }
         LockManager.lockSession();
+        updateSecureFlag();
         showLockOverlay();
     }
 
@@ -175,6 +188,7 @@ public class MainActivity extends Activity {
     }
 
     private void enableLockFlow() {
+        if (lockChangeBusy || lockOverlay.isShowing()) return;
         new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.lock_enable_title))
             .setMessage(getString(R.string.lock_enable_message))
@@ -186,6 +200,7 @@ public class MainActivity extends Activity {
     /** Long-pressing the lock button asks for the current code first (verify mode), then opens the
      *  settings; on a fresh install it simply jumps to the enable flow. */
     void lockSettingsFlow() {
+        if (lockChangeBusy || lockOverlay.isShowing()) return;
         if (!LockManager.isEnabled(this)) {
             enableLockFlow();
             return;
@@ -213,6 +228,7 @@ public class MainActivity extends Activity {
     }
 
     private void toggleFingerprint() {
+        if (lockChangeBusy) return;
         if (LockManager.isFingerprintEnabled(this)) {
             LockManager.setFingerprintEnabled(this, false);
             toast(R.string.lock_fp_off_toast);
@@ -223,22 +239,32 @@ public class MainActivity extends Activity {
             Toast.makeText(this, getString(R.string.lock_fp_no_enroll), Toast.LENGTH_LONG).show();
             return;
         }
+        lockChangeBusy = true;
         new Thread(() -> {
             boolean ok = LockManager.setFingerprintEnabled(this, true);
-            runOnUiThread(() ->
-                toast(ok ? R.string.lock_fp_on_toast : R.string.lock_fingerprint_unavailable));
+            final boolean result = ok;
+            runOnUiThread(() -> {
+                lockChangeBusy = false;
+                toast(result ? R.string.lock_fp_on_toast : R.string.lock_fingerprint_unavailable);
+            });
         }).start();
     }
 
     private void confirmDisableLock() {
+        if (lockChangeBusy) return;
         new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.lock_disable_title))
             .setMessage(getString(R.string.lock_disable_message))
             .setNegativeButton(getString(R.string.lock_cancel), null)
             .setPositiveButton(getString(R.string.lock_disable_action), (d, w) -> {
+                lockChangeBusy = true;
+                showProgress(getString(R.string.lock_progress_saving));
                 new Thread(() -> {
                     LockManager.disable(this);
                     runOnUiThread(() -> {
+                        dismissProgress();
+                        lockChangeBusy = false;
+                        updateSecureFlag();
                         showLockOverlay();
                         toast(R.string.lock_toast_disabled);
                         BalanceWidgetProvider.push(this);
@@ -251,6 +277,7 @@ public class MainActivity extends Activity {
     /** The shared PIN/password entry form used by the enable (fresh) and the change-code flows. The
      *  hash derivation is deliberately slow, so it runs off the UI thread before the dialog closes. */
     private void setupCodeDialog(final boolean changing) {
+        if (lockChangeBusy || lockOverlay.isShowing()) return;
         final boolean[] pin = {LockManager.isPinMode(this)};
         final EditText code = new EditText(this);
         final EditText confirm = new EditText(this);
@@ -272,10 +299,15 @@ public class MainActivity extends Activity {
             styleSeg(pinOpt, pin[0]);
             styleSeg(passOpt, !pin[0]);
             boolean isPin = pin[0];
+            // The first field stays readable for PINs (so the digits can be double-checked) but is
+            // masked for passwords; the confirmation field is always masked, in every mode.
             code.setInputType(isPin ? InputType.TYPE_CLASS_NUMBER
                 : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-            confirm.setInputType(isPin ? InputType.TYPE_CLASS_NUMBER
+            code.setTransformationMethod(isPin ? null : new android.text.method.PasswordTransformationMethod());
+            confirm.setInputType(isPin
+                ? InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD
                 : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            confirm.setTransformationMethod(new android.text.method.PasswordTransformationMethod());
             code.setHint(getString(isPin ? R.string.lock_pin_hint : R.string.lock_password_hint));
         };
         pinOpt.setOnClickListener(v -> { pin[0] = true; styleSeg.run(); });
@@ -338,13 +370,27 @@ public class MainActivity extends Activity {
                 final boolean wantFp = fp != null && fp.isChecked();
                 final String value = a;
                 dlg.dismiss();
+                lockChangeBusy = true;
+                showProgress(getString(R.string.lock_progress_saving));
                 new Thread(() -> {
-                    if (changing) LockManager.changeCode(this, value, isPin);
-                    else LockManager.enable(this, value, isPin, wantFp);
-                    runOnUiThread(() -> {
-                        toast(changing ? R.string.lock_toast_code_changed : R.string.lock_toast_enabled);
-                        BalanceWidgetProvider.push(this);
-                    });
+                    try {
+                        if (changing) LockManager.changeCode(this, value, isPin);
+                        else LockManager.enable(this, value, isPin, wantFp);
+                        runOnUiThread(() -> {
+                            dismissProgress();
+                            lockChangeBusy = false;
+                            updateSecureFlag();
+                            toast(changing ? R.string.lock_toast_code_changed : R.string.lock_toast_enabled);
+                            BalanceWidgetProvider.push(this);
+                        });
+                    } catch (Exception e) {
+                        android.util.Log.w("BalanceLock", "setup failed", e);
+                        runOnUiThread(() -> {
+                            dismissProgress();
+                            lockChangeBusy = false;
+                            toast(R.string.lock_error_generic);
+                        });
+                    }
                 }).start();
             }));
         dlg.show();
@@ -1025,13 +1071,13 @@ public class MainActivity extends Activity {
             }
         }
 
-        /** Draws the rounded-arrow refresh icon (the same glyph the widget's refresh button uses) top-right
-         *  of the app bar, opposite the app title. While a refresh runs, {@code refreshAngle} spins the
-         *  whole icon around its center. */
+        /** Draws the rounded-arrow refresh icon (the same glyph the widget's refresh button uses)
+         *  at the top-right corner, on the same line as the app title. While a refresh runs,
+         *  {@code refreshAngle} spins the whole icon around its center. */
         void drawRefreshIcon(Canvas c, int accent) {
             float w = getWidth() / d;
-            float cx = isRtl() ? 56 : w - 56;
-            float cy = 76;
+            float cx = isRtl() ? 40 : w - 40;
+            float cy = 54;
             if (refreshIcon == null) {
                 refreshIcon = getContext().getDrawable(R.drawable.ic_refresh).mutate();
                 refreshIcon.setTint(accent);
@@ -1044,11 +1090,11 @@ public class MainActivity extends Activity {
             c.restore();
         }
 
-        /** Draws the lock button just inside the refresh icon (the same glyph the locked widget shows),
-         *  top-right of the app bar. */
+        /** Draws the lock button just inside the refresh icon (the same glyph the locked widget
+         *  shows), in the top-right corner next to the app title. */
         void drawLockIcon(Canvas c, int accent) {
             float cx = lockCx();
-            float cy = 76;
+            float cy = 54;
             if (lockIcon == null) {
                 lockIcon = getContext().getDrawable(R.drawable.ic_lock).mutate();
                 lockIcon.setTint(accent);
@@ -1059,15 +1105,15 @@ public class MainActivity extends Activity {
         }
 
         float refreshCx() {
-            return isRtl() ? 56 : getWidth() / d - 56;
+            return isRtl() ? 40 : getWidth() / d - 40;
         }
 
         float lockCx() {
-            return isRtl() ? 88 : getWidth() / d - 88;
+            return isRtl() ? 72 : getWidth() / d - 72;
         }
 
         private boolean iconHit(float x, float y, float cx) {
-            return y >= 36 && y <= 100 && Math.abs(x - cx) <= 24;
+            return y >= 28 && y <= 80 && Math.abs(x - cx) <= 24;
         }
 
         /** The app-bar control under a tap: refresh, lock, or nothing. The lock sits just inside the

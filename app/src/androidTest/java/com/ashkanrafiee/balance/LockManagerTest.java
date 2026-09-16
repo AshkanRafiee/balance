@@ -1,9 +1,12 @@
 package com.ashkanrafiee.balance;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
+import android.os.SystemClock;
+import android.util.Base64;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -20,6 +23,8 @@ import org.junit.runner.RunWith;
 
 import java.util.ArrayList;
 import java.util.List;
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
 
 /** Covers the in-app lock: PIN/password hashing, fingerprint binding state, and the app-wide
  *  session locking that re-engages whenever the last screen leaves the foreground. */
@@ -62,6 +67,32 @@ public class LockManagerTest {
         assertFalse(LockManager.isPinMode(ctx));
         assertTrue(LockManager.verify(ctx, "MyPassw0rd"));
         assertFalse(LockManager.verify(ctx, "1234"));
+    }
+
+    /** A lock written by an older build at a different work factor must keep verifying at its own
+     *  factor first, then be re-derived to the current factor in the background. */
+    @Test public void legacyFactorLock_rehashesToTheCurrentFactorAfterVerify() {
+        LockManager.enable(ctx, "1234", true, false);
+        byte[] salt = new byte[16];
+        byte[] legacy = pbkdf2("1234", salt, 30_000);
+        ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit()
+            .putString(LockManager.KEY_LOCK_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
+            .putInt(LockManager.KEY_LOCK_ITERATIONS, 30_000)
+            .putString(LockManager.KEY_LOCK_HASH, Base64.encodeToString(legacy, Base64.NO_WRAP))
+            .commit();
+        assertTrue("Legacy factor must still verify", LockManager.verify(ctx, "1234"));
+        assertFalse(LockManager.verify(ctx, "0000"));
+
+        android.content.SharedPreferences p =
+            ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE);
+        long deadline = SystemClock.uptimeMillis() + 5000;
+        int iterations;
+        while ((iterations = p.getInt(LockManager.KEY_LOCK_ITERATIONS, 0))
+                != LockManager.LOCK_ITERATIONS && SystemClock.uptimeMillis() < deadline) {
+            SystemClock.sleep(50);
+        }
+        assertEquals("The lock must be re-derived to the current factor", LockManager.LOCK_ITERATIONS, iterations);
+        assertTrue(LockManager.verify(ctx, "1234"));
     }
 
     @Test public void disable_forgetsEverything() {
@@ -171,5 +202,15 @@ public class LockManagerTest {
             if (v instanceof LinearLayout && hasImage((LinearLayout) v)) return true;
         }
         return false;
+    }
+
+    /** PBKDF2-SHA256 on the caller's behalf, to fabricate a lock hash at an arbitrary factor. */
+    private static byte[] pbkdf2(String code, byte[] salt, int iterations) {
+        try {
+            PBEKeySpec spec = new PBEKeySpec(code.toCharArray(), salt, iterations, 256);
+            return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).getEncoded();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }

@@ -204,5 +204,8 @@
     <string name="lock_fp_on_toast">قفل اثر انگشت فعال شد</string>
     <string name="lock_fp_off_toast">قفل اثر انگشت غیرفعال شد</string>
     <string name="lock_fp_no_enroll">در این دستگاه اثر انگشتی ثبت نشده است. ابتدا از تنظیمات دستگاه یک اثر انگشت اضافه کنید.</string>
+    <string name="lock_progress_saving">در حال ذخیره…</string>
+    <string name="lock_error_generic">ذخیرهٔ قفل انجام نشد. لطفاً دوباره تلاش کنید.</string>
+    <string name="lock_fingerprint_negative_button">استفاده از رمز عددی یا رمز عبور</string>
     <string name="widget_locked_message">Balance قفل است — برای دیدن موجودی‌ها برنامه را باز کنید</string>
 </resources>
