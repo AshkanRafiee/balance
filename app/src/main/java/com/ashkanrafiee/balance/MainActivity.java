@@ -110,6 +110,10 @@ public class MainActivity extends Activity {
             // A dialog is a separate window and would otherwise stay on top of the lock, still
             // clickable, when the app is re-opened; drop whatever is up as we leave the foreground.
             dismissDialogs();
+            // Arm the lock now so it engages even on ROMs that delay or skip onStop. The arm is
+            // cancelled by the next screen's start, so navigating between our own screens (or
+            // returning quickly) never locks; a genuine end-of-foreground does.
+            LockManager.scheduleLock(this);
             if (LockManager.isSessionLocked()) {
                 lockOverlay.showLock();
                 lockOverlay.setAutoFingerprintEnabled(false);
@@ -136,11 +140,19 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        LockManager.cancelPendingLock();
         if (view != null) {
             view.enforceAutoHide();
             view.refresh();
         }
         registerSmsObserver();
+        // The delayed lock may have engaged while we were paused on a ROM that skipped onStop;
+        // reflect it now that we are back in the foreground.
+        if (LockManager.isEnabled(this) && LockManager.isSessionLocked()
+                && lockOverlay != null && !lockOverlay.isShowing()) {
+            pendingLockAction = null;
+            lockOverlay.showLock();
+        }
     }
 
     /**

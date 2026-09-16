@@ -484,8 +484,15 @@ public final class HistoryActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        LockManager.cancelPendingLock();
         BalanceData.addHistoryListener(onHistoryChanged);
         registerSmsObserver();
+        // The delayed lock may have engaged while we were paused on a ROM that skipped onStop;
+        // reflect it now that we are back in the foreground.
+        if (LockManager.isEnabled(this) && LockManager.isSessionLocked()
+                && lockOverlay != null && !lockOverlay.isShowing()) {
+            lockOverlay.showLock();
+        }
         // Re-scan in the background (a no-op if a scan is already running) so messages that
         // arrived while the screen was closed are reflected as soon as it opens.
         new Thread(() -> BalanceData.scanHistory(HistoryActivity.this)).start();
@@ -494,9 +501,14 @@ public final class HistoryActivity extends Activity {
     @Override
     protected void onPause() {
         unregisterSmsObserver();
-        if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) {
-            lockOverlay.showLock();
-            lockOverlay.setAutoFingerprintEnabled(false);
+        if (LockManager.isEnabled(this)) {
+            // Arm the lock now so it engages even on ROMs that delay or skip onStop; the next
+            // screen's start cancels it, so navigating between our own screens never locks.
+            LockManager.scheduleLock(this);
+            if (LockManager.isSessionLocked()) {
+                lockOverlay.showLock();
+                lockOverlay.setAutoFingerprintEnabled(false);
+            }
         }
         updateSecureFlag();
         BalanceData.removeHistoryListener(onHistoryChanged);
