@@ -7,10 +7,12 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.database.ContentObserver;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Telephony;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -42,6 +44,7 @@ public class MainActivity extends Activity {
     /** True while a lock enable/change/disable or fingerprint toggle is running in the background,
      *  so re-tapping the lock button or options can not open a second flow over the first. */
     private boolean lockChangeBusy = false;
+    private ContentObserver smsObserver;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -94,6 +97,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        unregisterSmsObserver();
         if (view != null && BalanceData.isAutoHide(this)) {
             view.hidden = true;
             view.invalidate();
@@ -121,6 +125,7 @@ public class MainActivity extends Activity {
             view.enforceAutoHide();
             view.refresh();
         }
+        registerSmsObserver();
     }
 
     /**
@@ -145,7 +150,30 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int r, String[] p, int[] g) {
         super.onRequestPermissionsResult(r, p, g);
-        if (r == SMS_REQUEST) view.refresh();
+        if (r == SMS_REQUEST) {
+            view.refresh();
+            registerSmsObserver();
+        }
+    }
+
+    private void registerSmsObserver() {
+        if (smsObserver != null) return;
+        if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) return;
+        smsObserver = new ContentObserver(new Handler(Looper.getMainLooper())) {
+            @Override public void onChange(boolean selfChange) { onChange(selfChange, null); }
+            @Override public void onChange(boolean selfChange, Uri uri) {
+                if (view != null) view.refreshSilent();
+            }
+        };
+        getContentResolver().registerContentObserver(
+            Telephony.Sms.Inbox.CONTENT_URI, true, smsObserver);
+    }
+
+    private void unregisterSmsObserver() {
+        if (smsObserver != null) {
+            getContentResolver().unregisterContentObserver(smsObserver);
+            smsObserver = null;
+        }
     }
 
     private void languageDialog() {
@@ -493,16 +521,18 @@ public class MainActivity extends Activity {
         return new int[]{ins.getSystemWindowInsetTop(), ins.getSystemWindowInsetBottom()};
     }
 
-    private void backupDialog() {
+    private void dataDialog() {
         String[] options = {
             getString(R.string.backup_action_create),
-            getString(R.string.backup_action_restore)
+            getString(R.string.backup_action_restore),
+            getString(R.string.data_action_reset)
         };
         new android.app.AlertDialog.Builder(this)
-            .setTitle(getString(R.string.backup_title))
+            .setTitle(getString(R.string.data_title))
             .setItems(options, (d, which) -> {
                 if (which == 0) askPassword(true, null);
-                else pickRestoreSource();
+                else if (which == 1) pickRestoreSource();
+                else hardRefreshDialog();
             })
             .show();
     }
@@ -740,32 +770,24 @@ public class MainActivity extends Activity {
     }
 
     private final class BalanceView extends View {
-        static final int ICON_NONE = 0, ICON_REFRESH = 1, ICON_LOCK = 2, ICON_EYE = 3;
+        static final int ICON_NONE = 0, ICON_LOCK = 1, ICON_EYE = 2;
         final Paint p = new Paint(3);
         final LinkedHashMap<String, Bank> banks = new LinkedHashMap<>();
         final java.util.Set<String> excluded = new java.util.HashSet<>();
         final float d = getResources().getDisplayMetrics().density;
-        Drawable refreshIcon;
         Drawable lockIcon;
         boolean hidden, refreshing;
         boolean autoHide;
         int insetsTop, insetsBottom;
         int sortMode;
-        float scrollY = 0, lastY, downY, refreshAngle;
+        float scrollY = 0, lastY, downY;
         boolean dragging;
-        boolean hardArmed;
-        boolean hardProbeFired;
         boolean lockArmed;
         boolean lockProbeFired;
         boolean eyeArmed;
         boolean eyeProbeFired;
         int downIcon = ICON_NONE;
         final Handler handler = new Handler(Looper.getMainLooper());
-        final Runnable hardRefreshProbe = () -> {
-            hardProbeFired = true;
-            if (MainActivity.this.isFinishing() || MainActivity.this.isDestroyed()) return;
-            MainActivity.this.hardRefreshDialog();
-        };
         final Runnable lockLongProbe = () -> {
             lockProbeFired = true;
             if (MainActivity.this.isFinishing() || MainActivity.this.isDestroyed()) return;
@@ -806,7 +828,8 @@ public class MainActivity extends Activity {
             return getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
         }
 
-        void refresh() { refresh(false); }
+        void refresh() { refresh(false, false); }
+        void refreshSilent() { refresh(false, true); }
 
         /** When auto-mask is on, the balances must start (and stay) masked; call this from the
          *  lifecycle so every app open or return from the background re-hides them. */
@@ -839,10 +862,14 @@ public class MainActivity extends Activity {
             BalanceWidgetProvider.push(MainActivity.this);
         }
 
+        void refresh(boolean hard) { refresh(hard, false); }
+
         /** Refreshes from the SMS inbox. With {@code hard} set, saved balances are discarded first and
          *  only the messages currently in the inbox are re-read, so banks whose SMS are no longer
-         *  available disappear. Callers must already have shown the consequence dialog. */
-        void refresh(boolean hard) {
+         *  available disappear. Callers must already have shown the consequence dialog. When
+         *  {@code silent} is true the "Refreshing…" status is suppressed — used by the background
+         *  ContentObserver so incoming-SMS updates don't flash status on screen. */
+        void refresh(boolean hard, boolean silent) {
             if (refreshing) return;
             if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
                 status = getString(R.string.status_permission_needed);
@@ -850,11 +877,12 @@ public class MainActivity extends Activity {
                 return;
             }
             refreshing = true;
-            status = getString(R.string.status_refreshing);
-            invalidate();
-            // Resolve the status messages on the UI thread; the worker below must not call getString()
-            // off the main thread (it can hit a stale configuration after a recreate).
+            if (!silent) {
+                status = getString(R.string.status_refreshing);
+                invalidate();
+            }
             String statusNoSms = getString(R.string.status_no_sms_found);
+            String updatedNow = getString(R.string.status_updated_now);
             String statusLoaded = getString(R.string.status_loaded_from_saved);
             new Thread(() -> {
                 final Context app = MainActivity.this.getApplicationContext();
@@ -868,7 +896,7 @@ public class MainActivity extends Activity {
                         excluded.clear();
                         excluded.addAll(BalanceData.getExcluded(app));
                         recalcTotal();
-                        status = buildStatus(count, saved.isEmpty(), statusNoSms, statusLoaded);
+                        status = buildStatus(count, saved.isEmpty(), statusNoSms, updatedNow);
                         refreshing = false;
                         invalidate();
                         BalanceWidgetProvider.push(app);
@@ -887,8 +915,6 @@ public class MainActivity extends Activity {
                         BalanceWidgetProvider.push(app);
                     });
                 }
-                // History is re-scanned independently of balances, on this same worker thread so it
-                // never stutters the UI; an open history screen re-renders via the change listener.
                 BalanceData.scanHistory(app);
             }).start();
         }
@@ -994,12 +1020,7 @@ public class MainActivity extends Activity {
             text(c, getString(R.string.app_name), edgeX, 58, 25, fg, edgeAlign);
             text(c, fit(getString(R.string.subtitle_offline_bank_balances), 14, w - 64), edgeX, 86, 14, muted, edgeAlign);
 
-            drawRefreshIcon(c, accent);
             drawLockIcon(c, accent);
-            if (refreshing) {
-                refreshAngle = (refreshAngle + 18) % 360;
-                postInvalidateOnAnimation();
-            }
 
             round(c, 24, 120, w - 24, 270, 28, panel);
             float totalLabelX = rtl ? w - 48 : 48;
@@ -1069,7 +1090,7 @@ public class MainActivity extends Activity {
             p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
             String aboutText = getString(R.string.footer_about);
             String langText = getString(R.string.footer_language);
-            String backupText = getString(R.string.footer_backup);
+            String backupText = getString(R.string.footer_data);
             String historyText = getString(R.string.footer_history);
             String sep = "  \u00b7  ";
             float aboutW = measure(aboutText, 13), langW = measure(langText, 13),
@@ -1138,27 +1159,7 @@ public class MainActivity extends Activity {
             }
         }
 
-        /** Draws the rounded-arrow refresh icon (the same glyph the widget's refresh button uses)
-         *  at the top-right corner, on the same line as the app title. While a refresh runs,
-         *  {@code refreshAngle} spins the whole icon around its center. */
-        void drawRefreshIcon(Canvas c, int accent) {
-            float w = getWidth() / d;
-            float cx = isRtl() ? 40 : w - 40;
-            float cy = 54;
-            if (refreshIcon == null) {
-                refreshIcon = getContext().getDrawable(R.drawable.ic_refresh).mutate();
-                refreshIcon.setTint(accent);
-            }
-            int half = 13;
-            refreshIcon.setBounds((int) (cx - half), (int) (cy - half), (int) (cx + half), (int) (cy + half));
-            c.save();
-            c.rotate(refreshing ? refreshAngle : 0f, cx, cy);
-            refreshIcon.draw(c);
-            c.restore();
-        }
-
-        /** Draws the lock button just inside the refresh icon (the same glyph the locked widget
-         *  shows), in the top-right corner next to the app title. */
+        /** Draws the lock icon at the top-right corner of the app bar. */
         void drawLockIcon(Canvas c, int accent) {
             float cx = lockCx();
             float cy = 54;
@@ -1171,12 +1172,8 @@ public class MainActivity extends Activity {
             lockIcon.draw(c);
         }
 
-        float refreshCx() {
-            return isRtl() ? 40 : getWidth() / d - 40;
-        }
-
         float lockCx() {
-            return isRtl() ? 72 : getWidth() / d - 72;
+            return isRtl() ? 40 : getWidth() / d - 40;
         }
 
         /** The centre of the eye/mask toggle in the balance card (top-right, mirrored in RTL). */
@@ -1197,10 +1194,9 @@ public class MainActivity extends Activity {
             return rtl ? (x >= cx - 15 && x <= cx + 30) : (x >= cx - 30 && x <= cx + 15);
         }
 
-        /** The app-bar control under a tap: refresh, lock, or nothing. The lock sits just inside the
-         *  refresh glyph, each with its own 24dp hit radius so the two never overlap. */
+        /** The app-bar control under a tap: lock, eye (mask), or nothing, each with its own 24dp
+         *  hit radius so the two never overlap. */
         int iconId(float x, float y) {
-            if (iconHit(x, y, refreshCx())) return ICON_REFRESH;
             if (iconHit(x, y, lockCx())) return ICON_LOCK;
             if (eyeHit(x, y)) return ICON_EYE;
             return ICON_NONE;
@@ -1286,27 +1282,21 @@ public class MainActivity extends Activity {
             if (e.getAction() == MotionEvent.ACTION_DOWN) {
                 lastY = y; downY = y; dragging = false;
                 downIcon = iconId(x, y);
-                hardArmed = downIcon == ICON_REFRESH;
                 lockArmed = downIcon == ICON_LOCK;
                 eyeArmed = downIcon == ICON_EYE;
-                hardProbeFired = false;
                 lockProbeFired = false;
                 eyeProbeFired = false;
-                handler.removeCallbacks(hardRefreshProbe);
                 handler.removeCallbacks(lockLongProbe);
                 handler.removeCallbacks(eyeLongProbe);
-                if (hardArmed) handler.postDelayed(hardRefreshProbe, 650);
-                else if (lockArmed) handler.postDelayed(lockLongProbe, 480);
+                if (lockArmed) handler.postDelayed(lockLongProbe, 480);
                 else if (eyeArmed) handler.postDelayed(eyeLongProbe, 500);
                 return true;
             }
             if (e.getAction() == MotionEvent.ACTION_MOVE) {
                 if (Math.abs(y - lastY) > 3) {
                     dragging = true;
-                    handler.removeCallbacks(hardRefreshProbe);
                     handler.removeCallbacks(lockLongProbe);
                     handler.removeCallbacks(eyeLongProbe);
-                    hardArmed = false;
                     lockArmed = false;
                     eyeArmed = false;
                     downIcon = ICON_NONE;
@@ -1319,14 +1309,12 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (e.getAction() != MotionEvent.ACTION_UP) return true;
-            handler.removeCallbacks(hardRefreshProbe);
             handler.removeCallbacks(lockLongProbe);
             handler.removeCallbacks(eyeLongProbe);
-            if (hardProbeFired) { hardProbeFired = false; hardArmed = false; return true; }
             if (lockProbeFired) { lockProbeFired = false; lockArmed = false; return true; }
             if (eyeProbeFired) { eyeProbeFired = false; eyeArmed = false; return true; }
             if (dragging) {
-                if (downY < 360 && y - downY > 55) refresh();
+                if (downY < 360 && y - downY > 55 && scrollY == 0) refresh();
                 return true;
             }
             if (y > footerY - 20 && y < footerY + 24) {
@@ -1335,12 +1323,10 @@ public class MainActivity extends Activity {
                 } else if (x >= footerLangStart - 10 && x <= footerLangEnd + 10) {
                     MainActivity.this.languageDialog();
                 } else if (x >= footerBackupStart - 10 && x <= footerBackupEnd + 10) {
-                    MainActivity.this.backupDialog();
+                    MainActivity.this.dataDialog();
                 } else if (x >= footerHistoryStart - 10 && x <= footerHistoryEnd + 10) {
                     startActivity(new Intent(MainActivity.this, HistoryActivity.class));
                 }
-            } else if (downIcon == ICON_REFRESH) {
-                refresh();
             } else if (downIcon == ICON_LOCK) {
                 MainActivity.this.onLockTap();
             } else if (downIcon == ICON_EYE) {

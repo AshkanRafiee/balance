@@ -18,12 +18,14 @@
         <item quantity="other">موجودی %1$d بانک از روی پیامک به‌روزرسانی شد</item>
     </plurals>
 
+    <string name="status_updated_now">هم‌اکنون به‌روزرسانی شد</string>
+
     <string name="toast_unmask_to_copy">برای کپی کردن، ابتدا موجودی را نمایان کنید</string>
     <string name="toast_copied_balance">موجودی %1$s کپی شد</string>
 
     <string name="footer_about">درباره</string>
     <string name="footer_language">زبان</string>
-    <string name="footer_backup">پشتیبان‌گیری</string>
+    <string name="footer_data">داده‌ها</string>
     <string name="footer_history">تاریخچه</string>
 
     <string name="dialog_language_title">زبان برنامه</string>
@@ -37,9 +39,10 @@
     <string name="widget_action_mask">نمایش یا مخفی کردن موجودی</string>
     <string name="language_system_default">پیش‌فرض سیستم</string>
 
-    <string name="backup_title">پشتیبان‌گیری و بازیابی</string>
+    <string name="data_title">داده‌ها</string>
     <string name="backup_action_create">ایجاد پشتیبان</string>
     <string name="backup_action_restore">بازیابی پشتیبان</string>
+    <string name="data_action_reset">بازنشانی و خواندن دوباره</string>
     <string name="backup_create_title">رمزگذاری و ذخیرهٔ پشتیبان</string>
     <string name="backup_restore_title">بازیابی پشتیبان</string>
     <string name="backup_password_hint">رمز عبور</string>
