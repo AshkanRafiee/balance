@@ -9,8 +9,8 @@ Features:
 - Toman display mode
 - Persistent privacy masking for balances
 - Balances update automatically as bank SMS arrive, plus pull-to-refresh
-- Home-screen widget with quick refresh and privacy mask
-- Transaction history with deposit and withdrawal tracking per day, month and year
+- Home-screen widget mirroring the same bank order, totals and privacy mask; it locks together with the app when the lock is enabled
+- Transaction history with deposit and withdrawal tracking per day, month and year, refreshing automatically as new bank SMS arrive
 - Full history from the total card; tap a bank for just that bank's transactions
 - Bank sorting by balance or update time, applied to the list and the widget
 - Exclude banks from the combined total
@@ -18,5 +18,6 @@ Features:
 - Reset and rescan balances from the data menu
 - Encrypted storage on device
 - Password-protected backup and restore
+- Optional in-app lock with PIN, password or fingerprint, protecting the app, the widget and screenshots/recents
 
 SMS and financial data stay on the device, encrypted. No account, cloud service, analytics, or network access is required.

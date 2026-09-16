@@ -17,6 +17,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Auto light/dark theme, persistent masked-balance and currency preferences
 - Automatic refresh as bank SMS arrive, plus pull-to-refresh
 - English and Persian (فارسی) interface, with automatic system-language detection and localized bank names
+- Optional in-app lock with a PIN, password or fingerprint, covering the app, the home-screen widget and screenshots/recents
 
 ## Download
 
@@ -49,7 +50,7 @@ Keep the keystore and passwords outside version control (`signing.properties` an
 
 ## Privacy
 
-Balance requests only `READ_SMS` to read existing messages. It declares no `INTERNET` permission and performs no network requests. SMS and balances remain on the device.
+Balance requests `READ_SMS` to read existing messages, and declares `RECEIVE_BOOT_COMPLETED` plus the fingerprint/BIOMETRIC permissions required for its optional in-app lock. It declares no `INTERNET` permission and performs no network requests. SMS and balances remain on the device.
 
 ## Source
 
