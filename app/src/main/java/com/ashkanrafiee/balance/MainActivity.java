@@ -102,18 +102,27 @@ public class MainActivity extends Activity {
             view.hidden = true;
             view.invalidate();
         }
-        if (LockManager.isEnabled(this)) {
+        // Reveal the entrance only when the session is already locked. A plain navigation to
+        // another screen (history) or a system picker (backup/restore) must not flash the lock;
+        // a true end-of-foreground is handled at onStop via registerActivityStop().
+        if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) {
             lockOverlay.showLock();
             lockOverlay.setAutoFingerprintEnabled(false);
-            updateSecureFlag();
         }
+        updateSecureFlag();
         super.onPause();
     }
 
     @Override
     protected void onStop() {
-        lockOverlay.hide();
-        LockManager.registerActivityStop();
+        // The last screen leaving the foreground locks the session; flip the overlay to the
+        // entrance then, so the exit frame and the next resume show the lock rather than the data.
+        if (LockManager.isEnabled(this) && LockManager.registerActivityStop()) {
+            lockOverlay.showLock();
+            lockOverlay.setAutoFingerprintEnabled(false);
+        } else {
+            lockOverlay.hide();
+        }
         updateSecureFlag();
         super.onStop();
     }
@@ -541,6 +550,7 @@ public class MainActivity extends Activity {
     }
 
     private void pickBackupTarget() {
+        LockManager.holdUnlock();
         Intent create = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         create.addCategory(Intent.CATEGORY_OPENABLE);
         create.setType("application/octet-stream");
@@ -549,6 +559,7 @@ public class MainActivity extends Activity {
     }
 
     private void pickRestoreSource() {
+        LockManager.holdUnlock();
         Intent open = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         open.addCategory(Intent.CATEGORY_OPENABLE);
         open.setType("*/*");

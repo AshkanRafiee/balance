@@ -136,12 +136,40 @@ public class LockManagerTest {
         assertFalse("Second screen must not re-lock", LockManager.isSessionLocked());
 
         // Leaving one screen, with another still up, keeps the session open.
-        LockManager.registerActivityStop();
-        assertFalse("One screen still foreground: stay open", LockManager.isSessionLocked());
+        assertFalse("One screen still foreground: stay open",
+            LockManager.registerActivityStop());
 
         // The last screen leaving the foreground locks, ready for the next entry.
-        LockManager.registerActivityStop();
+        assertTrue("Last screen gone: the stop reports the end of the session",
+            LockManager.registerActivityStop());
         assertTrue("No screen left: session locks", LockManager.isSessionLocked());
+    }
+
+    /** When the app hands over to a system activity (the backup/restore file picker) the session
+     *  must stay open; only after the hold expires does a real return re-lock. */
+    @Test public void holdUnlock_keepsTheSessionOpenAcrossASystemPicker() {
+        LockManager.enable(ctx, "1234", true, false);
+        LockManager.unlockSession();
+        LockManager.registerActivityStart(ctx);
+        LockManager.unlockSession();
+
+        // Launching the picker: the only screen stops but the session must not lock.
+        LockManager.holdUnlock();
+        assertFalse("Picker takeover must not lock the session",
+            LockManager.registerActivityStop());
+        assertFalse(LockManager.isSessionLocked());
+
+        // Returning within the grace window stays open.
+        LockManager.registerActivityStart(ctx);
+        assertFalse("Returning from the picker must not lock within the grace window",
+            LockManager.isSessionLocked());
+
+        // A user who walked away past the grace window gets locked on the next return.
+        LockManager.registerActivityStop();
+        LockManager.unlockSession();
+        LockManager.expireHoldForTest();
+        LockManager.registerActivityStart(ctx);
+        assertTrue("After the grace window a real return must lock", LockManager.isSessionLocked());
     }
 
     @Test public void fingerprint_state_isUnavailableWithoutBinding() {

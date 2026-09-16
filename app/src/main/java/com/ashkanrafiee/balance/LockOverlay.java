@@ -639,7 +639,7 @@ public final class LockOverlay extends FrameLayout {
             submit();
             return;
         } else {
-            if (pinBuffer.length() < 8) pinBuffer.append(key);
+            if (pinBuffer.length() < 6) pinBuffer.append(key);
         }
         hideError();
         renderDots();

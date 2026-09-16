@@ -82,6 +82,14 @@ final class LockManager {
     private static volatile boolean sessionLocked = false;
     private static final AtomicInteger activityCount = new AtomicInteger();
 
+    /** While a system activity we launched (e.g. the backup file picker) is in front, the session
+     *  must not lock, or the user would face the entrance again on return. The hold expires on its
+     *  own after {@link #HOLD_GRACE_MS}, so a user who walks away while the picker is open still
+     *  re-engages the lock on a later return. */
+    static final long HOLD_GRACE_MS = 60_000L;
+    private static volatile boolean holdUnlock = false;
+    private static volatile long holdSince = 0;
+
     private LockManager() {}
 
     private static SharedPreferences prefs(Context c) {
@@ -107,19 +115,44 @@ final class LockManager {
     /** Called by every protected activity from {@code onStart}; when the first screen appears after a
      *  pause the session is re-locked, so re-opening the app always asks for the code. */
     static void registerActivityStart(Context c) {
-        if (activityCount.getAndIncrement() == 0 && isEnabled(c)) lockSession();
+        if (activityCount.getAndIncrement() == 0 && isEnabled(c) && !holdingUnlock()) lockSession();
     }
 
-    /** Called by every protected activity from {@code onStop}; when the last screen leaves the
-     *  foreground the session locks, ready for the next {@link #registerActivityStart}. */
-    static void registerActivityStop() {
-        if (activityCount.decrementAndGet() <= 0) lockSession();
+    /** Called by every protected activity from {@code onStop}. When the last screen leaves the
+     *  foreground the session locks, ready for the next {@link #registerActivityStart}. Returns
+     *  whether this stop ended the foreground session, so the caller can flip its overlay to the
+     *  lock entrance for the exit frame. */
+    static boolean registerActivityStop() {
+        int left = activityCount.decrementAndGet();
+        boolean last = left <= 0 && !holdingUnlock();
+        if (last) lockSession();
+        return last;
+    }
+
+    /** Marks the imminent takeover by a system activity (the backup/restore file picker), so the
+     *  session stays open until the user returns or the hold expires. Call before launching the
+     *  document intent; the hold needs no explicit clearing. */
+    static void holdUnlock() {
+        holdUnlock = true;
+        holdSince = android.os.SystemClock.elapsedRealtime();
+    }
+
+    private static boolean holdingUnlock() {
+        return holdUnlock
+            && android.os.SystemClock.elapsedRealtime() - holdSince < HOLD_GRACE_MS;
+    }
+
+    /** Test hook: ages the hold out so a caller can exercise the post-grace path without waiting. */
+    static void expireHoldForTest() {
+        holdSince = 0;
     }
 
     /** Test hook: resets the process-wide session counters so a test starts from a known state. */
     static void resetSessionForTest() {
         activityCount.set(0);
         sessionLocked = false;
+        holdUnlock = false;
+        holdSince = 0;
     }
 
     // ====================================================================
@@ -325,8 +358,8 @@ final class LockManager {
         void onFpFailed(int errorRes);
     }
 
-    /** Opens the platform fingerprint dialog (BiometricPrompt on Android 9+, the system
-     *  FingerprintManager dialog on Android 8). The stored challenge is only accepted once it
+    /** Opens the platform fingerprint dialog (BiometricPrompt on Android 10+, the system
+     *  FingerprintManager dialog on Android 8–9). The stored challenge is only accepted once it
      *  actually decrypts with the authorized keystore key, so a verified print is genuinely
      *  required. Callbacks arrive on the main thread. Returns the cancellation signal, or null if
      *  the prompt could not be started (in which case {@code cb.onFpFailed} was already told). */
@@ -338,7 +371,7 @@ final class LockManager {
                 cb.onFpFailed(R.string.lock_error_fingerprint_unavailable);
                 return null;
             }
-            if (Build.VERSION.SDK_INT >= 28) {
+            if (Build.VERSION.SDK_INT >= 29) {
                 final android.app.Activity activity = (android.app.Activity) c;
                 final BiometricPrompt.AuthenticationCallback callback = new BiometricPrompt.AuthenticationCallback() {
                     @Override public void onAuthenticationSucceeded(
@@ -377,8 +410,9 @@ final class LockManager {
                             activity.getMainExecutor(), (d, w) -> cb.onFpFailed(-1))
                         .build();
                 } else {
-                    // Android 9: the (Activity, Executor, callback) constructor is no longer in the
-                    // modern public API surface, so it is reached reflectively on this one build.
+                    // Android 9 (API 29) only: its (Activity, Executor, callback) constructor is not
+                    // part of the modern public API surface, so it is reached reflectively on this
+                    // one build. Android 8–9 keep the working FingerprintManager path above instead.
                     try {
                         java.lang.reflect.Constructor<BiometricPrompt> ctor =
                             BiometricPrompt.class.getDeclaredConstructor(
