@@ -566,6 +566,9 @@ public final class LockOverlay extends FrameLayout {
     // ====================================================================
 
     private void buildPad() {
+        // Numerals keep their familiar left-to-right reading order in every language, so the
+        // keypad must never mirror itself under an RTL layout direction.
+        pinPad.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
         char[][] keys = {
             {'1', '2', '3'},
             {'4', '5', '6'},

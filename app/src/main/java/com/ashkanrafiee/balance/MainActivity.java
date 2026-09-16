@@ -322,6 +322,19 @@ public class MainActivity extends Activity {
                 ? InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD
                 : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
             confirm.setTransformationMethod(new android.text.method.PasswordTransformationMethod());
+            // Both fields follow the locale direction (right-aligned hints in Persian, left in
+            // English).  TEXT_DIRECTION_LOCALE alone doesn't always keep Gravity.START aligned
+            // correctly after setInputType(), so we also pin the layout direction and use explicit
+            // gravity that resolves immediately.
+            boolean rtl = getResources().getConfiguration().getLayoutDirection()
+                == View.LAYOUT_DIRECTION_RTL;
+            int hGrav = rtl ? Gravity.RIGHT : Gravity.LEFT;
+            code.setTextDirection(View.TEXT_DIRECTION_LOCALE);
+            code.setLayoutDirection(rtl ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
+            code.setGravity(hGrav | Gravity.CENTER_VERTICAL);
+            confirm.setTextDirection(View.TEXT_DIRECTION_LOCALE);
+            confirm.setLayoutDirection(rtl ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
+            confirm.setGravity(hGrav | Gravity.CENTER_VERTICAL);
             code.setHint(getString(isPin ? R.string.lock_pin_hint : R.string.lock_password_hint));
         };
         pinOpt.setOnClickListener(v -> { pin[0] = true; styleSeg.run(); });
