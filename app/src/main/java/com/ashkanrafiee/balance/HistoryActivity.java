@@ -1,14 +1,20 @@
 package com.ashkanrafiee.balance;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
+import android.database.ContentObserver;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
+import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.Looper;
+import android.provider.Telephony;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -34,8 +40,8 @@ import java.util.Set;
  * deposit/withdrawal subtotals. Sums always reflect money <em>movements</em> (deposits minus
  * withdrawals), never remaining balances. All date boundaries follow the Persian calendar.
  *
- * <p>The screen kicks off a background history re-scan whenever it opens and re-renders on the
- * result, spinning the refresh glyph while a scan is in flight.
+ * <p>The screen re-scans the SMS inbox whenever it opens and whenever a new bank message arrives
+ * (a ContentObserver, like the main screen), silently re-rendering on completion.
  */
 public final class HistoryActivity extends Activity {
     private static final String MONTH_TAG = "history_month";
@@ -60,14 +66,8 @@ public final class HistoryActivity extends Activity {
     /** Optional canonical bank name; when set, only that bank's transactions are shown. */
     private String bankFilter;
 
-    /** The refresh glyph in the header, rotated while a history scan is in flight (or for a short
-     *  beat after a tap, so a fast scan still reports an update visually). */
-    private ImageView refreshView;
-    private android.animation.ObjectAnimator refreshSpin;
-    private final android.os.Handler refreshHandler = new android.os.Handler(Looper.getMainLooper());
-    private final Runnable stopSpinRunnable = this::stopSpin;
-    private static final long MIN_SPIN_MS = 1000;
-    private long spinSince;
+    /** Watches for new bank SMS while the screen is open, triggering a silent history re-scan. */
+    private ContentObserver smsObserver;
 
     // ====================================================================
     // Shared drawing helpers
@@ -345,8 +345,12 @@ public final class HistoryActivity extends Activity {
 
     @Override
     protected void onStop() {
-        lockOverlay.hide();
-        LockManager.registerActivityStop();
+        if (LockManager.isEnabled(this) && LockManager.registerActivityStop()) {
+            lockOverlay.showLock();
+            lockOverlay.setAutoFingerprintEnabled(false);
+        } else {
+            lockOverlay.hide();
+        }
         updateSecureFlag();
         super.onStop();
     }
@@ -412,62 +416,7 @@ public final class HistoryActivity extends Activity {
 
         LinearLayout.LayoutParams barSpacer = new LinearLayout.LayoutParams(0, 0, 1);
         bar.addView(new View(this), barSpacer);
-
-        refreshView = new ImageView(this);
-        refreshView.setImageResource(R.drawable.ic_refresh);
-        refreshView.setColorFilter(fg);
-        refreshView.setPadding(dp(8), dp(8), dp(8), dp(8));
-        refreshView.setContentDescription(getString(R.string.history_refresh));
-        refreshView.setBackground(ripple(rounded(chipBg, 20)));
-        refreshView.setOnClickListener(v -> startRefresh());
-        bar.addView(refreshView, new LinearLayout.LayoutParams(dp(40), dp(40)));
         return bar;
-    }
-
-    // ====================================================================
-    // Refresh / scanning indicator
-    // ====================================================================
-
-    /** Kicks off a background history rescan if one is not already running. The glyph always starts
-     *  spinning: when a scan is already in flight, that scan's completion stops it. */
-    private void startRefresh() {
-        startSpin();
-        if (BalanceData.HISTORY_SCANNING) return;
-        new Thread(() -> BalanceData.scanHistory(HistoryActivity.this)).start();
-    }
-
-    /** Starts rotating the refresh glyph; rotations stop once a scan completes. */
-    private void startSpin() {
-        if (refreshView == null || refreshSpin != null) return;
-        spinSince = android.os.SystemClock.uptimeMillis();
-        refreshHandler.removeCallbacks(stopSpinRunnable);
-        refreshSpin = android.animation.ObjectAnimator.ofFloat(refreshView, "rotation", 0f, 360f);
-        refreshSpin.setDuration(900);
-        refreshSpin.setRepeatCount(android.animation.ValueAnimator.INFINITE);
-        refreshSpin.setInterpolator(new android.view.animation.LinearInterpolator());
-        refreshSpin.start();
-    }
-
-    private void stopSpin() {
-        stopSpin(false);
-    }
-
-    /** Stops the rotation immediately, or lets it complete at least a full turn so a scan that
-     *  finished in a few frames still gives visible feedback. */
-    private void stopSpin(boolean immediate) {
-        if (refreshSpin == null) {
-            refreshHandler.removeCallbacks(stopSpinRunnable);
-            return;
-        }
-        refreshHandler.removeCallbacks(stopSpinRunnable);
-        long elapsed = android.os.SystemClock.uptimeMillis() - spinSince;
-        if (!immediate && elapsed < MIN_SPIN_MS) {
-            refreshHandler.postDelayed(stopSpinRunnable, MIN_SPIN_MS - elapsed);
-            return;
-        }
-        refreshSpin.cancel();
-        refreshSpin = null;
-        refreshView.setRotation(0f);
     }
 
     // ====================================================================
@@ -536,22 +485,44 @@ public final class HistoryActivity extends Activity {
     protected void onResume() {
         super.onResume();
         BalanceData.addHistoryListener(onHistoryChanged);
-        startSpin();
-        // Trigger a re-scan in the background (a no-op if the app's own refresh already started one)
-        // so fresh messages are reflected as soon as the screen opens without blocking the UI.
+        registerSmsObserver();
+        // Re-scan in the background (a no-op if a scan is already running) so messages that
+        // arrived while the screen was closed are reflected as soon as it opens.
         new Thread(() -> BalanceData.scanHistory(HistoryActivity.this)).start();
     }
 
     @Override
     protected void onPause() {
-        if (LockManager.isEnabled(this)) {
+        unregisterSmsObserver();
+        if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) {
             lockOverlay.showLock();
             lockOverlay.setAutoFingerprintEnabled(false);
-            updateSecureFlag();
         }
+        updateSecureFlag();
         BalanceData.removeHistoryListener(onHistoryChanged);
-        stopSpin(true);
         super.onPause();
+    }
+
+    /** Re-scans the SMS inbox the moment new bank messages arrive, so the history the user is
+     *  looking at stays current without a refresh control. A scan already in flight is a no-op. */
+    private void registerSmsObserver() {
+        if (smsObserver != null) return;
+        if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) return;
+        smsObserver = new ContentObserver(new Handler(Looper.getMainLooper())) {
+            @Override public void onChange(boolean selfChange) { onChange(selfChange, null); }
+            @Override public void onChange(boolean selfChange, Uri uri) {
+                new Thread(() -> BalanceData.scanHistory(HistoryActivity.this)).start();
+            }
+        };
+        getContentResolver().registerContentObserver(
+            Telephony.Sms.Inbox.CONTENT_URI, true, smsObserver);
+    }
+
+    private void unregisterSmsObserver() {
+        if (smsObserver != null) {
+            getContentResolver().unregisterContentObserver(smsObserver);
+            smsObserver = null;
+        }
     }
 
     // ====================================================================
@@ -572,7 +543,6 @@ public final class HistoryActivity extends Activity {
             seedExpanded();
             renderYears(body, allYears);
         }
-        stopSpin();
     }
 
     /** Isolates the saved transactions that belong to {@link #bankFilter}, returning the input
