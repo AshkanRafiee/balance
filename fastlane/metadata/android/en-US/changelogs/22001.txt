@@ -1,0 +1,6 @@
+Lock reliability and icon fixes.
+
+• The lock now engages reliably when you send Balance to the background on devices that kept the session open.
+• Open menus (Data, Language, sort and bank options) no longer stay on top of the lock after the app is reopened.
+• Opening About and coming back no longer asks for your PIN or fingerprint again.
+• The fingerprint icon on the lock screen now renders correctly.
