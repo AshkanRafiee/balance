@@ -27,7 +27,6 @@
     <string name="footer_about">درباره</string>
     <string name="footer_language">زبان</string>
     <string name="footer_data">داده‌ها</string>
-    <string name="footer_history">تاریخچه</string>
 
     <string name="dialog_language_title">زبان برنامه</string>
     <string name="dialog_hard_refresh_title">بازنشانی موجودی‌ها و خواندن دوباره؟</string>

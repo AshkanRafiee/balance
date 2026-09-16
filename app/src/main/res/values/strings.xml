@@ -27,7 +27,6 @@
     <string name="footer_about">About</string>
     <string name="footer_language">Language</string>
     <string name="footer_data">Data</string>
-    <string name="footer_history">History</string>
 
     <string name="dialog_language_title">App language</string>
     <string name="dialog_hard_refresh_title">Reset balances and rescan?</string>
