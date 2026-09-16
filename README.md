@@ -15,7 +15,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Home-screen widget with the same bank order, totals, and privacy mask as the app
 - Password-encrypted backup and restore
 - Auto light/dark theme, persistent masked-balance and currency preferences
-- Pull-to-refresh and animated refresh indicator
+- Automatic refresh as bank SMS arrive, plus pull-to-refresh
 - English and Persian (فارسی) interface, with automatic system-language detection and localized bank names
 
 ## Download
