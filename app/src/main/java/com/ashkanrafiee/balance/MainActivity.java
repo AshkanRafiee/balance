@@ -1033,7 +1033,7 @@ public class MainActivity extends Activity {
             float totalLabelX = rtl ? w - 48 : 48;
             text(c, getString(R.string.total_balance_label), totalLabelX, 156, 13, muted, edgeAlign);
             totalValue(c, total, totalLabelX, 208, w - 150, rtl);
-            text(c, getString(R.string.total_history_hint), w / 2f, 260, 11, muted, Paint.Align.CENTER);
+            text(c, getString(R.string.total_history_hint), w / 2f, 253, 11, muted, Paint.Align.CENTER);
             RectF eyeRect = rtl ? new RectF(45, 147, 75, 165) : new RectF(w - 75, 147, w - 45, 165);
             float eyeCenterX = rtl ? 60 : w - 60;
             p.setStyle(Paint.Style.STROKE);
