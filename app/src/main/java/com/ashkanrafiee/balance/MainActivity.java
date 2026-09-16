@@ -55,6 +55,7 @@ public class MainActivity extends Activity {
             getWindow().setDecorFitsSystemWindows(false);
         getWindow().setStatusBarColor(resColor(R.color.status_bar));
         getWindow().setNavigationBarColor(resColor(R.color.nav_bar));
+        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(resColor(R.color.bg)));
         view = new BalanceView();
         FrameLayout host = new FrameLayout(this);
         setContentView(host);
@@ -70,6 +71,7 @@ public class MainActivity extends Activity {
         lockOverlay.setUnlockListener(() -> {
             Runnable action = pendingLockAction;
             pendingLockAction = null;
+            updateSecureFlag();
             if (action != null) action.run();
         });
         lockOverlay.setCancelListener(() -> {
@@ -87,12 +89,24 @@ public class MainActivity extends Activity {
         super.onStart();
         LockManager.registerActivityStart(this);
         showLockOverlay();
+        updateSecureFlag();
+    }
+
+    @Override
+    protected void onPause() {
+        if (LockManager.isEnabled(this)) {
+            lockOverlay.showLock();
+            lockOverlay.setAutoFingerprintEnabled(false);
+            updateSecureFlag();
+        }
+        super.onPause();
     }
 
     @Override
     protected void onStop() {
         lockOverlay.hide();
         LockManager.registerActivityStop();
+        updateSecureFlag();
         super.onStop();
     }
 

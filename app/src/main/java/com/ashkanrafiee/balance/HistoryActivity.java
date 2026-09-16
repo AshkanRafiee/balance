@@ -285,6 +285,7 @@ public final class HistoryActivity extends Activity {
         badgeBg = color(R.color.history_badge_bg);
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
+        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(bg));
         refreshDates();
 
         LinearLayout root = new LinearLayout(this);
@@ -316,7 +317,7 @@ public final class HistoryActivity extends Activity {
         root.addView(scrollView, new LinearLayout.LayoutParams(-1, 0, 1));
 
         lockOverlay = new LockOverlay(this);
-        lockOverlay.setUnlockListener(() -> { });
+        lockOverlay.setUnlockListener(this::updateSecureFlag);
         lockOverlay.setCancelListener(() -> lockOverlay.hide());
         host.addView(lockOverlay, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
@@ -336,14 +337,25 @@ public final class HistoryActivity extends Activity {
         LockManager.registerActivityStart(this);
         if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) {
             lockOverlay.showLock();
+        } else {
+            lockOverlay.hide();
         }
+        updateSecureFlag();
     }
 
     @Override
     protected void onStop() {
         lockOverlay.hide();
         LockManager.registerActivityStop();
+        updateSecureFlag();
         super.onStop();
+    }
+
+    /** For as long as the lock is enabled the screen content stays hidden from recents and
+     *  screenshots, regardless of the current unlock state — see {@link MainActivity}. */
+    private void updateSecureFlag() {
+        if (LockManager.isEnabled(this)) getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+        else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
     }
 
     /** Refreshes the cached "today" and "yesterday" Jalali dates once per render. */
@@ -532,6 +544,11 @@ public final class HistoryActivity extends Activity {
 
     @Override
     protected void onPause() {
+        if (LockManager.isEnabled(this)) {
+            lockOverlay.showLock();
+            lockOverlay.setAutoFingerprintEnabled(false);
+            updateSecureFlag();
+        }
         BalanceData.removeHistoryListener(onHistoryChanged);
         stopSpin(true);
         super.onPause();
