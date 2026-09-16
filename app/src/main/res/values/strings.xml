@@ -167,6 +167,7 @@
     <string name="lock_password_label">Password</string>
     <string name="lock_pin_hint">4 to 6 digits</string>
     <string name="lock_password_hint">at least 6 characters</string>
+    <string name="lock_password_entrance_hint">Enter your password</string>
     <string name="lock_confirm_hint">Repeat the code</string>
     <string name="lock_fingerprint_option">Allow fingerprint unlock</string>
     <string name="lock_fingerprint_unavailable">Fingerprint unlock is not available on this device</string>

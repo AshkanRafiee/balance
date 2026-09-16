@@ -58,6 +58,7 @@ public final class LockOverlay extends FrameLayout {
     private ImageView headerBadge;
     private final LinearLayout pinPad;
     private LinearLayout padCard;
+    private final LinearLayout columnView;
     private final LinearLayout passwordEntry;
     private LinearLayout pwHeader;
     private final EditText passwordInput;
@@ -111,6 +112,7 @@ public final class LockOverlay extends FrameLayout {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         LinearLayout column = new LinearLayout(ctx);
+        columnView = column;
         column.setOrientation(LinearLayout.VERTICAL);
         column.setGravity(Gravity.CENTER_HORIZONTAL);
         scroll.addView(column, new ScrollView.LayoutParams(
@@ -199,7 +201,7 @@ public final class LockOverlay extends FrameLayout {
         fpRow.setOnClickListener(v -> startFingerprint());
         LinearLayout.LayoutParams fpLp = new LinearLayout.LayoutParams(-1, -2);
         fpLp.setMargins(dp(48), dp(18), dp(48), 0);
-        column.addView(fpRow, fpLp);
+        columnView.addView(fpRow, fpLp);
         fpRow.setVisibility(GONE);
 
         cancel = text(getString(R.string.lock_cancel), 15, accent);
@@ -211,7 +213,7 @@ public final class LockOverlay extends FrameLayout {
         });
         LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(-2, -2);
         cancelLp.topMargin = dp(6);
-        column.addView(cancel, cancelLp);
+        columnView.addView(cancel, cancelLp);
         cancel.setVisibility(GONE);
     }
 
@@ -222,7 +224,7 @@ public final class LockOverlay extends FrameLayout {
         headerBadge.setColorFilter(accent);
         headerBadge.setBackground(oval(panel));
         headerBadge.setPadding(dp(24), dp(24), dp(24), dp(24));
-        root.addView(headerBadge, new LinearLayout.LayoutParams(dp(72), dp(72)));
+        root.addView(headerBadge, new LinearLayout.LayoutParams(dp(96), dp(96)));
 
         title = text(getString(R.string.lock_title), 22, fg);
         title.setTypeface(null, Typeface.BOLD);
@@ -256,7 +258,7 @@ public final class LockOverlay extends FrameLayout {
         badge.setColorFilter(accent);
         badge.setBackground(oval(panel));
         badge.setPadding(dp(20), dp(20), dp(20), dp(20));
-        pwHeader.addView(badge, new LinearLayout.LayoutParams(dp(52), dp(52)));
+        pwHeader.addView(badge, new LinearLayout.LayoutParams(dp(76), dp(76)));
 
         pwTitle = text(getString(R.string.lock_title), 20, fg);
         pwTitle.setTypeface(null, Typeface.BOLD);
@@ -361,7 +363,7 @@ public final class LockOverlay extends FrameLayout {
         subtitle.setVisibility(pinVis);
         error.setVisibility(pinVis);
         pwHeader.setVisibility(pinMode ? GONE : VISIBLE);
-        passwordInput.setHint(getString(R.string.lock_password_hint));
+        passwordInput.setHint(getString(R.string.lock_password_entrance_hint));
         padCard.setVisibility(pinMode ? VISIBLE : GONE);
         dots.setVisibility(pinMode ? VISIBLE : GONE);
         passwordEntry.setVisibility(pinMode ? GONE : VISIBLE);
@@ -414,6 +416,21 @@ public final class LockOverlay extends FrameLayout {
         boolean usable = !busy && LockManager.fpStatus(ctx) == LockManager.FP_OK;
         fpRow.setVisibility(usable ? VISIBLE : GONE);
         fpRow.setText(getString(R.string.lock_fingerprint_action));
+        // In password mode the fingerprint option lives inside the password cluster so it sits
+        // close to the unlock button; in PIN mode it stays under the keypad.
+        if (!pinMode && fpRow.getParent() != passwordEntry) {
+            ((ViewGroup) fpRow.getParent()).removeView(fpRow);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.topMargin = dp(12);
+            passwordEntry.addView(fpRow, lp);
+        } else if (pinMode && fpRow.getParent() != columnView) {
+            ((ViewGroup) fpRow.getParent()).removeView(fpRow);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.setMargins(dp(48), dp(18), dp(48), 0);
+            int idx = columnView.indexOfChild(padCard);
+            if (idx >= 0) columnView.addView(fpRow, idx + 1, lp);
+            else columnView.addView(fpRow, lp);
+        }
     }
 
     private void clearInput() {

@@ -167,6 +167,7 @@
     <string name="lock_password_label">رمز عبور</string>
     <string name="lock_pin_hint">۴ تا ۶ رقم</string>
     <string name="lock_password_hint">حداقل ۶ حرف</string>
+    <string name="lock_password_entrance_hint">رمز عبور خود را وارد کنید</string>
     <string name="lock_confirm_hint">تکرار کد</string>
     <string name="lock_fingerprint_option">باز کردن با اثر انگشت</string>
     <string name="lock_fingerprint_unavailable">باز کردن با اثر انگشت در این دستگاه در دسترس نیست</string>
