@@ -802,6 +802,9 @@ public class MainActivity extends Activity {
         boolean eyeProbeFired;
         boolean totalArmed;
         boolean totalProbeFired;
+        boolean bankArmed;
+        boolean bankProbeFired;
+        Bank bankProbeTarget;
         int downIcon = ICON_NONE;
         final Handler handler = new Handler(Looper.getMainLooper());
         final Runnable lockLongProbe = () -> {
@@ -818,6 +821,13 @@ public class MainActivity extends Activity {
             totalProbeFired = true;
             if (MainActivity.this.isFinishing() || MainActivity.this.isDestroyed()) return;
             copyBalance(getString(R.string.total_label), this.total);
+        };
+        final Runnable bankLongProbe = () -> {
+            bankProbeFired = true;
+            if (MainActivity.this.isFinishing() || MainActivity.this.isDestroyed()) return;
+            Bank bank = bankProbeTarget;
+            if (bank != null)
+                copyBalance(BankRules.displayName(MainActivity.this, bank.name), bank.amount);
         };
         String status = getString(R.string.status_reading_sms);
         long total;
@@ -1304,12 +1314,33 @@ public class MainActivity extends Activity {
                 lockProbeFired = false;
                 eyeProbeFired = false;
                 totalProbeFired = false;
+                bankArmed = false;
+                bankProbeFired = false;
+                bankProbeTarget = null;
                 handler.removeCallbacks(lockLongProbe);
                 handler.removeCallbacks(eyeLongProbe);
                 handler.removeCallbacks(totalLongProbe);
+                handler.removeCallbacks(bankLongProbe);
                 if (lockArmed) handler.postDelayed(lockLongProbe, 480);
                 else if (eyeArmed) handler.postDelayed(eyeLongProbe, 500);
                 else if (totalArmed) handler.postDelayed(totalLongProbe, 500);
+                else if (y >= 352 && y < byForTouch(h)
+                        && (rtl ? x >= 56 : x <= getWidth() / d - 56)) {
+                    // On a bank row, off the 3-dot menu: a long-press copies that bank's balance,
+                    // mirroring the total card.
+                    int bankIndex = (int) ((y - 352 + scrollY) / 96);
+                    float rowOffset = (y - 352 + scrollY) % 96;
+                    if (rowOffset < 82 && bankIndex >= 0 && bankIndex < banks.size()) {
+                        int i = 0;
+                        for (Bank bank : BalanceData.orderForDisplay(banks, excluded, sortMode)) {
+                            if (i++ == bankIndex) { bankProbeTarget = bank; break; }
+                        }
+                        if (bankProbeTarget != null) {
+                            bankArmed = true;
+                            handler.postDelayed(bankLongProbe, 500);
+                        }
+                    }
+                }
                 return true;
             }
             if (e.getAction() == MotionEvent.ACTION_MOVE) {
@@ -1318,9 +1349,12 @@ public class MainActivity extends Activity {
                     handler.removeCallbacks(lockLongProbe);
                     handler.removeCallbacks(eyeLongProbe);
                     handler.removeCallbacks(totalLongProbe);
+                    handler.removeCallbacks(bankLongProbe);
                     lockArmed = false;
                     eyeArmed = false;
                     totalArmed = false;
+                    bankArmed = false;
+                    bankProbeTarget = null;
                     downIcon = ICON_NONE;
                     scrollY = Math.max(0, Math.min(
                         Math.max(0, banks.size() * 96 - (h - 440)),
@@ -1334,9 +1368,16 @@ public class MainActivity extends Activity {
             handler.removeCallbacks(lockLongProbe);
             handler.removeCallbacks(eyeLongProbe);
             handler.removeCallbacks(totalLongProbe);
+            handler.removeCallbacks(bankLongProbe);
             if (lockProbeFired) { lockProbeFired = false; lockArmed = false; return true; }
             if (eyeProbeFired) { eyeProbeFired = false; eyeArmed = false; return true; }
             if (totalProbeFired) { totalProbeFired = false; totalArmed = false; return true; }
+            if (bankProbeFired) {
+                bankProbeFired = false;
+                bankArmed = false;
+                bankProbeTarget = null;
+                return true;
+            }
             if (dragging) {
                 if (downY < 360 && y - downY > 55 && scrollY == 0) refresh();
                 return true;
