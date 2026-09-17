@@ -411,11 +411,12 @@ public class MainActivity extends Activity {
             styleSeg(pinOpt, pin[0]);
             styleSeg(passOpt, !pin[0]);
             boolean isPin = pin[0];
-            // The first field stays readable for PINs (so the digits can be double-checked) but is
-            // masked for passwords; the confirmation field is always masked, in every mode.
-            code.setInputType(isPin ? InputType.TYPE_CLASS_NUMBER
+            // Both fields are masked identically in both modes, so the code can never be read off
+            // the screen while it is typed.
+            code.setInputType(isPin
+                ? InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD
                 : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-            code.setTransformationMethod(isPin ? null : new android.text.method.PasswordTransformationMethod());
+            code.setTransformationMethod(new android.text.method.PasswordTransformationMethod());
             confirm.setInputType(isPin
                 ? InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD
                 : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
