@@ -4,3 +4,5 @@ Lock reliability and icon fixes.
 • Open menus (Data, Language, sort and bank options) no longer stay on top of the lock after the app is reopened.
 • Opening About and coming back no longer asks for your PIN or fingerprint again.
 • The fingerprint icon on the lock screen now renders correctly.
+• The lock code is masked in both entry fields while you type it.
+• The auto-mask eye and the lock icon now use a green "active" color, so you can tell at a glance when auto-masking and the app lock are on.

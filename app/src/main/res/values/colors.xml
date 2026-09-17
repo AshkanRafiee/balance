@@ -9,9 +9,9 @@
     <color name="muted">#64748B</color>
     <color name="subtitle">#475569</color>
     <color name="accent">#0891B2</color>
+    <color name="active">#059669</color>
     <color name="purple">#7C3AED</color>
     <color name="link">#6D28D9</color>
-    <color name="blue">#3B82F6</color>
     <color name="footer">#64748B</color>
     <color name="divider">#CBD5E1</color>
     <color name="bank_name">#334155</color>

@@ -879,7 +879,7 @@ public class MainActivity extends Activity {
         final int fg = resColor(R.color.fg);
         final int muted = resColor(R.color.muted);
         final int accent = resColor(R.color.accent);
-        final int blue = resColor(R.color.blue);
+        final int active = resColor(R.color.active);
         final int purple = resColor(R.color.purple);
         final int panel = resColor(R.color.panel);
         final int bg = resColor(R.color.bg);
@@ -1094,7 +1094,7 @@ public class MainActivity extends Activity {
             text(c, getString(R.string.app_name), edgeX, 58, 25, fg, edgeAlign);
             text(c, fit(getString(R.string.subtitle_offline_bank_balances), 14, w - 64), edgeX, 86, 14, muted, edgeAlign);
 
-            drawLockIcon(c, accent);
+            drawLockIcon(c, LockManager.isEnabled(MainActivity.this) ? active : accent);
 
             round(c, 24, 120, w - 24, 270, 28, panel);
             float totalLabelX = rtl ? w - 48 : 48;
@@ -1105,13 +1105,13 @@ public class MainActivity extends Activity {
             float eyeCenterX = rtl ? 60 : w - 60;
             p.setStyle(Paint.Style.STROKE);
             p.setStrokeWidth(2.5f);
-            p.setColor(autoHide ? blue : accent);
+            p.setColor(autoHide ? active : accent);
             c.drawOval(eyeRect, p);
             p.setStyle(Paint.Style.FILL);
-            p.setColor(autoHide ? blue : accent);
+            p.setColor(autoHide ? active : accent);
             c.drawCircle(eyeCenterX, 156, 5, p);
             if (hidden) {
-                p.setColor(autoHide ? blue : accent);
+                p.setColor(autoHide ? active : accent);
                 p.setStrokeWidth(2.5f);
                 if (rtl) c.drawLine(43, 142, 77, 170, p);
                 else c.drawLine(w - 77, 142, w - 43, 170, p);
@@ -1229,13 +1229,13 @@ public class MainActivity extends Activity {
         }
 
         /** Draws the lock icon at the top-right corner of the app bar. */
-        void drawLockIcon(Canvas c, int accent) {
+        void drawLockIcon(Canvas c, int color) {
             float cx = lockCx();
             float cy = 54;
             if (lockIcon == null) {
                 lockIcon = getContext().getDrawable(R.drawable.ic_lock).mutate();
-                lockIcon.setTint(accent);
             }
+            lockIcon.setTint(color);
             int half = 12;
             lockIcon.setBounds((int) (cx - half), (int) (cy - half), (int) (cx + half), (int) (cy + half));
             lockIcon.draw(c);
