@@ -17,6 +17,7 @@ import android.widget.TextView;
 
 public final class AboutActivity extends Activity {
     static final String APP_WEBSITE = "https://balance.ashkanrafiee.com/";
+    static final String ISSUES_URL = "https://github.com/AshkanRafiee/balance/issues";
     int bg, card, muted, accent, purple, heroColor, link, footerColor, fg;
     private LockOverlay lockOverlay;
 
@@ -139,7 +140,8 @@ public final class AboutActivity extends Activity {
             "https://github.com/AshkanRafiee/balance/blob/main/LICENSE"), margin(0, 0, 0, 8));
         body.addView(info(getString(R.string.about_source_label), "github.com/ashkanrafiee/balance",
             "https://github.com/AshkanRafiee/balance"), margin(0, 0, 0, 8));
-        body.addView(info(getString(R.string.about_privacy_label), getString(R.string.about_privacy_value)), margin(0, 0, 0, 20));
+        body.addView(info(getString(R.string.about_privacy_label), getString(R.string.about_privacy_value)), margin(0, 0, 0, 8));
+        body.addView(info(getString(R.string.about_suggestions_label), "github.com/ashkanrafiee/balance/issues", ISSUES_URL), margin(0, 0, 0, 20));
 
         TextView footerView = text(getString(R.string.about_footer, appVersion()), 11, footerColor);
         footerView.setGravity(Gravity.CENTER);

@@ -75,6 +75,7 @@
     <string name="about_source_label">کد منبع</string>
     <string name="about_privacy_label">حریم خصوصی</string>
     <string name="about_privacy_value">آفلاین از پایه · بدون فضای ابری · بدون حساب کاربری</string>
+    <string name="about_suggestions_label">پیشنهادها</string>
     <string name="about_footer">نسخهٔ %1$s · Balance</string>
 
     <string name="history_title">تاریخچه</string>

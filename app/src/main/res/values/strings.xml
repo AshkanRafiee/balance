@@ -75,6 +75,7 @@
     <string name="about_source_label">Source code</string>
     <string name="about_privacy_label">Privacy</string>
     <string name="about_privacy_value">Offline by design · no cloud · no account</string>
+    <string name="about_suggestions_label">Suggestions</string>
     <string name="about_footer">Balance · Version %1$s</string>
 
     <string name="history_title">History</string>
