@@ -135,11 +135,11 @@ public final class AboutActivity extends Activity {
 
         body.addView(section(getString(R.string.about_section_heading), getString(R.string.about_section_body)), margin(0, 0, 0, 10));
         body.addView(info(getString(R.string.about_created_by_label), "Ashkan Rafiee", "https://AshkanRafiee.com/"), margin(0, 0, 0, 8));
-        body.addView(info(getString(R.string.about_website_label), "balance.ashkanrafiee.com", APP_WEBSITE), margin(0, 0, 0, 8));
         body.addView(info(getString(R.string.about_license_label), "GNU General Public License v3.0",
             "https://github.com/AshkanRafiee/balance/blob/main/LICENSE"), margin(0, 0, 0, 8));
         body.addView(info(getString(R.string.about_source_label), "github.com/ashkanrafiee/balance",
             "https://github.com/AshkanRafiee/balance"), margin(0, 0, 0, 8));
+        body.addView(info(getString(R.string.about_website_label), "balance.ashkanrafiee.com", APP_WEBSITE), margin(0, 0, 0, 8));
         body.addView(info(getString(R.string.about_suggestions_label), "github.com/ashkanrafiee/balance/issues", ISSUES_URL), margin(0, 0, 0, 8));
         body.addView(info(getString(R.string.about_privacy_label), getString(R.string.about_privacy_value)), margin(0, 0, 0, 20));
 
