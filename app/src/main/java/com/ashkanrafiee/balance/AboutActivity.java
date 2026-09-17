@@ -16,6 +16,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 public final class AboutActivity extends Activity {
+    static final String APP_WEBSITE = "https://balance.ashkanrafiee.com/";
     int bg, card, muted, accent, purple, heroColor, link, footerColor, fg;
     private LockOverlay lockOverlay;
 
@@ -133,6 +134,7 @@ public final class AboutActivity extends Activity {
 
         body.addView(section(getString(R.string.about_section_heading), getString(R.string.about_section_body)), margin(0, 0, 0, 10));
         body.addView(info(getString(R.string.about_created_by_label), "Ashkan Rafiee", "https://AshkanRafiee.com/"), margin(0, 0, 0, 8));
+        body.addView(info(getString(R.string.about_website_label), "balance.ashkanrafiee.com", APP_WEBSITE), margin(0, 0, 0, 8));
         body.addView(info(getString(R.string.about_license_label), "GNU General Public License v3.0",
             "https://github.com/AshkanRafiee/balance/blob/main/LICENSE"), margin(0, 0, 0, 8));
         body.addView(info(getString(R.string.about_source_label), "github.com/ashkanrafiee/balance",
