@@ -8,6 +8,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
@@ -16,6 +17,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 public final class AboutActivity extends Activity {
+    private static final String TAG = "About";
     static final String APP_WEBSITE = "https://balance.ashkanrafiee.com/";
     static final String ISSUES_URL = "https://github.com/AshkanRafiee/balance/issues";
     int bg, card, muted, accent, purple, heroColor, link, footerColor, fg;
@@ -236,9 +238,13 @@ public final class AboutActivity extends Activity {
         v.setEllipsize(TextUtils.TruncateAt.END);
         if (url != null) {
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-            if (intent.resolveActivity(getPackageManager()) != null) {
-                v.setOnClickListener(view -> startActivity(intent));
-            }
+            v.setOnClickListener(view -> {
+                try {
+                    startActivity(intent);
+                } catch (Exception e) {
+                    Log.w(TAG, "no app can open " + url);
+                }
+            });
         }
         box.addView(v);
         return box;
