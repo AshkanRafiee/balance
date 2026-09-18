@@ -1,7 +1,7 @@
 plugins { id 'com.android.application' }
 
 android { namespace 'com.ashkanrafiee.balance'; compileSdk 36
-    defaultConfig { applicationId 'com.ashkanrafiee.balance'; minSdk 26; targetSdk 36; versionCode 22100; versionName '1.13.0'
+    defaultConfig { applicationId 'com.ashkanrafiee.balance'; minSdk 26; targetSdk 36; versionCode 23000; versionName '1.13.0'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
