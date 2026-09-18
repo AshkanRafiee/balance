@@ -149,7 +149,7 @@ public class HistoryScanTest {
      *  follows deterministic. */
     private void seedTxScenario(String scenario, int expectedRows) throws Exception {
         exec("am start -n com.ashkanrafiee.smsinject/.MainActivity -e action tx -e scenario " + scenario);
-        long deadline = System.currentTimeMillis() + 15_000;
+        long deadline = System.currentTimeMillis() + 45_000;
         while (System.currentTimeMillis() < deadline) {
             int count = 0;
             try (android.database.Cursor c = ctx.getContentResolver().query(

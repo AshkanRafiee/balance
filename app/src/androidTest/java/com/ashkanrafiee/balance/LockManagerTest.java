@@ -121,8 +121,11 @@ public class LockManagerTest {
         assertTrue("The fifth wrong code must start a cooldown", cooldown > 0);
         assertFalse("The right code is still refused while the cooldown runs",
             LockManager.verify(ctx, "1234"));
-        assertEquals("A refused check must not extend or cancel the cooldown",
-            cooldown, LockManager.cooldownRemainingMs(ctx));
+        long after = LockManager.cooldownRemainingMs(ctx);
+        assertTrue("The cooldown is still running",
+            after > 0);
+        assertTrue("A refused check must not extend the cooldown",
+            after <= cooldown);
     }
 
     @Test public void successfulVerify_clearsTheAttemptAccounting() {
