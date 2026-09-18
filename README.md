@@ -53,6 +53,10 @@ Keep the keystore and passwords outside version control (`signing.properties` an
 
 Balance requests `READ_SMS` to read existing messages, and declares `RECEIVE_BOOT_COMPLETED` plus the fingerprint/BIOMETRIC permissions required for its optional in-app lock. It declares no `INTERNET` permission and performs no network requests. SMS and balances remain on the device.
 
+## Duplicate SMS handling
+
+Two messages with identical content — same bank sender, same movement amount, same resulting balance — are treated as the same transaction no matter how far apart their timestamps are. A bank that delivers the same SMS twice therefore shows a single transaction. A movement is only ever listed once in history; if you ever see a missing or doubled transaction in a report, this grouping rule is the first thing to check.
+
 ## Source
 
 https://github.com/ashkanrafiee/balance

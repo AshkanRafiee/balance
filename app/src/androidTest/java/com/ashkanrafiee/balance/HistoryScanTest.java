@@ -1,6 +1,8 @@
 package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.fail;
 
 import android.content.Context;
@@ -380,9 +382,10 @@ public class HistoryScanTest {
         assertEquals(1, BalanceData.readTransactions(ctx).size());
     }
 
-    @Test public void legacySiglessEntries_areNotDuplicatedOnRescan() throws Exception {
-        // Simulates history written by the previous version (no fingerprints): a fresh scan must
-        // dedupe against it via the bank|date|amount fallback instead of adding a copy.
+    @Test public void legacySiglessEntries_areMigratedOnUpgradeRescan() throws Exception {
+        // History written by the previous version had no fingerprints. A full upgrade re-scan rebuilds
+        // from the messages still in the inbox, so the legacy entry is replaced by the fingerprinted
+        // parse of its own message — exactly one entry, never a copy added on top.
         seed("500095", DEPOSIT, T + 1000);
         List<Transaction> legacy = new java.util.ArrayList<>();
         legacy.add(new Transaction("Saman", T + 1000, 200000L, null));
@@ -390,8 +393,10 @@ public class HistoryScanTest {
 
         int added = BalanceData.scanHistory(ctx);
 
-        assertEquals(0, added);
-        assertEquals(1, BalanceData.readTransactions(ctx).size());
+        assertEquals(1, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(1, txs.size());
+        assertNotNull(txs.get(0).sig);
     }
 
     // ============================================================
@@ -497,6 +502,52 @@ public class HistoryScanTest {
         List<Transaction> txs = BalanceData.readTransactions(ctx);
         assertEquals(3, txs.size());
         assertEquals(-5000000L, txs.get(2).amount);        // 77,222,945 - 72,222,945
+    }
+
+    // ============================================================
+    // Rules-version change (full re-scan)
+    // ============================================================
+
+    @Test public void rulesBump_reprocessesPresentMovement_correctingStaleEntry() throws Exception {
+        // A message still in the inbox must be re-parsed under the current rules after a rules-version
+        // change, replacing the stale entry the old rules recorded instead of being deduped against it.
+        seed("500095", DEPOSIT, T + 1000);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        BalanceData.writeTransactions(ctx, java.util.Arrays.asList(
+            new Transaction("Saman", T + 1000, 999_999L, "stale-sig")));
+        prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
+            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(1, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(1, txs.size());
+        assertEquals(200000L, txs.get(0).amount);
+        assertFalse("stale-sig".equals(txs.get(0).sig));
+    }
+
+    @Test public void rulesBump_reprocessesPresent_whileKeepingDeletedMessagesInHistory() throws Exception {
+        // The deposit is deleted from the inbox before the rules bump: its transaction is an orphan
+        // and must stay in history. The present withdrawal is re-processed. Nothing is lost, nothing
+        // is doubled.
+        seed("500095", DEPOSIT, T + 1000);
+        seed("500095", WITHDRAWAL, T + 2000);
+        assertEquals(2, BalanceData.scanHistory(ctx));
+        assertEquals(2, BalanceData.readTransactions(ctx).size());
+
+        clearInbox();
+        seed("500095", WITHDRAWAL, T + 2000);
+        prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
+            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(1, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(2, txs.size());
+        assertEquals(-120000L, txs.get(0).amount);   // present withdrawal re-processed, newest first
+        assertEquals(200000L, txs.get(1).amount);    // deleted deposit preserved as an orphan
     }
 
     // ============================================================

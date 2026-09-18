@@ -539,17 +539,25 @@ final class BalanceData {
         HISTORY_SCANNING = true;
         try {
             List<Transaction> stored = readTransactions(context);
-            Set<String> seenSigs = new HashSet<>();
-            Set<String> seenLegacy = new HashSet<>();
-            for (Transaction t : stored) {
-                if (t.sig != null) seenSigs.add(t.sig);
-                else seenLegacy.add(t.bank + "|" + t.date + "|" + t.amount);
-            }
             SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
             long hwm = prefs.getLong(KEY_HISTORY_THROUGH, 0);
             boolean full = hwm == 0
                 || prefs.getInt(KEY_HISTORY_RULES_VERSION, -1) != HISTORY_RULES_VERSION;
             if (full) hwm = 0;
+            // On an incremental scan the stored history doubles as the dedup set: a message already
+            // recorded (by fingerprint, or by the legacy bank|date|amount triple) is left alone. On a
+            // full scan the inbox is authoritative instead — every present movement is re-parsed under
+            // the current rules and the history is rebuilt from those parses (see below) — so dedup
+            // against what the old rules stored would only skip the very reprocessing this full scan
+            // exists to do.
+            Set<String> seenSigs = new HashSet<>();
+            Set<String> seenLegacy = new HashSet<>();
+            if (!full) {
+                for (Transaction t : stored) {
+                    if (t.sig != null) seenSigs.add(t.sig);
+                    else seenLegacy.add(t.bank + "|" + t.date + "|" + t.amount);
+                }
+            }
             int added = 0;
             long newest = 0;
             String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
@@ -573,6 +581,10 @@ final class BalanceData {
                 // from the last balance persisted by the previous scan.
                 rows.sort((a, b) -> Long.compare((Long) a[3], (Long) b[3]));
                 Map<String, Long> lastBalance = full ? new HashMap<>() : loadLastBalances(context);
+                // Fresh parses per (bank, date) key, counted only on a full scan: it caps how many
+                // stored entries each key may replace when the history is rebuilt below, so a present
+                // message is replaced by at most one fresh parse of the same moment.
+                Map<String, Integer> freshCount = full ? new HashMap<>() : null;
 
                 // Group this scan's rows by bank, merge each bank's movements into its recent-window,
                 // and reconcile the balance chains, so a fee and its transfer that arrived in the wrong
@@ -626,8 +638,10 @@ final class BalanceData {
                         // if the copies differ in timestamp or reference number, while two genuine
                         // movements of the same value — whose messages report different resulting
                         // balances — stay distinct. The legacy bank|date|amount triple is only consulted
-                        // for entries saved before fingerprints existed, so an upgrade re-scan never
-                        // duplicates them.
+                        // for entries saved before fingerprints existed. On an incremental scan this
+                        // dedup runs against the stored history; on a full scan the stored history is
+                        // not consulted (the inbox is the source of truth being re-processed), so this
+                        // only collapses the scan's own duplicates via the addedSigs set.
                         String legacyKey = bank + "|" + date + "|" + t.amount;
                         if (seenLegacy.contains(legacyKey)) continue;
                         String sig = t.sig;
@@ -640,6 +654,10 @@ final class BalanceData {
                         }
                         fresh.add(t);
                         added++;
+                        if (full) {
+                            String k = bank + "|" + date;
+                            freshCount.put(k, (freshCount.containsKey(k) ? freshCount.get(k) : 0) + 1);
+                        }
                     }
                     // Remember the last stated balance per bank so the next movement can be measured
                     // against it, across scans. OTP messages and balance-less prompts return -1 here
@@ -669,7 +687,10 @@ final class BalanceData {
                     // Place freshly scanned chain members next to their already-stored siblings when
                     // part of the pair was recorded earlier (split scans). Only chain members are ever
                     // placed, so a non-chain movement keeps the append path below and is never dropped.
-                    if (txs.isEmpty()) continue;
+                    // A full scan never needs this: every chain member in the inbox is re-parsed in
+                    // this pass, so the chain order already comes from the row reorder above plus the
+                    // stored reorder below, and sibling placement can't reference stale fingerprints.
+                    if (txs.isEmpty() || full) continue;
                     if (hasStoredChainMember(stored, bank, chain)) {
                         Set<String> chainSigs = new HashSet<>();
                         for (Reconcile.Entry ce : chain) if (ce.sig != null) chainSigs.add(ce.sig);
@@ -680,14 +701,36 @@ final class BalanceData {
                         placed.addAll(bySig.values());
                     }
                 }
-                // Append the remaining fresh transactions newest-first, preserving the append order
-                // earlier versions produced. Chain placements above already wrote their entries at the
-                // correct position relative to their stored siblings.
-                for (int i = fresh.size() - 1; i >= 0; i--) {
-                    if (placed.contains(fresh.get(i))) continue;
-                    stored.add(fresh.get(i));
+                // Full re-scan: the inbox is authoritative under the current rules, so rebuild the stored history
+                // from this scan's parses and keep every stored entry that no fresh parse can claim. A
+                // stored entry is replaced only by a fresh parse of the same (bank, date); everything
+                // else stays — the transactions of messages that were deleted from the inbox, and
+                // present messages the current rules no longer recognize as a movement. Fresh parses
+                // that claim nothing are new movements. This is what fixes history recorded under an
+                // older rules version.
+                // Incremental scan: append the remaining fresh transactions newest-first, preserving
+                // the append order earlier versions produced. Chain placements above already wrote
+                // their entries at the correct position relative to their stored siblings.
+                if (full) {
+                    List<Transaction> rebuilt = new ArrayList<>(fresh.size() + stored.size());
+                    for (int i = fresh.size() - 1; i >= 0; i--) rebuilt.add(fresh.get(i));
+                    for (Transaction t : stored) {
+                        String key = t.bank + "|" + t.date;
+                        Integer f = freshCount.get(key);
+                        if (f != null && f > 0) {
+                            freshCount.put(key, f - 1);
+                            continue;
+                        }
+                        rebuilt.add(t);
+                    }
+                    reorderStoredByChains(rebuilt, chainPosByBank);
+                    stored = rebuilt;
+                } else {
+                    for (int i = fresh.size() - 1; i >= 0; i--) {
+                        if (placed.contains(fresh.get(i))) continue;
+                        stored.add(fresh.get(i));
+                    }
                 }
-                if (full) reorderStoredByChains(stored, chainPosByBank);
                 saveLastBalances(context, lastBalance);
             } catch (Exception e) {
                 Log.w(TAG, "history scan failed", e);
@@ -732,7 +775,14 @@ final class BalanceData {
      *  the volatile metadata (timestamps, transaction/reference numbers) that makes duplicate copies
      *  no longer textually identical. Only completed movements carry a resulting balance; the OTP
      *  rejection and the balance-required rule in {@link #extractTransaction} keep prompts out of
-     *  history entirely. Messages without a stated balance fall back to the whole normalized body. */
+     *  history entirely. Messages without a stated balance fall back to the whole normalized body.
+     *
+     *  <p>Consequence: two messages whose content is identical (same sender, same amount text, same
+     *  resulting balance) are ONE transaction no matter how far apart their timestamps are. That
+     *  collapses the same-event double deliveries banks commonly send, at the cost of merging two
+     *  genuinely different movements whenever they report an identical balance. If a transaction ever
+     *  looks missing or doubled in support reports, this fingerprint and the (bank, date) replacement
+     *  key used by the full re-scan in {@link #scanHistory} are the two places that decide it. */
     static String messageSig(String sender, String body) {
         if (body == null) return null;
         String s = normalizeLetters(digits(body.replace("\u066C", ",").replace("\u060C", ",")))
