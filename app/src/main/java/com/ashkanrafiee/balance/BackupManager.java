@@ -94,14 +94,18 @@ final class BackupManager {
     private BackupManager() {}
 
     /** Builds an encrypted backup of the current balances and transaction history and writes it to
-     *  {@code uri}. */
+     *  {@code uri}. Synchronized on {@link BalanceData} like {@link #restore} so the snapshot can
+     *  never interleave with a background {@link BalanceData#scanSms} scan. */
     static void create(Context context, Uri uri, String password) throws Exception {
-        String payload = new JSONObject()
-            .put("payloadFormat", PAYLOAD_FORMAT)
-            .put("balances", new JSONObject(BalanceData.serialize(BalanceData.read(context))))
-            .put("transactions", new JSONObject(
-                BalanceData.serializeTransactions(BalanceData.readTransactions(context))))
-            .toString();
+        String payload;
+        synchronized (BalanceData.class) {
+            payload = new JSONObject()
+                .put("payloadFormat", PAYLOAD_FORMAT)
+                .put("balances", new JSONObject(BalanceData.serialize(BalanceData.read(context))))
+                .put("transactions", new JSONObject(
+                    BalanceData.serializeTransactions(BalanceData.readTransactions(context))))
+                .toString();
+        }
 
         byte[] salt = randomBytes(SALT_BYTES);
         byte[] iv = randomBytes(IV_BYTES);
