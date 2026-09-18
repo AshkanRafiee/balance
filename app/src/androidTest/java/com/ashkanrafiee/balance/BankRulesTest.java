@@ -32,6 +32,12 @@ public class BankRulesTest {
         assertEquals("Saman", BankRules.resolve("989999920000"));
     }
 
+    @Test public void resolve_bluServiceNumber_returnsBank() {
+        assertEquals("Blu", BankRules.resolve("+9890000258"));
+        assertEquals("Blu", BankRules.resolve("9890000258"));
+        assertEquals("Blu", BankRules.resolve("90000258"));
+    }
+
     @Test public void resolve_urlStyleSuffix_numericSender_returnsBank() {
         // 989999920000 normalizes to 9999992000, which is a suffix of Saman's 9999920000 pair...
         // instead assert a real documented suffix match below.

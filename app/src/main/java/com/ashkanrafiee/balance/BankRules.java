@@ -85,7 +85,7 @@ final class BankRules {
         {"Hekmat", "Hekmat Iranian|Hekmat"},
         {"Tosee Taavon", "Tosee Taavon"},
         {"Noor", "Noor Credit Inst.|Noor|0200080947001|0200002734006"},
-        {"Blu", "Blu|blu|+982187641|98300087641|300087641|989999987641|9999987641|+989999987641"},
+        {"Blu", "Blu|blu|+982187641|98300087641|300087641|989999987641|9999987641|+989999987641|+9890000258"},
         {"Kosar", "Kosar|Kosar Credit"},
         {"Mehr", "Mehr Iran|MehrIran"},
         {"Mehr Eghtesad", "Mehr Eghtesad|MehrEghtesad"},
