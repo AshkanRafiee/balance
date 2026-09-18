@@ -439,6 +439,36 @@ public class BalanceScanTest {
         assertEquals(2_000_000L, amount(find(saved, "Tejarat")));
     }
 
+    /** A rules bump that meets an empty inbox must not confirm the version: the stored balances
+     *  could not be re-derived, so the rebuild has to be retried on the next open. */
+    @Test public void rulesVersionReset_withEmptyInbox_keepsStaleBalancesButDoesNotConfirmTheVersion() throws Exception {
+        seed("5000973189", "\u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000", T + 1000);
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+        assertEquals(1_000_000L, amount(find(saved, "Tejarat")));
+        assertEquals(BankRules.VERSION, storedRulesVersion());
+
+        prefs().edit().putInt(BalanceData.KEY_RULES_VERSION, BankRules.VERSION - 1).commit();
+        clearInbox();
+        saved = new LinkedHashMap<>();
+        int matched = BalanceData.scanSms(ctx, saved);
+
+        assertEquals(0, matched);
+        assertEquals("Stale balances survive an empty full scan", 1_000_000L,
+            amount(find(saved, "Tejarat")));
+        assertEquals("The version stays stale so the next open retries the rebuild",
+            BankRules.VERSION - 1, storedRulesVersion());
+
+        seed("5000973189", "\u0645\u0648\u062C\u0648\u062F\u06CC: 2,000,000", T + 2000);
+        saved = new LinkedHashMap<>();
+        int again = BalanceData.scanSms(ctx, saved);
+
+        assertEquals(1, again);
+        assertEquals(2_000_000L, amount(find(saved, "Tejarat")));
+        assertEquals("A real rebuild confirms the rules version", BankRules.VERSION,
+            storedRulesVersion());
+    }
+
     // ============================================================
     // Reverse-arrival movements (fee + transfer)
     // ============================================================

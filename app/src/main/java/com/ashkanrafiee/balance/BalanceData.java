@@ -512,9 +512,16 @@ final class BalanceData {
         saveRecentMovements(context, windows);
 
         write(context, current);
-        SharedPreferences.Editor editor = prefs.edit().putInt(KEY_RULES_VERSION, rulesVersion);
-        if (newest > watermark) editor.putLong(KEY_SCANNED_THROUGH, newest);
-        editor.apply();
+        // A full scan that finds no bank message at all could not have re-derived anything, so it
+        // must not confirm the rules version or advance the watermark: the stored balances may be
+        // stale (the messages they came from are gone, or the SMS store is not available yet) and
+        // the rebuild must be retried on the next open instead of being marked as done.
+        boolean emptyFullScan = full && rowsByBank.isEmpty() && !current.isEmpty();
+        if (!emptyFullScan) {
+            SharedPreferences.Editor editor = prefs.edit().putInt(KEY_RULES_VERSION, rulesVersion);
+            if (newest > watermark) editor.putLong(KEY_SCANNED_THROUGH, newest);
+            editor.apply();
+        }
         saved.clear();
         saved.putAll(current);
         return matched;
