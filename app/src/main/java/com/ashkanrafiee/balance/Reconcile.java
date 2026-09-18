@@ -46,7 +46,13 @@ final class Reconcile {
                 if (i == j) continue;
                 Entry ei = in.get(i);
                 Entry ej = in.get(j);
-                if (ei.balance + ej.amount == ej.balance) {
+                long sum;
+                try {
+                    sum = Math.addExact(ei.balance, ej.amount);
+                } catch (ArithmeticException overflow) {
+                    continue;
+                }
+                if (sum == ej.balance) {
                     succ[i][succCount[i]++] = j;
                     outDegree[i]++;
                     inDegree[j]++;

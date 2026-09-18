@@ -109,4 +109,13 @@ public class ReconcileTest {
         Reconcile.Entry d = e(4, -50L, 50L);
         assertNull(Reconcile.order(Arrays.asList(b, d, c, a)));
     }
+
+    /** Long-overflowing sums must never forge an edge: without the guard, MAX_VALUE + 1 silently
+     *  wraps to MIN_VALUE and would fabricate a false chain between genuinely unconnected entries. */
+    @Test public void order_overflowingSums_neverForgeEdges() {
+        Reconcile.Entry a = e(1, Long.MAX_VALUE, Long.MAX_VALUE);
+        Reconcile.Entry b = e(2, 1L, Long.MIN_VALUE);
+        Reconcile.Entry c = e(3, 1L, Long.MIN_VALUE + 1);
+        assertNull("Overflow must not connect these entries", Reconcile.order(Arrays.asList(a, b, c)));
+    }
 }
