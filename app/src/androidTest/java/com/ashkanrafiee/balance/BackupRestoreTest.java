@@ -318,6 +318,19 @@ public class BackupRestoreTest {
                 android.util.Base64.encodeToString(new byte[16], android.util.Base64.NO_WRAP)), f).resId);
     }
 
+    @Test public void hostileOversizedSalt_isRejectedBeforeDerivation() throws Exception {
+        // A 1 MB KDF salt would multiply the PBKDF2 work factor enormously if it ever reached
+        // derivation, so it must be rejected up front, before any key is derived.
+        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        File f = file("hostileSalt.balance");
+        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        byte[] huge = new byte[1024 * 1024];
+        new java.security.SecureRandom().nextBytes(huge);
+        String b64 = android.util.Base64.encodeToString(huge, android.util.Base64.NO_WRAP);
+        assertEquals(R.string.backup_error_unsupported,
+            restoreExpecting(b -> rewriteHeaderField(b, "kdf", "salt", b64), f).resId);
+    }
+
     @Test public void oversizedFile_isRejected() throws Exception {
         // Just past the 10 MB cap: a file far larger than any real backup must not be read into memory.
         long over = 10L * 1024 * 1024 + 1;

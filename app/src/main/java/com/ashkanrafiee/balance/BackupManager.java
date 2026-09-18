@@ -64,6 +64,7 @@ final class BackupManager {
      *  the value comes from the file, so it is validated before any key derivation runs. Ours is 600k;
      *  anything farther above it is reported as unsupported rather than attempted. */
     private static final int MAX_ITERATIONS = 6_000_000;
+    private static final int MAX_SALT_BYTES = 256;
     private static final int MIN_KEY_BITS = 128;
     private static final int MAX_KEY_BITS = 256;
     /** Restore refuses to read a backup file larger than this. The payload is a handful of balances, so
@@ -206,6 +207,8 @@ final class BackupManager {
         if (tagBits != TAG_BITS)
             throw new BackupException(R.string.backup_error_unsupported);
         if (iv == null || iv.length != IV_BYTES)
+            throw new BackupException(R.string.backup_error_unsupported);
+        if (salt == null || salt.length == 0 || salt.length > MAX_SALT_BYTES)
             throw new BackupException(R.string.backup_error_unsupported);
 
         String plain;
