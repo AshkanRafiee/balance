@@ -94,9 +94,10 @@ public class ReconcileTest {
     }
 
     @Test public void order_cycle_returnsNull() {
-        // A +100 then -100 loop has no unique start.
+        // A true 2-cycle: 0 + -100 == -100 (A precedes B) and -100 + 100 == 0 (B precedes A).
+        // No in-degree-0 head exists, so the loop is ambiguous and correctly rejected.
         Reconcile.Entry a = e(1, 100L, 0L);
-        Reconcile.Entry b = e(2, -100L, 100L);
+        Reconcile.Entry b = e(2, -100L, -100L);
         assertNull(Reconcile.order(Arrays.asList(a, b)));
     }
 

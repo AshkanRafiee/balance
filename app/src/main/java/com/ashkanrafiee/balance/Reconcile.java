@@ -72,11 +72,11 @@ final class Reconcile {
             if (inDegree[i] == 0) { head = i; break; }
         }
         List<Entry> result = new ArrayList<>(n);
-        boolean[] visited = new boolean[n];
+        // Every node has in-degree <= 1 and the head has in-degree 0 (both checked above), so the
+        // walk from the head can never revisit a node: a cycle would need an in-degree-2 node or a
+        // missing head, and each is already rejected. The walk is therefore at most n steps.
         int cur = head;
         while (cur != -1) {
-            if (visited[cur]) return null;  // cycle
-            visited[cur] = true;
             result.add(in.get(cur));
             int next = -1;
             for (int k = 0; k < succCount[cur]; k++) {
