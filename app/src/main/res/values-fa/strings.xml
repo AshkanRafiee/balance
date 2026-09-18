@@ -194,6 +194,8 @@
     <string name="lock_action_unlock">باز کردن</string>
     <string name="lock_fingerprint_action">باز کردن با اثر انگشت</string>
     <string name="lock_error_incorrect">کد اشتباه است. دوباره تلاش کنید.</string>
+    <string name="lock_error_attempts_left">کد اشتباه است. %1$d تلاش باقی مانده است.</string>
+    <string name="lock_error_locked_out">تلاش‌های ناموفق بیش از حد مجاز بود. %1$d ثانیه دیگر دوباره تلاش کنید.</string>
     <string name="lock_error_fingerprint_expired">اثر انگشت‌های این دستگاه از زمان تعیین قفل تغییر کرده‌اند. از رمز عددی یا رمز عبور استفاده کنید.</string>
     <string name="lock_error_fingerprint_unavailable">باز کردن با اثر انگشت در حال حاضر در دسترس نیست. از رمز عددی یا رمز عبور استفاده کنید.</string>
     <string name="lock_error_fingerprint_failed">اثر انگشت شناخته نشد. دوباره تلاش کنید یا از کد استفاده کنید.</string>

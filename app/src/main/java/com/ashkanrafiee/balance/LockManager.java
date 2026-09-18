@@ -39,9 +39,10 @@ import javax.crypto.spec.PBEKeySpec;
  * <p>Fingerprint unlock uses only platform APIs (Android 8.0+, the app's minimum): a symmetric key
  * in AndroidKeyStore is created with {@code setInvalidatedByBiometricEnrollment(true)} and
  * {@code setUserAuthenticationRequired(true)} (or {@code setUserAuthenticationParameters} on
- * Android 11+), and wraps a random challenge. On Android 9+ the challenge decrypts through the
- * modern {@code BiometricPrompt} system dialog; older builds fall back to the legacy
- * {@code FingerprintManager}. A verified fingerprint is genuinely required either way — and if a
+*  Android 11+), and wraps a random challenge. On Android 11+ the challenge decrypts through the
+ *  modern {@code BiometricPrompt} system dialog; Android 8–10 keep the legacy
+ *  {@code FingerprintManager} dialog (Android 10's {@code BiometricPrompt} constructor is not on
+ *  the public API surface). A verified fingerprint is genuinely required either way — and if a
  * fingerprint is later enrolled or removed the key is permanently invalidated and the app falls
  * back to the PIN/password. The keystore key and challenge are also removed the moment the lock (or
  * just fingerprint unlock) is disabled.
@@ -61,6 +62,16 @@ final class LockManager {
     static final String KEY_LOCK_HASH = "lock_hash";
     private static final String KEY_LOCK_FP_CHAIN = "lock_fp_chain";
     private static final String KEY_LOCK_FP_CHALLENGE = "lock_fp_challenge";
+    static final String KEY_LOCK_ATTEMPTS = "lock_attempts";
+    static final String KEY_LOCK_UNTIL = "lock_locked_until";
+    static final String KEY_LOCK_STAGE = "lock_lockout_stage";
+
+    /** Consecutive wrong codes allowed before an on-device cooldown kicks in, so a four-digit PIN
+     *  cannot be brute-forced by hand on a lost or stolen device. */
+    static final int MAX_ATTEMPTS = 5;
+    /** First cooldown length, doubling per lockout up to {@link #LOCKOUT_MAX_MS}. */
+    private static final long LOCKOUT_BASE_MS = 30_000L;
+    private static final long LOCKOUT_MAX_MS = 10 * 60_000L;
 
     /** PBKDF2 work factor for the lock code: 100k keeps enabling and verifying snappy on phones.
      *  Stored per-lock, so an existing stronger factor keeps working and is re-derived lazily
@@ -273,6 +284,9 @@ final class LockManager {
             .putString(KEY_LOCK_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
             .putInt(KEY_LOCK_ITERATIONS, LOCK_ITERATIONS)
             .putString(KEY_LOCK_HASH, Base64.encodeToString(hash, Base64.NO_WRAP))
+            .remove(KEY_LOCK_ATTEMPTS)
+            .remove(KEY_LOCK_UNTIL)
+            .remove(KEY_LOCK_STAGE)
             .apply();
         if (wantFingerprint) setFingerprintEnabled(c, true);
         // The user just set this up in a live session: do not lock it immediately.
@@ -289,15 +303,21 @@ final class LockManager {
             .putString(KEY_LOCK_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
             .putInt(KEY_LOCK_ITERATIONS, LOCK_ITERATIONS)
             .putString(KEY_LOCK_HASH, Base64.encodeToString(hash, Base64.NO_WRAP))
+            .remove(KEY_LOCK_ATTEMPTS)
+            .remove(KEY_LOCK_UNTIL)
+            .remove(KEY_LOCK_STAGE)
             .apply();
         // Changing the code does not invalidate the fingerprint challenge: that key is independent.
     }
 
-    /** Constant-time check of a code against the stored hash. Runs synchronously — call off-thread. */
+    /** Constant-time check of a code against the stored hash. Runs synchronously — call off-thread.
+     *  Refuses every check while a failed-attempt cooldown is active, and counts consecutive wrong
+     *  codes into the next cooldown. */
     static boolean verify(Context c, String code) {
         if (!isEnabled(c)) return true;
         if (code == null) return false;
         SharedPreferences p = prefs(c);
+        if (p.getLong(KEY_LOCK_UNTIL, 0) > System.currentTimeMillis()) return false;
         String saltB64 = p.getString(KEY_LOCK_SALT, null);
         String hashB64 = p.getString(KEY_LOCK_HASH, null);
         if (saltB64 == null || hashB64 == null) return false;
@@ -309,12 +329,57 @@ final class LockManager {
             boolean ok = MessageDigest.isEqual(expected, actual);
             // A lock created by an older build may carry a different work factor; bring it up to
             // the current one in the background after a successful verify, keeping the same salt.
-            if (ok && iterations != LOCK_ITERATIONS) rehashToCurrentFactor(c, code, salt);
+            if (ok) {
+                clearBackoff(p);
+                if (iterations != LOCK_ITERATIONS) rehashToCurrentFactor(c, code, salt);
+            } else {
+                noteFailure(p);
+            }
             return ok;
         } catch (Exception e) {
             Log.w(TAG, "verify failed", e);
             return false;
         }
+    }
+
+    /** Attempts left before the next cooldown, or 0 while a cooldown is active. */
+    static int attemptsRemaining(Context c) {
+        SharedPreferences p = prefs(c);
+        if (p.getLong(KEY_LOCK_UNTIL, 0) > System.currentTimeMillis()) return 0;
+        return Math.max(0, MAX_ATTEMPTS - p.getInt(KEY_LOCK_ATTEMPTS, 0));
+    }
+
+    /** Milliseconds still in a failed-attempt cooldown, or 0 when none is active. */
+    static long cooldownRemainingMs(Context c) {
+        return Math.max(0, prefs(c).getLong(KEY_LOCK_UNTIL, 0) - System.currentTimeMillis());
+    }
+
+    /** Forgets the failed-attempt accounting, e.g. after a verified fingerprint unlock. */
+    static void resetAttempts(Context c) {
+        clearBackoff(prefs(c));
+    }
+
+    private static void noteFailure(SharedPreferences p) {
+        int attempts = p.getInt(KEY_LOCK_ATTEMPTS, 0) + 1;
+        SharedPreferences.Editor e = p.edit();
+        if (attempts >= MAX_ATTEMPTS) {
+            int stage = p.getInt(KEY_LOCK_STAGE, 0);
+            long delay = Math.min(LOCKOUT_BASE_MS << Math.min(stage, 16), LOCKOUT_MAX_MS);
+            e.putLong(KEY_LOCK_UNTIL, System.currentTimeMillis() + delay);
+            e.putInt(KEY_LOCK_STAGE, stage + 1);
+            e.remove(KEY_LOCK_ATTEMPTS);
+        } else {
+            e.putInt(KEY_LOCK_ATTEMPTS, attempts);
+        }
+        e.apply();
+    }
+
+    private static void clearBackoff(SharedPreferences p) {
+        p.edit()
+            .remove(KEY_LOCK_ATTEMPTS)
+            .remove(KEY_LOCK_UNTIL)
+            .remove(KEY_LOCK_STAGE)
+            .apply();
     }
 
     private static void rehashToCurrentFactor(final Context c, final String code, final byte[] salt) {
@@ -340,6 +405,9 @@ final class LockManager {
             .remove(KEY_LOCK_SALT)
             .remove(KEY_LOCK_ITERATIONS)
             .remove(KEY_LOCK_HASH)
+            .remove(KEY_LOCK_ATTEMPTS)
+            .remove(KEY_LOCK_UNTIL)
+            .remove(KEY_LOCK_STAGE)
             .apply();
         unlockSession();
     }
@@ -435,8 +503,8 @@ final class LockManager {
         void onFpFailed(int errorRes);
     }
 
-    /** Opens the platform fingerprint dialog (BiometricPrompt on Android 10+, the system
-     *  FingerprintManager dialog on Android 8–9). The stored challenge is only accepted once it
+    /** Opens the platform fingerprint dialog (BiometricPrompt on Android 11+, the system
+     *  FingerprintManager dialog on Android 8–10). The stored challenge is only accepted once it
      *  actually decrypts with the authorized keystore key, so a verified print is genuinely
      *  required. Callbacks arrive on the main thread. Returns the cancellation signal, or null if
      *  the prompt could not be started (in which case {@code cb.onFpFailed} was already told). */
@@ -448,7 +516,7 @@ final class LockManager {
                 cb.onFpFailed(R.string.lock_error_fingerprint_unavailable);
                 return null;
             }
-            if (Build.VERSION.SDK_INT >= 29) {
+            if (Build.VERSION.SDK_INT >= 30) {
                 final android.app.Activity activity = (android.app.Activity) c;
                 final BiometricPrompt.AuthenticationCallback callback = new BiometricPrompt.AuthenticationCallback() {
                     @Override public void onAuthenticationSucceeded(
@@ -460,8 +528,12 @@ final class LockManager {
                         } catch (Exception e) {
                             Log.w(TAG, "fingerprint challenge failed", e);
                         }
-                        if (ok) cb.onFpSucceeded();
-                        else cb.onFpFailed(R.string.lock_error_fingerprint_expired);
+                        if (ok) {
+                            resetAttempts(c);
+                            cb.onFpSucceeded();
+                        } else {
+                            cb.onFpFailed(R.string.lock_error_fingerprint_expired);
+                        }
                     }
 
                     @Override public void onAuthenticationFailed() {
@@ -477,32 +549,13 @@ final class LockManager {
                         }
                     }
                 };
-                BiometricPrompt prompt;
-                if (Build.VERSION.SDK_INT >= 30) {
-                    prompt = new BiometricPrompt.Builder(activity)
-                        .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
-                        .setTitle(activity.getString(R.string.lock_fingerprint_action))
-                        .setNegativeButton(
-                            activity.getString(R.string.lock_fingerprint_negative_button),
-                            activity.getMainExecutor(), (d, w) -> cb.onFpFailed(-1))
-                        .build();
-                } else {
-                    // Android 10 (API 29) only: its (Activity, Executor, callback) constructor is not
-                    // part of the modern public API surface, so it is reached reflectively on this
-                    // one build. Android 8–9 keep the working FingerprintManager path above instead.
-                    try {
-                        java.lang.reflect.Constructor<BiometricPrompt> ctor =
-                            BiometricPrompt.class.getDeclaredConstructor(
-                                android.app.Activity.class, java.util.concurrent.Executor.class,
-                                BiometricPrompt.AuthenticationCallback.class);
-                        ctor.setAccessible(true);
-                        prompt = ctor.newInstance(activity, activity.getMainExecutor(), callback);
-                    } catch (ReflectiveOperationException e) {
-                        Log.w(TAG, "legacy BiometricPrompt constructor unavailable", e);
-                        cb.onFpFailed(R.string.lock_error_fingerprint_unavailable);
-                        return null;
-                    }
-                }
+                BiometricPrompt prompt = new BiometricPrompt.Builder(activity)
+                    .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                    .setTitle(activity.getString(R.string.lock_fingerprint_action))
+                    .setNegativeButton(
+                        activity.getString(R.string.lock_fingerprint_negative_button),
+                        activity.getMainExecutor(), (d, w) -> cb.onFpFailed(-1))
+                    .build();
                 prompt.authenticate(new BiometricPrompt.CryptoObject(cipher),
                     cancel, activity.getMainExecutor(), callback);
             } else {
@@ -522,8 +575,12 @@ final class LockManager {
                             } catch (Exception e) {
                                 Log.w(TAG, "fingerprint challenge failed", e);
                             }
-                            if (ok) cb.onFpSucceeded();
-                            else cb.onFpFailed(R.string.lock_error_fingerprint_expired);
+                            if (ok) {
+                                resetAttempts(c);
+                                cb.onFpSucceeded();
+                            } else {
+                                cb.onFpFailed(R.string.lock_error_fingerprint_expired);
+                            }
                         }
 
                         @Override public void onAuthenticationFailed() {

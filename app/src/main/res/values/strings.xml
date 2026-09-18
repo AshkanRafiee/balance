@@ -194,6 +194,8 @@
     <string name="lock_action_unlock">Unlock</string>
     <string name="lock_fingerprint_action">Unlock with fingerprint</string>
     <string name="lock_error_incorrect">Incorrect code. Try again.</string>
+    <string name="lock_error_attempts_left">Incorrect code. %1$d attempts left.</string>
+    <string name="lock_error_locked_out">Too many incorrect attempts. Try again in %1$d seconds.</string>
     <string name="lock_error_fingerprint_expired">Your fingerprints changed since the lock was set. Use your PIN or password.</string>
     <string name="lock_error_fingerprint_unavailable">Fingerprint unlock is not available right now. Use your PIN or password.</string>
     <string name="lock_error_fingerprint_failed">Fingerprint not recognized. Try again or use your code.</string>

@@ -8,6 +8,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
 import android.os.CancellationSignal;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.InputType;
 import android.text.method.PasswordTransformationMethod;
 import android.view.Gravity;
@@ -73,6 +75,8 @@ public final class LockOverlay extends FrameLayout {
     private boolean busy = false;
     private boolean fpPromptAllowed = true;
     private CancellationSignal fpCancel;
+    private Handler cooldownHandler;
+    private Runnable cooldownTimer;
 
     public LockOverlay(Context context) {
         super(context);
@@ -453,9 +457,13 @@ public final class LockOverlay extends FrameLayout {
     }
 
     private void showError(int res) {
-        error.setText(getString(res));
+        showError(getString(res));
+    }
+
+    private void showError(String msg) {
+        error.setText(msg);
         error.setVisibility(VISIBLE);
-        pwError.setText(getString(res));
+        pwError.setText(msg);
         pwError.setVisibility(VISIBLE);
     }
 
@@ -497,6 +505,10 @@ public final class LockOverlay extends FrameLayout {
     /** Verifies the entered code on a worker thread (PBKDF2 is deliberately slow). */
     private void submit() {
         if (busy || !LockManager.isEnabled(ctx)) return;
+        if (LockManager.cooldownRemainingMs(ctx) > 0) {
+            startCooldown();
+            return;
+        }
         String code = pinMode ? pinBuffer.toString() : passwordInput.getText().toString();
         if (code.isEmpty()) {
             showError(R.string.lock_validate_empty);
@@ -523,14 +535,56 @@ public final class LockOverlay extends FrameLayout {
         setLoading(false);
         if (ok) {
             success();
+        } else if (LockManager.cooldownRemainingMs(ctx) > 0) {
+            startCooldown();
         } else {
-            showError(R.string.lock_error_incorrect);
+            int left = LockManager.attemptsRemaining(ctx);
+            if (left > 0 && left < LockManager.MAX_ATTEMPTS) {
+                showError(ctx.getString(R.string.lock_error_attempts_left, left));
+            } else {
+                showError(R.string.lock_error_incorrect);
+            }
             clearInput();
         }
     }
 
+    /** Blocks code entry while a failed-attempt cooldown runs and counts it down on the error line,
+     *  re-enabling the controls once it expires. */
+    private void startCooldown() {
+        if (cooldownTimer != null) return;
+        busy = true;
+        setEntryEnabled(false);
+        clearInput();
+        if (cooldownHandler == null) cooldownHandler = new Handler(Looper.getMainLooper());
+        cooldownTimer = new Runnable() {
+            @Override public void run() {
+                long ms = LockManager.cooldownRemainingMs(ctx);
+                if (ms > 0) {
+                    long seconds = (ms + 999) / 1000;
+                    showError(ctx.getString(R.string.lock_error_locked_out, seconds));
+                    cooldownHandler.postDelayed(this, 1000);
+                } else {
+                    cooldownTimer = null;
+                    busy = false;
+                    setEntryEnabled(true);
+                    hideError();
+                }
+            }
+        };
+        cooldownHandler.post(cooldownTimer);
+    }
+
+    private void dropCooldownCountdown() {
+        if (cooldownHandler != null && cooldownTimer != null) {
+            cooldownHandler.removeCallbacks(cooldownTimer);
+        }
+        cooldownTimer = null;
+    }
+
     private void success() {
         cancelFingerprint();
+        dropCooldownCountdown();
+        busy = false;
         LockManager.unlockSession();
         hide();
         if (unlockListener != null) unlockListener.onUnlocked();

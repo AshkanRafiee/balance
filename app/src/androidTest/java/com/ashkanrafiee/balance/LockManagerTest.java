@@ -108,6 +108,63 @@ public class LockManagerTest {
         assertTrue(LockManager.verify(ctx, null));
     }
 
+    @Test public void wrongEntries_countDownAndStillRefusedDuringWhatTheyTrigger() {
+        LockManager.enable(ctx, "1234", true, false);
+        for (int i = 0; i < LockManager.MAX_ATTEMPTS - 1; i++) {
+            assertFalse(LockManager.verify(ctx, "9999"));
+            assertEquals(LockManager.MAX_ATTEMPTS - (i + 1), LockManager.attemptsRemaining(ctx));
+        }
+        assertFalse(LockManager.verify(ctx, "9999"));
+        assertEquals("Five wrong codes leave no attempts on the counter", 0,
+            LockManager.attemptsRemaining(ctx));
+        long cooldown = LockManager.cooldownRemainingMs(ctx);
+        assertTrue("The fifth wrong code must start a cooldown", cooldown > 0);
+        assertFalse("The right code is still refused while the cooldown runs",
+            LockManager.verify(ctx, "1234"));
+        assertEquals("A refused check must not extend or cancel the cooldown",
+            cooldown, LockManager.cooldownRemainingMs(ctx));
+    }
+
+    @Test public void successfulVerify_clearsTheAttemptAccounting() {
+        LockManager.enable(ctx, "1234", true, false);
+        assertFalse(LockManager.verify(ctx, "9999"));
+        assertFalse(LockManager.verify(ctx, "8888"));
+        assertEquals(LockManager.MAX_ATTEMPTS - 2, LockManager.attemptsRemaining(ctx));
+        assertTrue(LockManager.verify(ctx, "1234"));
+        assertEquals("A success gives a fresh set of attempts",
+            LockManager.MAX_ATTEMPTS, LockManager.attemptsRemaining(ctx));
+    }
+
+    @Test public void expiredCooldown_restoresFreshAttempts() {
+        LockManager.enable(ctx, "1234", true, false);
+        for (int i = 0; i < LockManager.MAX_ATTEMPTS; i++) LockManager.verify(ctx, "9999");
+        assertTrue(LockManager.cooldownRemainingMs(ctx) > 0);
+
+        ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit()
+            .putLong(LockManager.KEY_LOCK_UNTIL, System.currentTimeMillis() - 1000).commit();
+        assertEquals(0, LockManager.cooldownRemainingMs(ctx));
+        assertEquals("An expired cooldown restores a fresh set of attempts",
+            LockManager.MAX_ATTEMPTS, LockManager.attemptsRemaining(ctx));
+        assertTrue("The right code unlocks again once the cooldown is over",
+            LockManager.verify(ctx, "1234"));
+    }
+
+    @Test public void secondLockout_outlastsTheFirst() {
+        LockManager.enable(ctx, "1234", true, false);
+        for (int i = 0; i < LockManager.MAX_ATTEMPTS; i++) LockManager.verify(ctx, "9999");
+        long first = LockManager.cooldownRemainingMs(ctx);
+        assertTrue(first > 0);
+
+        // Age the first cooldown out, then fail to the lockout again without any success in between.
+        ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit()
+            .putLong(LockManager.KEY_LOCK_UNTIL, System.currentTimeMillis() - 1000).commit();
+        for (int i = 0; i < LockManager.MAX_ATTEMPTS; i++) LockManager.verify(ctx, "9999");
+        long second = LockManager.cooldownRemainingMs(ctx);
+        assertTrue("The repeated lockout must last longer than the first", second > first);
+        assertFalse("The lock must stay wedged until the second cooldown expires",
+            LockManager.verify(ctx, "1234"));
+    }
+
     @Test public void validCode_enforcesLengthsAndDigits() {
         assertTrue(LockManager.validCode("1234", true));
         assertTrue(LockManager.validCode("123456", true));
