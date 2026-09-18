@@ -235,7 +235,10 @@ public final class AboutActivity extends Activity {
         v.setMaxLines(2);
         v.setEllipsize(TextUtils.TruncateAt.END);
         if (url != null) {
-            v.setOnClickListener(view -> startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))));
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            if (intent.resolveActivity(getPackageManager()) != null) {
+                v.setOnClickListener(view -> startActivity(intent));
+            }
         }
         box.addView(v);
         return box;
