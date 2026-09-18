@@ -20,6 +20,6 @@ Features:
 - Reset and rescan balances from the data menu
 - Encrypted storage on device
 - Password-protected backup and restore
-- Optional in-app lock with PIN, password or fingerprint, protecting the app, the widget and screenshots/recents
+- Optional in-app lock with PIN, password or fingerprint, protecting the app, the widget and screenshots/recents; after a few wrong attempts, code entry locks for a growing cooldown
 
 SMS and financial data stay on the device, encrypted. No account, cloud service, analytics, or network access is required.

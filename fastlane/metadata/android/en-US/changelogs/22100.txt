@@ -3,6 +3,6 @@ History rebuilds, out-of-order messages, and a hardier lock.
 • When the bank message rules change, history is rebuilt from your SMS and matched to what is already stored, so nothing is ever counted twice.
 • A transfer and its fee that arrive in the wrong order are now sorted into their true chronological order, for the balance and history alike.
 • Blu service messages (+9890000258) are recognized, so Blu balances update automatically.
-• Five wrong lock attempts now lock the code entry for a cooldown that grows with each timeout, slowing anyone trying to guess your PIN; fingerprint unlock still works during one.
+• Five wrong lock attempts now lock the code entry for a cooldown that grows with each timeout, slowing anyone trying to guess your PIN.
 • Fingerprint unlock works again on Android 10 devices.
 • The About screen gained links to the app website and to GitHub for reporting corrections and suggestions.
