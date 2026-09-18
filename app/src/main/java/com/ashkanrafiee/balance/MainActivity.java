@@ -1407,6 +1407,24 @@ public class MainActivity extends Activity {
                 }
                 return true;
             }
+            if (e.getAction() == MotionEvent.ACTION_CANCEL) {
+                // A cancelled gesture must behave like a lift that triggers nothing: drop every
+                // pending long-press probe and disarm so nothing fires after the touch is gone.
+                handler.removeCallbacks(lockLongProbe);
+                handler.removeCallbacks(eyeLongProbe);
+                handler.removeCallbacks(totalLongProbe);
+                handler.removeCallbacks(bankLongProbe);
+                lockProbeFired = false;
+                eyeProbeFired = false;
+                totalProbeFired = false;
+                bankProbeFired = false;
+                lockArmed = false;
+                eyeArmed = false;
+                totalArmed = false;
+                bankArmed = false;
+                bankProbeTarget = null;
+                return true;
+            }
             if (e.getAction() != MotionEvent.ACTION_UP) return true;
             handler.removeCallbacks(lockLongProbe);
             handler.removeCallbacks(eyeLongProbe);
