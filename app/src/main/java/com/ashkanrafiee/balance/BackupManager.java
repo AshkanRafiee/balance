@@ -170,7 +170,9 @@ final class BackupManager {
         JSONObject header;
         try {
             header = new JSONObject(new String(headerBytes, StandardCharsets.UTF_8));
-        } catch (Exception e) {
+        } catch (Throwable e) {
+            // A crafted file can nest its JSON so deeply that parsing exhausts the stack; that must
+            // land on the same "not a backup" path as any other malformed header, not crash.
             throw new BackupException(R.string.backup_error_not_backup);
         }
 
