@@ -56,7 +56,12 @@ final class BalanceData {
     static final int SORT_DATE_OLDEST = 4;
 
     /** Bumped whenever the movement-message recognition rules change, forcing a full history re-scan. */
-    static final int HISTORY_RULES_VERSION = 3;
+    static final int HISTORY_RULES_VERSION = 4;
+
+    /** Persisted recent-movement window for balance-chain reconciliation across split scans. */
+    static final String KEY_RECENT_MOVEMENTS = "recent_movements";
+    private static final long RECENT_WINDOW_MS = 5 * 60 * 1000;
+    private static final int MAX_RECENT_ENTRIES = 16;
 
     /** True while a history re-scan is running, so a second trigger (app open + history open) is a
      *  no-op instead of a duplicate pass. */
@@ -299,7 +304,8 @@ final class BalanceData {
      *  preference is untouched (it is a display choice, not app data). */
     static void reset(Context context) {
         context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-            .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).remove(KEY_HISTORY_LAST_BALANCE).apply();
+            .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).remove(KEY_HISTORY_LAST_BALANCE)
+            .remove(KEY_RECENT_MOVEMENTS).apply();
         context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
             .remove(KEY_SCANNED_THROUGH)
             .remove(KEY_RULES_VERSION)
@@ -435,6 +441,12 @@ final class BalanceData {
         int senderTarget = BankRules.supportedSenderCount();
         String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
         String[] args = selection != null ? new String[]{Long.toString(watermark)} : null;
+
+        // Collect every matching message per bank (sender, body, device date, stated balance). A bank
+        // that sends a fee and the transfer it belongs to in the wrong order surfaces here as two
+        // rows whose device dates disagree with their true chronology; the recent-movements window
+        // below reconciles that before the balance is chosen.
+        Map<String, List<Object[]>> rowsByBank = new LinkedHashMap<>();
         try (Cursor cursor = context.getContentResolver().query(
             Telephony.Sms.Inbox.CONTENT_URI,
             new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
@@ -449,16 +461,56 @@ final class BalanceData {
                 long value = extract(cursor.getString(1));
                 if (value < 0) continue;
                 matchedBanks.add(bank);
-                Bank existing = current.get(bank);
-                if (existing == null || date > existing.date) {
-                    matched++;
-                    current.put(bank, new Bank(bank, value, date, sender));
-                }
+                rowsByBank.computeIfAbsent(bank, k -> new ArrayList<>())
+                    .add(new Object[]{sender, cursor.getString(1), date});
                 if (full && matchedBanks.size() == senderTarget) break;
             }
         } catch (Exception e) {
             Log.w(TAG, "scan failed", e);
         }
+
+        Map<String, List<Reconcile.Entry>> windows = loadRecentMovements(context);
+        for (Map.Entry<String, List<Object[]>> e : rowsByBank.entrySet()) {
+            String bank = e.getKey();
+            List<Object[]> rows = e.getValue();
+            // Merge this scan's movements into the recent-movements window and reconcile the unique
+            // balance chain, so a fee and its transfer that the bank sent in the wrong order are seen
+            // in their true order instead of by arrival time.
+            Map<String, String> sigSender = new HashMap<>();
+            List<Reconcile.Entry> merged = mergedForWindow(windows.get(bank), rows, sigSender);
+            List<Reconcile.Entry> chain = reconcile(merged);
+
+            Object[] newestArr = newestRow(rows);
+            Reconcile.Entry chosen = null;
+            String chosenSender = null;
+            boolean chainTrusted = chain != null && !chain.isEmpty()
+                && isChainMovement(chain, (String) newestArr[0], (String) newestArr[1]);
+            if (chainTrusted) {
+                Reconcile.Entry last = chain.get(chain.size() - 1);
+                chosen = last;
+                chosenSender = sigSender.get(last.sig);
+            } else {
+                long bal = extract((String) newestArr[1]);
+                if (bal >= 0) {
+                    chosen = new Reconcile.Entry((Long) newestArr[2], 0, bal, null);
+                    chosenSender = (String) newestArr[0];
+                }
+            }
+            if (chosen != null) {
+                Bank existing = current.get(bank);
+                boolean changed = chainTrusted
+                    ? existing == null || existing.amount != chosen.balance || existing.date != chosen.date
+                    : existing == null || chosen.date > existing.date;
+                if (changed) {
+                    matched++;
+                    current.put(bank, new Bank(bank, chosen.balance, chosen.date,
+                        chosenSender != null ? chosenSender : (existing != null ? existing.sender : null)));
+                }
+            }
+            windows.put(bank, pruneWindow(merged));
+        }
+        saveRecentMovements(context, windows);
+
         write(context, current);
         SharedPreferences.Editor editor = prefs.edit().putInt(KEY_RULES_VERSION, rulesVersion);
         if (newest > watermark) editor.putLong(KEY_SCANNED_THROUGH, newest);
@@ -521,7 +573,44 @@ final class BalanceData {
                 // from the last balance persisted by the previous scan.
                 rows.sort((a, b) -> Long.compare((Long) a[3], (Long) b[3]));
                 Map<String, Long> lastBalance = full ? new HashMap<>() : loadLastBalances(context);
+
+                // Group this scan's rows by bank, merge each bank's movements into its recent-window,
+                // and reconcile the balance chains, so a fee and its transfer that arrived in the wrong
+                // order are processed (and stored) in their true order instead of by arrival time.
+                Map<String, List<Object[]>> rowsByBank = new LinkedHashMap<>();
+                for (Object[] row : rows) {
+                    rowsByBank.computeIfAbsent((String) row[0], k -> new ArrayList<>()).add(row);
+                }
+                Map<String, List<Reconcile.Entry>> windows = loadRecentMovements(context);
+                Map<String, Map<String, Integer>> chainPosByBank = new LinkedHashMap<>();
+                Map<String, List<Reconcile.Entry>> chainByBank = new LinkedHashMap<>();
+                for (Map.Entry<String, List<Object[]>> e : rowsByBank.entrySet()) {
+                    String bank = e.getKey();
+                    // History rows carry [bank, sender, body, date]; the window merger reads them as
+                    // [sender, body, date] (the layout scanSms builds), so rebind before merging.
+                    List<Reconcile.Entry> merged = mergedForWindow(windows.get(bank),
+                        senderBodyDate(e.getValue()));
+                    List<Reconcile.Entry> chain = reconcile(merged);
+                    if (chain != null && !chain.isEmpty()) {
+                        chainByBank.put(bank, chain);
+                        Map<String, Integer> pos = new HashMap<>();
+                        for (int i = 0; i < chain.size(); i++) {
+                            Reconcile.Entry en = chain.get(i);
+                            if (en.sig != null) pos.put(en.sig, i);
+                        }
+                        chainPosByBank.put(bank, pos);
+                    }
+                    windows.put(bank, pruneWindow(merged));
+                }
+                saveRecentMovements(context, windows);
+
+                // Reorder the date-sorted rows so that adjacent same-bank movements known to a unique
+                // chain appear in their true order. Everything else keeps its current relative order.
+                rows = reorderByChains(rows, chainPosByBank);
+
                 List<Transaction> fresh = new ArrayList<>();
+                List<Transaction> placed = new ArrayList<>();
+                Set<String> addedSigs = new HashSet<>();
                 for (Object[] row : rows) {
                     String bank = (String) row[0];
                     String sender = (String) row[1];
@@ -545,6 +634,7 @@ final class BalanceData {
                         if (sig != null) {
                             if (seenSigs.contains(sig)) continue;
                             seenSigs.add(sig);
+                            addedSigs.add(sig);
                         } else if (seenSigs.contains(legacyKey)) {
                             continue;
                         }
@@ -557,8 +647,47 @@ final class BalanceData {
                     long bal = extract(body);
                     if (bal >= 0) lastBalance.put(bank, bal);
                 }
-                // Append newest-first, preserving the append order previous versions produced.
-                for (int i = fresh.size() - 1; i >= 0; i--) stored.add(fresh.get(i));
+                // Chain banks: keep the balance chain end correct when the true-newest movement was not
+                // among the rows scanned now (a previous scan already committed it), and place fresh
+                // chain members relative to their already-stored siblings when part of the pair was
+                // recorded earlier (split scans). A full re-scan additionally reorders any stored
+                // entries the arrival order previously put back-to-front.
+                for (Map.Entry<String, List<Reconcile.Entry>> e : chainByBank.entrySet()) {
+                    String bank = e.getKey();
+                    List<Reconcile.Entry> chain = e.getValue();
+                    List<Transaction> txs = new ArrayList<>();
+                    for (Transaction t : fresh) if (bank.equals(t.bank)) txs.add(t);
+                    // Chain banks: keep the persisted last balance at the chain end (the true-newest
+                    // movement) unless the chain-last movement itself was committed now, or a movement
+                    // OUTSIDE the chain was recorded this scan and superseded it (a delta-derived
+                    // balance that moved on past the pair).
+                    Reconcile.Entry last = chain.get(chain.size() - 1);
+                    if (last.sig != null && !addedSigs.contains(last.sig)
+                            && !hasFreshOutsideChain(txs, chain)) {
+                        lastBalance.put(bank, last.balance);
+                    }
+                    // Place freshly scanned chain members next to their already-stored siblings when
+                    // part of the pair was recorded earlier (split scans). Only chain members are ever
+                    // placed, so a non-chain movement keeps the append path below and is never dropped.
+                    if (txs.isEmpty()) continue;
+                    if (hasStoredChainMember(stored, bank, chain)) {
+                        Set<String> chainSigs = new HashSet<>();
+                        for (Reconcile.Entry ce : chain) if (ce.sig != null) chainSigs.add(ce.sig);
+                        Map<String, Transaction> bySig = new HashMap<>();
+                        for (Transaction t : txs)
+                            if (t.sig != null && chainSigs.contains(t.sig)) bySig.put(t.sig, t);
+                        placeReconciled(stored, bank, chain, bySig);
+                        placed.addAll(bySig.values());
+                    }
+                }
+                // Append the remaining fresh transactions newest-first, preserving the append order
+                // earlier versions produced. Chain placements above already wrote their entries at the
+                // correct position relative to their stored siblings.
+                for (int i = fresh.size() - 1; i >= 0; i--) {
+                    if (placed.contains(fresh.get(i))) continue;
+                    stored.add(fresh.get(i));
+                }
+                if (full) reorderStoredByChains(stored, chainPosByBank);
                 saveLastBalances(context, lastBalance);
             } catch (Exception e) {
                 Log.w(TAG, "history scan failed", e);
@@ -775,6 +904,303 @@ final class BalanceData {
             return Long.parseLong(s.replace(",", ""));
         } catch (Exception e) {
             return -1;
+        }
+    }
+
+    // ============================================================
+    // Recent-movements window and balance-chain reconciliation
+    // ============================================================
+
+    /** Adds the movement rows of this scan (messages with a transaction amount and a stated balance)
+     *  to the bank's recent-movements window, deduped by message fingerprint, and returns the merged
+     *  list. {@code sigSender} is populated with the sender of each newly added movement so balance
+     *  selection can keep the originating address. */
+    private static List<Reconcile.Entry> mergedForWindow(List<Reconcile.Entry> window,
+            List<Object[]> rows, Map<String, String> sigSender) {
+        List<Reconcile.Entry> merged = new ArrayList<>();
+        Set<String> sigs = new HashSet<>();
+        if (window != null) {
+            merged.addAll(window);
+            for (Reconcile.Entry en : window) if (en.sig != null) sigs.add(en.sig);
+        }
+        for (Object[] row : rows) {
+            String sender = (String) row[0];
+            String body = (String) row[1];
+            Long txn = extractTransaction(body);
+            long bal = extract(body);
+            if (txn == null || bal < 0) continue;
+            String sig = messageSig(sender, body);
+            if (sig == null || !sigs.add(sig)) continue;
+            if (sigSender != null) sigSender.put(sig, sender);
+            merged.add(new Reconcile.Entry((Long) row[2], txn, bal, sig));
+        }
+        return merged;
+    }
+
+    /** Rebinds history-scan rows [bank, sender, body, date] into the [sender, body, date] layout the
+     *  window merger consumes. */
+    private static List<Object[]> senderBodyDate(List<Object[]> rows) {
+        List<Object[]> out = new ArrayList<>(rows.size());
+        for (Object[] r : rows) out.add(new Object[]{r[1], r[2], r[3]});
+        return out;
+    }
+
+    private static List<Reconcile.Entry> mergedForWindow(List<Reconcile.Entry> window,
+            List<Object[]> rows) {
+        return mergedForWindow(window, rows, null);
+    }
+
+    /** Returns the concatenation of the unique, per-cluster balance chains for a bank's movements,
+     *  in chronological order, or {@code null} when no cluster of two or more movements is uniquely
+     *  orderable (in which case arrival order remains authoritative). */
+    private static List<Reconcile.Entry> reconcile(List<Reconcile.Entry> merged) {
+        List<List<Reconcile.Entry>> clusters = clusterEntries(merged);
+        List<Reconcile.Entry> chain = null;
+        for (List<Reconcile.Entry> cluster : clusters) {
+            List<Reconcile.Entry> c = Reconcile.order(cluster);
+            if (c == null) continue;
+            if (chain == null) chain = new ArrayList<>();
+            chain.addAll(c);
+        }
+        return chain;
+    }
+
+    /** Splits a bank's movements into clusters separated by gaps larger than {@link #RECENT_WINDOW_MS},
+     *  so reversals are only ever resolved against their true neighbors and never against movements
+     *  from unrelated moments. */
+    private static List<List<Reconcile.Entry>> clusterEntries(List<Reconcile.Entry> list) {
+        if (list.isEmpty()) return java.util.Collections.emptyList();
+        list.sort((a, b) -> Long.compare(a.date, b.date));
+        List<List<Reconcile.Entry>> clusters = new ArrayList<>();
+        List<Reconcile.Entry> cur = new ArrayList<>();
+        long prev = Long.MIN_VALUE;
+        for (Reconcile.Entry en : list) {
+            if (!cur.isEmpty() && en.date - prev > RECENT_WINDOW_MS) {
+                clusters.add(cur);
+                cur = new ArrayList<>();
+            }
+            cur.add(en);
+            prev = en.date;
+        }
+        if (!cur.isEmpty()) clusters.add(cur);
+        return clusters;
+    }
+
+    /** Keeps the window to the movements within {@link #RECENT_WINDOW_MS} of the newest one, capped
+     *  at {@link #MAX_RECENT_ENTRIES}, so it stays a small cache meant only for split-scan chaining. */
+    private static List<Reconcile.Entry> pruneWindow(List<Reconcile.Entry> list) {
+        if (list.isEmpty()) return new ArrayList<>();
+        long newest = 0;
+        for (Reconcile.Entry en : list) if (en.date > newest) newest = en.date;
+        long cutoff = newest - RECENT_WINDOW_MS;
+        List<Reconcile.Entry> kept = new ArrayList<>();
+        for (Reconcile.Entry en : list) if (en.date >= cutoff) kept.add(en);
+        kept.sort((a, b) -> Long.compare(a.date, b.date));
+        while (kept.size() > MAX_RECENT_ENTRIES) kept.remove(0);
+        return kept;
+    }
+
+    /** The newest-arrived row of a bank (the one with the maximum device date). */
+    private static Object[] newestRow(List<Object[]> rows) {
+        Object[] best = null;
+        for (Object[] r : rows) {
+            if (best == null || (Long) r[2] > (Long) best[2]) best = r;
+        }
+        return best;
+    }
+
+    /** Whether the given message is a money movement whose fingerprint belongs to a reconciled chain.
+     *  When it is, the chain's own order is authoritative over the arrival order. */
+    private static boolean isChainMovement(List<Reconcile.Entry> chain, String sender, String body) {
+        if (body == null || extractTransaction(body) == null) return false;
+        String sig = messageSig(sender, body);
+        if (sig == null) return false;
+        for (Reconcile.Entry en : chain) if (sig.equals(en.sig)) return true;
+        return false;
+    }
+
+    /** Reorders the date-sorted scan rows so that adjacent same-bank movements known to a unique
+     *  chain appear in its true order. Only adjacent same-bank rows are ever swapped, so unrelated
+     *  messages (other banks, balance-only snapshots) keep their current relative positions. */
+    private static List<Object[]> reorderByChains(List<Object[]> rows,
+            Map<String, Map<String, Integer>> posByBank) {
+        if (posByBank.isEmpty() || rows.size() < 2) return rows;
+        List<Object[]> out = new ArrayList<>(rows);
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (int i = 0; i + 1 < out.size(); i++) {
+                Object[] a = out.get(i);
+                Object[] b = out.get(i + 1);
+                if (!a[0].equals(b[0])) continue;
+                Map<String, Integer> pos = posByBank.get(a[0]);
+                if (pos == null) continue;
+                Integer pa = chainPosOfRow(pos, a);
+                Integer pb = chainPosOfRow(pos, b);
+                if (pa == null || pb == null || pa <= pb) continue;
+                out.set(i, b);
+                out.set(i + 1, a);
+                changed = true;
+            }
+        }
+        return out;
+    }
+
+    /** The chain position of a scan row (bank, sender, body, date), or null when the row is not a
+     *  movement recognized by the chain. */
+    private static Integer chainPosOfRow(Map<String, Integer> pos, Object[] row) {
+        String body = (String) row[2];
+        if (body == null || extractTransaction(body) == null) return null;
+        String sig = messageSig((String) row[1], body);
+        return sig == null ? null : pos.get(sig);
+    }
+
+    /** Whether any entry of a bank's reconciled chain was already saved to the stored history, which
+     *  is the signature of a split scan (part of a reversal pair committed earlier). */
+    private static boolean hasStoredChainMember(List<Transaction> stored, String bank,
+            List<Reconcile.Entry> chain) {
+        for (Reconcile.Entry e : chain) {
+            if (e.sig == null) continue;
+            for (Transaction t : stored) {
+                if (t.sig != null && t.sig.equals(e.sig) && bank.equals(t.bank)) return true;
+            }
+        }
+        return false;
+    }
+
+    /** Places the freshly scanned chain members of a bank into the stored history at the position
+     *  their already-stored siblings dictate (newest first), instead of appending on top. This keeps
+     *  a fee that arrives in a later scan below the transfer it belongs to. */
+    private static void placeReconciled(List<Transaction> stored, String bank,
+            List<Reconcile.Entry> chain, Map<String, Transaction> freshBySig) {
+        for (int k = chain.size() - 1; k >= 0; k--) {
+            Reconcile.Entry e = chain.get(k);
+            Transaction tx = freshBySig.get(e.sig);
+            if (tx == null) continue;
+            boolean dup = false;
+            for (Transaction t : stored) {
+                if (t.sig != null && t.sig.equals(e.sig)) { dup = true; break; }
+            }
+            if (dup) continue;
+            stored.add(chainInsertIndex(stored, bank, chain, k), tx);
+        }
+    }
+
+    /** Whether any freshly scanned transaction of the bank is NOT part of the reconciled chain, i.e.
+     *  whether a movement after (or outside) the chain was recorded in this scan. */
+    private static boolean hasFreshOutsideChain(List<Transaction> txs, List<Reconcile.Entry> chain) {
+        for (Transaction t : txs) {
+            boolean inChain = false;
+            if (t.sig != null) {
+                for (Reconcile.Entry c : chain) {
+                    if (c.sig != null && c.sig.equals(t.sig)) { inChain = true; break; }
+                }
+            }
+            if (!inChain) return true;
+        }
+        return false;
+    }
+
+    /** The stored-history index at which chain entry {@code k} (0 = oldest) must be inserted so the
+     *  bank's chain reads newest-first: after its newest already-stored sibling, or before its oldest
+     *  already-stored sibling, or at the top when it has none. */
+    private static int chainInsertIndex(List<Transaction> stored, String bank,
+            List<Reconcile.Entry> chain, int k) {
+        int maxNewer = -1;
+        int minOlder = Integer.MAX_VALUE;
+        for (int i = 0; i < stored.size(); i++) {
+            Transaction t = stored.get(i);
+            if (t.bank == null || !t.bank.equals(bank) || t.sig == null) continue;
+            for (int p = 0; p < chain.size(); p++) {
+                Reconcile.Entry ce = chain.get(p);
+                if (ce.sig != null && ce.sig.equals(t.sig)) {
+                    if (p > k) maxNewer = Math.max(maxNewer, i);
+                    else if (p < k) minOlder = Math.min(minOlder, i);
+                    break;
+                }
+            }
+        }
+        if (maxNewer != -1) return maxNewer + 1;
+        if (minOlder != Integer.MAX_VALUE) return minOlder;
+        return 0;
+    }
+
+    /** On a full re-scan, bubbles adjacent same-bank stored entries that a reversed arrival order
+     *  previously saved back-to-front into their true chain order. Entries that are adjacent and both
+     *  known to a unique chain are the only ones moved, mirroring {@link #reorderByChains}. */
+    private static void reorderStoredByChains(List<Transaction> stored,
+            Map<String, Map<String, Integer>> posByBank) {
+        if (posByBank.isEmpty() || stored.size() < 2) return;
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (int i = 0; i + 1 < stored.size(); i++) {
+                Transaction a = stored.get(i);
+                Transaction b = stored.get(i + 1);
+                if (a.bank == null || !a.bank.equals(b.bank)) continue;
+                Map<String, Integer> pos = posByBank.get(a.bank);
+                if (pos == null) continue;
+                Integer pa = a.sig != null ? pos.get(a.sig) : null;
+                Integer pb = b.sig != null ? pos.get(b.sig) : null;
+                if (pa == null || pb == null || pa >= pb) continue;
+                stored.set(i, b);
+                stored.set(i + 1, a);
+                changed = true;
+            }
+        }
+    }
+
+    /** Loads the persisted recent-movements window, keyed by bank. */
+    private static Map<String, List<Reconcile.Entry>> loadRecentMovements(Context context) {
+        Map<String, List<Reconcile.Entry>> map = new HashMap<>();
+        try {
+            String raw = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
+                .getString(KEY_RECENT_MOVEMENTS, null);
+            if (raw == null) return map;
+            String json = raw.indexOf('{') == 0 ? raw : decrypt(raw);
+            JSONObject obj = new JSONObject(json);
+            Iterator<String> it = obj.keys();
+            while (it.hasNext()) {
+                String bank = it.next();
+                JSONArray arr = obj.optJSONArray(bank);
+                List<Reconcile.Entry> list = new ArrayList<>();
+                if (arr != null) {
+                    for (int i = 0; i < arr.length(); i++) {
+                        JSONObject e = arr.getJSONObject(i);
+                        list.add(new Reconcile.Entry(e.getLong("d"), e.getLong("a"), e.getLong("b"),
+                            e.isNull("s") ? null : e.optString("s", null)));
+                    }
+                }
+                map.put(bank, list);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "loadRecentMovements failed", e);
+        }
+        return map;
+    }
+
+    /** Persists the recent-movements window, encrypted like the rest of the data store. */
+    private static void saveRecentMovements(Context context, Map<String, List<Reconcile.Entry>> map) {
+        try {
+            if (map.isEmpty()) {
+                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
+                    .remove(KEY_RECENT_MOVEMENTS).apply();
+                return;
+            }
+            JSONObject obj = new JSONObject();
+            for (Map.Entry<String, List<Reconcile.Entry>> e : map.entrySet()) {
+                JSONArray arr = new JSONArray();
+                for (Reconcile.Entry en : e.getValue()) {
+                    JSONObject je = new JSONObject().put("d", en.date).put("a", en.amount).put("b", en.balance);
+                    je.put("s", en.sig != null ? en.sig : JSONObject.NULL);
+                    arr.put(je);
+                }
+                obj.put(e.getKey(), arr);
+            }
+            context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
+                .putString(KEY_RECENT_MOVEMENTS, encrypt(obj.toString())).apply();
+        } catch (Exception e) {
+            Log.w(TAG, "saveRecentMovements failed", e);
         }
     }
 

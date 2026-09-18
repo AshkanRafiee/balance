@@ -35,6 +35,15 @@ public class BalanceScanTest {
     /** Arbitrary epoch for seeded test messages. */
     private static final long T = 1_000_000_000L;
 
+    private static final String MELLAT_TRANSFER =
+        "\u0628\u0631\u062F\u0627\u0634\u062A100,000,000 \u0645\u0627\u0646\u062F\u0647 77,222,945";
+    private static final String MELLAT_FEE =
+        "\u0628\u0631\u062F\u0627\u0634\u062A10,000 \u0645\u0627\u0646\u062F\u0647 177,222,945";
+    private static final String RESALAT_TRANSFER =
+        "-200,000,000  \n06/22_20:37 \n\u0645\u0627\u0646\u062F\u0647: 2,279,545,033";
+    private static final String RESALAT_FEE =
+        "-40,000  \n06/22_20:37 \n\u0645\u0627\u0646\u062F\u0647: 2,279,505,033";
+
     private Context ctx;
 
     @Before public void setUp() throws Exception {
@@ -426,6 +435,54 @@ public class BalanceScanTest {
         int again = BalanceData.scanSms(ctx, saved);
         assertEquals(1, again);
         assertEquals(2_000_000L, amount(find(saved, "Tejarat")));
+    }
+
+    // ============================================================
+    // Reverse-arrival movements (fee + transfer)
+    // ============================================================
+
+    @Test public void reversal_mellatTransferArrivesBeforeFee_keepsTransferBalance() throws Exception {
+        // The transfer (77,222,945) is the true-newest event but arrived first; the newest-arrived
+        // fee (177,222,945) must not override it.
+        seed("+9815560001", MELLAT_TRANSFER, T + 1000);
+        seed("+9815560001", MELLAT_FEE, T + 2000);
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        int matched = BalanceData.scanSms(ctx, saved);
+
+        assertEquals(1, matched);
+        assertEquals(77222945L, amount(find(saved, "Mellat")));
+        assertEquals(T + 1000, date(find(saved, "Mellat")));
+    }
+
+    @Test public void reversal_resalatFeeArrivesBeforeTransfer_keepsFeeBalance() throws Exception {
+        // The fee (2,279,505,033) is the true-newest event but arrived first; the newest-arrived
+        // transfer (2,279,545,033) must not override it.
+        seed("2000474701", RESALAT_FEE, T + 1000);
+        seed("2000474701", RESALAT_TRANSFER, T + 2000);
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        int matched = BalanceData.scanSms(ctx, saved);
+
+        assertEquals(1, matched);
+        assertEquals(2279505033L, amount(find(saved, "Resalat")));
+        assertEquals(T + 1000, date(find(saved, "Resalat")));
+    }
+
+    @Test public void reversal_splitAcrossScans_feeArrivingLater_neverOverwritesTransferBalance() throws Exception {
+        seed("+9815560001", MELLAT_TRANSFER, T + 1000);
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+        assertEquals(77222945L, amount(find(saved, "Mellat")));
+
+        // The fee belongs BEFORE the transfer: even though it arrives in a later scan, the account
+        // balance stays at the transfer's value.
+        seed("+9815560001", MELLAT_FEE, T + 2000);
+        int second = BalanceData.scanSms(ctx, saved);
+
+        assertEquals(0, second);
+        assertEquals(77222945L, amount(find(saved, "Mellat")));
+        assertEquals(T + 1000, date(find(saved, "Mellat")));
     }
 
     // ============================================================

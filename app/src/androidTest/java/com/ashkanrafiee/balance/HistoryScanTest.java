@@ -63,6 +63,12 @@ public class HistoryScanTest {
         "-40,000  \n"
         + "06/22_20:37 \n"
         + "\u0645\u0627\u0646\u062F\u0647: 2,279,505,033";
+    private static final String MELLAT_TRANSFER =
+        "\u0628\u0631\u062F\u0627\u0634\u062A100,000,000 \u0645\u0627\u0646\u062F\u0647 77,222,945";
+    private static final String MELLAT_FEE =
+        "\u0628\u0631\u062F\u0627\u0634\u062A10,000 \u0645\u0627\u0646\u062F\u0647 177,222,945";
+    private static final String MELLAT_DELTA =
+        "\u067E\u0631\u062F\u0627\u062E\u062A \u0627\u0646\u062C\u0627\u0645 \u0634\u062F\u060C \u0645\u0627\u0646\u062F\u0647 \u062D\u0633\u0627\u0628: 72,222,945";
 
     private Context ctx;
 
@@ -404,6 +410,93 @@ public class HistoryScanTest {
         int added = BalanceData.scanHistory(ctx);
         assertEquals(1, added);
         assertEquals(1, BalanceData.readTransactions(ctx).size());
+    }
+
+    // ============================================================
+    // Reverse-arrival movements (fee before/after its transfer)
+    // ============================================================
+
+    @Test public void sameScan_reversedFeeBeforeTransfer_storesTrueOrder() throws Exception {
+        // Resalat sent the fee (resulting balance 2,279,505,033) BEFORE the transfer it belongs to
+        // (2,279,545,033). The fee is the true-newest event, but arrived first: the stored history
+        // must follow the chain, not the arrival order.
+        seed("2000474701", RESALAT_WITHDRAWAL_2, T);
+        seed("2000474701", RESALAT_WITHDRAWAL_1, T + 500);
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(2, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(2, txs.size());
+        assertEquals(-40000L, txs.get(0).amount);          // fee (true newest)
+        assertEquals(-200000000L, txs.get(1).amount);      // transfer (true oldest)
+    }
+
+    @Test public void sameScan_reversedTransferBeforeFee_currentBalanceIsTransfer() throws Exception {
+        // Mellat sent the transfer (77,222,945) BEFORE its fee (177,222,945). Last balance is stored
+        // for the chain-end bank and a later message must measure from it.
+        seed("+9815560001", MELLAT_TRANSFER, T);
+        seed("+9815560001", MELLAT_FEE, T + 500);
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(2, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(2, txs.size());
+        assertEquals(-100000000L, txs.get(0).amount);      // transfer (true newest)
+        assertEquals(-10000L, txs.get(1).amount);          // fee (true oldest)
+    }
+
+    @Test public void splitScan_feeArrivesBeforeTransfer_feeStaysNewest() throws Exception {
+        seed("2000474701", RESALAT_WITHDRAWAL_2, T);       // fee arrives first, scanned alone
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(1, txs.size());
+        assertEquals(-40000L, txs.get(0).amount);
+
+        seed("2000474701", RESALAT_WITHDRAWAL_1, T + 500); // transfer in a later scan
+        int second = BalanceData.scanHistory(ctx);
+
+        assertEquals(1, second);
+        txs = BalanceData.readTransactions(ctx);
+        assertEquals(2, txs.size());
+        assertEquals(-40000L, txs.get(0).amount);          // fee stays the true-newest entry
+        assertEquals(-200000000L, txs.get(1).amount);      // transfer sits below it
+    }
+
+    @Test public void splitScan_transferBeforeFee_transferStaysNewest() throws Exception {
+        seed("+9815560001", MELLAT_TRANSFER, T + 1000);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(1, txs.size());
+        assertEquals(-100000000L, txs.get(0).amount);
+
+        seed("+9815560001", MELLAT_FEE, T + 2000);
+        int second = BalanceData.scanHistory(ctx);
+
+        assertEquals(1, second);
+        txs = BalanceData.readTransactions(ctx);
+        assertEquals(2, txs.size());
+        assertEquals(-100000000L, txs.get(0).amount);      // transfer (true newest) stays on top
+        assertEquals(-10000L, txs.get(1).amount);          // fee placed below it
+    }
+
+    @Test public void splitScan_deltaAfterReversedPair_measuredFromTrueNewestBalance() throws Exception {
+        // The fee's stated balance (177M) must never seed the delta chain: after the reversed pair the
+        // account's real value is the transfer's 77M, so a later delta message (72,222,945) records a
+        // -5M movement, not -105M.
+        seed("+9815560001", MELLAT_TRANSFER, T + 1000);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        seed("+9815560001", MELLAT_FEE, T + 2000);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+
+        seed("+9815560001", MELLAT_DELTA, T + 3000);
+        int third = BalanceData.scanHistory(ctx);
+
+        assertEquals(1, third);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(3, txs.size());
+        assertEquals(-5000000L, txs.get(2).amount);        // 77,222,945 - 72,222,945
     }
 
     // ============================================================
