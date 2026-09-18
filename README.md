@@ -15,7 +15,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Bank sorting by balance or update time, mirrored in the list and the home-screen widget
 - Home-screen widget with the same bank order, totals, and privacy mask as the app
 - Password-encrypted backup and restore
-- Auto light/dark theme, persistent masked-balance and currency preferences
+- Auto light/dark theme, persistent masked-balance and Toman display mode preference
 - Automatic refresh as bank SMS arrive, plus pull-to-refresh
 - English and Persian (فارسی) interface, with automatic system-language detection and localized bank names
 - Optional in-app lock with a PIN, password or fingerprint, covering the app, the home-screen widget and screenshots/recents
@@ -56,6 +56,8 @@ Balance requests `READ_SMS` to read existing messages, and declares `RECEIVE_BOO
 ## Duplicate SMS handling
 
 Two messages with identical content — same bank sender, same movement amount, same resulting balance — are treated as the same transaction no matter how far apart their timestamps are. A bank that delivers the same SMS twice therefore shows a single transaction. A movement is only ever listed once in history; if you ever see a missing or doubled transaction in a report, this grouping rule is the first thing to check.
+
+When the bank message rules change, history is rebuilt from the current inbox on the next open; the rebuilt entries are matched against what is already stored by these fingerprints, so the rebuild never duplicates a recorded transaction. While rebuilding, bank messages that arrived out of order (for example a transfer and its fee) are re-read in their true chronological order where the balances allow it.
 
 ## Source
 

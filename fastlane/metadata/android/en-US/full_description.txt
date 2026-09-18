@@ -10,8 +10,10 @@ Features:
 - Persistent privacy masking for balances
 - Balances update automatically as bank SMS arrive, plus pull-to-refresh
 - Home-screen widget mirroring the same bank order, totals and privacy mask; it locks together with the app when the lock is enabled
-- Transaction history with deposit and withdrawal tracking per day, month and year, refreshing automatically as new bank SMS arrive
-- Full history from the total card; tap a bank for just that bank's transactions, and long-press the total card or any bank card to copy that balance, and long-press the total card or any bank card to copy that balance
+- Transaction history with deposit and withdrawal tracking per day, month and year, refreshing automatically as new bank SMS arrive, with out-of-order messages (like a transfer and its fee) shown in their true order
+- Bank rule updates rebuild history from your SMS and match it to what is already stored, so nothing is ever counted twice
+- Full history from the total card; tap a bank for just that bank's transactions
+- Long-press the total card or any bank card to copy that balance
 - Bank sorting by balance or update time, applied to the list and the widget
 - Exclude banks from the combined total
 - Automatic light and dark theme that follows your device
