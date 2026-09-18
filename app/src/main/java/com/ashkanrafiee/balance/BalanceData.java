@@ -498,9 +498,10 @@ final class BalanceData {
             }
             if (chosen != null) {
                 Bank existing = current.get(bank);
-                boolean changed = chainTrusted
-                    ? existing == null || existing.amount != chosen.balance || existing.date != chosen.date
-                    : existing == null || chosen.date > existing.date;
+                // Only move the stored balance forward in time. The chain-resolved branch must not
+                // regress a newer stored entry when the last message is gone or a late,
+                // out-of-order movement resolves as the chain tail.
+                boolean changed = existing == null || chosen.date > existing.date;
                 if (changed) {
                     matched++;
                     current.put(bank, new Bank(bank, chosen.balance, chosen.date,
