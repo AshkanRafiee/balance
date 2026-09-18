@@ -29,11 +29,16 @@ final class Reconcile {
 
     private Reconcile() {}
 
+    private static final int MAX_CLUSTER = 64;
+
     /** Returns the entries in correct chronological order, or {@code null} when the chain is
      *  ambiguous. The returned list contains the same entry objects as the input. */
     static List<Entry> order(List<Entry> in) {
         int n = in.size();
         if (n < 2) return null;
+        // The edge matrix below is O(n^2) in both time and memory; callers only feed small windows
+        // (see the MAX_CLUSTER bound applied before this is reached), so this stays negligible.
+        if (n > MAX_CLUSTER) return null;
 
         // Edge i -> j iff balance[i] + amount[j] == balance[j]
         int[] outDegree = new int[n];
