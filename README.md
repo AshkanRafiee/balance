@@ -18,7 +18,8 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Auto light/dark theme, persistent masked-balance and Toman display mode preference
 - Automatic refresh as bank SMS arrive, plus pull-to-refresh
 - English and Persian (فارسی) interface, with automatic system-language detection and localized bank names
-- Optional in-app lock with a PIN, password or fingerprint, covering the app, the home-screen widget and screenshots/recents
+- Optional in-app lock with a PIN, password or fingerprint, covering the app, the home-screen widget and screenshots/recents, with progressive cooldown delays against wrong-entry guessing
+- About screen with direct links to the website and issue tracker
 
 ## Download
 
