@@ -15,12 +15,6 @@ package com.ashkanrafiee.balance;
  * transactions by Persian day / month / year.
  */
 final class JalaliCalendar {
-    /** Persian month names (Farvardin..Esfand). */
-    static final String[] MONTH_NAMES = {
-        "Farvardin", "Ordibehesht", "Khordad", "Tir", "Mordad", "Shahrivar",
-        "Mehr", "Aban", "Azar", "Dey", "Bahman", "Esfand"
-    };
-
     final int year;
     final int month;
     final int day;
