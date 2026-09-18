@@ -163,6 +163,34 @@ public class HistoryScanTest {
         fail("tx scenario " + scenario + " messages did not arrive in time");
     }
 
+    /** Waits until at least {@code count} rows with the given sender and body are in the inbox,
+     *  for scenarios where several identical copies of one message are delivered. */
+    private void awaitRows(String sender, String body, int count) throws Exception {
+        long deadline = System.currentTimeMillis() + 45_000;
+        while (System.currentTimeMillis() < deadline) {
+            try (android.database.Cursor c = ctx.getContentResolver().query(
+                    android.provider.Telephony.Sms.Inbox.CONTENT_URI,
+                    new String[]{android.provider.Telephony.Sms.ADDRESS, android.provider.Telephony.Sms.BODY},
+                    null, null, null)) {
+                int found = 0;
+                if (c != null) {
+                    while (c.moveToNext()) {
+                        if (sender.equals(c.getString(0)) && body.equals(c.getString(1))) found++;
+                    }
+                }
+                if (found >= count) return;
+            }
+            Thread.sleep(150);
+        }
+        fail("fewer than " + count + " copies of the seeded message arrived: sender=" + sender);
+    }
+
+    private int amountsOf(List<Transaction> txs, long amount) {
+        int n = 0;
+        for (Transaction t : txs) if (t.amount == amount) n++;
+        return n;
+    }
+
     private SharedPreferences prefs() {
         return ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE);
     }
@@ -527,6 +555,8 @@ public class HistoryScanTest {
         assertEquals(1, txs.size());
         assertEquals(200000L, txs.get(0).amount);
         assertFalse("stale-sig".equals(txs.get(0).sig));
+        assertEquals(BalanceData.HISTORY_RULES_VERSION,
+            prefs().getInt(BalanceData.KEY_HISTORY_RULES_VERSION, -1));
     }
 
     @Test public void rulesBump_reprocessesPresent_whileKeepingDeletedMessagesInHistory() throws Exception {
@@ -550,6 +580,76 @@ public class HistoryScanTest {
         assertEquals(2, txs.size());
         assertEquals(-120000L, txs.get(0).amount);   // present withdrawal re-processed, newest first
         assertEquals(200000L, txs.get(1).amount);    // deleted deposit preserved as an orphan
+        assertEquals(BalanceData.HISTORY_RULES_VERSION,
+            prefs().getInt(BalanceData.KEY_HISTORY_RULES_VERSION, -1));
+    }
+
+    @Test public void rulesBump_emptyInbox_keepsAllStoredHistory() throws Exception {
+        // Every message is deleted before the rules bump: all stored transactions are orphans and
+        // must survive untouched.
+        seed("500095", DEPOSIT, T + 1000);
+        seed("500095", WITHDRAWAL, T + 2000);
+        assertEquals(2, BalanceData.scanHistory(ctx));
+
+        clearInbox();
+        prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
+            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(0, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(2, txs.size());
+        assertEquals(1, amountsOf(txs, 200000L));
+        assertEquals(1, amountsOf(txs, -120000L));
+    }
+
+    @Test public void rulesBump_sameMomentSibling_neverDoubledOrDropped() throws Exception {
+        // Two movements share the same (bank, date). One message is gone before the bump; the rebuild
+        // must pair a present parse with its own stored twin by fingerprint — a (bank, date) budget
+        // would claim the sibling in the wrong stored slot, dropping the orphan and doubling the live
+        // movement.
+        seed("500095", DEPOSIT, T);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        Transaction deposit = BalanceData.readTransactions(ctx).get(0);
+        // Put the orphan first so a (bank, date)-keyed match would hit it.
+        BalanceData.writeTransactions(ctx, java.util.Arrays.asList(
+            new Transaction("Saman", T, 999_999L, "orphan-sig"), deposit));
+        assertEquals(2, BalanceData.readTransactions(ctx).size());
+
+        prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
+            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(1, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(2, txs.size());
+        assertEquals(1, amountsOf(txs, 200000L));     // the surviving movement, once
+        assertEquals(1, amountsOf(txs, 999_999L));    // the orphan, kept
+    }
+
+    @Test public void rulesBump_duplicateContentAcrossTimestamps_mergesToOneEntry() throws Exception {
+        // The same movement content delivered twice collapses to one transaction (per fingerprint).
+        // If the older copy is then deleted, the full re-scan must recognize the newer copy as the
+        // same transaction instead of keeping the old entry as an orphan and adding a second one.
+        seed("500095", DEPOSIT, T + 1000);
+        seed("500095", DEPOSIT, T + 2000);
+        awaitRows("500095", DEPOSIT, 2);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
+
+        clearInbox();
+        seed("500095", DEPOSIT, T + 2000);            // only the newer copy remains
+        prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
+            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(1, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(1, txs.size());
+        assertEquals(200000L, txs.get(0).amount);
+        assertEquals(T + 2000, txs.get(0).date);
     }
 
     // ============================================================

@@ -531,12 +531,18 @@ final class BalanceData {
      *
      *  <p>Persistence is committed before the watermark advances, so a process death mid-scan only causes
      *  a harmless re-read of already-deduped messages. A scan that is already running is reported as a
-     *  no-op so concurrent triggers (app open + history open) collapse into a single pass. */
+     *  no-op so concurrent triggers (app open + history open) collapse into a single pass.
+     *
+     *  <p>A rules-version change triggers a full re-scan that rebuilds the stored history from the
+     *  messages currently in the inbox (correcting entries the old rules parsed wrongly) while keeping
+     *  every stored entry whose message was deleted. If that scan fails part-way, neither the rules
+     *  version nor the watermark is advanced, so the rebuild runs again on the next scan. */
     static synchronized int scanHistory(Context context) {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
             return 0;
         if (HISTORY_SCANNING) return 0;
         HISTORY_SCANNING = true;
+        boolean completed = false;
         try {
             List<Transaction> stored = readTransactions(context);
             SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
@@ -581,10 +587,6 @@ final class BalanceData {
                 // from the last balance persisted by the previous scan.
                 rows.sort((a, b) -> Long.compare((Long) a[3], (Long) b[3]));
                 Map<String, Long> lastBalance = full ? new HashMap<>() : loadLastBalances(context);
-                // Fresh parses per (bank, date) key, counted only on a full scan: it caps how many
-                // stored entries each key may replace when the history is rebuilt below, so a present
-                // message is replaced by at most one fresh parse of the same moment.
-                Map<String, Integer> freshCount = full ? new HashMap<>() : null;
 
                 // Group this scan's rows by bank, merge each bank's movements into its recent-window,
                 // and reconcile the balance chains, so a fee and its transfer that arrived in the wrong
@@ -654,10 +656,6 @@ final class BalanceData {
                         }
                         fresh.add(t);
                         added++;
-                        if (full) {
-                            String k = bank + "|" + date;
-                            freshCount.put(k, (freshCount.containsKey(k) ? freshCount.get(k) : 0) + 1);
-                        }
                     }
                     // Remember the last stated balance per bank so the next movement can be measured
                     // against it, across scans. OTP messages and balance-less prompts return -1 here
@@ -702,23 +700,53 @@ final class BalanceData {
                     }
                 }
                 // Full re-scan: the inbox is authoritative under the current rules, so rebuild the stored history
-                // from this scan's parses and keep every stored entry that no fresh parse can claim. A
-                // stored entry is replaced only by a fresh parse of the same (bank, date); everything
-                // else stays — the transactions of messages that were deleted from the inbox, and
-                // present messages the current rules no longer recognize as a movement. Fresh parses
-                // that claim nothing are new movements. This is what fixes history recorded under an
-                // older rules version.
+                // from this scan's parses and keep every stored entry that no fresh parse can claim.
+                // A stored entry is claimed in two passes. First by identity: its fingerprint matches a
+                // fresh parse, so a deleted copy of a still-present message (or a same-moment sibling
+                // stored in the wrong order) collapses back into one transaction no matter the stored
+                // position. Then by a residual (bank, date) budget — how many fresh parses that moment
+                // has left after the identity claims — which replaces stale parses and legacy sigless
+                // entries left by the older rules. Everything else stays: deleted messages' orphans,
+                // and present messages the current rules no longer recognize as a movement. Fresh
+                // parses that claim nothing are new movements. This is what fixes history recorded
+                // under an older rules version.
                 // Incremental scan: append the remaining fresh transactions newest-first, preserving
                 // the append order earlier versions produced. Chain placements above already wrote
                 // their entries at the correct position relative to their stored siblings.
                 if (full) {
+                    Set<String> freshSigs = new HashSet<>();
+                    Map<String, Integer> freshAtKey = new HashMap<>();
+                    for (Transaction t : fresh) {
+                        if (t.sig != null) freshSigs.add(t.sig);
+                        String key = t.bank + "|" + t.date;
+                        freshAtKey.put(key, freshAtKey.getOrDefault(key, 0) + 1);
+                    }
                     List<Transaction> rebuilt = new ArrayList<>(fresh.size() + stored.size());
                     for (int i = fresh.size() - 1; i >= 0; i--) rebuilt.add(fresh.get(i));
+                    // Identity claims are order-independent so a sibling orphan can never be claimed
+                    // for another entry's fingerprint.
+                    Set<Transaction> identityClaimed = new HashSet<>();
+                    Map<String, Integer> identityClaimsPerKey = new HashMap<>();
                     for (Transaction t : stored) {
+                        if (t.sig != null && freshSigs.contains(t.sig)) {
+                            identityClaimed.add(t);
+                            String key = t.bank + "|" + t.date;
+                            identityClaimsPerKey.put(key,
+                                identityClaimsPerKey.getOrDefault(key, 0) + 1);
+                        }
+                    }
+                    Map<String, Integer> budget = new HashMap<>();
+                    for (Map.Entry<String, Integer> e : freshAtKey.entrySet()) {
+                        int left = e.getValue()
+                            - identityClaimsPerKey.getOrDefault(e.getKey(), 0);
+                        if (left > 0) budget.put(e.getKey(), left);
+                    }
+                    for (Transaction t : stored) {
+                        if (identityClaimed.contains(t)) continue;
                         String key = t.bank + "|" + t.date;
-                        Integer f = freshCount.get(key);
-                        if (f != null && f > 0) {
-                            freshCount.put(key, f - 1);
+                        Integer left = budget.get(key);
+                        if (left != null && left > 0) {
+                            budget.put(key, left - 1);
                             continue;
                         }
                         rebuilt.add(t);
@@ -732,13 +760,17 @@ final class BalanceData {
                     }
                 }
                 saveLastBalances(context, lastBalance);
+                completed = true;
             } catch (Exception e) {
                 Log.w(TAG, "history scan failed", e);
             }
             writeTransactions(context, stored);
             SharedPreferences.Editor editor = prefs.edit();
-            if (full) editor.putInt(KEY_HISTORY_RULES_VERSION, HISTORY_RULES_VERSION);
-            if (newest > 0) editor.putLong(KEY_HISTORY_THROUGH, newest);
+            // Only commit the rules version and watermark when the scan finished cleanly: marking a
+            // full rebuild as done (or advancing past rows that failed) would skip the correction
+            // forever until the next manual version bump.
+            if (completed && full) editor.putInt(KEY_HISTORY_RULES_VERSION, HISTORY_RULES_VERSION);
+            if (completed && newest > 0) editor.putLong(KEY_HISTORY_THROUGH, newest);
             editor.apply();
             return added;
         } finally {
