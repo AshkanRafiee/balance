@@ -314,6 +314,7 @@ public final class LockOverlay extends FrameLayout {
 
     public void hide() {
         cancelFingerprint();
+        dropCooldownCountdown();
         if (getVisibility() != GONE) setVisibility(GONE);
         if (getWindowToken() != null) {
             InputMethodManager ime = (InputMethodManager) ctx.getSystemService(Context.INPUT_METHOD_SERVICE);
@@ -340,6 +341,7 @@ public final class LockOverlay extends FrameLayout {
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
         cancelFingerprint();
+        dropCooldownCountdown();
     }
 
     // ====================================================================
@@ -379,6 +381,13 @@ public final class LockOverlay extends FrameLayout {
         clearInput();
         hideError();
         applyFingerprintRow();
+        // A cooldown from an earlier session may still be running; the entry must stay blocked and
+        // the countdown shown, not silently re-enabled under the owner's hands.
+        if (LockManager.cooldownRemainingMs(ctx) > 0) {
+            startCooldown();
+        } else {
+            dropCooldownCountdown();
+        }
     }
 
     private void reveal() {
