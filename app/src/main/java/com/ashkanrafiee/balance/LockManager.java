@@ -363,7 +363,7 @@ final class LockManager {
         int attempts = p.getInt(KEY_LOCK_ATTEMPTS, 0) + 1;
         SharedPreferences.Editor e = p.edit();
         if (attempts >= MAX_ATTEMPTS) {
-            int stage = p.getInt(KEY_LOCK_STAGE, 0);
+            int stage = Math.max(p.getInt(KEY_LOCK_STAGE, 0), 0);
             long delay = Math.min(LOCKOUT_BASE_MS << Math.min(stage, 16), LOCKOUT_MAX_MS);
             e.putLong(KEY_LOCK_UNTIL, System.currentTimeMillis() + delay);
             e.putInt(KEY_LOCK_STAGE, stage + 1);
