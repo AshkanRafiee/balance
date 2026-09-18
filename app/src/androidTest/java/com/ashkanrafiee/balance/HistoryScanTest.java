@@ -99,10 +99,12 @@ public class HistoryScanTest {
     }
 
     private void clearInbox() throws Exception {
-        exec("am start -n com.ashkanrafiee.smsinject/.MainActivity -e action clear");
+        // Broadcast to the injector's receiver rather than launching its activity: a receiver has no
+        // window/launch lifecycle to race with the next seed under test-suite load.
+        exec("am broadcast -n com.ashkanrafiee.smsinject/.SeedReceiver -a com.ashkanrafiee.smsinject.CLEAR");
         // Clearing is async across processes: wait until the inbox is actually empty so the next
         // test never sees a leftover row, regardless of device load.
-        long deadline = System.currentTimeMillis() + 15_000;
+        long deadline = System.currentTimeMillis() + 45_000;
         while (System.currentTimeMillis() < deadline) {
             try (android.database.Cursor c = ctx.getContentResolver().query(
                     android.provider.Telephony.Sms.Inbox.CONTENT_URI,
@@ -117,15 +119,15 @@ public class HistoryScanTest {
     private void seed(String sender, String body, long base) throws Exception {
         String b64 = android.util.Base64.encodeToString(
                 body.getBytes(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP);
-        exec("am start -n com.ashkanrafiee.smsinject/.MainActivity -e sender " + sender
-                + " -e body64 " + b64 + " -e base " + base);
+        exec("am broadcast -n com.ashkanrafiee.smsinject/.SeedReceiver -a com.ashkanrafiee.smsinject.SEED"
+                + " -e sender " + sender + " -e body64 " + b64 + " -e base " + base);
         awaitSms(sender, body);
     }
 
     /** Polls the real inbox until the exact seeded message is visible, so that the scan that follows
      *  in the same test is deterministic even when the system is slow. */
     private void awaitSms(String sender, String body) throws Exception {
-        long deadline = System.currentTimeMillis() + 15_000;
+        long deadline = System.currentTimeMillis() + 45_000;
         while (System.currentTimeMillis() < deadline) {
             try (android.database.Cursor c = ctx.getContentResolver().query(
                     android.provider.Telephony.Sms.Inbox.CONTENT_URI,
