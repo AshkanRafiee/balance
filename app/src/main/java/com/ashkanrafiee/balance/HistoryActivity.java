@@ -18,6 +18,7 @@ import android.provider.Telephony;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -51,6 +52,19 @@ public final class HistoryActivity extends Activity {
     /** Intent extra: when set, the screen shows the history of this canonical bank name only. */
     static final String EXTRA_BANK = "bank_filter";
 
+    /** Movement-direction filter: all transactions, deposits only, or withdrawals only. */
+    static final int DIR_ALL = 0;
+    static final int DIR_DEPOSIT = 1;
+    static final int DIR_WITHDRAWAL = -1;
+
+    /** Date-range filter: the clearly-bounded presets plus a hand-entered range. CUSTOM is set
+     *  whenever the from/to fields were typed directly, so the preset chips stop highlighting. */
+    static final int RANGE_ALL = 0;
+    static final int RANGE_TODAY = 1;
+    static final int RANGE_MONTH = 2;
+    static final int RANGE_YEAR = 3;
+    static final int RANGE_CUSTOM = 4;
+
     private int bg, card, muted, accent, fg, divider, negativeColor, positiveColor;
     private int todayColor, monthColor, yearColor;
     private int heroTop, heroBottom, rail, openBg, chipBg;
@@ -65,6 +79,15 @@ public final class HistoryActivity extends Activity {
     private JalaliCalendar todayJalali, yesterdayJalali;
     /** Optional canonical bank name; when set, only that bank's transactions are shown. */
     private String bankFilter;
+
+    /** The active direction and date bounds, applied before the transactions are grouped so the hero
+     *  and the breakdown always match what is on screen. Starts from {@link Filter#ALL} on every open
+     *  and survives rotation through the saved state; never persisted across sessions. */
+    private Filter filter = Filter.ALL;
+
+    /** The filter controls row (direction segment above the date presets), rebuilt by every render
+     *  so its highlight and labels always mirror {@link #filter}. */
+    private LinearLayout filterBar;
 
     /** Watches for new bank SMS while the screen is open, triggering a silent history re-scan. */
     private ContentObserver smsObserver;
@@ -259,6 +282,7 @@ public final class HistoryActivity extends Activity {
             // level, so empty sets must not trigger a fresh force-expansion on the next rotation.
             expandedSeeded = state.getBoolean(KEY_EXPANDED_SEEDED, false);
             pendingScroll = state.getInt(KEY_SCROLL_Y, 0);
+            restoreFilter(state);
         }
         bankFilter = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_BANK);
         bg = color(R.color.bg);
@@ -310,6 +334,9 @@ public final class HistoryActivity extends Activity {
         host.addView(root, new FrameLayout.LayoutParams(-1, -1));
 
         root.addView(buildHeader(), margin(0, 0, 0, 14));
+        filterBar = new LinearLayout(this);
+        filterBar.setOrientation(LinearLayout.VERTICAL);
+        root.addView(filterBar, margin(0, 0, 0, 12));
         body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         scrollView = new ScrollView(this);
@@ -420,6 +447,172 @@ public final class HistoryActivity extends Activity {
     }
 
     // ====================================================================
+    // Filter controls
+    // ====================================================================
+
+    /** Rebuilds the filter bar to mirror {@link #filter}: the movement-direction segment above the
+     *  date presets and a custom-range chip, plus a one-line summary when a custom range is active. */
+    private void rebuildFilterBar() {
+        filterBar.removeAllViews();
+        filterBar.addView(directionSegment());
+
+        LinearLayout dateRow = new LinearLayout(this);
+        dateRow.setOrientation(LinearLayout.HORIZONTAL);
+        addFilterChip(dateRow, getString(R.string.history_total), RANGE_ALL, true,
+            () -> applyRange(RANGE_ALL));
+        addFilterChip(dateRow, getString(R.string.history_today), RANGE_TODAY, true,
+            () -> applyRange(RANGE_TODAY));
+        addFilterChip(dateRow, getString(R.string.history_this_month), RANGE_MONTH, true,
+            () -> applyRange(RANGE_MONTH));
+        addFilterChip(dateRow, getString(R.string.history_this_year), RANGE_YEAR, true,
+            () -> applyRange(RANGE_YEAR));
+        addFilterChip(dateRow, getString(R.string.history_filter_custom), RANGE_CUSTOM, true,
+            this::customRangeDialog);
+        LinearLayout.LayoutParams dateLp = new LinearLayout.LayoutParams(-1, -2);
+        dateLp.topMargin = dp(8);
+        filterBar.addView(dateRow, dateLp);
+
+        if (filter.rangePreset == RANGE_CUSTOM && (filter.from != null || filter.to != null)) {
+            TextView summary = text(customRangeSummary(), 12, muted);
+            LinearLayout.LayoutParams sumLp = new LinearLayout.LayoutParams(-1, -2);
+            sumLp.topMargin = dp(6);
+            filterBar.addView(summary, sumLp);
+        }
+    }
+
+    /** The three-way movement segment: All / Deposits / Withdrawals, the active choice highlighted
+     *  as an accent pill inside a quiet strip. */
+    private LinearLayout directionSegment() {
+        LinearLayout seg = new LinearLayout(this);
+        seg.setPadding(dp(3), dp(3), dp(3), dp(3));
+        seg.setBackground(rounded(chipBg, 14));
+        addSegmentChip(seg, getString(R.string.history_filter_all), DIR_ALL, () -> applyDirection(DIR_ALL));
+        addSegmentChip(seg, getString(R.string.history_filter_deposits), DIR_DEPOSIT,
+            () -> applyDirection(DIR_DEPOSIT));
+        addSegmentChip(seg, getString(R.string.history_filter_withdrawals), DIR_WITHDRAWAL,
+            () -> applyDirection(DIR_WITHDRAWAL));
+        return seg;
+    }
+
+    private void addSegmentChip(LinearLayout host, String label, int id, Runnable action) {
+        boolean selected = filter.direction == id;
+        TextView chip = text(label, 12, selected ? Color.WHITE : fg, MEDIUM);
+        chip.setGravity(Gravity.CENTER);
+        chip.setSingleLine(true);
+        chip.setPadding(dp(6), dp(8), dp(6), dp(8));
+        chip.setBackground(rounded(selected ? accent : chipBg, 11));
+        chip.setContentDescription(label);
+        chip.setClickable(true);
+        chip.setFocusable(true);
+        chip.setOnClickListener(v -> action.run());
+        host.addView(chip, new LinearLayout.LayoutParams(0, -2, 1));
+    }
+
+    /** One date chip that highlights when its {@code id} is the active preset and otherwise sits as
+     *  a quiet toggle. The chips share the row width, so labels stay on-screen at any font scale. */
+    private void addFilterChip(LinearLayout host, String label, int id, boolean weight, Runnable action) {
+        boolean selected = filter.rangePreset == id;
+        TextView chip = text(label, 12, selected ? Color.WHITE : fg, MEDIUM);
+        chip.setGravity(Gravity.CENTER);
+        chip.setSingleLine(true);
+        chip.setPadding(dp(4), dp(7), dp(4), dp(7));
+        chip.setBackground(rounded(selected ? accent : chipBg, 10));
+        chip.setContentDescription(label);
+        if (action != null) {
+            chip.setClickable(true);
+            chip.setFocusable(true);
+            chip.setOnClickListener(v -> action.run());
+        }
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(weight ? 0 : -2, -2,
+            weight ? 1 : 0);
+        lp.setMarginStart(dp(2));
+        lp.setMarginEnd(dp(2));
+        host.addView(chip, lp);
+    }
+
+    private void applyDirection(int direction) {
+        filter = filter.withDirection(direction);
+        render();
+    }
+
+    /** Applies one of the clearly-bounded date presets, recomputing its bounds against "now". */
+    private void applyRange(int preset) {
+        filter = rangePreset(filter, preset, nowJalali());
+        render();
+    }
+
+    /** The hand-entered From/To range dialog. Each field accepts "y/m/d" in ASCII or Persian digits;
+     *  a left-empty field stays unbounded on that side. Validation keeps the dialog open on bad or
+     *  inverted dates so the user can correct them without losing their typing. */
+    private void customRangeDialog() {
+        final EditText fromField = new EditText(this);
+        final EditText toField = new EditText(this);
+        for (EditText e : new EditText[]{fromField, toField}) {
+            e.setTextSize(15);
+            e.setTextColor(fg);
+            e.setHintTextColor(muted);
+            e.setSingleLine(true);
+            e.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        }
+        fromField.setHint(getString(R.string.history_filter_from_hint));
+        toField.setHint(getString(R.string.history_filter_to_hint));
+        if (filter.from != null) fromField.setText(compactDate(filter.from));
+        if (filter.to != null) toField.setText(compactDate(filter.to));
+
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(dp(24), dp(8), dp(24), 0);
+        wrap.addView(text(getString(R.string.history_filter_date_hint), 12, muted));
+        LinearLayout.LayoutParams fromLp = new LinearLayout.LayoutParams(-1, -2);
+        fromLp.topMargin = dp(10);
+        wrap.addView(fromField, fromLp);
+        LinearLayout.LayoutParams toLp = new LinearLayout.LayoutParams(-1, -2);
+        toLp.topMargin = dp(8);
+        wrap.addView(toField, toLp);
+
+        android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.history_filter_custom_range_title))
+            .setView(wrap)
+            .setNegativeButton(getString(R.string.lock_cancel), null)
+            .setPositiveButton(getString(R.string.history_filter_apply), null)
+            .create();
+        dlg.setOnShowListener(d -> dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
+            .setOnClickListener(v -> {
+                String fs = fromField.getText().toString().trim();
+                String ts = toField.getText().toString().trim();
+                JalaliCalendar f = fs.isEmpty() ? null : parseJalaliDate(fs);
+                JalaliCalendar t = ts.isEmpty() ? null : parseJalaliDate(ts);
+                if ((!fs.isEmpty() && f == null) || (!ts.isEmpty() && t == null)) {
+                    toast(R.string.history_filter_invalid_date);
+                    return;
+                }
+                if (f != null && t != null && compareDate(f, t) > 0) {
+                    toast(R.string.history_filter_date_order);
+                    return;
+                }
+                // Both fields empty degenerates to the unbounded All-time preset.
+                filter = f == null && t == null ? Filter.ALL
+                    : new Filter(filter.direction, RANGE_CUSTOM, f, t);
+                dlg.dismiss();
+                render();
+            }));
+        dlg.show();
+    }
+
+    /** One-line description of the active custom range, e.g. "From 1403/12/1 to 1404/2/5". */
+    private String customRangeSummary() {
+        if (filter.from != null && filter.to != null) {
+            return getString(R.string.history_filter_range_summary,
+                compactDate(filter.from), compactDate(filter.to));
+        }
+        if (filter.from != null) {
+            return getString(R.string.history_filter_from_without_to, compactDate(filter.from));
+        }
+        return getString(R.string.history_filter_to_without_from, compactDate(filter.to));
+    }
+
+    // ====================================================================
     // Expansion state
     // ====================================================================
 
@@ -428,6 +621,14 @@ public final class HistoryActivity extends Activity {
     private static final String KEY_EXPANDED_DAYS = "expanded_days";
     private static final String KEY_EXPANDED_SEEDED = "expanded_seeded";
     private static final String KEY_SCROLL_Y = "scroll_y";
+    private static final String KEY_FILTER_DIRECTION = "filter_direction";
+    private static final String KEY_FILTER_RANGE = "filter_range";
+    private static final String KEY_FILTER_FROM_YEAR = "filter_from_year";
+    private static final String KEY_FILTER_FROM_MONTH = "filter_from_month";
+    private static final String KEY_FILTER_FROM_DAY = "filter_from_day";
+    private static final String KEY_FILTER_TO_YEAR = "filter_to_year";
+    private static final String KEY_FILTER_TO_MONTH = "filter_to_month";
+    private static final String KEY_FILTER_TO_DAY = "filter_to_day";
 
     /** The sets of year, month and day keys currently expanded in the breakdown. The current year,
      *  current month and its days start expanded. */
@@ -477,6 +678,34 @@ public final class HistoryActivity extends Activity {
         outState.putStringArrayList(KEY_EXPANDED_DAYS, new java.util.ArrayList<>(expandedDays));
         outState.putBoolean(KEY_EXPANDED_SEEDED, expandedSeeded);
         if (scrollView != null) outState.putInt(KEY_SCROLL_Y, scrollView.getScrollY());
+        outState.putInt(KEY_FILTER_DIRECTION, filter.direction);
+        outState.putInt(KEY_FILTER_RANGE, filter.rangePreset);
+        writeDate(outState, KEY_FILTER_FROM_YEAR, KEY_FILTER_FROM_MONTH, KEY_FILTER_FROM_DAY, filter.from);
+        writeDate(outState, KEY_FILTER_TO_YEAR, KEY_FILTER_TO_MONTH, KEY_FILTER_TO_DAY, filter.to);
+    }
+
+    /** Persists one filter date bound as (year, month, day), leaving the keys out when unbounded. */
+    private static void writeDate(Bundle outState, String yKey, String mKey, String dKey,
+            JalaliCalendar jc) {
+        if (jc == null) return;
+        outState.putInt(yKey, jc.year);
+        outState.putInt(mKey, jc.month);
+        outState.putInt(dKey, jc.day);
+    }
+
+    /** Rebuilds {@link #filter} from the saved state, staying on {@link Filter#ALL} when a fresh
+     *  screen (no state, or state saved before filters existed) is shown. */
+    private void restoreFilter(Bundle state) {
+        if (!state.containsKey(KEY_FILTER_DIRECTION)) return;
+        JalaliCalendar from = readDate(state, KEY_FILTER_FROM_YEAR, KEY_FILTER_FROM_MONTH, KEY_FILTER_FROM_DAY);
+        JalaliCalendar to = readDate(state, KEY_FILTER_TO_YEAR, KEY_FILTER_TO_MONTH, KEY_FILTER_TO_DAY);
+        filter = new Filter(state.getInt(KEY_FILTER_DIRECTION, DIR_ALL),
+            state.getInt(KEY_FILTER_RANGE, RANGE_ALL), from, to);
+    }
+
+    private static JalaliCalendar readDate(Bundle state, String yKey, String mKey, String dKey) {
+        int y = state.getInt(yKey, -1), m = state.getInt(mKey, -1), d = state.getInt(dKey, -1);
+        return y >= 0 && m >= 1 && d >= 1 ? JalaliCalendar.of(y, m, d) : null;
     }
 
     private final Runnable onHistoryChanged = () -> runOnUiThread(this::render);
@@ -541,10 +770,14 @@ public final class HistoryActivity extends Activity {
     // Screen rendering
     // ====================================================================
 
-    /** Re-reads the saved history and rebuilds the whole screen from it. */
+    /** Re-reads the saved history, applies the current filters and rebuilds the whole screen from it:
+     *  the filter bar first (so its chips mirror the active filter), then the hero and the breakdown
+     *  computed over the filtered list, so every figure on screen reflects exactly what is shown. */
     private void render() {
         refreshDates();
-        Lists lists = buildLists(filtered(BalanceData.readTransactions(this)));
+        List<Transaction> txs = applyFilters(filtered(BalanceData.readTransactions(this)), filter);
+        rebuildFilterBar();
+        Lists lists = buildLists(txs);
         body.removeAllViews();
         if (lists.years.isEmpty()) {
             emptyState();
@@ -580,9 +813,15 @@ public final class HistoryActivity extends Activity {
         icon.setImageResource(R.drawable.ic_history_empty);
         icon.setColorFilter(muted);
         wrap.addView(icon);
-        String empty = bankFilter == null
-            ? getString(R.string.history_empty)
-            : getString(R.string.history_empty_bank, BankRules.displayName(this, bankFilter));
+        String empty;
+        if (filter.isActive()) {
+            // A filter may hide every transaction even though history exists.
+            empty = getString(R.string.history_empty_filtered);
+        } else if (bankFilter != null) {
+            empty = getString(R.string.history_empty_bank, BankRules.displayName(this, bankFilter));
+        } else {
+            empty = getString(R.string.history_empty);
+        }
         TextView msg = text(empty, 14, muted);
         msg.setGravity(Gravity.CENTER);
         msg.setPadding(dp(8), dp(18), dp(8), 0);
@@ -1129,6 +1368,104 @@ public final class HistoryActivity extends Activity {
         }
     }
 
+    /** The movement-direction and date bounds applied to the transactions before grouping. A screen
+     *  opens on {@link #ALL} and, like the per-bank filter, narrows everything it displays. */
+    static final class Filter {
+        static final Filter ALL = new Filter(DIR_ALL, RANGE_ALL, null, null);
+
+        final int direction;
+        final int rangePreset;
+        /** Inclusive lower bound, or null for unbounded. */
+        final JalaliCalendar from;
+        /** Inclusive upper bound, or null for unbounded. */
+        final JalaliCalendar to;
+
+        Filter(int direction, int rangePreset, JalaliCalendar from, JalaliCalendar to) {
+            this.direction = direction;
+            this.rangePreset = rangePreset;
+            this.from = from;
+            this.to = to;
+        }
+
+        /** Whether anything is dropped relative to the unfiltered list. */
+        boolean isActive() {
+            return direction != DIR_ALL || from != null || to != null;
+        }
+
+        Filter withDirection(int direction) {
+            return new Filter(direction, rangePreset, from, to);
+        }
+
+        Filter withRange(int preset, JalaliCalendar from, JalaliCalendar to) {
+            return new Filter(direction, preset, from, to);
+        }
+    }
+
+    /** Keeps the transactions whose movement direction and Persian date fall inside {@code f}; a
+     *  transaction on a boundary day is included. Never mutates the caller's list, so it composes
+     *  safely after the per-bank filter for both the full and the per-bank screens. */
+    static List<Transaction> applyFilters(List<Transaction> txs, Filter f) {
+        List<Transaction> out = new ArrayList<>(txs.size());
+        for (Transaction t : txs) {
+            if (f.direction == DIR_DEPOSIT && t.amount <= 0) continue;
+            if (f.direction == DIR_WITHDRAWAL && t.amount >= 0) continue;
+            if (f.from != null || f.to != null) {
+                int[] g = gDate(t.date);
+                JalaliCalendar jc = JalaliCalendar.fromGregorian(g[0], g[1], g[2]);
+                if (f.from != null && compareDate(jc, f.from) < 0) continue;
+                if (f.to != null && compareDate(jc, f.to) > 0) continue;
+            }
+            out.add(t);
+        }
+        return out;
+    }
+
+    /** Replaces the date bounds with what the preset means on {@code now}; CUSTOM is never applied
+     *  here — the dialog sets its own bounds. Kept static so the instrumented tests cover it. */
+    static Filter rangePreset(Filter f, int preset, JalaliCalendar now) {
+        switch (preset) {
+            case RANGE_TODAY:
+                return f.withRange(RANGE_TODAY, now, now);
+            case RANGE_MONTH:
+                return f.withRange(RANGE_MONTH,
+                    JalaliCalendar.of(now.year, now.month, 1),
+                    JalaliCalendar.of(now.year, now.month, JalaliCalendar.daysInMonth(now.year, now.month)));
+            case RANGE_YEAR:
+                return f.withRange(RANGE_YEAR,
+                    JalaliCalendar.of(now.year, 1, 1),
+                    JalaliCalendar.of(now.year, 12, JalaliCalendar.daysInMonth(now.year, 12)));
+            default:
+                return f.withRange(RANGE_ALL, null, null);
+        }
+    }
+
+    /** Parses a "y/m/d" string (ASCII or Persian digits) into a Persian date, or null when the text
+     *  is not a real calendar day. Kept static so the instrumented tests cover it directly. */
+    static JalaliCalendar parseJalaliDate(String raw) {
+        if (raw == null || raw.trim().isEmpty()) return null;
+        String s = BalanceData.digits(raw.trim());
+        if (s.indexOf('/') < 0) return null;
+        String[] parts = s.split("/");
+        if (parts.length != 3) return null;
+        try {
+            int y = Integer.parseInt(parts[0].trim());
+            int m = Integer.parseInt(parts[1].trim());
+            int d = Integer.parseInt(parts[2].trim());
+            if (y < 1100 || y > 1700 || m < 1 || m > 12) return null;
+            if (d < 1 || d > JalaliCalendar.daysInMonth(y, m)) return null;
+            return JalaliCalendar.of(y, m, d);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** Chronological order of two Persian dates, compared field by field (no round trip needed). */
+    private static int compareDate(JalaliCalendar a, JalaliCalendar b) {
+        if (a.year != b.year) return Integer.compare(a.year, b.year);
+        if (a.month != b.month) return Integer.compare(a.month, b.month);
+        return Integer.compare(a.day, b.day);
+    }
+
     /** Splits the raw transactions into the summary sums and the year-by-year (month-by-month,
      *  day-by-day) groups. Never mutates the caller's list. */
     static Lists buildLists(List<Transaction> txs) {
@@ -1249,6 +1586,17 @@ public final class HistoryActivity extends Activity {
             return faDigits(jc.day) + " " + monthName(jc.month) + " " + faDigits(jc.year);
         }
         return monthName(jc.month) + " " + jc.day + " " + jc.year;
+    }
+
+    /** Formats a Persian date as the compact "y/m/d" used by the custom-range inputs and summary, in
+     *  the app language's digits. */
+    private String compactDate(JalaliCalendar jc) {
+        String s = jc.year + "/" + jc.month + "/" + jc.day;
+        return "fa".equals(LocaleHelper.currentTag(this)) ? faDigitsString(s) : s;
+    }
+
+    private void toast(int res) {
+        android.widget.Toast.makeText(this, getString(res), android.widget.Toast.LENGTH_SHORT).show();
     }
 
     /** The movement's time of day as a compact "HH:mm" string in the app digits. */
