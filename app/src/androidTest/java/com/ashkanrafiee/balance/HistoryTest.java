@@ -2,7 +2,6 @@ package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -690,50 +689,70 @@ public class HistoryTest {
         assertEquals(HistoryActivity.DIR_WITHDRAWAL, cleared.direction);
     }
 
-    // ---- history filters: custom-date parsing ----------------------------------------
+    // ---- history filters: custom-range calendar ----------------------------------
 
-    @Test public void parseJalaliDate_ascii() {
-        JalaliCalendar j = HistoryActivity.parseJalaliDate("1403/12/1");
-        assertNotNull(j);
-        assertEquals(1403, j.year);
-        assertEquals(12, j.month);
-        assertEquals(1, j.day);
+    @Test public void pickDay_firstTapSetsFrom() {
+        JalaliCalendar[] picked = new JalaliCalendar[2];
+        HistoryActivity.pickDay(picked, JalaliCalendar.of(1405, 6, 15));
+        assertEquals(1405, picked[0].year);
+        assertEquals(6, picked[0].month);
+        assertEquals(15, picked[0].day);
+        assertNull(picked[1]);
     }
 
-    @Test public void parseJalaliDate_persianDigits() {
-        JalaliCalendar j = HistoryActivity.parseJalaliDate("\u06f1\u06f4\u06f0\u06f3/\u06f1\u06f2/\u06f1");
-        assertNotNull(j);
-        assertEquals(1403, j.year);
-        assertEquals(12, j.month);
-        assertEquals(1, j.day);
+    @Test public void pickDay_secondTapSetsTo() {
+        JalaliCalendar[] picked = new JalaliCalendar[2];
+        HistoryActivity.pickDay(picked, JalaliCalendar.of(1405, 6, 1));
+        HistoryActivity.pickDay(picked, JalaliCalendar.of(1405, 6, 15));
+        assertEquals(1, picked[0].day);
+        assertEquals(15, picked[1].day);
     }
 
-    @Test public void parseJalaliDate_acceptsRealCalendarDays() {
-        // Months 1..6 have 31 days; month 6 of 1405 has 31.
-        assertNotNull(HistoryActivity.parseJalaliDate("1405/6/31"));
-        assertNotNull(HistoryActivity.parseJalaliDate("1405/12/29"));
-        assertNotNull(HistoryActivity.parseJalaliDate("1403/12/30")); // 1403 is leap (Esfand 30)
-        assertNotNull(HistoryActivity.parseJalaliDate("1404/12/29")); // 1404 is not leap (Esfand 29)
+    @Test public void pickDay_toBeforeFromSwapsBounds() {
+        JalaliCalendar[] picked = new JalaliCalendar[2];
+        HistoryActivity.pickDay(picked, JalaliCalendar.of(1405, 6, 15));
+        HistoryActivity.pickDay(picked, JalaliCalendar.of(1405, 6, 1));
+        assertEquals(1, picked[0].day);
+        assertEquals(15, picked[1].day);
+        assertEquals(6, picked[0].month);
+        assertEquals(6, picked[1].month);
+        assertEquals(1405, picked[0].year);
+        assertEquals(1405, picked[1].year);
     }
 
-    @Test public void parseJalaliDate_rejectsImpossibleDays() {
-        assertNull(HistoryActivity.parseJalaliDate("1405/8/31"));    // month 8 has 30 days
-        assertNull(HistoryActivity.parseJalaliDate("1405/12/30"));   // 1405 is not leap
-        assertNull(HistoryActivity.parseJalaliDate("1404/12/30"));   // 1404 is not leap
-        assertNull(HistoryActivity.parseJalaliDate("1405/13/1"));    // month 13 does not exist
-        assertNull(HistoryActivity.parseJalaliDate("1405/0/1"));
-        assertNull(HistoryActivity.parseJalaliDate("999/1/1"));      // outside the supported years
-        assertNull(HistoryActivity.parseJalaliDate("2000/1/1"));
+    @Test public void pickDay_tapWhileClosedStartsFreshFrom() {
+        JalaliCalendar[] picked = new JalaliCalendar[2];
+        HistoryActivity.pickDay(picked, JalaliCalendar.of(1405, 6, 1));
+        HistoryActivity.pickDay(picked, JalaliCalendar.of(1405, 6, 15));
+        HistoryActivity.pickDay(picked, JalaliCalendar.of(1405, 7, 1));
+        assertEquals(1405, picked[0].year);
+        assertEquals(7, picked[0].month);
+        assertEquals(1, picked[0].day);
+        assertNull(picked[1]);
     }
 
-    @Test public void parseJalaliDate_rejectsMalformedText() {
-        assertNull(HistoryActivity.parseJalaliDate(null));
-        assertNull(HistoryActivity.parseJalaliDate(""));
-        assertNull(HistoryActivity.parseJalaliDate("   "));
-        assertNull(HistoryActivity.parseJalaliDate("1403"));
-        assertNull(HistoryActivity.parseJalaliDate("1403/12"));
-        assertNull(HistoryActivity.parseJalaliDate("1403/1/2/3"));
-        assertNull(HistoryActivity.parseJalaliDate("ab/cd/ef"));
+    @Test public void pickDay_sameDayTwiceClosesTheRange() {
+        JalaliCalendar[] picked = new JalaliCalendar[2];
+        JalaliCalendar d = JalaliCalendar.of(1405, 6, 1);
+        HistoryActivity.pickDay(picked, d);
+        HistoryActivity.pickDay(picked, d);
+        assertEquals(1, picked[0].day);
+        assertEquals(1, picked[1].day);
+    }
+
+    @Test public void weekdayIndex_saturdayIsTheLeadingColumn() {
+        // Farvardin 1 1403 was Wednesday (index 4); Farvardin 4 was a Saturday (index 0).
+        assertEquals(4, HistoryActivity.weekdayIndex(JalaliCalendar.of(1403, 1, 1)));
+        assertEquals(0, HistoryActivity.weekdayIndex(JalaliCalendar.of(1403, 1, 4)));
+        assertEquals(2, HistoryActivity.weekdayIndex(JalaliCalendar.of(1403, 1, 6)));
+    }
+
+    @Test public void weekdayIndex_advancesOnePerDay() {
+        for (int d = 1; d <= 7; d++) {
+            int expected = (4 + (d - 1)) % 7;
+            assertEquals("Farvardin " + d + " 1403", expected,
+                HistoryActivity.weekdayIndex(JalaliCalendar.of(1403, 1, d)));
+        }
     }
 
     // ---- Persian calendar numerals have no thousands grouping ----
