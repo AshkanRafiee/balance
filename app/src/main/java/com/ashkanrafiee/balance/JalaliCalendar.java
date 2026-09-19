@@ -31,6 +31,14 @@ final class JalaliCalendar {
         return new JalaliCalendar(j[0], j[1], j[2]);
     }
 
+    /** A Persian date from its directly-known components. Callers must supply a real calendar day
+     *  (month 1..12, day within the month); it performs no sanity checks, so it is only used where
+     *  the components come from a validated source (the history date parser, or month/year bounds
+     *  computed with {@link #daysInMonth}). */
+    static JalaliCalendar of(int year, int month, int day) {
+        return new JalaliCalendar(year, month, day);
+    }
+
     /** Converts this Persian date back to a proleptic Gregorian {@code {year, month, day}} array. */
     int[] toGregorian() {
         return d2g(j2d(year, month, day));
