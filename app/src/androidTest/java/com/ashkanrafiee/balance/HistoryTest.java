@@ -2,6 +2,7 @@ package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -279,6 +280,12 @@ public class HistoryTest {
         return c.getTimeInMillis();
     }
 
+    /** Epoch millis for a Persian date at local noon, converted through the calendar itself. */
+    private static long epochJ(int jy, int jm, int jd) {
+        int[] g = JalaliCalendar.of(jy, jm, jd).toGregorian();
+        return epoch(g[0], g[1], g[2]);
+    }
+
     @Test public void yearsAndMonths_splitAcrossMonthBoundary() {
         // Mid-August and mid-September 2026 fall in Mordad and Shahrivar 1405.
         List<Transaction> txs = new ArrayList<>();
@@ -500,6 +507,233 @@ public class HistoryTest {
         List<Transaction> copy = new ArrayList<>(txs);
         HistoryActivity.filterByBank(txs, "Saman");
         assertEquals(copy, txs);
+    }
+
+    // ---- history filters: direction --------------------------------------------------
+
+    @Test public void filter_direction_depositsOnly() {
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Saman", epoch(2026, 9, 10), 1000000L));
+        txs.add(new Transaction("Saman", epoch(2026, 9, 10), -300000L));
+        HistoryActivity.Filter f = new HistoryActivity.Filter(HistoryActivity.DIR_DEPOSIT,
+            HistoryActivity.RANGE_ALL, null, null);
+        List<Transaction> out = HistoryActivity.applyFilters(txs, f);
+        assertEquals(1, out.size());
+        assertEquals(1000000L, out.get(0).amount);
+    }
+
+    @Test public void filter_direction_withdrawalsOnly() {
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Mellat", epoch(2026, 9, 10), 1000000L));
+        txs.add(new Transaction("Mellat", epoch(2026, 9, 10), -300000L));
+        txs.add(new Transaction("Mellat", epoch(2026, 9, 10), -700000L));
+        HistoryActivity.Filter f = new HistoryActivity.Filter(HistoryActivity.DIR_WITHDRAWAL,
+            HistoryActivity.RANGE_ALL, null, null);
+        List<Transaction> out = HistoryActivity.applyFilters(txs, f);
+        assertEquals(2, out.size());
+        for (Transaction t : out) assertTrue(t.amount < 0);
+    }
+
+    @Test public void filter_direction_allKeepsEverything() {
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Saman", epoch(2026, 9, 10), 1000000L));
+        txs.add(new Transaction("Saman", epoch(2026, 9, 10), -300000L));
+        assertEquals(2, HistoryActivity.applyFilters(txs, HistoryActivity.Filter.ALL).size());
+    }
+
+    @Test public void filter_isActive_reflectsBounds() {
+        HistoryActivity.Filter none = HistoryActivity.Filter.ALL;
+        assertFalse(none.isActive());
+        assertTrue(new HistoryActivity.Filter(HistoryActivity.DIR_WITHDRAWAL,
+            HistoryActivity.RANGE_ALL, null, null).isActive());
+        assertTrue(new HistoryActivity.Filter(HistoryActivity.DIR_ALL,
+            HistoryActivity.RANGE_CUSTOM, JalaliCalendar.of(1405, 6, 1), null).isActive());
+    }
+
+    // ---- history filters: date range -------------------------------------------------
+
+    @Test public void filter_dateRange_inclusiveBoundaries() {
+        // Shahrivar 1405 runs 1405/6/1..1405/6/30; the 1405/7/1 transaction must fall outside.
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Saman", epochJ(1405, 6, 1), 1000000L));
+        txs.add(new Transaction("Saman", epochJ(1405, 6, 15), -300000L));
+        txs.add(new Transaction("Saman", epochJ(1405, 7, 1), 500000L));
+        HistoryActivity.Filter f = new HistoryActivity.Filter(HistoryActivity.DIR_ALL,
+            HistoryActivity.RANGE_CUSTOM, JalaliCalendar.of(1405, 6, 1), JalaliCalendar.of(1405, 6, 30));
+        List<Transaction> out = HistoryActivity.applyFilters(txs, f);
+        assertEquals(2, out.size());
+        assertTrue(out.contains(txs.get(0)));
+        assertTrue(out.contains(txs.get(1)));
+    }
+
+    @Test public void filter_dateRange_openEnds() {
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Saman", epochJ(1405, 5, 20), 1000000L));
+        txs.add(new Transaction("Saman", epochJ(1405, 6, 1), -300000L));
+        txs.add(new Transaction("Saman", epochJ(1404, 12, 29), 500000L));
+        // From 1405/6/1 onward (no upper bound).
+        HistoryActivity.Filter from = new HistoryActivity.Filter(HistoryActivity.DIR_ALL,
+            HistoryActivity.RANGE_CUSTOM, JalaliCalendar.of(1405, 6, 1), null);
+        List<Transaction> outFrom = HistoryActivity.applyFilters(txs, from);
+        assertEquals(1, outFrom.size());
+        assertEquals(-300000L, outFrom.get(0).amount);
+        // Up to 1405/6/1 inclusive (no lower bound).
+        HistoryActivity.Filter to = new HistoryActivity.Filter(HistoryActivity.DIR_ALL,
+            HistoryActivity.RANGE_CUSTOM, null, JalaliCalendar.of(1405, 6, 1));
+        assertEquals(3, HistoryActivity.applyFilters(txs, to).size());
+    }
+
+    @Test public void filter_directionAndDate_compose() {
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Saman", epochJ(1405, 6, 1), 1000000L));
+        txs.add(new Transaction("Saman", epochJ(1405, 6, 2), -300000L));
+        txs.add(new Transaction("Saman", epochJ(1405, 7, 1), 500000L));
+        HistoryActivity.Filter f = new HistoryActivity.Filter(HistoryActivity.DIR_DEPOSIT,
+            HistoryActivity.RANGE_CUSTOM, JalaliCalendar.of(1405, 6, 1), JalaliCalendar.of(1405, 6, 30));
+        List<Transaction> out = HistoryActivity.applyFilters(txs, f);
+        assertEquals(1, out.size());
+        assertEquals(1000000L, out.get(0).amount);
+    }
+
+    @Test public void filter_afterBankFilter() {
+        // The full pipeline: isolate a bank, then narrow by direction and date.
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Saman", epochJ(1405, 6, 1), 1000000L));
+        txs.add(new Transaction("Saman", epochJ(1405, 6, 1), -300000L));
+        txs.add(new Transaction("Mellat", epochJ(1405, 6, 5), 2000000L));
+        txs.add(new Transaction("Saman", epochJ(1404, 12, 1), 500000L));
+        HistoryActivity.Filter f = new HistoryActivity.Filter(HistoryActivity.DIR_WITHDRAWAL,
+            HistoryActivity.RANGE_CUSTOM, JalaliCalendar.of(1405, 1, 1), null);
+        List<Transaction> out = HistoryActivity.applyFilters(
+            HistoryActivity.filterByBank(txs, "Saman"), f);
+        assertEquals(1, out.size());
+        assertEquals("Saman", out.get(0).bank);
+        assertEquals(-300000L, out.get(0).amount);
+    }
+
+    @Test public void filter_totalsReflectFilter() {
+        // The hero and period figures must be computed over the filtered set, not the full set.
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Saman", epochJ(1405, 6, 1), 1000000L));
+        txs.add(new Transaction("Saman", epochJ(1405, 6, 1), -300000L));
+        txs.add(new Transaction("Saman", epochJ(1404, 12, 1), 900000L));
+        HistoryActivity.Filter f = new HistoryActivity.Filter(HistoryActivity.DIR_ALL,
+            HistoryActivity.RANGE_CUSTOM, JalaliCalendar.of(1405, 1, 1), null);
+        HistoryActivity.Lists lists = HistoryActivity.buildLists(HistoryActivity.applyFilters(txs, f));
+        assertEquals(700000L, lists.total);
+        assertEquals(1, lists.years.size());
+        assertEquals(1405, lists.years.get(0).year);
+    }
+
+    @Test public void filter_doesNotMutateInput() {
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Saman", epoch(2026, 9, 10), 1000000L));
+        txs.add(new Transaction("Saman", epoch(2026, 9, 10), -300000L));
+        List<Transaction> copy = new ArrayList<>(txs);
+        HistoryActivity.applyFilters(txs, new HistoryActivity.Filter(HistoryActivity.DIR_DEPOSIT,
+            HistoryActivity.RANGE_CUSTOM, null, null));
+        assertEquals(copy, txs);
+    }
+
+    // ---- history filters: date presets ----------------------------------------------
+
+    @Test public void rangePreset_today_wrapsNow() {
+        HistoryActivity.Filter f = HistoryActivity.rangePreset(HistoryActivity.Filter.ALL,
+            HistoryActivity.RANGE_TODAY, JalaliCalendar.of(1405, 6, 13));
+        assertEquals(HistoryActivity.RANGE_TODAY, f.rangePreset);
+        assertEquals(1405, f.from.year);
+        assertEquals(6, f.from.month);
+        assertEquals(13, f.from.day);
+        assertEquals(f.from.year, f.to.year);
+        assertEquals(f.from.month, f.to.month);
+        assertEquals(f.from.day, f.to.day);
+    }
+
+    @Test public void rangePreset_month_boundsFirstAndLastDay() {
+        // Shahrivar (month 6) has 31 days; the preset must span exactly the month.
+        HistoryActivity.Filter f = HistoryActivity.rangePreset(HistoryActivity.Filter.ALL,
+            HistoryActivity.RANGE_MONTH, JalaliCalendar.of(1405, 6, 13));
+        assertEquals(1405, f.from.year);
+        assertEquals(6, f.from.month);
+        assertEquals(1, f.from.day);
+        assertEquals(1405, f.to.year);
+        assertEquals(6, f.to.month);
+        assertEquals(31, f.to.day);
+    }
+
+    @Test public void rangePreset_month_leapEsfand_gets30Days() {
+        HistoryActivity.Filter f = HistoryActivity.rangePreset(HistoryActivity.Filter.ALL,
+            HistoryActivity.RANGE_MONTH, JalaliCalendar.of(1403, 12, 10));
+        assertEquals(30, f.to.day);
+    }
+
+    @Test public void rangePreset_year_boundsFarvardinToLastEsfand() {
+        // 1404 is not a leap year, so the year ends on Esfand 29.
+        HistoryActivity.Filter f = HistoryActivity.rangePreset(HistoryActivity.Filter.ALL,
+            HistoryActivity.RANGE_YEAR, JalaliCalendar.of(1404, 7, 10));
+        assertEquals(1404, f.from.year);
+        assertEquals(1, f.from.month);
+        assertEquals(1, f.from.day);
+        assertEquals(1404, f.to.year);
+        assertEquals(12, f.to.month);
+        assertEquals(29, f.to.day);
+    }
+
+    @Test public void rangePreset_all_clearsBoundsKeepsDirection() {
+        HistoryActivity.Filter set = new HistoryActivity.Filter(HistoryActivity.DIR_WITHDRAWAL,
+            HistoryActivity.RANGE_CUSTOM, JalaliCalendar.of(1405, 6, 1), JalaliCalendar.of(1405, 6, 30));
+        HistoryActivity.Filter cleared = HistoryActivity.rangePreset(set, HistoryActivity.RANGE_ALL,
+            JalaliCalendar.of(1405, 6, 13));
+        assertEquals(HistoryActivity.RANGE_ALL, cleared.rangePreset);
+        assertNull(cleared.from);
+        assertNull(cleared.to);
+        assertEquals(HistoryActivity.DIR_WITHDRAWAL, cleared.direction);
+    }
+
+    // ---- history filters: custom-date parsing ----------------------------------------
+
+    @Test public void parseJalaliDate_ascii() {
+        JalaliCalendar j = HistoryActivity.parseJalaliDate("1403/12/1");
+        assertNotNull(j);
+        assertEquals(1403, j.year);
+        assertEquals(12, j.month);
+        assertEquals(1, j.day);
+    }
+
+    @Test public void parseJalaliDate_persianDigits() {
+        JalaliCalendar j = HistoryActivity.parseJalaliDate("\u06f1\u06f4\u06f0\u06f3/\u06f1\u06f2/\u06f1");
+        assertNotNull(j);
+        assertEquals(1403, j.year);
+        assertEquals(12, j.month);
+        assertEquals(1, j.day);
+    }
+
+    @Test public void parseJalaliDate_acceptsRealCalendarDays() {
+        // Months 1..6 have 31 days; month 6 of 1405 has 31.
+        assertNotNull(HistoryActivity.parseJalaliDate("1405/6/31"));
+        assertNotNull(HistoryActivity.parseJalaliDate("1405/12/29"));
+        assertNotNull(HistoryActivity.parseJalaliDate("1403/12/30")); // 1403 is leap (Esfand 30)
+        assertNotNull(HistoryActivity.parseJalaliDate("1404/12/29")); // 1404 is not leap (Esfand 29)
+    }
+
+    @Test public void parseJalaliDate_rejectsImpossibleDays() {
+        assertNull(HistoryActivity.parseJalaliDate("1405/8/31"));    // month 8 has 30 days
+        assertNull(HistoryActivity.parseJalaliDate("1405/12/30"));   // 1405 is not leap
+        assertNull(HistoryActivity.parseJalaliDate("1404/12/30"));   // 1404 is not leap
+        assertNull(HistoryActivity.parseJalaliDate("1405/13/1"));    // month 13 does not exist
+        assertNull(HistoryActivity.parseJalaliDate("1405/0/1"));
+        assertNull(HistoryActivity.parseJalaliDate("999/1/1"));      // outside the supported years
+        assertNull(HistoryActivity.parseJalaliDate("2000/1/1"));
+    }
+
+    @Test public void parseJalaliDate_rejectsMalformedText() {
+        assertNull(HistoryActivity.parseJalaliDate(null));
+        assertNull(HistoryActivity.parseJalaliDate(""));
+        assertNull(HistoryActivity.parseJalaliDate("   "));
+        assertNull(HistoryActivity.parseJalaliDate("1403"));
+        assertNull(HistoryActivity.parseJalaliDate("1403/12"));
+        assertNull(HistoryActivity.parseJalaliDate("1403/1/2/3"));
+        assertNull(HistoryActivity.parseJalaliDate("ab/cd/ef"));
     }
 
     // ---- Persian calendar numerals have no thousands grouping ----
