@@ -99,12 +99,9 @@
     <string name="history_filter_withdrawals">برداشت</string>
     <string name="history_filter_custom">دلخواه…</string>
     <string name="history_filter_custom_range_title">بازهٔ تاریخ دلخواه</string>
-    <string name="history_filter_date_hint">تاریخ‌ها را به‌صورت y/m/d بنویسید، نمونه: ۱۴۰۳/۱۲/۱. اگر فیلدی را خالی بگذارید، همان سمت بدون محدودیت می‌ماند.</string>
-    <string name="history_filter_from_hint">از (y/m/d)</string>
-    <string name="history_filter_to_hint">تا (y/m/d)</string>
     <string name="history_filter_apply">اعمال</string>
-    <string name="history_filter_invalid_date">تاریخ نامعتبر است — از y/m/d استفاده کنید.</string>
-    <string name="history_filter_date_order">تاریخ آغاز نباید بعد از تاریخ پایان باشد.</string>
+    <string name="history_filter_pick_from">روز از را انتخاب کنید</string>
+    <string name="history_filter_pick_to">روز تا را انتخاب کنید — از: %1$s</string>
     <string name="history_filter_range_summary">از %1$s تا %2$s</string>
     <string name="history_filter_from_without_to">از %1$s به بعد</string>
     <string name="history_filter_to_without_from">تا %1$s</string>

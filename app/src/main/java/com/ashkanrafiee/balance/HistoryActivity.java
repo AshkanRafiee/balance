@@ -18,7 +18,6 @@ import android.provider.Telephony;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
-import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -541,35 +540,33 @@ public final class HistoryActivity extends Activity {
         render();
     }
 
-    /** The hand-entered From/To range dialog. Each field accepts "y/m/d" in ASCII or Persian digits;
-     *  a left-empty field stays unbounded on that side. Validation keeps the dialog open on bad or
-     *  inverted dates so the user can correct them without losing their typing. */
+    /** The custom-range dialog: a visual Persian month calendar for tapping From and To instead of
+     *  typing. Opening it again restores the current bounds, ranged-selected, and applying with a
+     *  single picked day keeps that bound open-ended (matching the old optional text fields). */
     private void customRangeDialog() {
-        final EditText fromField = new EditText(this);
-        final EditText toField = new EditText(this);
-        for (EditText e : new EditText[]{fromField, toField}) {
-            e.setTextSize(15);
-            e.setTextColor(fg);
-            e.setHintTextColor(muted);
-            e.setSingleLine(true);
-            e.setInputType(android.text.InputType.TYPE_CLASS_TEXT
-                | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        }
-        fromField.setHint(getString(R.string.history_filter_from_hint));
-        toField.setHint(getString(R.string.history_filter_to_hint));
-        if (filter.from != null) fromField.setText(compactDate(filter.from));
-        if (filter.to != null) toField.setText(compactDate(filter.to));
+        final RangePicker picker = new RangePicker();
 
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setLayoutDirection(isRtl() ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
         wrap.setPadding(dp(24), dp(8), dp(24), 0);
-        wrap.addView(text(getString(R.string.history_filter_date_hint), 12, muted));
-        LinearLayout.LayoutParams fromLp = new LinearLayout.LayoutParams(-1, -2);
-        fromLp.topMargin = dp(10);
-        wrap.addView(fromField, fromLp);
-        LinearLayout.LayoutParams toLp = new LinearLayout.LayoutParams(-1, -2);
-        toLp.topMargin = dp(8);
-        wrap.addView(toField, toLp);
+        wrap.addView(picker.status, new LinearLayout.LayoutParams(-1, -2));
+
+        // The arrows land at the reading-start edge: next on the left in LTR, mirroring for RTL.
+        LinearLayout monthRow = new LinearLayout(this);
+        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, -2, 1);
+        titleLp.setMarginStart(dp(8));
+        titleLp.setMarginEnd(dp(8));
+        monthRow.addView(picker.prev, new LinearLayout.LayoutParams(-2, -2));
+        monthRow.addView(picker.title, titleLp);
+        monthRow.addView(picker.next, new LinearLayout.LayoutParams(-2, -2));
+        LinearLayout.LayoutParams monthLp = new LinearLayout.LayoutParams(-1, -2);
+        monthLp.topMargin = dp(8);
+        wrap.addView(monthRow, monthLp);
+
+        LinearLayout.LayoutParams gridLp = new LinearLayout.LayoutParams(-1, -2);
+        gridLp.topMargin = dp(6);
+        wrap.addView(picker.grid, gridLp);
 
         android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.history_filter_custom_range_title))
@@ -579,25 +576,171 @@ public final class HistoryActivity extends Activity {
             .create();
         dlg.setOnShowListener(d -> dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
             .setOnClickListener(v -> {
-                String fs = fromField.getText().toString().trim();
-                String ts = toField.getText().toString().trim();
-                JalaliCalendar f = fs.isEmpty() ? null : parseJalaliDate(fs);
-                JalaliCalendar t = ts.isEmpty() ? null : parseJalaliDate(ts);
-                if ((!fs.isEmpty() && f == null) || (!ts.isEmpty() && t == null)) {
-                    toast(R.string.history_filter_invalid_date);
-                    return;
+                // Neither day picked degenerates to the unbounded All-time preset.
+                if (picker.picked[0] == null && picker.picked[1] == null) {
+                    filter = Filter.ALL;
+                } else {
+                    filter = new Filter(filter.direction, RANGE_CUSTOM,
+                        picker.picked[0], picker.picked[1]);
                 }
-                if (f != null && t != null && compareDate(f, t) > 0) {
-                    toast(R.string.history_filter_date_order);
-                    return;
-                }
-                // Both fields empty degenerates to the unbounded All-time preset.
-                filter = f == null && t == null ? Filter.ALL
-                    : new Filter(filter.direction, RANGE_CUSTOM, f, t);
                 dlg.dismiss();
                 render();
             }));
         dlg.show();
+    }
+
+    /** The From/To month-grid picker used inside the custom-range dialog. Navigate Persian months
+     *  with the arrows, tap a day for From and a day for To; tapping while a range is closed starts
+     *  a fresh From pick, and a To tapped before From swaps the bounds so the range keeps its order. */
+    private final class RangePicker {
+        final JalaliCalendar[] picked = new JalaliCalendar[]{filter.from, filter.to};
+        final LinearLayout grid = new LinearLayout(HistoryActivity.this);
+        final TextView title = text("", 14, fg, MEDIUM);
+        final TextView status = text("", 12.5f, muted);
+        final TextView prev = navButton("\u2039");
+        final TextView next = navButton("\u203A");
+        int viewYear;
+        int viewMonth;
+
+        RangePicker() {
+            JalaliCalendar start = picked[0] != null ? picked[0] : picked[1];
+            if (start == null) start = nowJalali();
+            viewYear = start.year;
+            viewMonth = start.month;
+            grid.setOrientation(LinearLayout.VERTICAL);
+            render();
+        }
+
+        TextView navButton(String arrow) {
+            TextView b = text(arrow, 18, fg, MEDIUM);
+            b.setGravity(Gravity.CENTER);
+            b.setPadding(dp(12), dp(2), dp(12), dp(2));
+            b.setBackground(rounded(chipBg, 10));
+            return b;
+        }
+
+        /** Rebuilds the month title, the prev/next affordance and the day grid for the viewed month. */
+        void render() {
+            boolean fa = "fa".equals(LocaleHelper.currentTag(HistoryActivity.this));
+            title.setText(monthName(viewMonth) + " "
+                + (fa ? faDigits(viewYear) : Integer.toString(viewYear)));
+            title.setGravity(Gravity.CENTER);
+            bindNav(prev, viewYear > 1100 || viewYear == 1100 && viewMonth > 1, -1);
+            bindNav(next, viewYear < 1700 || viewYear == 1700 && viewMonth < 12, 1);
+            grid.removeAllViews();
+
+            String[] weekdays = weekdayLabels();
+            LinearLayout weekRow = new LinearLayout(HistoryActivity.this);
+            for (String w : weekdays) {
+                TextView h = text(w, 11, muted);
+                h.setGravity(Gravity.CENTER);
+                weekRow.addView(h, new LinearLayout.LayoutParams(0, -2, 1));
+            }
+            grid.addView(weekRow, new LinearLayout.LayoutParams(-1, -2));
+
+            int rangeFill = (accent & 0x00FFFFFF) | 0x26000000;
+            JalaliCalendar today = nowJalali();
+            int firstDay = weekdayIndex(JalaliCalendar.of(viewYear, viewMonth, 1));
+            int days = JalaliCalendar.daysInMonth(viewYear, viewMonth);
+            for (int offset = 0; offset < firstDay + days; offset += 7) {
+                LinearLayout row = new LinearLayout(HistoryActivity.this);
+                for (int col = 0; col < 7; col++) {
+                    int d = offset + col - firstDay + 1;
+                    TextView cell = d < 1 || d > days
+                        ? text("", 0, fg) : dayCell(JalaliCalendar.of(viewYear, viewMonth, d), today);
+                    row.addView(cell, new LinearLayout.LayoutParams(0, dp(38), 1));
+                }
+                grid.addView(row, new LinearLayout.LayoutParams(-1, -2));
+            }
+            updateStatus();
+        }
+
+        /** One tappable day, highlighted as a range bound, today's outline, or the ranged tint. */
+        TextView dayCell(JalaliCalendar day, JalaliCalendar today) {
+            boolean fa = "fa".equals(LocaleHelper.currentTag(HistoryActivity.this));
+            boolean fromSel = picked[0] != null && picked[0].year == day.year
+                && picked[0].month == day.month && picked[0].day == day.day;
+            boolean toSel = picked[1] != null && picked[1].year == day.year
+                && picked[1].month == day.month && picked[1].day == day.day;
+            boolean inRange = picked[0] != null && picked[1] != null
+                && compareDate(picked[0], day) <= 0 && compareDate(day, picked[1]) <= 0;
+            boolean isToday = today.year == day.year
+                && today.month == day.month && today.day == day.day;
+            TextView cell = text(fa ? faDigits(day.day) : Integer.toString(day.day), 12.5f,
+                fromSel || toSel ? Color.WHITE : fg);
+            cell.setGravity(Gravity.CENTER);
+            if (fromSel || toSel) {
+                cell.setBackground(rounded(accent, 10));
+            } else if (isToday) {
+                cell.setBackground(roundedStroke(Color.TRANSPARENT, 10, accent));
+            } else if (inRange) {
+                int rangeFill = (accent & 0x00FFFFFF) | 0x26000000;
+                cell.setBackground(rounded(rangeFill, 10));
+            }
+            cell.setContentDescription(persianDate(day));
+            cell.setClickable(true);
+            cell.setFocusable(true);
+            cell.setOnClickListener(v -> {
+                pickDay(picked, day);
+                render();
+            });
+            return cell;
+        }
+
+        void bindNav(TextView arrow, boolean canStep, int delta) {
+            arrow.setEnabled(canStep);
+            arrow.setAlpha(canStep ? 1f : .35f);
+            arrow.setClickable(canStep);
+            arrow.setOnClickListener(canStep ? v -> step(delta) : null);
+        }
+
+        void step(int delta) {
+            viewMonth += delta;
+            if (viewMonth < 1) {
+                viewMonth = 12;
+                viewYear--;
+            } else if (viewMonth > 12) {
+                viewMonth = 1;
+                viewYear++;
+            }
+            render();
+        }
+
+        /** Tells the user what to pick next, or shows the closing summary once the range is full. */
+        void updateStatus() {
+            if (picked[0] == null) {
+                status.setText(R.string.history_filter_pick_from);
+            } else if (picked[1] == null) {
+                status.setText(getString(R.string.history_filter_pick_to, compactDate(picked[0])));
+            } else {
+                status.setText(getString(R.string.history_filter_range_summary,
+                    compactDate(picked[0]), compactDate(picked[1])));
+            }
+        }
+    }
+
+    /** The tap rule for the range calendar, kept pure so the tests cover it: the first pick sets
+     *  From, the next sets To, a tap while both are set starts a fresh From, and a To tapped before
+     *  From swaps the bounds so From always precedes To. */
+    static void pickDay(JalaliCalendar[] picked, JalaliCalendar day) {
+        if (picked[0] == null || picked[1] != null) {
+            picked[0] = day;
+            picked[1] = null;
+        } else if (compareDate(day, picked[0]) < 0) {
+            picked[1] = picked[0];
+            picked[0] = day;
+        } else {
+            picked[1] = day;
+        }
+    }
+
+    /** Weekday of a Persian date as 0..6 for Saturday..Friday (the grid's leading column). */
+    static int weekdayIndex(JalaliCalendar jc) {
+        int[] g = jc.toGregorian();
+        Calendar c = Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"));
+        c.clear();
+        c.set(g[0], g[1] - 1, g[2]);
+        return (c.get(Calendar.DAY_OF_WEEK) - Calendar.SATURDAY + 7) % 7;
     }
 
     /** One-line description of the active custom range, e.g. "From 1403/12/1 to 1404/2/5". */
@@ -1439,26 +1582,6 @@ public final class HistoryActivity extends Activity {
         }
     }
 
-    /** Parses a "y/m/d" string (ASCII or Persian digits) into a Persian date, or null when the text
-     *  is not a real calendar day. Kept static so the instrumented tests cover it directly. */
-    static JalaliCalendar parseJalaliDate(String raw) {
-        if (raw == null || raw.trim().isEmpty()) return null;
-        String s = BalanceData.digits(raw.trim());
-        if (s.indexOf('/') < 0) return null;
-        String[] parts = s.split("/");
-        if (parts.length != 3) return null;
-        try {
-            int y = Integer.parseInt(parts[0].trim());
-            int m = Integer.parseInt(parts[1].trim());
-            int d = Integer.parseInt(parts[2].trim());
-            if (y < 1100 || y > 1700 || m < 1 || m > 12) return null;
-            if (d < 1 || d > JalaliCalendar.daysInMonth(y, m)) return null;
-            return JalaliCalendar.of(y, m, d);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
     /** Chronological order of two Persian dates, compared field by field (no round trip needed). */
     private static int compareDate(JalaliCalendar a, JalaliCalendar b) {
         if (a.year != b.year) return Integer.compare(a.year, b.year);
@@ -1578,6 +1701,14 @@ public final class HistoryActivity extends Activity {
         }
     }
 
+    /** The 7 weekday grid headings, Saturday first, in the app language. */
+    private String[] weekdayLabels() {
+        boolean fa = "fa".equals(LocaleHelper.currentTag(this));
+        return fa
+            ? new String[]{"ش", "ی", "د", "س", "چ", "پ", "ج"}
+            : new String[]{"Sa", "Su", "Mo", "Tu", "We", "Th", "Fr"};
+    }
+
     /** Formats a Persian date in the app language, e.g. "Khordad 12 1403" / "۱۲ خرداد ۱۴۰۳". */
     private String persianDate(JalaliCalendar jc) {
         String tag = LocaleHelper.currentTag(this);
@@ -1593,10 +1724,6 @@ public final class HistoryActivity extends Activity {
     private String compactDate(JalaliCalendar jc) {
         String s = jc.year + "/" + jc.month + "/" + jc.day;
         return "fa".equals(LocaleHelper.currentTag(this)) ? faDigitsString(s) : s;
-    }
-
-    private void toast(int res) {
-        android.widget.Toast.makeText(this, getString(res), android.widget.Toast.LENGTH_SHORT).show();
     }
 
     /** The movement's time of day as a compact "HH:mm" string in the app digits. */

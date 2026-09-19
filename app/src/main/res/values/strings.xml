@@ -99,12 +99,9 @@
     <string name="history_filter_withdrawals">Withdrawals</string>
     <string name="history_filter_custom">Custom…</string>
     <string name="history_filter_custom_range_title">Custom date range</string>
-    <string name="history_filter_date_hint">From and To dates in y/m/d, e.g. 1403/12/1. Leave a field empty to leave that side unbounded.</string>
-    <string name="history_filter_from_hint">From (y/m/d)</string>
-    <string name="history_filter_to_hint">To (y/m/d)</string>
     <string name="history_filter_apply">Apply</string>
-    <string name="history_filter_invalid_date">Invalid date — use y/m/d.</string>
-    <string name="history_filter_date_order">The From date must not be after the To date.</string>
+    <string name="history_filter_pick_from">Choose the From date</string>
+    <string name="history_filter_pick_to">Choose the To date — From is %1$s</string>
     <string name="history_filter_range_summary">From %1$s to %2$s</string>
     <string name="history_filter_from_without_to">From %1$s onward</string>
     <string name="history_filter_to_without_from">Up to %1$s</string>
