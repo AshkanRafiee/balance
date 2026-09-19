@@ -10,6 +10,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Latest balance per supported bank, without accumulating repeated messages
 - Combined total balance, with the option to exclude individual banks from the total
 - Transaction history with deposits and withdrawals, broken down by day, month and year
+- History filters by movement type (all, deposits or withdrawals) and by date — today, this month, this year or a custom Persian date range — applied to every figure on the screen
 - Full history from the total card, per-bank history from any bank card
 - Long-press the total card to copy the combined total, or long-press a bank card to copy that bank's balance
 - Bank sorting by balance or update time, mirrored in the list and the home-screen widget
