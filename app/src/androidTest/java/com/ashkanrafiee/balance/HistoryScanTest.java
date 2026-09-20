@@ -3,6 +3,7 @@ package com.ashkanrafiee.balance;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import android.content.Context;
@@ -231,6 +232,25 @@ public class HistoryScanTest {
         assertEquals(-120000L, txs.get(0).amount);  // newest first (T+500)
         assertEquals(200000L, txs.get(1).amount);   // oldest last (T)
         assertEquals(T + 1000, historyWatermark());
+    }
+
+    @Test public void futureDatedMovement_neverFreezesHistoryScan() throws Exception {
+        // A forged or clock-skewed message dated far in the future must not advance the history
+        // watermark past every genuine message: dates are clamped to real time, so movements that
+        // arrive afterwards are still captured on the next incremental scan.
+        long future = System.currentTimeMillis() + 86_400_000L;
+        seed("2000474701", RESALAT_WITHDRAWAL_1, future);
+
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        assertTrue("history watermark must not leap into the future",
+            historyWatermark() <= System.currentTimeMillis());
+
+        long after = System.currentTimeMillis() + 60_000L;
+        seed("TejaratBank", TEJARAT_DEPOSIT, after);
+
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(2, txs.size());
     }
 
     @Test public void fullFirstScan_oldMovementsBeyondBalanceTail_areStillCaptured() throws Exception {

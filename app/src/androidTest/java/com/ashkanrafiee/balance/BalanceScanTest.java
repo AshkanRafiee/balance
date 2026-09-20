@@ -3,6 +3,7 @@ package com.ashkanrafiee.balance;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import android.content.Context;
@@ -649,6 +650,61 @@ public class BalanceScanTest {
         assertEquals(0, second);
         assertEquals(77222945L, amount(find(saved, "Mellat")));
         assertEquals(T + 1000, date(find(saved, "Mellat")));
+    }
+
+    @Test public void reversal_accountBearingTransferArrivesBeforeFee_keepsTransferBalance() throws Exception {
+        // Tejarat movements state their account, so every stored chain fingerprint is account-qualified.
+        // The transfer is the true-newest event but arrived first; the newest-arrived fee must not
+        // override it. This guards the account-qualified chain matching: the scan-side movement check
+        // must fold the account into the signature exactly like the window merger did, or the chain is
+        // never trusted and the arrival order (fee) wins.
+        String transfer = "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A*\n"
+            + "\u062D\u0633\u0627\u0628: 01351234567890 \n"
+            + "\u0628\u0631\u062F\u0627\u0634\u062A: 100,000,000 \u0631\u06CC\u0627\u0644 \n"
+            + "\u0645\u0627\u0646\u062F\u0647: 77,222,945 \u0631\u06CC\u0627\u0644 \n"
+            + "1405/06/07\n20:16";
+        String fee = "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A*\n"
+            + "\u062D\u0633\u0627\u0628: 01351234567890 \n"
+            + "\u0628\u0631\u062F\u0627\u0634\u062A: 10,000 \u0631\u06CC\u0627\u0644 \n"
+            + "\u0645\u0627\u0646\u062F\u0647: 177,222,945 \u0631\u06CC\u0627\u0644 \n"
+            + "1405/06/07\n20:17";
+        seed("TejaratBank", transfer, T + 1000);
+        seed("TejaratBank", fee, T + 2000);
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+
+        LinkedHashMap<String, Bank> after = BalanceData.read(ctx);
+        assertEquals(1, after.size());
+        Bank acct = after.get("Tejarat|01351234567890");
+        assertNotNull(acct);
+        assertEquals(77_222_945L, acct.amount);
+        assertEquals(T + 1000, acct.date);
+    }
+
+    @Test public void futureDatedMessage_neverFreezesIncrementalScanning() throws Exception {
+        // A forged or clock-skewed message dated far in the future must not push the scan watermark
+        // past every genuine message: the watermark is clamped to real time, so messages arriving
+        // afterwards are still read on the next refresh.
+        long future = System.currentTimeMillis() + 86_400_000L;
+        seed("500095", "available balance 5,000,000", future);
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+        assertEquals(5_000_000L, amount(find(saved, "Saman")));
+        assertTrue("watermark must not leap into the future", watermark() <= System.currentTimeMillis());
+
+        long after = System.currentTimeMillis() + 60_000L;
+        seed("5000973189",
+            "\u0645\u0648\u062C\u0648\u062F\u06CC \u062D\u0633\u0627\u0628 \u0634\u0645\u0627: 2,222,222 \u0631\u06CC\u0627\u0644",
+            after);
+
+        // The future-dated row may be re-read on later scans (each re-clamp dates it to that scan's
+        // "now"), but the genuine message that arrived in between must be scanned too. Without the
+        // watermark clamp it never would be, because the watermark would sit a whole day ahead.
+        assertTrue("a genuine message arriving later must still be scanned",
+            BalanceData.scanSms(ctx, saved) >= 1);
+        assertEquals(2_222_222L, amount(find(saved, "Tejarat")));
     }
 
     // ============================================================
