@@ -104,9 +104,10 @@ public class WidgetOrderTest {
         assertEquals(0, BalanceWidgetService.widgetBanks(ctx).size());
     }
 
-    /** A bank with several accounts collapses to one widget row carrying their summed balance, keeping
-     *  the widget a per-bank glanceable summary rather than one row per account. */
-    @Test public void widgetBanks_aggregatesAccountsIntoOneRowPerBank() {
+    /** A multi-account bank contributes one widget row per account, each with its own balance, so the
+     *  widget mirrors the main app's flat per-entry cards. Rows keep the app's order: the bank with
+     *  the largest balance first, then that bank's accounts newest first. */
+    @Test public void widgetBanks_oneRowPerAccount() {
         LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
         map.put("Mellat|1110000222", new Bank("Mellat", 1_000_000, 1000L, "5300", "1110000222"));
         map.put("Mellat|1110000333", new Bank("Mellat", 2_000_000, 2000L, "5300", "1110000333"));
@@ -114,10 +115,14 @@ public class WidgetOrderTest {
         BalanceData.write(ctx, map);
 
         List<Bank> widget = BalanceWidgetService.widgetBanks(ctx);
-        assertEquals(2, widget.size());
+        assertEquals(3, widget.size());
         assertEquals("Tejarat", widget.get(0).name);       // blockKey 5M ranks first in balance-high
         assertEquals(5_000_000, widget.get(0).amount);
-        assertEquals("Mellat", widget.get(1).name);        // one row per bank, summed 1M + 2M
-        assertEquals(3_000_000, widget.get(1).amount);
+        assertEquals("Mellat", widget.get(1).name);        // one row per account, own balance
+        assertEquals("1110000333", widget.get(1).account);
+        assertEquals(2_000_000, widget.get(1).amount);
+        assertEquals("Mellat", widget.get(2).name);
+        assertEquals("1110000222", widget.get(2).account);
+        assertEquals(1_000_000, widget.get(2).amount);
     }
 }
