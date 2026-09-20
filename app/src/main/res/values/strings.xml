@@ -106,7 +106,6 @@
     <string name="history_filter_to_without_from">Up to %1$s</string>
     <string name="history_empty_filtered">No transactions match the current filters.</string>
     <string name="history_empty_account">No transactions found for this account yet.</string>
-    <string name="history_account_all">All accounts</string>
     <plurals name="history_n_tx">
         <item quantity="one">%1$d transaction</item>
         <item quantity="other">%1$d transactions</item>

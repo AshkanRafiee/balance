@@ -96,10 +96,6 @@ public final class HistoryActivity extends Activity {
      *  so its highlight and labels always mirror {@link #filter}. */
     private LinearLayout filterBar;
 
-    /** The per-bank account chip row, rebuilt by every render so its highlight mirrors
-     *  {@link #accountFilter}; hidden outside the per-bank view. */
-    private LinearLayout accountBar;
-
     /** Watches for new bank SMS while the screen is open, triggering a silent history re-scan. */
     private ContentObserver smsObserver;
 
@@ -347,10 +343,6 @@ public final class HistoryActivity extends Activity {
         host.addView(root, new FrameLayout.LayoutParams(-1, -1));
 
         root.addView(buildHeader(), margin(0, 0, 0, 14));
-        accountBar = new LinearLayout(this);
-        accountBar.setOrientation(LinearLayout.VERTICAL);
-        accountBar.setVisibility(View.GONE);
-        root.addView(accountBar, margin(0, 0, 0, 10));
         filterBar = new LinearLayout(this);
         filterBar.setOrientation(LinearLayout.VERTICAL);
         root.addView(filterBar, margin(0, 0, 0, 12));
@@ -432,15 +424,19 @@ public final class HistoryActivity extends Activity {
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-2, -2);
         titleParams.setMarginStart(dp(10));
         if (bankFilter != null) {
-            // Per-bank view: a bank badge plus the bank's name identifies exactly whose filtered
-            // history this is, and the "Bank" chip flags it as not the full history.
+            // A bank or account view: the badge plus the bank's name identifies whose filtered
+            // history this is; the chip flags a single account (else the whole bank), so an
+            // account's history reads as a first-class scope, exactly like another bank's.
             View badge = bankBadge(bankFilter);
             LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(dp(32), dp(32));
             badgeLp.setMarginStart(dp(4));
             bar.addView(badge, badgeLp);
             TextView title = text(BankRules.displayName(this, bankFilter), 22, fg, MEDIUM);
             bar.addView(title, titleParams);
-            TextView chip = text(getString(R.string.history_bank_chip), 11, badgeFg, MEDIUM);
+            String chipText = accountFilter != null
+                ? getString(R.string.account_label) + " " + digits(accountFilter)
+                : getString(R.string.history_bank_chip);
+            TextView chip = text(chipText, 11, badgeFg, MEDIUM);
             chip.setPadding(dp(8), dp(3), dp(8), dp(3));
             chip.setBackground(rounded(badgeBg, 9));
             LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(-2, -2);
@@ -493,48 +489,6 @@ public final class HistoryActivity extends Activity {
     /** Rebuilds the per-bank account chips: "All accounts" plus one chip per account the bank has
      *  transactions for. The row only appears in the per-bank view and derives from the whole bank's
      *  history (before the direction/date filters), so its choices stay stable while narrowing. */
-    private void rebuildAccountBar(List<Transaction> bankTxs) {
-        accountBar.removeAllViews();
-        accountBar.setVisibility(bankFilter == null ? View.GONE : View.VISIBLE);
-        if (bankFilter == null) return;
-        List<String> accounts = new ArrayList<>();
-        for (Transaction t : bankTxs)
-            if (t.account != null && !accounts.contains(t.account)) accounts.add(t.account);
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        addAccountChip(row, getString(R.string.history_account_all), null, () -> applyAccount(null));
-        for (String account : accounts)
-            addAccountChip(row, getString(R.string.account_label) + " " + digits(account),
-                account, () -> applyAccount(account));
-        android.widget.HorizontalScrollView scroller = new android.widget.HorizontalScrollView(this);
-        scroller.setHorizontalScrollBarEnabled(false);
-        scroller.addView(row, new android.widget.HorizontalScrollView.LayoutParams(-2, -2));
-        accountBar.addView(scroller, new LinearLayout.LayoutParams(-1, -2));
-    }
-
-    /** One account chip; highlights when it is the active filter. */
-    private void addAccountChip(LinearLayout host, String label, String account, Runnable action) {
-        boolean selected = account == null ? accountFilter == null : account.equals(accountFilter);
-        TextView chip = text(label, 12, selected ? Color.WHITE : fg, MEDIUM);
-        chip.setGravity(Gravity.CENTER);
-        chip.setSingleLine(true);
-        chip.setPadding(dp(8), dp(7), dp(8), dp(7));
-        chip.setBackground(rounded(selected ? accent : chipBg, 10));
-        chip.setContentDescription(label);
-        chip.setClickable(true);
-        chip.setFocusable(true);
-        chip.setOnClickListener(v -> action.run());
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-        lp.setMarginStart(dp(2));
-        lp.setMarginEnd(dp(2));
-        host.addView(chip, lp);
-    }
-
-    private void applyAccount(String account) {
-        accountFilter = account;
-        render();
-    }
-
     /** The three-way movement segment: All / Deposits / Withdrawals, the active choice highlighted
      *  as an accent pill inside a quiet strip. */
     private LinearLayout directionSegment() {
@@ -979,7 +933,6 @@ public final class HistoryActivity extends Activity {
         List<Transaction> acctTxs = accountFilter == null ? bankTxs : filterByAccount(bankTxs, accountFilter);
         List<Transaction> txs = applyFilters(acctTxs, filter);
         rebuildFilterBar();
-        rebuildAccountBar(bankTxs);
         Lists lists = buildLists(txs);
         body.removeAllViews();
         if (lists.years.isEmpty()) {

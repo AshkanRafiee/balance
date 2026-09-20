@@ -872,8 +872,7 @@ public class MainActivity extends Activity {
             BankRow row = bankProbeRow;
             if (row == null) return;
             String label = BankRules.displayName(MainActivity.this, row.bankName);
-            if (row.kind == BankRow.HEADER) label += " " + getString(R.string.total_label);
-            else if (row.bank != null && row.bank.account != null)
+            if (row.bank != null && row.bank.account != null)
                 label += " " + faDigits(row.bank.account);
             copyBalance(label, row.amount);
         };
@@ -1144,57 +1143,30 @@ public class MainActivity extends Activity {
                 float nameX = rtl ? w - 88 : 88;
                 float valueX = rtl ? 60 : w - 60;
                 float menuX = rtl ? 36 : w - 36;
-                float accountX = rtl ? w - 48 : 48;
                 Paint.Align nameAlign = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
                 Paint.Align valueAlign = rtl ? Paint.Align.LEFT : Paint.Align.RIGHT;
-                Paint.Align accountAlign = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
                 for (BankRow row : rows()) {
                     float yy = row.top - scrollY;
                     String displayName = BankRules.displayName(MainActivity.this, row.bankName);
-                    switch (row.kind) {
-                        case BankRow.SINGLE:
-                            round(c, 24, yy, w - 24, yy + 82, 20, row.excluded ? bg : panel);
-                            bankBadge(c, row.bankName, badgeX, yy + 41);
-                            p.setColor(muted);
-                            for (int dot = -1; dot <= 1; dot++)
-                                c.drawCircle(menuX, yy + 41 + dot * 4.5f, 1.8f, p);
-                            text(c, fit(displayName, 17, Math.max(40, valueLeft - 100)), nameX, yy + 36, 17,
-                                row.excluded ? muted : fg, nameAlign);
-                            if (row.excluded) {
-                                value(c, row.amount, valueX, yy + 35, valueWidth, 17, valueAlign, true);
-                                String exLabel = getString(R.string.excluded_label);
-                                text(c, exLabel, nameX, yy + 68, 11, muted, nameAlign);
-                            } else {
-                                value(c, row.amount, valueX, yy + 35, valueWidth, 17, valueAlign);
-                                if (row.bank.account != null) {
-                                    String accountText = getString(R.string.account_label) + " "
-                                        + faDigits(row.bank.account);
-                                    text(c, fit(accountText, 12, Math.max(40, valueLeft - 100)), nameX, yy + 60, 12,
-                                        muted, nameAlign);
-                                }
-                            }
-                            break;
-                        case BankRow.HEADER:
-                            round(c, 24, yy, w - 24, yy + 56, 16, row.excluded ? bg : panel);
-                            bankBadge(c, row.bankName, badgeX, yy + 28);
-                            p.setColor(muted);
-                            for (int dot = -1; dot <= 1; dot++)
-                                c.drawCircle(menuX, yy + 28 + dot * 4.5f, 1.8f, p);
-                            text(c, fit(displayName, 17, Math.max(40, valueLeft - 100)), nameX, yy + 30, 17,
-                                row.excluded ? muted : fg, nameAlign);
-                            value(c, row.amount, valueX, yy + 26, valueWidth, 15, valueAlign, row.excluded);
-                            break;
-                        case BankRow.ACCOUNT:
-                            round(c, 24, yy, w - 24, yy + 60, 16, row.excluded ? bg : panel);
-                            int barColor = bankColors[Math.floorMod(row.bankName.hashCode(), bankColors.length)];
-                            round(c, rtl ? w - 31 : 28, yy + 14, rtl ? w - 28 : 31, yy + 46, 3, barColor);
-                            String accountText = row.bank.account != null
-                                ? getString(R.string.account_label) + " " + faDigits(row.bank.account)
-                                : displayName;
-                            text(c, fit(accountText, 14, Math.max(40, valueLeft - 76)), accountX, yy + 33, 14,
-                                row.excluded ? muted : fg, accountAlign);
-                            value(c, row.amount, valueX, yy + 29, valueWidth, 15, valueAlign, row.excluded);
-                            break;
+                    round(c, 24, yy, w - 24, yy + 82, 20, row.excluded ? bg : panel);
+                    bankBadge(c, row.bankName, badgeX, yy + 41);
+                    p.setColor(muted);
+                    for (int dot = -1; dot <= 1; dot++)
+                        c.drawCircle(menuX, yy + 41 + dot * 4.5f, 1.8f, p);
+                    text(c, fit(displayName, 17, Math.max(40, valueLeft - 100)), nameX, yy + 36, 17,
+                        row.excluded ? muted : fg, nameAlign);
+                    if (row.excluded) {
+                        value(c, row.amount, valueX, yy + 35, valueWidth, 17, valueAlign, true);
+                        String exLabel = getString(R.string.excluded_label);
+                        text(c, exLabel, nameX, yy + 68, 11, muted, nameAlign);
+                    } else {
+                        value(c, row.amount, valueX, yy + 35, valueWidth, 17, valueAlign);
+                        if (row.bank.account != null) {
+                            String accountText = getString(R.string.account_label) + " "
+                                + faDigits(row.bank.account);
+                            text(c, fit(accountText, 12, Math.max(40, valueLeft - 100)), nameX, yy + 60, 12,
+                                muted, nameAlign);
+                        }
                     }
                 }
             }
@@ -1257,12 +1229,12 @@ public class MainActivity extends Activity {
                 ? HistoryActivity.faDigitsString(s) : s;
         }
 
-        /** One card row in the bank list: a legacy single-balance card, a multi-account bank's slim
-         *  header card (badge, name, summed total), or one of its per-account cards. Geometry is in
-         *  dp relative to the bank section's top edge (352), so a row's screen position is
-         *  {@code row.top - scrollY}. */
+        /** One card row in the bank list. Every bank entry — whether a one-account bank or a single
+         *  account of a multi-account bank — is its own flat card, so accounts read exactly like
+         *  separate banks. Geometry is in dp relative to the bank section's top edge (352), so a
+         *  row's screen position is {@code row.top - scrollY}. */
         private static final class BankRow {
-            static final int SINGLE = 0, HEADER = 1, ACCOUNT = 2;
+            static final int SINGLE = 0;
             final int kind;
             final Bank bank;
             final String bankName;
@@ -1281,28 +1253,18 @@ public class MainActivity extends Activity {
             }
         }
 
-        /** Lays out the bank cards: one legacy card per account-less bank (and per single-account
-         *  bank), while a bank with several accounts gets a slim header card — badge, name, and the
-         *  summed balance, so the bank aggregate stays visible — followed by one card per account.
+        /** Lays out the bank cards: one full card per bank entry — a one-account bank contributes a
+         *  single card, a multi-account bank one card per account, with no aggregate header. Every
+         *  card is drawn and hit-tested identically, so an account behaves like a bank of its own.
          *  Re-derived on every call (the lists are tiny) so drawing and touch always agree. */
         java.util.List<BankRow> rows() {
             java.util.List<BankRow> out = new java.util.ArrayList<>();
             float cursor = 352;
             for (java.util.List<Bank> block : BalanceData.groupedForDisplay(banks, excluded, sortMode)) {
-                Bank head = block.get(0);
-                boolean ex = excluded.contains(head.name);
-                if (block.size() == 1) {
-                    out.add(new BankRow(BankRow.SINGLE, head, head.name, head.amount, ex, cursor, 82));
+                boolean ex = excluded.contains(block.get(0).name);
+                for (Bank b : block) {
+                    out.add(new BankRow(BankRow.SINGLE, b, b.name, b.amount, ex, cursor, 82));
                     cursor += 96;
-                } else {
-                    long total = 0;
-                    for (Bank b : block) total += b.amount;
-                    out.add(new BankRow(BankRow.HEADER, null, head.name, total, ex, cursor, 56));
-                    cursor += 64;
-                    for (Bank b : block) {
-                        out.add(new BankRow(BankRow.ACCOUNT, b, head.name, b.amount, ex, cursor, 60));
-                        cursor += 68;
-                    }
                 }
             }
             bankListHeight = cursor - 352;
@@ -1475,9 +1437,8 @@ public class MainActivity extends Activity {
                 else if (totalArmed) handler.postDelayed(totalLongProbe, 500);
                 else if (y >= 352 && y < byForTouch(h)
                         && (rtl ? x >= 56 : x <= getWidth() / d - 56)) {
-                    // On a bank row, off the 3-dot menu: a long-press copies that row's balance —
-                    // the bank total on a header card, that account's balance on an account card —
-                    // mirroring the total card.
+                    // On a bank or account row, off the 3-dot menu: a long-press copies that row's
+                    // balance, mirroring the total card.
                     BankRow row = rowAt(y + scrollY);
                     if (row != null) {
                         bankProbeRow = row;
@@ -1570,12 +1531,12 @@ public class MainActivity extends Activity {
                     boolean onMenu = rtl
                         ? x >= 16 && x <= 56
                         : x >= getWidth() / d - 56 && x <= getWidth() / d - 16;
-                    if (onMenu && (row.kind == BankRow.SINGLE || row.kind == BankRow.HEADER)) {
+                    if (onMenu) {
                         showBankMenu(row.bankName, row.amount);
-                    } else if (!onMenu) {
+                    } else {
                         Intent history = new Intent(MainActivity.this, HistoryActivity.class);
                         history.putExtra(HistoryActivity.EXTRA_BANK, row.bankName);
-                        if (row.kind == BankRow.ACCOUNT && row.bank != null && row.bank.account != null)
+                        if (row.bank != null && row.bank.account != null)
                             history.putExtra(HistoryActivity.EXTRA_ACCOUNT, row.bank.account);
                         startActivity(history);
                     }

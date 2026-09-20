@@ -16,10 +16,10 @@ public class BalanceWidgetService extends RemoteViewsService {
         return new Factory(getApplicationContext());
     }
 
-    /** The ordered bank list the widget shows: only included banks, aggregated to one row per bank,
-     *  in exactly the same order the main app shows them (persisted sort mode), with excluded banks
-     *  dropped entirely so the widget stays a glanceable summary of the total. When a bank has
-     *  several accounts its widget row carries their summed balance. */
+    /** The ordered list the widget shows: only included banks, one row per bank entry — a
+     *  multi-account bank contributes a row per account, exactly as on the main screen — in the
+     *  same order the app shows them (persisted sort mode), with excluded banks dropped entirely so
+     *  the widget stays a glanceable summary of the total. */
     static List<Bank> widgetBanks(Context context) {
         Context c = LocaleHelper.wrap(context);
         Set<String> excluded = BalanceData.getExcluded(c);
@@ -28,9 +28,8 @@ public class BalanceWidgetService extends RemoteViewsService {
                 BalanceData.read(c), excluded, BalanceData.getSort(c))) {
             String name = block.get(0).name;
             if (excluded.contains(name)) continue;
-            long sum = 0;
-            for (Bank b : block) sum += b.amount;
-            included.add(new Bank(name, sum, 0, null));
+            for (Bank b : block)
+                included.add(new Bank(b.name, b.amount, b.date, b.sender, b.account));
         }
         return included;
     }
@@ -81,11 +80,24 @@ public class BalanceWidgetService extends RemoteViewsService {
                 hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : BalanceData.toman(c, b.amount));
             views.setInt(R.id.bank_name, "setGravity", Gravity.CENTER_VERTICAL | Gravity.START);
             views.setInt(R.id.bank_amount, "setGravity", Gravity.CENTER_VERTICAL | Gravity.END);
+            if (b.account != null) {
+                views.setTextViewText(R.id.bank_account, accountLabel(c, b.account));
+                views.setViewVisibility(R.id.bank_account, View.VISIBLE);
+            } else {
+                views.setViewVisibility(R.id.bank_account, View.GONE);
+            }
             int iconRes = BankIcon.iconFor(b.name);
             views.setViewVisibility(R.id.bank_icon, iconRes != 0 ? View.VISIBLE : View.GONE);
             if (iconRes != 0) views.setImageViewResource(R.id.bank_icon, iconRes);
             views.setOnClickPendingIntent(R.id.widget_item_root, BalanceWidgetProvider.openApp(c));
             return views;
+        }
+
+        /** "Account 30101…" with the digits in the app's language, matching the app's cards. */
+        private String accountLabel(Context c, String account) {
+            String digits = "fa".equals(LocaleHelper.currentTag(c))
+                ? HistoryActivity.faDigitsString(account) : account;
+            return c.getString(R.string.account_label) + " " + digits;
         }
 
         private RemoteViews emptyViews() {
