@@ -56,7 +56,7 @@ final class BalanceData {
     static final int SORT_DATE_OLDEST = 4;
 
     /** Bumped whenever the movement-message recognition rules change, forcing a full history re-scan. */
-    static final int HISTORY_RULES_VERSION = 8;
+    static final int HISTORY_RULES_VERSION = BankRules.VERSION;
 
     /** Persisted recent-movement window for balance-chain reconciliation across split scans. */
     static final String KEY_RECENT_MOVEMENTS = "recent_movements";
@@ -844,9 +844,10 @@ final class BalanceData {
                     // account, while its stored twin from the older account-less era keeps an
                     // account-free fingerprint: neither the fingerprint identity nor the
                     // (bank|account, date) budget can bridge the two, so the same event would be
-                    // recorded twice. Claim the account-less twin when a fresh parse is the exact same
-                    // content — same bank, same moment, and the identical message (its account-free
-                    // fingerprint equals the stored one; legacy sig-less entries match by amount).
+                    // recorded twice. Claim the account-less twin when a fresh parse is the same event
+                    // — same bank, same moment, and either the identical message (account-free
+                    // fingerprint equality) or the same amount, which is all the account-less era could
+                    // distinguish (this also covers stored legacy sig-less entries).
                     Set<Transaction> accountTwins = new HashSet<>();
                     if (!freeByFresh.isEmpty()) {
                         Map<String, Transaction> byContent = new HashMap<>();
@@ -859,10 +860,15 @@ final class BalanceData {
                         }
                         for (Transaction s : stored) {
                             if (s.account != null) continue;
-                            String claimed = s.bank + "|" + s.date + "|"
-                                + (s.sig != null ? s.sig : Long.toString(s.amount));
-                            Transaction f = s.sig != null
-                                ? byContent.remove(claimed) : byAmount.remove(claimed);
+                            String contentKey = s.sig != null
+                                ? s.bank + "|" + s.date + "|" + s.sig : null;
+                            Transaction f = contentKey != null ? byContent.remove(contentKey) : null;
+                            if (f == null) {
+                                // Same bank, same moment and same amount is the account-less era's best
+                                // claim (it had no account to tell events apart anyway); legacy sig-less
+                                // entries land here too.
+                                f = byAmount.remove(s.bank + "|" + s.date + "|" + s.amount);
+                            }
                             if (f != null) accountTwins.add(s);
                         }
                     }
