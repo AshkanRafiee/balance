@@ -287,6 +287,16 @@ final class BankRules {
         // on both sides, which also keeps dotted dates out ("1405.06.15" alone can't match).
         ACCOUNT_RULES.put("Resalat",
             Pattern.compile("(?<![0-9])[0-9]{1,2}\\.[0-9]{4,12}\\.[0-9]{1,2}(?![0-9])"));
+        // Tejarat: "*بانک تجارت* / حساب: 0135… / برداشت|واریز: … ریال / … / مانده: … ریال". Like
+        // Melli, the label, optional spacing, colon, then digits straight on; the six-digit minimum
+        // and the no-thousand-separator guard keep "حساب شما: 1,000,000"-style balances out.
+        ACCOUNT_RULES.put("Tejarat",
+            Pattern.compile("\u062D\u0633\u0627\u0628\\s*:\\s*([0-9]{6,24})(?![0-9,.])"));
+        // Parsian: the movement message opens with the account on its own line and the "مبلغ:"
+        // amount line directly follows it ("3010…\nمبلغ:500,000-\nمانده:…"). Requiring that next
+        // line keeps unrelated one-off codes (OTPs, renewal notices) from being read as accounts.
+        ACCOUNT_RULES.put("Parsian",
+            Pattern.compile("(?m)^([0-9]{10,24})\\s*\\r?\\n\\s*\u0645\u0628\u0644\u063A:"));
     }
 
     static { VERSION = rulesVersion(); }
