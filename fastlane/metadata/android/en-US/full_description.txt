@@ -1,10 +1,10 @@
-Balance reads supported bank balance SMS messages locally and shows the latest balance for each bank plus the combined total.
+Balance reads supported bank balance SMS messages locally and shows the latest balance for each bank — split per account number when the bank SMS states one — plus the combined total.
 
 Currently designed for users in Iran, with support for Iranian banks and Persian bank SMS formats.
 
 Features:
 - Offline SMS parsing with no internet permission
-- Latest balance per supported bank without duplicate accumulation
+- Latest balance per supported bank, split per account number when stated, without duplicate accumulation
 - Combined balance total
 - Toman display mode
 - Persistent privacy masking for balances
@@ -13,8 +13,8 @@ Features:
 - Transaction history with deposit and withdrawal tracking per day, month and year, refreshing automatically as new bank SMS arrive, with out-of-order messages (like a transfer and its fee) shown in their true order
 - Filter history by movement type (all, deposits or withdrawals) and by date — today, this month, this year or a custom Persian date range — applied to the whole screen
 - Bank rule updates rebuild history from your SMS and match it to what is already stored, so nothing is ever counted twice
-- Full history from the total card; tap a bank for just that bank's transactions
-- Long-press the total card or any bank card to copy that balance
+- Full history from the total card; tap a bank for just that bank's transactions, or tap one of its accounts (a row or an account chip) for a single account's history
+- Long-press the total card, a bank card or an account row to copy that balance
 - Bank sorting by balance or update time, applied to the list and the widget
 - Exclude banks from the combined total
 - Automatic light and dark theme that follows your device

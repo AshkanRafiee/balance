@@ -1,18 +1,18 @@
 # Balance
 
-Balance is a small, offline-first Android app that reads supported bank SMS messages locally and shows the latest balance for each recognized bank plus the combined total.
+Balance is a small, offline-first Android app that reads supported bank SMS messages locally and shows the latest balance for each recognized bank — broken out per account number when the bank states one — plus the combined total.
 
 The current release is designed for users in Iran. It recognizes Iranian banks and the Persian SMS formats used by those banks.
 
 ## Features
 
 - Local SMS parsing only — no account, cloud service, analytics, or internet permission
-- Latest balance per supported bank, without accumulating repeated messages
+- Latest balance per supported bank — split per account number when the bank SMS state one — without accumulating repeated messages
 - Combined total balance, with the option to exclude individual banks from the total
 - Transaction history with deposits and withdrawals, broken down by day, month and year
 - History filters by movement type (all, deposits or withdrawals) and by date — today, this month, this year or a custom Persian date range — applied to every figure on the screen
-- Full history from the total card, per-bank history from any bank card
-- Long-press the total card to copy the combined total, or long-press a bank card to copy that bank's balance
+- Full history from the total card, per-bank history from any bank card, and single-account history by tapping an account row in the list or an account chip in the history screen
+- Long-press the total card to copy the combined total, or long-press a bank or account card to copy that balance
 - Bank sorting by balance or update time, mirrored in the list and the home-screen widget
 - Home-screen widget with the same bank order, totals, and privacy mask as the app
 - Password-encrypted backup and restore
