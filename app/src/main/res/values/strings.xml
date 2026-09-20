@@ -158,6 +158,7 @@
     <string name="action_include">Include in total</string>
     <string name="action_copy_balance">Copy balance</string>
     <string name="excluded_label">Excluded from total</string>
+    <string name="account_label">Account</string>
     <string name="toast_excluded">Excluded from total</string>
     <string name="toast_included">Included in total</string>
 

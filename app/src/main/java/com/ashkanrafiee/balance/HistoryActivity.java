@@ -51,6 +51,10 @@ public final class HistoryActivity extends Activity {
     /** Intent extra: when set, the screen shows the history of this canonical bank name only. */
     static final String EXTRA_BANK = "bank_filter";
 
+    /** Intent extra (used with {@link #EXTRA_BANK}): when set, only transactions of this account
+     *  number of that bank are shown. */
+    static final String EXTRA_ACCOUNT = "account_filter";
+
     /** Movement-direction filter: all transactions, deposits only, or withdrawals only. */
     static final int DIR_ALL = 0;
     static final int DIR_DEPOSIT = 1;

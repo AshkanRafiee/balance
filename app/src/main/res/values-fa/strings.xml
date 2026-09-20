@@ -158,6 +158,7 @@
     <string name="action_include">لحاظ کردن در مجموع</string>
     <string name="action_copy_balance">کپی موجودی</string>
     <string name="excluded_label">خارج شده از مجموع</string>
+    <string name="account_label">حساب</string>
     <string name="toast_excluded">از مجموع خارج شد</string>
     <string name="toast_included">در مجموع لحاظ شد</string>
 

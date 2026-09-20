@@ -136,6 +136,56 @@ public class SortTest {
             new LinkedHashMap<>(), setOf("Tejarat"), BalanceData.SORT_BALANCE_LOW).isEmpty());
     }
 
+    // ---- groupedForDisplay: accounts stay together under their bank ----
+
+    @Test public void groupedForDisplay_multiAccountBank_staysContiguousInterleaving() {
+        LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
+        map.put("Melli|1111", new Bank("Melli", 2_000_000, 1000L, "5001", "1111"));
+        map.put("Tejarat", new Bank("Tejarat", 1_500_000, 900L, "5000"));
+        map.put("Melli|2222", new Bank("Melli", 3_000_000, 1100L, "5001", "2222"));
+        List<List<String>> result = new ArrayList<>();
+        for (List<Bank> block : BalanceData.groupedForDisplay(map, setOf(), BalanceData.SORT_BALANCE_HIGH))
+            result.add(names(block));
+        assertEquals(2, result.size());
+        assertEquals(java.util.Arrays.asList("Melli", "Melli"), result.get(0));
+        assertEquals(java.util.Arrays.asList("Tejarat"), result.get(1));
+    }
+
+    @Test public void groupedForDisplay_balanceHigh_ranksBankByLargestAccount() {
+        LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
+        map.put("Melli|1111", new Bank("Melli", 2_000_000, 1000L, "5001", "1111"));
+        map.put("Tejarat", new Bank("Tejarat", 2_500_000, 900L, "5000"));
+        map.put("Melli|2222", new Bank("Melli", 3_000_000, 1100L, "5001", "2222"));
+        List<List<Bank>> result = BalanceData.groupedForDisplay(map, setOf(), BalanceData.SORT_BALANCE_HIGH);
+        assertEquals("Melli", result.get(0).get(0).name);
+        assertEquals("Tejarat", result.get(1).get(0).name);
+    }
+
+    @Test public void groupedForDisplay_dateRecent_ranksBankByNewestAccount() {
+        LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
+        map.put("Tejarat|a", new Bank("Tejarat", 1_000_000, 100L, "5000", "a"));
+        map.put("Tejarat|b", new Bank("Tejarat", 1_000_000, 500L, "5000", "b"));
+        map.put("Saman", new Bank("Saman", 1_000_000, 300L, "5001"));
+        List<List<Bank>> result = BalanceData.groupedForDisplay(map, setOf(), BalanceData.SORT_DATE_RECENT);
+        assertEquals("Tejarat", result.get(0).get(0).name);
+        assertEquals("Saman", result.get(1).get(0).name);
+    }
+
+    @Test public void groupedForDisplay_excludedBank_staysAsBottomBlock() {
+        LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
+        map.put("Saman", new Bank("Saman", 9_000_000, 1000L, "5001"));
+        map.put("Melli|1111", new Bank("Melli", 2_000_000, 1000L, "5001", "1111"));
+        List<List<Bank>> result = BalanceData.groupedForDisplay(
+            map, setOf("Saman"), BalanceData.SORT_BALANCE_HIGH);
+        assertEquals("Melli", result.get(0).get(0).name);
+        assertEquals("Saman", result.get(1).get(0).name);
+    }
+
+    @Test public void groupedForDisplay_emptyMap_returnsEmpty() {
+        assertTrue(BalanceData.groupedForDisplay(
+            new LinkedHashMap<>(), setOf("Tejarat"), BalanceData.SORT_BALANCE_LOW).isEmpty());
+    }
+
     // ---- helpers ----
 
     private static LinkedHashMap<String, Bank> banks() {
