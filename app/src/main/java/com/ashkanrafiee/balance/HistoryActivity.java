@@ -359,6 +359,7 @@ public final class HistoryActivity extends Activity {
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         lockOverlay.setVisibility(View.GONE);
 
+        updateSecureFlag();
         render();
         if (pendingScroll > 0) {
             int offset = pendingScroll;
@@ -437,6 +438,8 @@ public final class HistoryActivity extends Activity {
                 ? getString(R.string.account_label) + " " + digits(accountFilter)
                 : getString(R.string.history_bank_chip);
             TextView chip = text(chipText, 11, badgeFg, MEDIUM);
+            chip.setMaxLines(1);
+            chip.setEllipsize(android.text.TextUtils.TruncateAt.END);
             chip.setPadding(dp(8), dp(3), dp(8), dp(3));
             chip.setBackground(rounded(badgeBg, 9));
             LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(-2, -2);

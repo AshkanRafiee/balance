@@ -88,6 +88,7 @@ public class MainActivity extends Activity {
         host.addView(lockOverlay, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         lockOverlay.setVisibility(View.GONE);
+        updateSecureFlag();
         requestSms();
     }
 
@@ -463,7 +464,7 @@ public class MainActivity extends Activity {
             TextView note = new TextView(this);
             note.setText(getString(R.string.lock_fingerprint_unavailable));
             note.setTextSize(12);
-            note.setTextColor(0xFFB91C1C);
+            note.setTextColor(resColor(R.color.negative));
             LinearLayout.LayoutParams noteLp = new LinearLayout.LayoutParams(-1, -2);
             noteLp.topMargin = dp(14);
             wrap.addView(note, noteLp);
@@ -644,7 +645,7 @@ public class MainActivity extends Activity {
         if (warning != null) {
             TextView error = new TextView(this);
             error.setText(warning);
-            error.setTextColor(0xFFB91C1C);
+            error.setTextColor(resColor(R.color.negative));
             error.setTextSize(13);
             error.setPadding(0, 0, 0, dp(10));
             layout.addView(error);
@@ -1104,7 +1105,13 @@ public class MainActivity extends Activity {
             round(c, 24, 120, w - 24, 270, 28, panel);
             float totalLabelX = rtl ? w - 48 : 48;
             text(c, getString(R.string.total_balance_label), totalLabelX, 156, 13, muted, edgeAlign);
-            totalValue(c, total, totalLabelX, 208, w - 150, rtl);
+            if (banks.isEmpty()) {
+                // No balances yet: a dash, not a literal zero, so a fresh install or a bank-less
+                // state never reads as a real zero-rial balance.
+                text(c, getString(R.string.total_empty_value), totalLabelX, 208, 34, fg, edgeAlign);
+            } else {
+                totalValue(c, total, totalLabelX, 208, w - 150, rtl);
+            }
             text(c, getString(R.string.total_history_hint), w / 2f, 253, 11, muted, Paint.Align.CENTER);
             RectF eyeRect = rtl ? new RectF(45, 147, 75, 165) : new RectF(w - 75, 147, w - 45, 165);
             float eyeCenterX = rtl ? 60 : w - 60;

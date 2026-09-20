@@ -101,11 +101,13 @@ public final class AboutActivity extends Activity {
         host.addView(lockOverlay, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         lockOverlay.setVisibility(View.GONE);
+        updateSecureFlag();
 
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
         TextView back = text(rtl ? "›" : "‹", 34, fg);
         back.setGravity(Gravity.CENTER);
+        back.setContentDescription(getString(R.string.about_back));
         back.setOnClickListener(v -> finish());
         bar.addView(back, new LinearLayout.LayoutParams(dp(42), dp(48)));
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-2, -2);
