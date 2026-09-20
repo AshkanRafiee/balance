@@ -72,6 +72,12 @@ final class LockManager {
     /** First cooldown length, doubling per lockout up to {@link #LOCKOUT_MAX_MS}. */
     private static final long LOCKOUT_BASE_MS = 30_000L;
     private static final long LOCKOUT_MAX_MS = 10 * 60_000L;
+    /** Cooldown deadlines use the monotonic clock so the device owner cannot skip them by changing the
+     *  clock (forward), and a wrong zone/NTP rollback (backward) cannot trap the owner in a cooldown
+     *  that never expires. An {@code KEY_LOCK_UNTIL} left behind by an older build is an epoch-millis
+     *  deadline; such values sit astronomically above any plausible reboot uptime, so the two formats
+     *  are told apart by size. */
+    private static final long WALL_CLOCK_EPOCH_MS = 1_000_000_000_000L;
 
     /** PBKDF2 work factor for the lock code: 100k keeps enabling and verifying snappy on phones.
      *  Stored per-lock, so an existing stronger factor keeps working and is re-derived lazily
@@ -317,7 +323,7 @@ final class LockManager {
         if (!isEnabled(c)) return true;
         if (code == null) return false;
         SharedPreferences p = prefs(c);
-        if (p.getLong(KEY_LOCK_UNTIL, 0) > System.currentTimeMillis()) return false;
+        if (lockoutRemainingMs(p) > 0) return false;
         String saltB64 = p.getString(KEY_LOCK_SALT, null);
         String hashB64 = p.getString(KEY_LOCK_HASH, null);
         if (saltB64 == null || hashB64 == null) return false;
@@ -345,13 +351,23 @@ final class LockManager {
     /** Attempts left before the next cooldown, or 0 while a cooldown is active. */
     static int attemptsRemaining(Context c) {
         SharedPreferences p = prefs(c);
-        if (p.getLong(KEY_LOCK_UNTIL, 0) > System.currentTimeMillis()) return 0;
+        if (lockoutRemainingMs(p) > 0) return 0;
         return Math.max(0, MAX_ATTEMPTS - p.getInt(KEY_LOCK_ATTEMPTS, 0));
     }
 
     /** Milliseconds still in a failed-attempt cooldown, or 0 when none is active. */
     static long cooldownRemainingMs(Context c) {
-        return Math.max(0, prefs(c).getLong(KEY_LOCK_UNTIL, 0) - System.currentTimeMillis());
+        return lockoutRemainingMs(prefs(c));
+    }
+
+    /** Milliseconds still in the failed-attempt cooldown, or 0 when none is active. Honors cooldown
+     *  deadlines stored by older builds as epoch-millis as well as the current monotonic-uptime ones. */
+    private static long lockoutRemainingMs(SharedPreferences p) {
+        long until = p.getLong(KEY_LOCK_UNTIL, 0);
+        if (until == 0) return 0;
+        if (until > WALL_CLOCK_EPOCH_MS)
+            return Math.max(0, until - System.currentTimeMillis());
+        return Math.max(0, until - android.os.SystemClock.elapsedRealtime());
     }
 
     /** Forgets the failed-attempt accounting, e.g. after a verified fingerprint unlock. */
@@ -365,7 +381,7 @@ final class LockManager {
         if (attempts >= MAX_ATTEMPTS) {
             int stage = Math.max(p.getInt(KEY_LOCK_STAGE, 0), 0);
             long delay = Math.min(LOCKOUT_BASE_MS << Math.min(stage, 16), LOCKOUT_MAX_MS);
-            e.putLong(KEY_LOCK_UNTIL, System.currentTimeMillis() + delay);
+            e.putLong(KEY_LOCK_UNTIL, android.os.SystemClock.elapsedRealtime() + delay);
             e.putInt(KEY_LOCK_STAGE, stage + 1);
             e.remove(KEY_LOCK_ATTEMPTS);
         } else {

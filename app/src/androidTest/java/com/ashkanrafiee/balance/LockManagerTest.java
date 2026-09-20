@@ -152,6 +152,46 @@ public class LockManagerTest {
             LockManager.verify(ctx, "1234"));
     }
 
+    /** The cooldown deadline is stored on the monotonic clock, so changing the device clock can
+     *  neither skip nor extend the lockout: an era past its deadline reads as an expired cooldown. */
+    @Test public void cooldown_isStoredOnTheMonotonicClock() {
+        LockManager.enable(ctx, "1234", true, false);
+        for (int i = 0; i < LockManager.MAX_ATTEMPTS; i++) LockManager.verify(ctx, "9999");
+        long stored = ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE)
+            .getLong(LockManager.KEY_LOCK_UNTIL, 0);
+        assertTrue("The fifth wrong code must write a cooldown deadline", stored > 0);
+        assertTrue("The deadline must be monotonic uptime, not an epoch wall-clock value",
+            stored < 1_000_000_000_000L);
+        long remaining = LockManager.cooldownRemainingMs(ctx);
+        assertTrue("The stored deadline must still read as an active cooldown", remaining > 0);
+
+        // Aging the deadline out must restore the attempts (as a real reader would observe).
+        ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit()
+            .putLong(LockManager.KEY_LOCK_UNTIL, SystemClock.elapsedRealtime() - 1000).commit();
+        assertEquals("An aged monotonic deadline must read as expired", 0,
+            LockManager.cooldownRemainingMs(ctx));
+    }
+
+    /** A cooldown written by an older build as an epoch-millis deadline must still be honoured: a
+     *  still-running lockout stays wedged, and an expired one clears. */
+    @Test public void legacyEpochCooldown_isStillHonoured() {
+        LockManager.enable(ctx, "1234", true, false);
+        ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit()
+            .putLong(LockManager.KEY_LOCK_UNTIL, System.currentTimeMillis() + 3000).commit();
+        long remaining = LockManager.cooldownRemainingMs(ctx);
+        assertTrue("A legacy epoch deadline in the future must still run", remaining > 0);
+        assertTrue("It must run for as long as the stored deadline implies", remaining <= 3000);
+        assertFalse("The lock must stay refused under a legacy epoch cooldown",
+            LockManager.verify(ctx, "1234"));
+
+        ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit()
+            .putLong(LockManager.KEY_LOCK_UNTIL, System.currentTimeMillis() - 1000).commit();
+        assertEquals("An expired legacy deadline must clear the cooldown", 0,
+            LockManager.cooldownRemainingMs(ctx));
+        assertTrue("The right code unlocks once a legacy cooldown lapses",
+            LockManager.verify(ctx, "1234"));
+    }
+
     @Test public void secondLockout_outlastsTheFirst() {
         LockManager.enable(ctx, "1234", true, false);
         for (int i = 0; i < LockManager.MAX_ATTEMPTS; i++) LockManager.verify(ctx, "9999");
