@@ -25,4 +25,12 @@ public class AboutLinksTest {
         assertEquals("github.com", uri.getHost());
         assertEquals("/AshkanRafiee/balance/issues", uri.getPath());
     }
+
+    @Test public void donation_link_points_at_the_repo_readme_donate_section() throws Exception {
+        URI uri = new URI(AboutActivity.DONATION_URL);
+        assertEquals("https", uri.getScheme());
+        assertEquals("github.com", uri.getHost());
+        assertEquals("/AshkanRafiee/balance", uri.getPath());
+        assertEquals("donate", uri.getFragment());
+    }
 }
