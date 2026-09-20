@@ -4,3 +4,4 @@ Balances per account number, and Melli movements fixed.
 • Tapping an account row or the account chip in the history screen opens a single-account history; long-pressing an account card copies that account's exact balance.
 • History filters and the combined total respect the same per-account split, and long-deposit/withdraw totals per day, month and year stay consistent with it.
 • Melli movements are now read from their own label and sign, so the first movement of an account is no longer skipped and later balances are no longer off by it.
+• Account detection runs through a single shared bank-rule engine, recognizing account numbers in Tejarat, Parsian, Melli, Saderat, Pasargad and Mehr Iran messages, and each account's chain of movements stays intact across refreshes and rule updates.
