@@ -61,6 +61,15 @@ Two messages with identical content — same bank sender, same movement amount, 
 
 When the bank message rules change, history is rebuilt from the current inbox on the next open; the rebuilt entries are matched against what is already stored by these fingerprints, so the rebuild never duplicates a recorded transaction. While rebuilding, bank messages that arrived out of order (for example a transfer and its fee) are re-read in their true chronological order where the balances allow it.
 
+## Reporting a problem or requesting a bank
+
+Is your bank's SMS not recognized, the per-account split wrong, or a balance or
+history entry off? We need the bank's exact message format — verbatim, line
+breaks and spacing included — plus the sender number, your Android version and
+your phone model. You may swap the real numbers for made-up ones of the same
+length and format for privacy. Open an [issue](https://github.com/AshkanRafiee/balance/issues)
+or email us; see [CONTRIBUTING.md](CONTRIBUTING.md) for the full checklist.
+
 ## Source
 
 https://github.com/ashkanrafiee/balance
