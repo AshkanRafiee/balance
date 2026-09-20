@@ -1010,7 +1010,8 @@ public final class HistoryActivity extends Activity {
         LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-2, -2);
         labelParams.setMarginStart(dp(9));
         TextView label = text(getString(R.string.history_total), 12, muted, MEDIUM);
-        label.setLetterSpacing(0.08f);
+        label.setLetterSpacing(label.getResources().getConfiguration().getLayoutDirection()
+            == View.LAYOUT_DIRECTION_LTR ? 0.08f : 0f);
         top.addView(label, labelParams);
         hero.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
@@ -1070,10 +1071,12 @@ public final class HistoryActivity extends Activity {
         return cell;
     }
 
-    /** A list-style section header: letter-spaced label on the baseline. */
+    /** A list-style section header. Letter-spaced only in left-to-right layouts: in the Persian
+     *  interface extra letter spacing would break the joining of the script's characters. */
     private TextView sectionLabel(String s) {
         TextView t = text(s, 12, muted, MEDIUM);
-        t.setLetterSpacing(0.09f);
+        t.setLetterSpacing(t.getResources().getConfiguration().getLayoutDirection()
+            == View.LAYOUT_DIRECTION_LTR ? 0.09f : 0f);
         return t;
     }
 
