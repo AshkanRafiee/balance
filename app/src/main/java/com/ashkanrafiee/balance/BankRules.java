@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 final class BankRules {
     /** Maps a canonical (English, storage-key) bank name to its localized display string resource. */
@@ -268,5 +270,47 @@ final class BankRules {
         if (s.startsWith("0098")) s = s.substring(4);
         if (s.startsWith("98") && s.length() > 8) s = s.substring(2);
         return s;
+    }
+
+    /** Per-bank rules that pull the account number out of a message body, when the bank states one.
+     *  Banks absent from this table (or messages that never mention an account) stay under the
+     *  bank-level balance/transaction slot. Keys are canonical bank names (see bankName). */
+    private static final Map<String, Pattern> ACCOUNT_RULES = new HashMap<>();
+
+    static {
+        // Mellat: the account digits are glued straight onto the label (no colon/spacing), e.g.
+        // "حساب1110000222". The strict glue keeps "مانده حساب: 72,222,945"-style balances out.
+        ACCOUNT_RULES.put("Mellat",
+            Pattern.compile("\u062D\u0633\u0627\u0628([0-9]{6,})"));
+        // Melli: "حساب:10001" — label, optional spacing, colon, then digits directly. Requiring at
+        // least three consecutive digits (no commas) skips comma-grouped balance figures.
+        ACCOUNT_RULES.put("Melli",
+            Pattern.compile("\u062D\u0633\u0627\u0628\\s*:\\s*([0-9]{3,12})(?![0-9,.])"));
+        // Resalat: a three-part dotted id like "10.1234567.2". The middle part must be >= 4 digits
+        // on both sides, which also keeps dotted dates out ("1405.06.15" alone can't match).
+        ACCOUNT_RULES.put("Resalat",
+            Pattern.compile("(?<![0-9])[0-9]{1,2}\\.[0-9]{4,12}\\.[0-9]{1,2}(?![0-9])"));
+    }
+
+    /** Returns the account number a message from the given bank belongs to, or null when the bank
+     *  never states one in this message. Matching runs over ASCII digits only (Persian/Arabic digit
+     *  forms are folded in) so punctuation like ":", ".", and thousand separators keep their role. */
+    static String extractAccount(String bank, String body) {
+        if (bank == null || body == null) return null;
+        Pattern p = ACCOUNT_RULES.get(bank);
+        if (p == null) return null;
+        Matcher m = p.matcher(digitsToAscii(body));
+        if (!m.find()) return null;
+        return m.groupCount() == 0 ? m.group(0) : m.group(1);
+    }
+
+    private static String digitsToAscii(String raw) {
+        StringBuilder out = new StringBuilder(raw.length());
+        for (char c : raw.toCharArray()) {
+            if (c >= '\u06F0' && c <= '\u06F9') out.append((char) ('0' + c - '\u06F0'));
+            else if (c >= '\u0660' && c <= '\u0669') out.append((char) ('0' + c - '\u0660'));
+            else out.append(c);
+        }
+        return out.toString();
     }
 }

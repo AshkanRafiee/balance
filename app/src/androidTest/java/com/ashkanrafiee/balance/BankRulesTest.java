@@ -159,4 +159,54 @@ public class BankRulesTest {
         assertTrue("EDBI should be reachable", reachable.contains("EDBI"));
         assertTrue("Tejarat should be reachable", reachable.contains("Tejarat"));
     }
+
+    // ---- account extraction -------------------------------------------------------------
+    @Test public void extractAccount_mellatGluedDigits_returnsAccount() {
+        assertEquals("1110000222", BankRules.extractAccount("Mellat",
+            "\u062D\u0633\u0627\u0628" + "1110000222"));
+        assertEquals("1110000222", BankRules.extractAccount("Mellat",
+            "\u062D\u0633\u0627\u0628" + "\u06F1\u06F1\u06F1\u06F0\u06F0\u06F0\u06F0\u06F2\u06F2\u06F2"));
+    }
+
+    @Test public void extractAccount_mellatBalanceStatement_notCaptured() {
+        // The colon/space between label and figure keeps balance statements out of the glue rule.
+        assertNull(BankRules.extractAccount("Mellat", "\u0645\u0627\u0646\u062F\u0647 "
+            + "\u062D\u0633\u0627\u0628" + ": 72,222,945"));
+        assertNull(BankRules.extractAccount("Mellat", "\u062D\u0633\u0627\u0628" + "شما 1,000,000"));
+    }
+
+    @Test public void extractAccount_melliColonDigits_returnsAccount() {
+        assertEquals("10001", BankRules.extractAccount("Melli",
+            "\u062D\u0633\u0627\u0628" + ":10001"));
+        assertEquals("10001", BankRules.extractAccount("Melli",
+            "\u062D\u0633\u0627\u0628" + ": " + "\u06F1\u06F0\u06F0\u06F0\u06F1"));
+    }
+
+    @Test public void extractAccount_melliBalanceStatement_notCaptured() {
+        // Two digits under the three-digit minimum and thousand separators reject comma-grouped balances.
+        assertNull(BankRules.extractAccount("Melli", "\u0645\u0627\u0646\u062F\u0647 "
+            + "\u062D\u0633\u0627\u0628" + ": 72,222,945 \u0631\u06CC\u0627\u0644"));
+        assertNull(BankRules.extractAccount("Melli", "\u062D\u0633\u0627\u0628" + ": 10001,"));
+    }
+
+    @Test public void extractAccount_resalatDotted_returnsAccount() {
+        assertEquals("10.1234567.2", BankRules.extractAccount("Resalat", "10.1234567.2\n-200,000,000"));
+    }
+
+    @Test public void extractAccount_resalatDottedDate_notCaptured() {
+        // A dotted date has a two-digit middle segment, below the four-digit minimum, so it stays a date.
+        assertNull(BankRules.extractAccount("Resalat", "\u06F1\u06F4\u06F0\u06F5.\u06F0\u06F6.\u06F1\u06F5"));
+    }
+
+    @Test public void extractAccount_noRuleBank_accountNotExtracted() {
+        assertNull(BankRules.extractAccount("Tejarat", "\u062D\u0633\u0627\u0628" + ": 01351234567890"));
+        assertNull(BankRules.extractAccount("Saman", "\u0645\u062C\u0648\u062F\u06CC: 1,250,000"));
+        assertNull(BankRules.extractAccount("Blu", "\u06F1\u06F4\u06F0\u06F5.\u06F0\u06F6.\u06F1\u06F5"));
+    }
+
+    @Test public void extractAccount_nullArguments_notCaptured() {
+        assertNull(BankRules.extractAccount(null, "10.1234567.2"));
+        assertNull(BankRules.extractAccount("Mellat", null));
+        assertNull(BankRules.extractAccount("Mellat", ""));
+    }
 }
