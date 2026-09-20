@@ -64,6 +64,16 @@ your phone model. You may swap the real numbers for made-up ones of the same
 length and format for privacy. Open an [issue](https://github.com/AshkanRafiee/balance/issues)
 or email us; see [CONTRIBUTING.md](CONTRIBUTING.md) for the full checklist.
 
+## Donate
+
+Balance is free and open source, and always will be. If you find it useful, you can support its development with a donation in GRAM (prev. TON):
+
+```
+UQB4goexr3cp0QIdd2_fAJPW9REwZvrRQm-mltr1dMQtV9ig
+```
+
+Thank you for your support.
+
 ## Source
 
 https://github.com/ashkanrafiee/balance
