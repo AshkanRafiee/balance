@@ -56,7 +56,7 @@ final class BalanceData {
     static final int SORT_DATE_OLDEST = 4;
 
     /** Bumped whenever the movement-message recognition rules change, forcing a full history re-scan. */
-    static final int HISTORY_RULES_VERSION = 7;
+    static final int HISTORY_RULES_VERSION = 8;
 
     /** Persisted recent-movement window for balance-chain reconciliation across split scans. */
     static final String KEY_RECENT_MOVEMENTS = "recent_movements";

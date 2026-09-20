@@ -266,6 +266,40 @@ public class BalanceScanTest {
         assertEquals("302601234567890123", acct.account);
     }
 
+    @Test public void pasargadDottedAccountLine_singleAccountEntry() throws Exception {
+        // Pasargad movements open with the four-part dotted account id alone, so their balances land
+        // in a per-account entry (dotted id kept verbatim) instead of a bank-wide slot.
+        seed("B.Pasargad", "123.456.78901234.5\n-508,000\n06/29_21:06\n\u0645\u0627\u0646\u062F\u0647: 51,289",
+            T + 1000);
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+
+        LinkedHashMap<String, Bank> after = BalanceData.read(ctx);
+        assertEquals(1, after.size());
+        Bank acct = after.get("Pasargad|123.456.78901234.5");
+        assertNotNull(acct);
+        assertEquals(51_289L, acct.amount);
+        assertEquals("123.456.78901234.5", acct.account);
+    }
+
+    @Test public void saderatAccountLabel_singleAccountEntry() throws Exception {
+        // Saderat movements state the account right after the "حساب:" label, so their balances land
+        // in a per-account entry instead of a bank-wide slot.
+        seed("BankSaderat", " \u0627\u0646\u062A\u0642\u0627\u0644: 500,000-\n \u062D\u0633\u0627\u0628:48203\n"
+            + " \u0645\u0627\u0646\u062F\u0647:422,050\n 0629 - 21:00 ", T + 1000);
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+
+        LinkedHashMap<String, Bank> after = BalanceData.read(ctx);
+        assertEquals(1, after.size());
+        Bank acct = after.get("Saderat|48203");
+        assertNotNull(acct);
+        assertEquals(422_050L, acct.amount);
+        assertEquals("48203", acct.account);
+    }
+
     @Test public void freshInstallPersianDigitMessage_parsesValue() throws Exception {
         seed("5000973189",
                 "\u0645\u0648\u062C\u0648\u062F\u06CC \u062D\u0633\u0627\u0628 \u0634\u0645\u0627: \u06F1\u066C\u06F2\u06F5\u06F0\u066C\u06F0\u06F0\u06F0 \u0631\u06CC\u0627\u0644",

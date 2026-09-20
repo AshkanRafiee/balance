@@ -303,6 +303,17 @@ final class BankRules {
         // no-thousand-separator guard keeps the amount, the date and the balance from matching.
         ACCOUNT_RULES.put("Mehr",
             Pattern.compile("(?m)^[\\u202A-\\u202E]*([0-9]{10,24})(?![0-9,.])[\\u202A-\\u202E ]*\\r?$"));
+        // Pasargad: the movement message opens with the account on its own first line, a dotted id
+        // like "123.456.78901234.5". Requiring the whole line to be four dot-separated digit runs
+        // (and nothing after the last) keeps two/three-part dotted dates and signed amounts out.
+        ACCOUNT_RULES.put("Pasargad",
+            Pattern.compile("(?m)^[0-9]{1,4}\\.[0-9]{1,6}\\.[0-9]{6,12}\\.[0-9]{1,3}(?![0-9.])\\s*\\r?$"));
+        // Saderat: "حساب:48203" — the "حساب" label, a colon, then the account right after it (the
+        // movement message prints the label at the start of its own line). Requiring at least four
+        // consecutive digits with no commas, anchored to the line start, keeps balances and
+        // destination mentions like "به حساب: 1,000,000" from being read as the account.
+        ACCOUNT_RULES.put("Saderat",
+            Pattern.compile("(?m)^[ \\t]*\u062D\u0633\u0627\u0628\\s*:\\s*([0-9]{4,10})(?![0-9,.])"));
     }
 
     static { VERSION = rulesVersion(); }

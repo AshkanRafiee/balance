@@ -345,6 +345,48 @@ public class HistoryScanTest {
         assertEquals(-279500L, sum);   // -400,000 + +120,500
     }
 
+    @Test public void realBankFormat_pasargadDottedAccountMovements_areRecorded() throws Exception {
+        // Pasargad opens with the four-part dotted account id alone and writes the amount with a
+        // leading sign ("-508,000"), with the resulting balance on the last line.
+        seed("B.Pasargad", "123.456.78901234.5\n-508,000\n06/29_21:06\n\u0645\u0627\u0646\u062F\u0647: 51,289", T);
+        seed("B.Pasargad", "123.456.78901234.5\n+120,000\n06/30_09:14\n\u0645\u0627\u0646\u062F\u0647: 171,289", T + 1000);
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(2, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(2, txs.size());
+        long sum = 0;
+        for (Transaction t : txs) {
+            assertEquals("Pasargad", t.bank);
+            assertEquals("123.456.78901234.5", t.account);
+            sum += t.amount;
+        }
+        assertEquals(-388000L, sum);    // -508,000 + +120,000
+    }
+
+    @Test public void realBankFormat_saderatAccountLabelMovements_areRecorded() throws Exception {
+        // Saderat writes "انتقال: <amount>-" and the account right after the "حساب:" label, with
+        // the resulting balance in the line below.
+        seed("BankSaderat", " \u0627\u0646\u062A\u0642\u0627\u0644: 500,000-\n \u062D\u0633\u0627\u0628:48203\n"
+            + " \u0645\u0627\u0646\u062F\u0647:422,050\n 0629 - 21:00 ", T);
+        seed("BankSaderat", " \u0627\u0646\u062A\u0642\u0627\u0644: 350,000+\n \u062D\u0633\u0627\u0628:48203\n"
+            + " \u0645\u0627\u0646\u062F\u0647:772,050\n 0630 - 09:20 ", T + 1000);
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(2, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(2, txs.size());
+        long sum = 0;
+        for (Transaction t : txs) {
+            assertEquals("Saderat", t.bank);
+            assertEquals("48203", t.account);
+            sum += t.amount;
+        }
+        assertEquals(-150000L, sum);    // -500,000 + +350,000
+    }
+
     @Test public void realBankFormat_resalat_duplicateDelivery_countsOnce() throws Exception {
         seed("2000474701", RESALAT_WITHDRAWAL_1, T);
         seed("2000474701", RESALAT_WITHDRAWAL_1, T + 500);

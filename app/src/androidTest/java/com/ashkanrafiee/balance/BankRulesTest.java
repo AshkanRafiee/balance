@@ -261,6 +261,40 @@ public class BankRulesTest {
         assertNull(BankRules.extractAccount("Mehr", "\u0645\u0627\u0646\u062F\u0647:865,083"));
     }
 
+    @Test public void extractAccount_pasargadDottedAccountLine_returnsAccount() {
+        // Pasargad movements open with a four-part dotted account id alone on the first line.
+        assertEquals("123.456.78901234.5", BankRules.extractAccount("Pasargad",
+            "123.456.78901234.5\n-508,000\n06/29_21:06\n\u0645\u0627\u0646\u062F\u0647: 51,289"));
+        assertEquals("123.456.78901234.5", BankRules.extractAccount("Pasargad",
+            "\u06F1\u06F2\u06F3.\u06F4\u06F5\u06F6.\u06F7\u06F8\u06F9\u06F0\u06F1\u06F2\u06F3\u06F4.\u06F5\n"
+            + "-508,000\n06/29_21:06\n\u0645\u0627\u0646\u062F\u0647: 51,289"));
+    }
+
+    @Test public void extractAccount_pasargadDateOrAmount_notCaptured() {
+        // A dated line, a signed amount, or a dotted date must not be mistaken for the account.
+        assertNull(BankRules.extractAccount("Pasargad", "-508,000\n06/29_21:06\n\u0645\u0627\u0646\u062F\u0647: 51,289"));
+        assertNull(BankRules.extractAccount("Pasargad", "1405.06.29\n06/29_21:06\n\u0645\u0627\u0646\u062F\u0647: 51,289"));
+        assertNull(BankRules.extractAccount("Pasargad", "06/29_21:06\n\u0645\u0627\u0646\u062F\u0647: 51,289"));
+    }
+
+    @Test public void extractAccount_saderatLabel_returnsAccount() {
+        // Saderat movements state the account right after the "حساب:" label, with or without
+        // spacing, on its own line.
+        assertEquals("48203", BankRules.extractAccount("Saderat",
+            " \u0627\u0646\u062A\u0642\u0627\u0644: 500,000-\n \u062D\u0633\u0627\u0628:48203\n \u0645\u0627\u0646\u062F\u0647:422,050"));
+        assertEquals("48203", BankRules.extractAccount("Saderat",
+            " \u0627\u0646\u062A\u0642\u0627\u0644: 500,000-\n \u062D\u0633\u0627\u0628: 48203\n \u0645\u0627\u0646\u062F\u0647:422,050"));
+    }
+
+    @Test public void extractAccount_saderatBalanceOrDestination_notCaptured() {
+        // The balance line uses a different label, and a destination mention ("به حساب: …") is not
+        // the account line start the rule is anchored to.
+        assertNull(BankRules.extractAccount("Saderat",
+            " \u0645\u0627\u0646\u062F\u0647:422,050"));
+        assertNull(BankRules.extractAccount("Saderat",
+            " \u0627\u0646\u062A\u0642\u0627\u0644 \u0628\u0647 \u062D\u0633\u0627\u0628: 1,000,000"));
+    }
+
     @Test public void extractAccount_nullArguments_notCaptured() {
         assertNull(BankRules.extractAccount(null, "10.1234567.2"));
         assertNull(BankRules.extractAccount("Mellat", null));
