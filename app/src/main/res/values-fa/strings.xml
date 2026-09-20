@@ -60,6 +60,7 @@
     <string name="backup_restore_summary_none">پشتیبان موجودی جدیدتری ندارد</string>
     <string name="backup_restore_confirm">بازیابی</string>
     <string name="backup_validate_empty">رمز عبور را وارد کنید</string>
+    <string name="backup_validate_short">رمز عبور باید حداقل ۸ کاراکتر باشد</string>
     <string name="backup_validate_mismatch">رمزهای عبور یکسان نیستند</string>
     <string name="backup_error_not_backup">این فایل یک پشتیبان Balance نیست</string>
     <string name="backup_error_unsupported">این پشتیبان از قالب پشتیبانی‌نشده استفاده می‌کند</string>

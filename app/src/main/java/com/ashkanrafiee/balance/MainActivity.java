@@ -41,6 +41,9 @@ public class MainActivity extends Activity {
     /** How long a copied balance stays in the system clipboard before it is cleared (see
      *  {@code BalanceView.copyBalance}). */
     private static final long CLIP_CLEAR_MS = 60_000L;
+    /** Shortest acceptable backup password: the backup is an off-device ciphertext that brute force
+     *  can grind at, so a very short code would nullify the 600k-iteration KDF. */
+    private static final int MIN_BACKUP_PASSWORD_LENGTH = 8;
     private BalanceView view;
     private String pendingBackupPassword;
     private LockOverlay lockOverlay;
@@ -697,6 +700,10 @@ public class MainActivity extends Activity {
                 String value = pw.getText().toString();
                 if (value.isEmpty()) {
                     Toast.makeText(MainActivity.this, getString(R.string.backup_validate_empty), Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (forBackup && value.length() < MIN_BACKUP_PASSWORD_LENGTH) {
+                    Toast.makeText(MainActivity.this, getString(R.string.backup_validate_short), Toast.LENGTH_SHORT).show();
                     return;
                 }
                 if (forBackup && !value.equals(cf.getText().toString())) {

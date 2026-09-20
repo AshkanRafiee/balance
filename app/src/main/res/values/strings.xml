@@ -60,6 +60,7 @@
     <string name="backup_restore_summary_none">The backup holds no newer balances</string>
     <string name="backup_restore_confirm">Restore</string>
     <string name="backup_validate_empty">Enter a password</string>
+    <string name="backup_validate_short">Password must be at least 8 characters</string>
     <string name="backup_validate_mismatch">Passwords do not match</string>
     <string name="backup_error_not_backup">This file is not a Balance backup</string>
     <string name="backup_error_unsupported">This backup uses an unsupported format</string>
