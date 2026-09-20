@@ -322,6 +322,29 @@ public class HistoryScanTest {
         assertEquals(-200000000L, txs.get(1).amount);    // oldest last
     }
 
+    @Test public void realBankFormat_mehrIran_bareTrailingSignedAmounts_areRecorded() throws Exception {
+        // Mehr Iran opens with the account digits alone (RTL bidi-wrapped) and writes its movement
+        // as a bare amount with the sign trailing ("400,000-"), with the resulting balance on the
+        // last line. Both must be attributed to the per-account slot.
+        seed("B.QMEHRIRAN", "\u202A302601234567890123\u202C\n400,000-\n1405/6/29-20:30\n"
+            + "\u0645\u0627\u0646\u062F\u0647:865,083", T);
+        seed("B.QMEHRIRAN", "\u202A302601234567890123\u202C\n120,500+\n1405/6/29-20:31\n"
+            + "\u0645\u0627\u0646\u062F\u0647:985,583", T + 1000);
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(2, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(2, txs.size());
+        long sum = 0;
+        for (Transaction t : txs) {
+            assertEquals("Mehr", t.bank);
+            assertEquals("302601234567890123", t.account);
+            sum += t.amount;
+        }
+        assertEquals(-279500L, sum);   // -400,000 + +120,500
+    }
+
     @Test public void realBankFormat_resalat_duplicateDelivery_countsOnce() throws Exception {
         seed("2000474701", RESALAT_WITHDRAWAL_1, T);
         seed("2000474701", RESALAT_WITHDRAWAL_1, T + 500);

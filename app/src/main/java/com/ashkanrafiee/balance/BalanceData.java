@@ -56,7 +56,7 @@ final class BalanceData {
     static final int SORT_DATE_OLDEST = 4;
 
     /** Bumped whenever the movement-message recognition rules change, forcing a full history re-scan. */
-    static final int HISTORY_RULES_VERSION = 6;
+    static final int HISTORY_RULES_VERSION = 7;
 
     /** Persisted recent-movement window for balance-chain reconciliation across split scans. */
     static final String KEY_RECENT_MOVEMENTS = "recent_movements";
@@ -110,6 +110,12 @@ final class BalanceData {
      *  direction, so no label or keyword is needed. */
     private static final Pattern signedAmount = Pattern.compile(
         "^\\s*([+-])\\s*([0-9][0-9,]*)", Pattern.MULTILINE);
+    /** A bare, signed amount on its own line with the sign after the number, as Mehr Iran writes it
+     *  ("400,000-" on its own line, resulting balance on the last). Allowing RTL bidi marks around
+     *  the amount and holding the whole line to the shape "digits, optional sign" keeps unsigned
+     *  balances, account lines and date lines from matching; the explicit sign gives the direction. */
+    private static final Pattern bareSignedAmount = Pattern.compile(
+        "(?m)^[ \\t\\u202A-\\u202E]*([0-9][0-9,]*)[ \\t\\u202A-\\u202E]*([+-])[ \\t\\u202A-\\u202E]*$");
     /** A line of "<label>:<amount><sign>" where the sign trails the number, as Melli writes it
      *  ("انتقالي:1,000,000-", "خريداينترنتي:7,600,000-", "حواله پل:7,700,000+"). The line ending in
      *  an explicit sign distinguishes the moved amount from balances and account numbers (which are
@@ -972,8 +978,10 @@ final class BalanceData {
      *  "مبلغ:500,000-"), after a deposit/withdrawal label ("واریز:"/"برداشت:", Tejarat), as a
      *  "<label>:<amount><sign>" line with a trailing sign (Melli's "انتقالي:1,000,000-" /
      *  "حواله پل:7,700,000+" layout), as a bare
-     *  number standing next to "ریال" that is not the stated resulting balance (Blu), or as a bare
-     *  signed amount opening the message (Resalat's "-200,000,000" first line). The direction is
+     *  number standing next to "ریال" that is not the stated resulting balance (Blu), as a bare
+     *  signed amount opening the message (Resalat's "-200,000,000" first line), or as a bare
+     *  signed amount alone on its own line with the sign trailing the number (Mehr Iran's
+     *  "400,000-" layout). The direction is
      *  taken from the explicit sign, the direction label, or exactly one of the deposit/withdrawal
      *  keywords. Finally the message must also carry the resulting balance — the proof that the
      *  movement settled — so OTP payment prompts or authorization messages are never counted. Returns a
@@ -1043,6 +1051,17 @@ final class BalanceData {
             if (ms.find()) {
                 sign = ms.group(1).equals("-") ? -1 : 1;
                 amount = toLong(ms.group(2));
+            }
+        }
+
+        // 6) A bare signed amount on its own line with a trailing sign, the mirror of Resalat's
+        //    leading-sign form (Mehr Iran writes "400,000-" alone, then the resulting balance). The
+        //    whole-line shape keeps the unsigned account, date and balance lines out.
+        if (amount <= 0) {
+            Matcher mbs = bareSignedAmount.matcher(n);
+            if (mbs.find()) {
+                sign = mbs.group(2).equals("-") ? -1 : 1;
+                amount = toLong(mbs.group(1));
             }
         }
 

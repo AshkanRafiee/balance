@@ -297,6 +297,12 @@ final class BankRules {
         // line keeps unrelated one-off codes (OTPs, renewal notices) from being read as accounts.
         ACCOUNT_RULES.put("Parsian",
             Pattern.compile("(?m)^([0-9]{10,24})\\s*\\r?\\n\\s*\u0645\u0628\u0644\u063A:"));
+        // Mehr Iran: the movement message opens with the account digits alone on their own line,
+        // wrapped in RTL bidi marks ("\u202a30267…\u202c\n400,000-\n…\nمانده:865,083"). Requiring
+        // the account to be the whole line (after optional bidi marks and spaces) plus the
+        // no-thousand-separator guard keeps the amount, the date and the balance from matching.
+        ACCOUNT_RULES.put("Mehr",
+            Pattern.compile("(?m)^[\\u202A-\\u202E]*([0-9]{10,24})(?![0-9,.])[\\u202A-\\u202E ]*\\r?$"));
     }
 
     static { VERSION = rulesVersion(); }

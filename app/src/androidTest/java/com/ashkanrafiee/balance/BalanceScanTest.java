@@ -249,6 +249,23 @@ public class BalanceScanTest {
         assertEquals("30101234567890", acct.account);
     }
 
+    @Test public void mehrAccountOpeningLine_singleAccountEntry() throws Exception {
+        // Mehr Iran movements open with the account digits alone (RTL bidi-wrapped), so their
+        // balances land in a per-account entry instead of a bank-wide slot.
+        seed("B.QMEHRIRAN", "\u202A302601234567890123\u202C\n400,000-\n1405/6/29-20:30\n"
+            + "\u0645\u0627\u0646\u062F\u0647:865,083", T + 1000);
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+
+        LinkedHashMap<String, Bank> after = BalanceData.read(ctx);
+        assertEquals(1, after.size());
+        Bank acct = after.get("Mehr|302601234567890123");
+        assertNotNull(acct);
+        assertEquals(865_083L, acct.amount);
+        assertEquals("302601234567890123", acct.account);
+    }
+
     @Test public void freshInstallPersianDigitMessage_parsesValue() throws Exception {
         seed("5000973189",
                 "\u0645\u0648\u062C\u0648\u062F\u06CC \u062D\u0633\u0627\u0628 \u0634\u0645\u0627: \u06F1\u066C\u06F2\u06F5\u06F0\u066C\u06F0\u06F0\u06F0 \u0631\u06CC\u0627\u0644",

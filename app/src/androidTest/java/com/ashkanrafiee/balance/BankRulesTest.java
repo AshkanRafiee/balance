@@ -241,6 +241,26 @@ public class BankRulesTest {
             "\u0648\u0631\u0648\u062F \u0628\u0647 \u0647\u0645\u0631\u0627\u0647 \u0628\u0627\u0646\u06A9 1405/06/07"));
     }
 
+    @Test public void extractAccount_mehrAccountLine_returnsAccount() {
+        // Real Mehr Iran movements open with the account digits alone on their own line, wrapped in
+        // RTL bidi marks.
+        assertEquals("302601234567890123", BankRules.extractAccount("Mehr",
+            "\u202A302601234567890123\u202C\n400,000-\n1405/6/29-20:30\n\u0645\u0627\u0646\u062F\u0647:865,083"));
+        assertEquals("302601234567890123", BankRules.extractAccount("Mehr",
+            "302601234567890123\n400,000-\n1405/6/29-20:30\n\u0645\u0627\u0646\u062F\u0647:865,083"));
+    }
+
+    @Test public void extractAccount_mehrAmountLine_notCaptured() {
+        // The signed amount line, a possibly longer comma-free amount, the date, or the balance must
+        // never be read as the account.
+        assertNull(BankRules.extractAccount("Mehr",
+            "400,000-\n1405/6/29-20:30\n\u0645\u0627\u0646\u062F\u0647:865,083"));
+        assertNull(BankRules.extractAccount("Mehr",
+            "12000000000-\n\u0645\u0627\u0646\u062F\u0647:865,083"));
+        assertNull(BankRules.extractAccount("Mehr", "1405/6/29-20:30\n\u0645\u0627\u0646\u062F\u0647:865,083"));
+        assertNull(BankRules.extractAccount("Mehr", "\u0645\u0627\u0646\u062F\u0647:865,083"));
+    }
+
     @Test public void extractAccount_nullArguments_notCaptured() {
         assertNull(BankRules.extractAccount(null, "10.1234567.2"));
         assertNull(BankRules.extractAccount("Mellat", null));
