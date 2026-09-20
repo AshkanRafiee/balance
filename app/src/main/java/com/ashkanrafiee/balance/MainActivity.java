@@ -833,6 +833,11 @@ public class MainActivity extends Activity {
         final LinkedHashMap<String, Bank> banks = new LinkedHashMap<>();
         final java.util.Set<String> excluded = new java.util.HashSet<>();
         final float d = getResources().getDisplayMetrics().density;
+        /** System font scale, applied to every text the canvas draws (the canvas otherwise renders in
+         *  density-scaled px and would silently ignore the user's chosen font size). Layout positions
+         *  stay density-scaled; only the glyph sizes scale, matching how system-wide font scaling
+         *  works in normal view hierarchies. */
+        final float fs = getResources().getConfiguration().fontScale;
         Drawable lockIcon;
         boolean hidden, refreshing;
         boolean autoHide;
@@ -1049,13 +1054,13 @@ public class MainActivity extends Activity {
         }
 
         float measure(String value, float size) {
-            p.setTextSize(size);
+            p.setTextSize(size * fs);
             p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
             return p.measureText(value);
         }
 
         String fit(String value, float size, float max) {
-            p.setTextSize(size);
+            p.setTextSize(size * fs);
             p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
             if (p.measureText(value) <= max) return value;
             String s = value;
@@ -1066,7 +1071,7 @@ public class MainActivity extends Activity {
 
         void text(Canvas c, String s, float x, float y, float size,
                   int color, Paint.Align align) {
-            p.setTextSize(size);
+            p.setTextSize(size * fs);
             p.setColor(color);
             p.setTextAlign(align);
             p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
