@@ -431,13 +431,6 @@ public final class HistoryActivity extends Activity {
         } else {
             TextView title = text(getString(R.string.history_title), 22, fg, MEDIUM);
             bar.addView(title, titleParams);
-
-            LinearLayout.LayoutParams badgeParams = new LinearLayout.LayoutParams(-2, -2);
-            badgeParams.setMarginStart(dp(8));
-            TextView badge = text(getString(R.string.history_experimental), 11, badgeFg, MEDIUM);
-            badge.setPadding(dp(8), dp(3), dp(8), dp(3));
-            badge.setBackground(rounded(badgeBg, 9));
-            bar.addView(badge, badgeParams);
         }
 
         LinearLayout.LayoutParams barSpacer = new LinearLayout.LayoutParams(0, 0, 1);

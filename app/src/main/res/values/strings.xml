@@ -79,7 +79,6 @@
     <string name="about_footer">Balance · Version %1$s</string>
 
     <string name="history_title">History</string>
-    <string name="history_experimental">Experimental</string>
     <string name="history_bank_chip">Bank</string>
     <string name="history_empty">No transactions found yet. Transaction history is built from bank SMS as they are scanned.</string>
     <string name="history_empty_bank">No transactions found for %1$s yet. Transaction history is built from bank SMS as they are scanned.</string>
