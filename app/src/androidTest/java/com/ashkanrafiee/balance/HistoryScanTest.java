@@ -354,6 +354,36 @@ public class HistoryScanTest {
         assertEquals(2, resalatWithdrawals);
     }
 
+    @Test public void injectorTxScenario_accounts_movementsAreSplitPerAccount() throws Exception {
+        // The sms-injector's "accounts" scenario seeds account-bearing movements: three on Mellat
+        // across two account numbers, one on Melli (حساب:10001) and one on a Resalat dotted account.
+        // Each message states its account number, so history splits the bank into per-account rows
+        // instead of one mixed chain.
+        seedTxScenario("accounts", 5);
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(5, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(5, txs.size());
+        long mellatAcct1 = 0, mellatAcct2 = 0, melli = 0, resalat = 0;
+        for (Transaction t : txs) {
+            switch (t.bank) {
+                case "Mellat":
+                    if ("1110000222".equals(t.account)) mellatAcct1++;
+                    else if ("1110000333".equals(t.account)) mellatAcct2++;
+                    break;
+                case "Melli": if ("10001".equals(t.account)) melli++; break;
+                case "Resalat": if ("10.1234567.2".equals(t.account)) resalat++; break;
+                default: break;
+            }
+        }
+        assertEquals(2, mellatAcct1);   // deposit + withdrawal on the first account
+        assertEquals(1, mellatAcct2);   // deposit on the second account
+        assertEquals(1, melli);
+        assertEquals(1, resalat);
+    }
+
     // ============================================================
     // Exact-duplicate messages are one entry
     // ============================================================
