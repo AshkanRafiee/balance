@@ -56,7 +56,7 @@ final class BalanceData {
     static final int SORT_DATE_OLDEST = 4;
 
     /** Bumped whenever the movement-message recognition rules change, forcing a full history re-scan. */
-    static final int HISTORY_RULES_VERSION = 5;
+    static final int HISTORY_RULES_VERSION = 6;
 
     /** Persisted recent-movement window for balance-chain reconciliation across split scans. */
     static final String KEY_RECENT_MOVEMENTS = "recent_movements";
@@ -545,6 +545,20 @@ final class BalanceData {
             Log.w(TAG, "scan failed", e);
         }
 
+        // A full re-scan that re-keys a bank's messages per account supersedes the legacy plain
+        // bank slot (which pre-dates account extraction): drop it so the old merged balance is not
+        // kept next to — and summed with — the new per-account slots. Banks with no account-bearing
+        // message in the inbox keep their plain slot untouched, and composite keys are never removed
+        // here because they are not names of banks.
+        if (full) {
+            Set<String> splitBanks = new HashSet<>();
+            for (String k : rowsByKey.keySet()) {
+                int bar = k.indexOf('|');
+                if (bar > 0) splitBanks.add(k.substring(0, bar));
+            }
+            if (!splitBanks.isEmpty()) current.keySet().removeIf(splitBanks::contains);
+        }
+
         Map<String, List<Reconcile.Entry>> windows = loadRecentMovements(context);
         for (Map.Entry<String, List<Object[]>> e : rowsByKey.entrySet()) {
             String key = e.getKey();
@@ -554,7 +568,7 @@ final class BalanceData {
             // balance chain, so a fee and its transfer that the bank sent in the wrong order are seen
             // in their true order instead of by arrival time.
             Map<String, String> sigSender = new HashMap<>();
-            List<Reconcile.Entry> merged = mergedForWindow(windows.get(key), rows, sigSender);
+            List<Reconcile.Entry> merged = mergedForWindow(windows.get(key), rows, sigSender, bank);
             List<Reconcile.Entry> chain = reconcile(merged);
 
             Object[] newestArr = newestRow(rows);
@@ -689,7 +703,7 @@ final class BalanceData {
                     // History rows carry [bank, sender, body, date]; the window merger reads them as
                     // [sender, body, date] (the layout scanSms builds), so rebind before merging.
                     List<Reconcile.Entry> merged = mergedForWindow(windows.get(key),
-                        senderBodyDate(e.getValue()));
+                        senderBodyDate(e.getValue()), null, bankOfKey(e.getKey()));
                     List<Reconcile.Entry> chain = reconcile(merged);
                     if (chain != null && !chain.isEmpty()) {
                         chainByBank.put(key, chain);
@@ -1127,9 +1141,12 @@ final class BalanceData {
     /** Adds the movement rows of this scan (messages with a transaction amount and a stated balance)
      *  to the bank's recent-movements window, deduped by message fingerprint, and returns the merged
      *  list. {@code sigSender} is populated with the sender of each newly added movement so balance
-     *  selection can keep the originating address. */
+     *  selection can keep the originating address. The window fingerprint folds the message's account
+     *  number (mirroring the stored transactions'), so a fee and its transfer on one account are placed
+     *  correctly against their stored siblings rather than colliding with an equal pair on another
+     *  account of the same bank. */
     private static List<Reconcile.Entry> mergedForWindow(List<Reconcile.Entry> window,
-            List<Object[]> rows, Map<String, String> sigSender) {
+            List<Object[]> rows, Map<String, String> sigSender, String bank) {
         List<Reconcile.Entry> merged = new ArrayList<>();
         Set<String> sigs = new HashSet<>();
         if (window != null) {
@@ -1142,7 +1159,8 @@ final class BalanceData {
             Long txn = extractTransaction(body);
             long bal = extract(body);
             if (txn == null || bal < 0) continue;
-            String sig = messageSig(sender, body);
+            String sig = messageSig(sender, body,
+                bank == null ? null : BankRules.extractAccount(bank, body));
             if (sig == null || !sigs.add(sig)) continue;
             if (sigSender != null) sigSender.put(sig, sender);
             merged.add(new Reconcile.Entry((Long) row[2], txn, bal, sig));
@@ -1160,7 +1178,7 @@ final class BalanceData {
 
     private static List<Reconcile.Entry> mergedForWindow(List<Reconcile.Entry> window,
             List<Object[]> rows) {
-        return mergedForWindow(window, rows, null);
+        return mergedForWindow(window, rows, null, null);
     }
 
     /** Returns the concatenation of the unique, per-cluster balance chains for a bank's movements,
