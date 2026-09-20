@@ -169,6 +169,13 @@ final class BankRules {
         return all;
     }
 
+    /** The account-rule rows of {@link #ACCOUNT_RULES} in declaration order. Test-only oracle input. */
+    static String[][] accountRulesTestOnly() {
+        String[][] all = new String[ACCOUNT_RULES.length][];
+        for (int i = 0; i < ACCOUNT_RULES.length; i++) all[i] = ACCOUNT_RULES[i].clone();
+        return all;
+    }
+
     /** Bank names an incoming SMS can actually reach: every rule alias resolves exactly the way a sender
      *  does, so aliases that collide and lose to an earlier rule (e.g. Tosee Credit Inst.'s +9830005816,
      *  claimed by Tosee Taavon) simply drop out instead of inflating the count. */
@@ -233,9 +240,10 @@ final class BankRules {
         int v = 0;
         for (String[] rule : RULES) for (String alias : rule[1].split("\\|")) v = v * 31 + alias.hashCode();
         for (String[] rule : OFFICIAL_EXTRA_RULES) for (String alias : rule[1].split("\\|")) v = v * 31 + alias.hashCode();
-        List<String> accounts = new ArrayList<>(ACCOUNT_RULES.keySet());
+        List<String> accounts = new ArrayList<>();
+        for (String[] row : ACCOUNT_RULES) accounts.add(row[0]);
         java.util.Collections.sort(accounts);
-        for (String bank : accounts) v = v * 31 + bank.hashCode() * 31 + ACCOUNT_RULES.get(bank).pattern().hashCode();
+        for (String bank : accounts) v = v * 31 + bank.hashCode() * 31 + ACCOUNT_PATTERNS.get(bank).pattern().hashCode();
         return v;
     }
 
@@ -270,50 +278,60 @@ final class BankRules {
     }
 
     /** Per-bank rules that pull the account number out of a message body, when the bank states one.
-     *  Banks absent from this table (or messages that never mention an account) stay under the
-     *  bank-level balance/transaction slot. Keys are canonical bank names (see bankName). */
-    private static final Map<String, Pattern> ACCOUNT_RULES = new HashMap<>();
+     *  One row per bank, mirroring the alias {@link #RULES} table above; a row picks one of the
+     *  matcher shapes in {@link #compileAccount} and, for the labeled/bare shapes, the account-digit
+     *  length bounds. Adding a bank that prints a known shape is a one-line copy of a row here;
+     *  a brand-new layout is one new "case" in compileAccount and then the same one-line row. Banks
+     *  absent from this table (or messages that never mention an account) stay under the bank-level
+     *  balance/transaction slot. Row columns: {bank, shape, min, max} — "min"/"max" are digit-length
+     *  bounds, with "" meaning unbounded (or unused by that shape). */
+    private static final String[][] ACCOUNT_RULES = {
+        {"Mellat",   "label-glued",     "6",  ""},
+        {"Melli",    "label-colon",     "3",  "12"},
+        {"Tejarat",  "label-colon",     "6",  "24"},
+        {"Saderat",  "label-colon-line","4",  "10"},
+        {"Parsian",  "bare-mablagh",    "10", "24"},
+        {"Mehr",     "bare-bidi",       "10", "24"},
+        {"Resalat",  "dotted",          "",   ""},
+        {"Pasargad", "dotted-line",     "",   ""},
+    };
 
+    /** Builds the matcher for one {@link #ACCOUNT_RULES} row. Each shape carries the guards — the
+     *  glued/colon label, the whole-line or line-start anchors, the no-thousand-separator lookahead,
+     *  the bidi tolerance, the trailing "مبلغ:" requirement — that keep balances, amounts, dates and
+     *  one-off codes from ever being read as an account. */
+    private static Pattern compileAccount(String[] row) {
+        String shape = row[1];
+        String d = digitRange(row[2], row[3]);
+        switch (shape) {
+            case "label-glued":   // Mellat: "حساب1110000222"; the glue keeps "مانده حساب: …" out.
+                return Pattern.compile("\u062D\u0633\u0627\u0628(" + d + ")");
+            case "label-colon":   // Melli/Tejarat: "حساب: 10001"; no-thousand-separator lookahead
+                return Pattern.compile("\u062D\u0633\u0627\u0628\\s*:\\s*(" + d + ")(?![0-9,.])");
+            case "label-colon-line":  // Saderat: "حساب:48203" at its own line start, so destination
+                return Pattern.compile("(?m)^[ \\t]*\u062D\u0633\u0627\u0628\\s*:\\s*(" + d + ")(?![0-9,.])");
+            case "bare-mablagh":  // Parsian: the account line, the "مبلغ:" amount line right under it
+                return Pattern.compile("(?m)^(" + d + ")\\s*\\r?\\n\\s*\u0645\u0628\u0644\u063A:");
+            case "bare-bidi":     // Mehr: the account (bidi-wrapped) alone as the whole line
+                return Pattern.compile("(?m)^[\\u202A-\\u202E]*(" + d + ")(?![0-9,.])[\\u202A-\\u202E ]*\\r?$");
+            case "dotted":        // Resalat: free-floating three-part id; bounds keep dotted dates out
+                return Pattern.compile("(?<![0-9])[0-9]{1,2}\\.[0-9]{4,12}\\.[0-9]{1,2}(?![0-9])");
+            case "dotted-line":   // Pasargad: four-part dotted id alone on its own line
+                return Pattern.compile("(?m)^[0-9]{1,4}\\.[0-9]{1,6}\\.[0-9]{6,12}\\.[0-9]{1,3}(?![0-9.])\\s*\\r?$");
+            default:
+                throw new IllegalArgumentException("unknown account shape '" + shape + "' for " + row[0]);
+        }
+    }
+
+    /** A "[0-9]{min,max}" run from the two length-bound columns of an account row ("" max = unbounded). */
+    private static String digitRange(String min, String max) {
+        return max.isEmpty() ? "[0-9]{" + min + ",}" : "[0-9]{" + min + "," + max + "}";
+    }
+
+    /** Compiled matchers for {@link #ACCOUNT_RULES}, keyed by canonical bank name. */
+    private static final Map<String, Pattern> ACCOUNT_PATTERNS = new HashMap<>();
     static {
-        // Mellat: the account digits are glued straight onto the label (no colon/spacing), e.g.
-        // "حساب1110000222". The strict glue keeps "مانده حساب: 72,222,945"-style balances out.
-        ACCOUNT_RULES.put("Mellat",
-            Pattern.compile("\u062D\u0633\u0627\u0628([0-9]{6,})"));
-        // Melli: "حساب:10001" — label, optional spacing, colon, then digits directly. Requiring at
-        // least three consecutive digits (no commas) skips comma-grouped balance figures.
-        ACCOUNT_RULES.put("Melli",
-            Pattern.compile("\u062D\u0633\u0627\u0628\\s*:\\s*([0-9]{3,12})(?![0-9,.])"));
-        // Resalat: a three-part dotted id like "10.1234567.2". The middle part must be >= 4 digits
-        // on both sides, which also keeps dotted dates out ("1405.06.15" alone can't match).
-        ACCOUNT_RULES.put("Resalat",
-            Pattern.compile("(?<![0-9])[0-9]{1,2}\\.[0-9]{4,12}\\.[0-9]{1,2}(?![0-9])"));
-        // Tejarat: "*بانک تجارت* / حساب: 0135… / برداشت|واریز: … ریال / … / مانده: … ریال". Like
-        // Melli, the label, optional spacing, colon, then digits straight on; the six-digit minimum
-        // and the no-thousand-separator guard keep "حساب شما: 1,000,000"-style balances out.
-        ACCOUNT_RULES.put("Tejarat",
-            Pattern.compile("\u062D\u0633\u0627\u0628\\s*:\\s*([0-9]{6,24})(?![0-9,.])"));
-        // Parsian: the movement message opens with the account on its own line and the "مبلغ:"
-        // amount line directly follows it ("3010…\nمبلغ:500,000-\nمانده:…"). Requiring that next
-        // line keeps unrelated one-off codes (OTPs, renewal notices) from being read as accounts.
-        ACCOUNT_RULES.put("Parsian",
-            Pattern.compile("(?m)^([0-9]{10,24})\\s*\\r?\\n\\s*\u0645\u0628\u0644\u063A:"));
-        // Mehr Iran: the movement message opens with the account digits alone on their own line,
-        // wrapped in RTL bidi marks ("\u202a30267…\u202c\n400,000-\n…\nمانده:865,083"). Requiring
-        // the account to be the whole line (after optional bidi marks and spaces) plus the
-        // no-thousand-separator guard keeps the amount, the date and the balance from matching.
-        ACCOUNT_RULES.put("Mehr",
-            Pattern.compile("(?m)^[\\u202A-\\u202E]*([0-9]{10,24})(?![0-9,.])[\\u202A-\\u202E ]*\\r?$"));
-        // Pasargad: the movement message opens with the account on its own first line, a dotted id
-        // like "123.456.78901234.5". Requiring the whole line to be four dot-separated digit runs
-        // (and nothing after the last) keeps two/three-part dotted dates and signed amounts out.
-        ACCOUNT_RULES.put("Pasargad",
-            Pattern.compile("(?m)^[0-9]{1,4}\\.[0-9]{1,6}\\.[0-9]{6,12}\\.[0-9]{1,3}(?![0-9.])\\s*\\r?$"));
-        // Saderat: "حساب:48203" — the "حساب" label, a colon, then the account right after it (the
-        // movement message prints the label at the start of its own line). Requiring at least four
-        // consecutive digits with no commas, anchored to the line start, keeps balances and
-        // destination mentions like "به حساب: 1,000,000" from being read as the account.
-        ACCOUNT_RULES.put("Saderat",
-            Pattern.compile("(?m)^[ \\t]*\u062D\u0633\u0627\u0628\\s*:\\s*([0-9]{4,10})(?![0-9,.])"));
+        for (String[] row : ACCOUNT_RULES) ACCOUNT_PATTERNS.put(row[0], compileAccount(row));
     }
 
     static { VERSION = rulesVersion(); }
@@ -323,7 +341,7 @@ final class BankRules {
      *  forms are folded in) so punctuation like ":", ".", and thousand separators keep their role. */
     static String extractAccount(String bank, String body) {
         if (bank == null || body == null) return null;
-        Pattern p = ACCOUNT_RULES.get(bank);
+        Pattern p = ACCOUNT_PATTERNS.get(bank);
         if (p == null) return null;
         Matcher m = p.matcher(digitsToAscii(body));
         if (!m.find()) return null;

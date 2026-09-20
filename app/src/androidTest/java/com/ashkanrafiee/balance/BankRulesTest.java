@@ -300,4 +300,44 @@ public class BankRulesTest {
         assertNull(BankRules.extractAccount("Mellat", null));
         assertNull(BankRules.extractAccount("Mellat", ""));
     }
+
+    @Test public void accountTable_rowsReferenceKnownBanks_uniqueAndShapely() {
+        java.util.Set<String> known = BankRules.supportedNames();
+        java.util.Set<String> shapes = new java.util.HashSet<>(java.util.Arrays.asList(
+            "label-glued", "label-colon", "label-colon-line", "bare-mablagh", "bare-bidi",
+            "dotted", "dotted-line"));
+        java.util.Set<String> banksSeen = new java.util.HashSet<>();
+        for (String[] row : BankRules.accountRulesTestOnly()) {
+            assertEquals(4, row.length);
+            assertTrue("row bank not known: " + row[0], known.contains(row[0]));
+            assertTrue("duplicate bank row: " + row[0], banksSeen.add(row[0]));
+            assertTrue("unknown shape: " + row[1], shapes.contains(row[1]));
+        }
+    }
+
+    @Test public void accountTable_rowLengthBoundsAreValid() {
+        for (String[] row : BankRules.accountRulesTestOnly()) {
+            String shape = row[1];
+            if (shape.equals("dotted") || shape.equals("dotted-line")) {
+                assertEquals("", row[2]);
+                assertEquals("", row[3]);
+                continue;
+            }
+            int min = Integer.parseInt(row[2]);
+            assertTrue("min must be > 0: " + row[0], min > 0);
+            if (!row[3].isEmpty()) {
+                assertTrue("max must be >= min: " + row[0], Integer.parseInt(row[3]) >= min);
+            }
+        }
+    }
+
+    @Test public void extractAccount_sharedColonShape_parametrisesPerBank() {
+        // The three colon-label banks share one shape; only their length bounds and the line-start
+        // requirement differ, so the same body extracts for some banks and not others.
+        assertEquals("5678", BankRules.extractAccount("Melli", "\u062D\u0633\u0627\u0628: 5678"));
+        assertNull(BankRules.extractAccount("Tejarat", "\u062D\u0633\u0627\u0628: 5678"));
+        assertEquals("01351234567890", BankRules.extractAccount("Tejarat", "\u062D\u0633\u0627\u0628: 01351234567890"));
+        assertEquals("5678", BankRules.extractAccount("Saderat", "\u062D\u0633\u0627\u0628:5678"));
+        assertNull(BankRules.extractAccount("Saderat", "\u0627\u0646\u062A\u0642\u0627\u0644 \u0628\u0647 \u062D\u0633\u0627\u0628:5678"));
+    }
 }
