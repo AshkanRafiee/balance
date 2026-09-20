@@ -283,8 +283,8 @@ final class BalanceData {
     }
 
     /** Serializes transactions to the JSON shape used for the local store and the backup payload. The
-     *  message fingerprint and the account number are optional and skipped when absent, so backups
-     *  stay readable both ways. */
+     *  message fingerprint, account number and content digest are optional and skipped when absent, so
+     *  backups stay readable both ways. */
     static String serializeTransactions(List<Transaction> txs) throws Exception {
         JSONArray arr = new JSONArray();
         for (Transaction t : txs) {
@@ -294,6 +294,7 @@ final class BalanceData {
                 .put("amount", t.amount);
             if (t.account != null) e.put("account", t.account);
             if (t.sig != null) e.put("sig", t.sig);
+            if (t.content != null) e.put("content", t.content);
             arr.put(e);
         }
         return new JSONObject().put(KEY_TRANSACTIONS, arr).toString();
@@ -313,8 +314,9 @@ final class BalanceData {
                 JSONObject e = arr.getJSONObject(i);
                 String sig = e.has("sig") && !e.isNull("sig") ? e.getString("sig") : null;
                 String account = e.has("account") && !e.isNull("account") ? e.getString("account") : null;
+                String content = e.has("content") && !e.isNull("content") ? e.getString("content") : null;
                 list.add(new Transaction(e.getString("bank"), account, e.getLong("date"),
-                    e.getLong("amount"), sig));
+                    e.getLong("amount"), sig, content));
             }
         } catch (Exception ex) {
             Log.w(TAG, "parseTransactions failed");
@@ -844,31 +846,33 @@ final class BalanceData {
                     // account, while its stored twin from the older account-less era keeps an
                     // account-free fingerprint: neither the fingerprint identity nor the
                     // (bank|account, date) budget can bridge the two, so the same event would be
-                    // recorded twice. Claim the account-less twin when a fresh parse is the same event
-                    // — same bank, same moment, and either the identical message (account-free
-                    // fingerprint equality) or the same amount, which is all the account-less era could
-                    // distinguish (this also covers stored legacy sig-less entries).
+                    // recorded twice. Claim the account-less twin when a fresh parse is the same event,
+                    // tried strongest-first: identical message content (the parse-independent digest),
+                    // then the account-free fingerprint, then the amount, which is all the account-less
+                    // era could distinguish (this also covers stored legacy sig-less entries).
                     Set<Transaction> accountTwins = new HashSet<>();
                     if (!freeByFresh.isEmpty()) {
                         Map<String, Transaction> byContent = new HashMap<>();
+                        Map<String, Transaction> byDigest = new HashMap<>();
                         Map<String, Transaction> byAmount = new HashMap<>();
                         for (Transaction f : fresh) {
+                            if (f.account == null) continue;
                             String free = freeByFresh.get(f);
-                            if (free == null || f.account == null) continue;
-                            byContent.putIfAbsent(f.bank + "|" + f.date + "|" + free, f);
+                            if (free != null)
+                                byContent.putIfAbsent(f.bank + "|" + f.date + "|" + free, f);
+                            if (f.content != null)
+                                byDigest.putIfAbsent(f.bank + "|" + f.date + "|" + f.content, f);
                             byAmount.putIfAbsent(f.bank + "|" + f.date + "|" + f.amount, f);
                         }
                         for (Transaction s : stored) {
                             if (s.account != null) continue;
-                            String contentKey = s.sig != null
-                                ? s.bank + "|" + s.date + "|" + s.sig : null;
-                            Transaction f = contentKey != null ? byContent.remove(contentKey) : null;
-                            if (f == null) {
-                                // Same bank, same moment and same amount is the account-less era's best
-                                // claim (it had no account to tell events apart anyway); legacy sig-less
-                                // entries land here too.
+                            Transaction f = null;
+                            if (s.content != null)
+                                f = byDigest.remove(s.bank + "|" + s.date + "|" + s.content);
+                            if (f == null && s.sig != null)
+                                f = byContent.remove(s.bank + "|" + s.date + "|" + s.sig);
+                            if (f == null)
                                 f = byAmount.remove(s.bank + "|" + s.date + "|" + s.amount);
-                            }
                             if (f != null) accountTwins.add(s);
                         }
                     }
@@ -977,6 +981,29 @@ final class BalanceData {
             return sb.toString();
         } catch (Exception e) {
             return fold;
+        }
+    }
+
+    /** A parse-independent digest of the message text itself (sender + normalized body), unlike
+     *  {@link #messageSig} which folds the parsed amount and resulting balance. The same physical
+     *  message therefore hashes identically no matter how the parsing rules evolve, which is what lets
+     *  a rules update reconcile its re-parsed result with the entry stored under the old rules. */
+    static String contentHash(String sender, String body) {
+        if (body == null) return null;
+        String s = normalizeLetters(digits(body.replace("\u066C", ",").replace("\u060C", ",")))
+            .trim().replaceAll("\\s+", " ");
+        if (s.isEmpty()) return null;
+        try {
+            byte[] h = MessageDigest.getInstance("SHA-256")
+                .digest((sender + "|" + s).getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(32);
+            for (int i = 0; i < 16; i++) {
+                int b = h[i] & 0xFF;
+                sb.append(Character.forDigit(b >>> 4, 16)).append(Character.forDigit(b & 0xF, 16));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -1153,7 +1180,8 @@ final class BalanceData {
             txn = delta;
         }
         String account = BankRules.extractAccount(bank, body);
-        return new Transaction(bank, account, date, txn, messageSig(sender, body, account));
+        return new Transaction(bank, account, date, txn,
+            messageSig(sender, body, account), contentHash(sender, body));
     }
 
     /** The last number captured by the given pattern in the string, or null if it matched nothing. */

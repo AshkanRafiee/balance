@@ -16,6 +16,11 @@ final class Transaction {
     final long amount;
     /** Deterministic fingerprint of the source SMS, used to reject exact duplicate redeliveries. */
     final String sig;
+    /** Parse-independent digest of the source message (sender + normalized body). Unlike {@link #sig}
+     *  it folds no parsed values, so it stays identical however the parsing rules change; the history
+     *  scan uses it to reconcile stored entries with their re-parsed messages after a rules update.
+     *  Null for entries written before this identity existed. */
+    final String content;
 
     Transaction(String bank, long date, long amount) {
         this(bank, date, amount, null);
@@ -26,10 +31,15 @@ final class Transaction {
     }
 
     Transaction(String bank, String account, long date, long amount, String sig) {
+        this(bank, account, date, amount, sig, null);
+    }
+
+    Transaction(String bank, String account, long date, long amount, String sig, String content) {
         this.bank = bank;
         this.account = account;
         this.date = date;
         this.amount = amount;
         this.sig = sig;
+        this.content = content;
     }
 }
