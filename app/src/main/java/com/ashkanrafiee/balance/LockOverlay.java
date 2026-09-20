@@ -454,6 +454,8 @@ public final class LockOverlay extends FrameLayout {
 
     private void renderDots() {
         int n = pinBuffer.length();
+        dots.setContentDescription(getResources().getQuantityString(
+            R.plurals.lock_pin_dots, n, n));
         if (n == 0) {
             dots.setTextColor(muted);
             dots.setText(getString(R.string.lock_pin_placeholder));
@@ -661,6 +663,8 @@ public final class LockOverlay extends FrameLayout {
             for (char k : row) {
                 final char key = k;
                 View b = key == '\u2713' ? buildCheckKey() : buildTextKey(String.valueOf(k));
+                if (key == '\u232B') b.setContentDescription(getString(R.string.lock_key_delete));
+                else if (key == '\u2713') b.setContentDescription(getString(R.string.lock_key_confirm));
                 b.setOnClickListener(v -> padTapped(key));
                 line.addView(b, new LinearLayout.LayoutParams(0, dp(58), 1f));
             }

@@ -3,6 +3,7 @@
     <string name="app_name">Balance</string>
     <string name="subtitle_offline_bank_balances">Offline bank balances</string>
     <string name="total_balance_label">TOTAL BALANCE</string>
+    <string name="total_empty_value">—</string>
     <string name="section_banks">Banks</string>
     <string name="unit_toman">Toman</string>
     <string name="total_label">Total</string>
@@ -66,6 +67,7 @@
     <string name="backup_error_generic">Backup operation failed</string>
 
     <string name="about_title">About</string>
+    <string name="about_back">Back</string>
     <string name="tagline_offline_bank_balance">Offline bank balance</string>
     <string name="about_section_heading">ABOUT THIS APP</string>
     <string name="about_section_body">Balance is a private, offline dashboard for the latest balances reported by supported banks. It reads supported bank SMS messages locally, keeps one current balance per bank, and never sends SMS or financial data anywhere.</string>
@@ -204,6 +206,12 @@
     <string name="lock_verify_subtitle_pin">Enter your PIN to continue</string>
     <string name="lock_verify_subtitle_password">Enter your password to continue</string>
     <string name="lock_pin_placeholder">•••••</string>
+    <plurals name="lock_pin_dots">
+        <item quantity="one">PIN: %1$d digit entered</item>
+        <item quantity="other">PIN: %1$d digits entered</item>
+    </plurals>
+    <string name="lock_key_delete">Delete digit</string>
+    <string name="lock_key_confirm">Confirm</string>
     <string name="lock_action_unlock">Unlock</string>
     <string name="lock_fingerprint_action">Unlock with fingerprint</string>
     <string name="lock_error_incorrect">Incorrect code. Try again.</string>

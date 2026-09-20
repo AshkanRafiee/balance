@@ -3,6 +3,7 @@
     <string name="app_name">Balance</string>
     <string name="subtitle_offline_bank_balances">موجودی آفلاین بانک‌ها</string>
     <string name="total_balance_label">مجموع موجودی</string>
+    <string name="total_empty_value">—</string>
     <string name="section_banks">بانک‌ها</string>
     <string name="unit_toman">تومان</string>
     <string name="total_label">مجموع</string>
@@ -66,6 +67,7 @@
     <string name="backup_error_generic">عملیات پشتیبان‌گیری خطا داشت</string>
 
     <string name="about_title">درباره</string>
+    <string name="about_back">بازگشت</string>
     <string name="tagline_offline_bank_balance">موجودی آفلاین بانکی</string>
     <string name="about_section_heading">دربارهٔ این برنامه</string>
     <string name="about_section_body">برنامهٔ Balance یک داشبورد خصوصی و آفلاین برای آخرین موجودی‌های اعلام‌شده توسط بانک‌های پشتیبانی‌شده است. این برنامه پیامک‌های بانکی پشتیبانی‌شده را به‌صورت محلی می‌خواند، یک موجودی جاری برای هر بانک نگه می‌دارد و هرگز پیامک یا اطلاعات مالی را به جایی ارسال نمی‌کند.</string>
@@ -204,6 +206,12 @@
     <string name="lock_verify_subtitle_pin">برای ادامه رمز عددی را وارد کنید</string>
     <string name="lock_verify_subtitle_password">برای ادامه رمز عبور را وارد کنید</string>
     <string name="lock_pin_placeholder">•••••</string>
+    <plurals name="lock_pin_dots">
+        <item quantity="one">رمز: %1$d رقم وارد شده است</item>
+        <item quantity="other">رمز: %1$d رقم وارد شده است</item>
+    </plurals>
+    <string name="lock_key_delete">حذف رقم</string>
+    <string name="lock_key_confirm">تأیید</string>
     <string name="lock_action_unlock">باز کردن</string>
     <string name="lock_fingerprint_action">باز کردن با اثر انگشت</string>
     <string name="lock_error_incorrect">کد اشتباه است. دوباره تلاش کنید.</string>
