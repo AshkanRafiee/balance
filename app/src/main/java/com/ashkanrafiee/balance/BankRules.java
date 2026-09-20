@@ -136,8 +136,10 @@ final class BankRules {
         {"Bankino", "20004860"}
     };
 
-    /** Version fingerprint of the rule tables, used to detect bank-list changes and force a full rescan. */
-    static final int VERSION = rulesVersion();
+    /** Version fingerprint of the rule tables, used to detect bank-list changes and force a full rescan.
+     *  Assigned in a later static block once {@link #ACCOUNT_RULES} is built, so account-rule changes
+     *  also force the rebuild (their absence left existing installs scanning with stale keys). */
+    static final int VERSION;
 
     private static final Set<String> SUPPORTED_BANKS = new HashSet<>();
     static {
@@ -226,19 +228,14 @@ final class BankRules {
     }
 
     // Built after the alias-index block above: reachableBanks() -> resolve() needs EXACT/SUFFIX_OF ready.
-    private static final int REACHABLE_COUNT = reachableBanks().size();
-
-    /** How many distinct supported bank senders an SMS can actually match. A full scan can stop once
-     *  each has matched once: matchedBanks is always a subset of reachableBanks, so the sizes being
-     *  equal means every supported bank has already been recorded. */
-    static int supportedSenderCount() {
-        return REACHABLE_COUNT;
-    }
 
     private static int rulesVersion() {
         int v = 0;
         for (String[] rule : RULES) for (String alias : rule[1].split("\\|")) v = v * 31 + alias.hashCode();
         for (String[] rule : OFFICIAL_EXTRA_RULES) for (String alias : rule[1].split("\\|")) v = v * 31 + alias.hashCode();
+        List<String> accounts = new ArrayList<>(ACCOUNT_RULES.keySet());
+        java.util.Collections.sort(accounts);
+        for (String bank : accounts) v = v * 31 + bank.hashCode() * 31 + ACCOUNT_RULES.get(bank).pattern().hashCode();
         return v;
     }
 
@@ -291,6 +288,8 @@ final class BankRules {
         ACCOUNT_RULES.put("Resalat",
             Pattern.compile("(?<![0-9])[0-9]{1,2}\\.[0-9]{4,12}\\.[0-9]{1,2}(?![0-9])"));
     }
+
+    static { VERSION = rulesVersion(); }
 
     /** Returns the account number a message from the given bank belongs to, or null when the bank
      *  never states one in this message. Matching runs over ASCII digits only (Persian/Arabic digit

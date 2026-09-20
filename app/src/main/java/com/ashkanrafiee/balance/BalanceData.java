@@ -56,7 +56,7 @@ final class BalanceData {
     static final int SORT_DATE_OLDEST = 4;
 
     /** Bumped whenever the movement-message recognition rules change, forcing a full history re-scan. */
-    static final int HISTORY_RULES_VERSION = 4;
+    static final int HISTORY_RULES_VERSION = 5;
 
     /** Persisted recent-movement window for balance-chain reconciliation across split scans. */
     static final String KEY_RECENT_MOVEMENTS = "recent_movements";
@@ -110,6 +110,13 @@ final class BalanceData {
      *  direction, so no label or keyword is needed. */
     private static final Pattern signedAmount = Pattern.compile(
         "^\\s*([+-])\\s*([0-9][0-9,]*)", Pattern.MULTILINE);
+    /** A line of "<label>:<amount><sign>" where the sign trails the number, as Melli writes it
+     *  ("انتقالي:1,000,000-", "خريداينترنتي:7,600,000-", "حواله پل:7,700,000+"). The line ending in
+     *  an explicit sign distinguishes the moved amount from balances and account numbers (which are
+     *  unsigned), and the sign itself carries the direction — so "حواله پل:7,700,000+" is a deposit
+     *  even though "حواله" is a withdrawal keyword. */
+    private static final Pattern labeledSignedAmount = Pattern.compile(
+        "(?m)^([^\\r\\n:0-9][^\\r\\n:]{0,39}):[ \\t]*([0-9][0-9,]*)[ \\t]*([+-])[ \\t]*$");
     private static final String[] DEPOSIT_KEYWORDS = {
         "\u0648\u0627\u0631\u06cc\u0632", "\u062f\u0631\u06cc\u0627\u0641\u062a",
         "\u0628\u0633\u062a\u0627\u0646\u06a9\u0627\u0631", "\u0627\u0641\u0632\u0627\u06cc\u0634",
@@ -507,15 +514,15 @@ final class BalanceData {
         if (full) watermark = 0;
         int matched = 0;
         long newest = 0;
-        Set<String> matchedBanks = new HashSet<>();
-        int senderTarget = BankRules.supportedSenderCount();
         String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
         String[] args = selection != null ? new String[]{Long.toString(watermark)} : null;
 
-        // Collect every matching message per bank (sender, body, device date, stated balance). A bank
-        // that sends a fee and the transfer it belongs to in the wrong order surfaces here as two
-        // rows whose device dates disagree with their true chronology; the recent-movements window
-        // below reconciles that before the balance is chosen.
+        // Collect every matching message (sender, body, device date, stated balance). A bank that
+        // sends a fee and the transfer it belongs to in the wrong order surfaces here as two rows
+        // whose device dates disagree with their true chronology; the recent-movements window below
+        // reconciles that before the balance is chosen. A full scan reads the whole inbox (like the
+        // history scan), because with per-account composite keys the newest message of one account
+        // never proves another account's balance is current.
         Map<String, List<Object[]>> rowsByKey = new LinkedHashMap<>();
         try (Cursor cursor = context.getContentResolver().query(
             Telephony.Sms.Inbox.CONTENT_URI,
@@ -530,11 +537,9 @@ final class BalanceData {
                 if (bank == null) continue;
                 long value = extract(cursor.getString(1));
                 if (value < 0) continue;
-                matchedBanks.add(bank);
                 String key = storageKey(bank, BankRules.extractAccount(bank, cursor.getString(1)));
                 rowsByKey.computeIfAbsent(key, k -> new ArrayList<>())
                     .add(new Object[]{sender, cursor.getString(1), date});
-                if (full && matchedBanks.size() == senderTarget) break;
             }
         } catch (Exception e) {
             Log.w(TAG, "scan failed", e);
@@ -898,6 +903,13 @@ final class BalanceData {
      *  looks missing or doubled in support reports, this fingerprint and the (bank, date) replacement
      *  key used by the full re-scan in {@link #scanHistory} are the two places that decide it. */
     static String messageSig(String sender, String body) {
+        return messageSig(sender, body, null);
+    }
+
+    /** Same as {@link #messageSig(String, String)}, folding the account number into the primary
+     *  fingerprint so that two same-amount movements ending at the same resulting balance but on two
+     *  different accounts of one bank stay distinct ({@code sender|account|amount|balance}). */
+    static String messageSig(String sender, String body, String account) {
         if (body == null) return null;
         String s = normalizeLetters(digits(body.replace("\u066C", ",").replace("\u060C", ",")))
             .trim().replaceAll("\\s+", " ");
@@ -906,7 +918,7 @@ final class BalanceData {
         long balance = extract(body);
         Long txn = extractTransaction(body);
         if (txn != null && balance >= 0) {
-            fold = sender + "|" + txn + "|" + balance;
+            fold = sender + (account == null ? "" : "|" + account) + "|" + txn + "|" + balance;
         } else {
             fold = sender + "|" + s;
         }
@@ -967,7 +979,9 @@ final class BalanceData {
     /** Parses a signed transaction amount (in rials) from a bank message, or null if the message does
      *  not describe a completed money movement. The amount is recognized, in order: after the "مبلغ"
      *  (amount) label — where an explicit "+"/"-" sign is authoritative (e.g. Parsian's
-     *  "مبلغ:500,000-"), after a deposit/withdrawal label ("واریز:"/"برداشت:", Tejarat), as a bare
+     *  "مبلغ:500,000-"), after a deposit/withdrawal label ("واریز:"/"برداشت:", Tejarat), as a
+     *  "<label>:<amount><sign>" line with a trailing sign (Melli's "انتقالي:1,000,000-" /
+     *  "حواله پل:7,700,000+" layout), as a bare
      *  number standing next to "ریال" that is not the stated resulting balance (Blu), or as a bare
      *  signed amount opening the message (Resalat's "-200,000,000" first line). The direction is
      *  taken from the explicit sign, the direction label, or exactly one of the deposit/withdrawal
@@ -1007,7 +1021,19 @@ final class BalanceData {
             }
         }
 
-        // 3) A bare number adjacent to "ریال", excluding the resulting balance itself.
+        // 3) A "<label>:<amount><sign>" line where the sign trails the number (Melli), e.g.
+        //    "انتقالي:1,000,000-" or "حواله پل:7,700,000+". The explicit sign decides the direction,
+        //    so a label that happens to contain a keyword of the opposite kind ("حواله" is a
+        //    withdrawal keyword but is a deposit here) cannot flip it.
+        if (amount <= 0) {
+            Matcher ml = labeledSignedAmount.matcher(n);
+            if (ml.find()) {
+                amount = toLong(ml.group(2));
+                sign = ml.group(3).equals("-") ? -1 : 1;
+            }
+        }
+
+        // 4) A bare number adjacent to "ریال", excluding the resulting balance itself.
         if (amount <= 0) {
             Matcher mb = balance.matcher(n);
             while (mb.find()) {
@@ -1020,7 +1046,7 @@ final class BalanceData {
             if (best > 0) amount = best;
         }
 
-        // 4) A bare signed amount at the start of the message (e.g. Resalat's "-200,000,000" first
+        // 5) A bare signed amount at the start of the message (e.g. Resalat's "-200,000,000" first
         //    line, with the resulting balance at the end). The explicit sign is the direction.
         if (amount <= 0) {
             Matcher ms = signedAmount.matcher(n);
@@ -1069,7 +1095,8 @@ final class BalanceData {
             if (delta == 0) return null;
             txn = delta;
         }
-        return new Transaction(bank, BankRules.extractAccount(bank, body), date, txn, messageSig(sender, body));
+        String account = BankRules.extractAccount(bank, body);
+        return new Transaction(bank, account, date, txn, messageSig(sender, body, account));
     }
 
     /** The last number captured by the given pattern in the string, or null if it matched nothing. */
