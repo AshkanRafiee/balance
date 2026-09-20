@@ -13,6 +13,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Telephony;
+import android.provider.Settings;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -173,6 +174,18 @@ public class MainActivity extends Activity {
                 && checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{Manifest.permission.READ_SMS}, SMS_REQUEST);
         else view.refresh();
+    }
+
+    /** Opens this app's settings page so the user can re-grant SMS permission after a permanent
+     *  denial, which the runtime permission dialog can no longer revoke. */
+    private void openSmsSettings() {
+        try {
+            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", getPackageName(), null));
+            startActivity(i);
+        } catch (Exception e) {
+            requestSms();
+        }
     }
 
     @Override
@@ -1541,6 +1554,15 @@ public class MainActivity extends Activity {
             } else if (y > 290 && y < 350 && (rtl ? x < 150 : x > getWidth() / d - 150)) {
                 showSortDialog();
             } else if (y >= 352 && y < byForTouch(h)) {
+                if (banks.isEmpty()) {
+                    // No balances at all: the empty card is the app's main entry point again. Without
+                    // SMS permission (e.g. after a permanent denial, which no runtime re-request can
+                    // lift) it deep-links into the app's system settings; otherwise it retries the scan.
+                    if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
+                        openSmsSettings();
+                    else refresh();
+                    return true;
+                }
                 BankRow row = rowAt(y + scrollY);
                 if (row != null) {
                     boolean onMenu = rtl
