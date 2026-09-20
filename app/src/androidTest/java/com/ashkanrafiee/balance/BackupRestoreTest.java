@@ -524,4 +524,21 @@ public class BackupRestoreTest {
         assertEquals(1, pasargad);  // new movement added from the backup
         assertEquals(1, melat);     // current history never dropped
     }
+
+    @Test public void merge_transactions_sameAmountSameTimeDifferentAccounts_staySeparate() throws Exception {
+        // Two accounts of one bank moved the same amount at the same moment; without an account-aware
+        // identity the restore merge would collapse them into a single history row.
+        List<Transaction> backupTxs = new ArrayList<>();
+        backupTxs.add(new Transaction("Mellat", "1110000222", T + 1000, -500_000L, null));
+        backupTxs.add(new Transaction("Mellat", "1110000333", T + 1000, -500_000L, null));
+        BalanceData.writeTransactions(ctx, backupTxs);
+        Uri u = uri("txn3.balance");
+        BackupManager.create(ctx, u, PASSWORD);
+
+        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+
+        BackupManager.restore(ctx, u, PASSWORD);
+        List<Transaction> out = BalanceData.readTransactions(ctx);
+        assertEquals(2, out.size());
+    }
 }

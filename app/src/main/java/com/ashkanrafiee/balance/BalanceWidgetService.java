@@ -16,16 +16,22 @@ public class BalanceWidgetService extends RemoteViewsService {
         return new Factory(getApplicationContext());
     }
 
-    /** The ordered bank list the widget shows: only included banks, in exactly the same order the main
-     *  app shows them (persisted sort mode), with excluded banks dropped entirely so the widget stays
-     *  a glanceable summary of the total. */
+    /** The ordered bank list the widget shows: only included banks, aggregated to one row per bank,
+     *  in exactly the same order the main app shows them (persisted sort mode), with excluded banks
+     *  dropped entirely so the widget stays a glanceable summary of the total. When a bank has
+     *  several accounts its widget row carries their summed balance. */
     static List<Bank> widgetBanks(Context context) {
         Context c = LocaleHelper.wrap(context);
         Set<String> excluded = BalanceData.getExcluded(c);
-        List<Bank> ordered = new ArrayList<>(BalanceData.orderForDisplay(
-            BalanceData.read(c), excluded, BalanceData.getSort(c)));
         List<Bank> included = new ArrayList<>();
-        for (Bank b : ordered) if (!excluded.contains(b.name)) included.add(b);
+        for (List<Bank> block : BalanceData.groupedForDisplay(
+                BalanceData.read(c), excluded, BalanceData.getSort(c))) {
+            String name = block.get(0).name;
+            if (excluded.contains(name)) continue;
+            long sum = 0;
+            for (Bank b : block) sum += b.amount;
+            included.add(new Bank(name, sum, 0, null));
+        }
         return included;
     }
 

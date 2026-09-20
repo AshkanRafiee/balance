@@ -271,12 +271,12 @@ final class BackupManager {
         Set<String> seen = new HashSet<>();
         for (Transaction t : currentTxs) seen.add(BalanceData.txIdentityKey(t));
         for (Transaction t : backupTxs) {
-            String legacyKey = t.bank + "|" + t.date + "|" + t.amount;
             String sigKey = t.sig != null ? "s:" + t.sig : null;
+            String key = BalanceData.txIdentityKey(t);
             if (sigKey != null && seen.contains(sigKey)) continue;
-            if (seen.contains(legacyKey)) continue;
+            if (seen.contains(key)) continue;
             if (sigKey != null) seen.add(sigKey);
-            seen.add(legacyKey);
+            seen.add(key);
             currentTxs.add(t);
         }
         BalanceData.writeTransactions(context, currentTxs);
