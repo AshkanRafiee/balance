@@ -340,7 +340,8 @@ final class BalanceData {
 
     /** Discards every saved balance and transaction and forgets both scan watermarks, so the next scans
      *  behave like a fresh install and rebuild from the messages currently in the inbox. The hide/unmask
-     *  preference is untouched (it is a display choice, not app data). */
+     *  preference is untouched (it is a display choice, not app data); the excluded-banks set is
+     *  forgotten too, because a fresh install has no exclusions. */
     static void reset(Context context) {
         context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
             .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).remove(KEY_HISTORY_LAST_BALANCE)
@@ -495,6 +496,10 @@ final class BalanceData {
         boolean full = watermark == 0 || prefs.getInt(KEY_RULES_VERSION, -1) != rulesVersion;
         if (full) watermark = 0;
         int matched = 0;
+        // Inbox dates are trusted as-served; a forged or clock-skewed message dated in the future
+        // would otherwise push the scan watermark past every genuine message, freezing incremental
+        // scans forever. Clamp each row's date to now so the watermark can only ever tag real time.
+        long now = System.currentTimeMillis();
         long newest = 0;
         String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
         String[] args = selection != null ? new String[]{Long.toString(watermark)} : null;
@@ -512,7 +517,7 @@ final class BalanceData {
             selection, args, Telephony.Sms.DATE + " DESC")) {
             if (cursor == null) return 0;
             while (cursor.moveToNext()) {
-                long date = cursor.getLong(2);
+                long date = Math.min(cursor.getLong(2), now);
                 if (newest < date) newest = date;
                 String sender = cursor.getString(0);
                 String bank = BankRules.resolve(sender);
@@ -557,7 +562,7 @@ final class BalanceData {
             Reconcile.Entry chosen = null;
             String chosenSender = null;
             boolean chainTrusted = chain != null && !chain.isEmpty()
-                && isChainMovement(chain, (String) newestArr[0], (String) newestArr[1]);
+                && isChainMovement(chain, bank, (String) newestArr[0], (String) newestArr[1]);
             if (chainTrusted) {
                 Reconcile.Entry last = chain.get(chain.size() - 1);
                 chosen = last;
@@ -647,6 +652,7 @@ final class BalanceData {
                 }
             }
             int added = 0;
+            long now = System.currentTimeMillis();
             long newest = 0;
             String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
             String[] args = selection != null ? new String[]{Long.toString(hwm)} : null;
@@ -657,7 +663,7 @@ final class BalanceData {
                 if (cursor == null) return 0;
                 List<Object[]> rows = new ArrayList<>();
                 while (cursor.moveToNext()) {
-                    long date = cursor.getLong(2);
+                    long date = Math.min(cursor.getLong(2), now);
                     if (date > newest) newest = date;
                     String sender = cursor.getString(0);
                     String bank = BankRules.resolve(sender);
@@ -1236,10 +1242,14 @@ final class BalanceData {
     }
 
     /** Whether the given message is a money movement whose fingerprint belongs to a reconciled chain.
-     *  When it is, the chain's own order is authoritative over the arrival order. */
-    private static boolean isChainMovement(List<Reconcile.Entry> chain, String sender, String body) {
+     *  When it is, the chain's own order is authoritative over the arrival order. The signature is
+     *  qualified with the message's account number, mirroring what {@link #mergedForWindow} persisted
+     *  (and what {@link #scanSms} grouped the row under), so a bank that states account numbers in its
+     *  messages is chain-matched correctly instead of falling back to arrival order. */
+    private static boolean isChainMovement(List<Reconcile.Entry> chain, String bank,
+            String sender, String body) {
         if (body == null || extractTransaction(body) == null) return false;
-        String sig = messageSig(sender, body);
+        String sig = messageSig(sender, body, BankRules.extractAccount(bank, body));
         if (sig == null) return false;
         for (Reconcile.Entry en : chain) if (sig.equals(en.sig)) return true;
         return false;
@@ -1278,7 +1288,7 @@ final class BalanceData {
     private static Integer chainPosOfRow(Map<String, Integer> pos, Object[] row) {
         String body = (String) row[2];
         if (body == null || extractTransaction(body) == null) return null;
-        String sig = messageSig((String) row[1], body);
+        String sig = messageSig((String) row[1], body, BankRules.extractAccount((String) row[0], body));
         return sig == null ? null : pos.get(sig);
     }
 
