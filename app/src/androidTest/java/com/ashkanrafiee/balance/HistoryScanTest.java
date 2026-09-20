@@ -279,6 +279,30 @@ public class HistoryScanTest {
         assertEquals("01351234567890", txs.get(0).account);
     }
 
+    @Test public void rulesNowRecognizeAccount_twinWithDifferentOldParse_isClaimedByAmount() throws Exception {
+        // If the older rules parsed the same still-present message into a different looking content, its
+        // fingerprint no longer matches the fresh account-bearing parse; same bank, same moment and same
+        // amount is then the only reliable claim the account-less era affords.
+        String sender = "TejaratBank";
+        long date = T + 99;
+        seed(sender, TEJARAT_DEPOSIT, date);
+
+        // The old-rules parse misread some text, so its stored fingerprint differs from today's, but the
+        // recorded amount and the movement's moment are the same event.
+        String wrongParseSig = BalanceData.messageSig(sender, TEJARAT_DEPOSIT) + "x";
+        List<Transaction> oldRules = new java.util.ArrayList<>();
+        oldRules.add(new Transaction("Tejarat", null, date, 115000000L, wrongParseSig));
+        BalanceData.writeTransactions(ctx, oldRules);
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(1, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(1, txs.size());
+        assertEquals(115000000L, txs.get(0).amount);
+        assertEquals("01351234567890", txs.get(0).account);
+    }
+
     @Test public void fullFirstScan_oldMovementsBeyondBalanceTail_areStillCaptured() throws Exception {
         // The balance scan stops per bank at the newest message; history must reach back further
         // and pick up the older movements too.
