@@ -2,6 +2,7 @@ package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -166,6 +167,58 @@ public class HistoryTest {
     @Test public void txn_signedAmountWithoutResultingBalance_isNull() {
         assertNull(BalanceData.extractTransaction("-200,000,000 \u062E\u0631\u06CC\u062F \u0627\u0646\u062C\u0627\u0645 \u0634\u062F"));
         assertNull(BalanceData.extractTransaction("-200,000,000\n06/22_20:37"));
+    }
+
+    // ---- real-world bank formats (Melli labeled amounts with a trailing sign) ----------
+    @Test public void txn_melli_transferWithdrawal_trailingMinus() {
+        assertEquals(-1000000L, (long) BalanceData.extractTransaction(
+            "\u0627\u0646\u062A\u0642\u0627\u0644\u06CC:1,000,000-\n"
+            + "\u062D\u0633\u0627\u0628:10001\n"
+            + "\u0645\u0627\u0646\u062F\u0647:208,405\n"
+            + "0629-17:23"));
+    }
+
+    @Test public void txn_melli_transferDeposit_trailingPlus() {
+        assertEquals(1000000L, (long) BalanceData.extractTransaction(
+            "\u0627\u0646\u062A\u0642\u0627\u0644\u06CC:1,000,000+\n"
+            + "\u062D\u0633\u0627\u0628:10002\n"
+            + "\u0645\u0627\u0646\u062F\u0647:1,070,622\n"
+            + "0629-17:23"));
+    }
+
+    @Test public void txn_melli_onlinePurchase_trailingMinus() {
+        assertEquals(-7600000L, (long) BalanceData.extractTransaction(
+            "\u062E\u0631\u06CC\u062F\u0627\u06CC\u0646\u062A\u0631\u0646\u062A\u06CC:7,600,000-\n"
+            + "\u062D\u0633\u0627\u0628:10002\n"
+            + "\u0645\u0627\u0646\u062F\u0647:220,112\n"
+            + "0620-23:13"));
+    }
+
+    @Test public void txn_melli_posDeposit_keywordOfOppositeKind_isDeposit() {
+        // "حواله" is a withdrawal keyword, but the trailing "+" marks a deposit; the sign must win.
+        assertEquals(7700000L, (long) BalanceData.extractTransaction(
+            "\u062D\u0648\u0627\u0644\u0647 \u067E\u0644:7,700,000+\n"
+            + "\u062D\u0633\u0627\u0628:10002\n"
+            + "\u0645\u0627\u0646\u062F\u0647:7,820,112\n"
+            + "0620-23:12"));
+    }
+
+    @Test public void txn_melli_labeledAmountWithoutResultingBalance_isNull() {
+        // The label and sign alone are not final: without the stated balance it must be rejected.
+        assertNull(BalanceData.extractTransaction(
+            "\u0627\u0646\u062A\u0642\u0627\u0644\u06CC:1,000,000-\n\u062D\u0633\u0627\u0628:10001"));
+    }
+
+    @Test public void txn_melli_firstMovement_ofAnAccount_isRecordedExactly() {
+        // The message states its own amount and sign, so the first movement of an account no longer
+        // needs a previous balance to be recorded (previously the delta fallback dropped it).
+        Transaction t = BalanceData.parseMovement("Melli", "9830009417",
+            "\u0627\u0646\u062A\u0642\u0627\u0644\u06CC:1,000,000-\n"
+            + "\u062D\u0633\u0627\u0628:10001\n"
+            + "\u0645\u0627\u0646\u062F\u0647:208,405", 1L, false, 0);
+        assertNotNull(t);
+        assertEquals(-1000000L, t.amount);
+        assertEquals("10001", t.account);
     }
 
     // ---- balance-delta fallback -------------------------------------------------------

@@ -384,6 +384,45 @@ public class HistoryScanTest {
         assertEquals(1, resalat);
     }
 
+    @Test public void injectorTxScenario_melliLabeledSigns_recordedExactlyPerAccount() throws Exception {
+        // The user-reported Melli layout: "<label>:<amount><sign>" with the sign trailing the number
+        // and no "مبلغ:"/"واریز:" label or unit. The amount and its sign come from the message itself,
+        // so the chronologically-first movement of each account is recorded exactly instead of being
+        // dropped by the balance-delta (which needs a previous balance it cannot have for the first).
+        String sender = "9830009417";
+        seed(sender, "\u0627\u0646\u062A\u0642\u0627\u0644\u06CC:1,000,000-\n"
+            + "\u062D\u0633\u0627\u0628:10001\n"
+            + "\u0645\u0627\u0646\u062F\u0647:1,058,405\n"
+            + "0629-17:09", T);
+        seed(sender, "\u0627\u0646\u062A\u0642\u0627\u0644\u06CC:1,000,000-\n"
+            + "\u062D\u0633\u0627\u0628:10001\n"
+            + "\u0645\u0627\u0646\u062F\u0647:208,405\n"
+            + "0629-17:23", T + 1000);
+        seed(sender, "\u062F\u0631\u06CC\u0627\u0641\u062A \u06CC\u0627\u0631\u0627\u0646\u0647:7,700,000+\n"
+            + "\u062D\u0633\u0627\u0628:10002\n"
+            + "\u0645\u0627\u0646\u062F\u0647:7,820,112\n"
+            + "0620-23:12", T + 2000);
+        seed(sender, "\u062E\u0631\u06CC\u062F\u0627\u06CC\u0646\u062A\u0631\u0646\u062A\u06CC:7,600,000-\n"
+            + "\u062D\u0633\u0627\u0628:10002\n"
+            + "\u0645\u0627\u0646\u062F\u0647:220,112\n"
+            + "0620-23:13", T + 3000);
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(4, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(4, txs.size());
+        long acct1 = 0, acct2 = 0;
+        for (Transaction t : txs) {
+            assertEquals("Melli", t.bank);
+            if ("10001".equals(t.account)) acct1 += t.amount;
+            else if ("10002".equals(t.account)) acct2 += t.amount;
+            else fail("unexpected account " + t.account);
+        }
+        assertEquals(-2000000L, acct1);   // two -1,000,000 transfers on account 10001
+        assertEquals(100000L, acct2);     // +7,700,000 deposit then -7,600,000 purchase on 10002
+    }
+
     // ============================================================
     // Exact-duplicate messages are one entry
     // ============================================================
