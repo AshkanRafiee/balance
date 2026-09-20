@@ -38,6 +38,9 @@ public class MainActivity extends Activity {
     private static final int SMS_REQUEST = 10;
     private static final int REQ_CREATE_BACKUP = 20;
     private static final int REQ_PICK_RESTORE = 21;
+    /** How long a copied balance stays in the system clipboard before it is cleared (see
+     *  {@code BalanceView.copyBalance}). */
+    private static final long CLIP_CLEAR_MS = 60_000L;
     private BalanceView view;
     private String pendingBackupPassword;
     private LockOverlay lockOverlay;
@@ -869,6 +872,9 @@ public class MainActivity extends Activity {
         boolean bankProbeFired;
         BankRow bankProbeRow;
         int downIcon = ICON_NONE;
+        /** Clears a copied balance from the system clipboard shortly after it was copied (see
+         *  {@link #copyBalance}); while set, the clipboard holds sensitive data we placed there. */
+        Runnable clearClipRunnable;
         final Handler handler = new Handler(Looper.getMainLooper());
         final Runnable lockLongProbe = () -> {
             lockProbeFired = true;
@@ -1401,8 +1407,25 @@ public class MainActivity extends Activity {
                 return;
             }
             ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-            clipboard.setPrimaryClip(ClipData.newPlainText(label, Long.toString(value / 10)));
+            String amount = Long.toString(value / 10);
+            clipboard.setPrimaryClip(ClipData.newPlainText(label, amount));
             Toast.makeText(MainActivity.this, getString(R.string.toast_copied_balance, label), Toast.LENGTH_SHORT).show();
+            // Sensitive numbers must not linger in the system clipboard (other apps can read it):
+            // clear it again once the paste window has passed, unless the user copied something else
+            // in the meantime (then that newer clip is left alone).
+            if (clearClipRunnable != null) handler.removeCallbacks(clearClipRunnable);
+            clearClipRunnable = () -> {
+                clearClipRunnable = null;
+                CharSequence current = clipboard.hasPrimaryClip()
+                    && clipboard.getPrimaryClip() != null
+                    && clipboard.getPrimaryClip().getItemCount() > 0
+                    ? clipboard.getPrimaryClip().getItemAt(0).getText() : null;
+                if (amount.equals(String.valueOf(current))) {
+                    if (android.os.Build.VERSION.SDK_INT >= 28) clipboard.clearPrimaryClip();
+                    else clipboard.setPrimaryClip(ClipData.newPlainText("", ""));
+                }
+            };
+            handler.postDelayed(clearClipRunnable, CLIP_CLEAR_MS);
         }
 
         void showBankMenu(String bankName, long amount) {
