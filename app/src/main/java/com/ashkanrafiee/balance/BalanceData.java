@@ -185,10 +185,13 @@ final class BalanceData {
             JSONObject obj = new JSONObject(json);
             Iterator<String> keys = obj.keys();
             while (keys.hasNext()) {
-                String bank = keys.next();
-                JSONObject entry = obj.getJSONObject(bank);
-                map.put(bank, new Bank(bank, entry.getLong("amount"),
-                    entry.getLong("date"), entry.getString("sender")));
+                String key = keys.next();
+                JSONObject entry = obj.getJSONObject(key);
+                String account = entry.has("account") && !entry.isNull("account")
+                    ? entry.getString("account") : null;
+                if (account == null) account = accountOfKey(key);
+                map.put(key, new Bank(bankOfKey(key), entry.getLong("amount"),
+                    entry.getLong("date"), entry.getString("sender"), account));
             }
         } catch (Exception e) { }
         return map;
@@ -203,6 +206,7 @@ final class BalanceData {
             entry.put("amount", b.amount);
             entry.put("date", b.date);
             entry.put("sender", b.sender);
+            if (b.account != null) entry.put("account", b.account);
             obj.put(e.getKey(), entry);
         }
         return obj.toString();
@@ -213,6 +217,25 @@ final class BalanceData {
         LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
         parse(map, json);
         return map;
+    }
+
+    /** The composite storage key for a bank balance/transaction slot: the plain bank name when the
+     *  message carries no account number, or {@code bank|account} when it does. Bank names never
+     *  contain '|', and neither do account numbers. */
+    static String storageKey(String bank, String account) {
+        return account == null ? bank : bank + "|" + account;
+    }
+
+    /** The canonical bank name embedded in a composite storage key. */
+    static String bankOfKey(String key) {
+        int i = key.indexOf('|');
+        return i < 0 ? key : key.substring(0, i);
+    }
+
+    /** The account number embedded in a composite storage key, or null for a plain bank key. */
+    private static String accountOfKey(String key) {
+        int i = key.indexOf('|');
+        return i < 0 ? null : key.substring(i + 1);
     }
 
     /** Reads all saved transactions, newest first, the order in which they were appended. */
@@ -247,7 +270,8 @@ final class BalanceData {
     }
 
     /** Serializes transactions to the JSON shape used for the local store and the backup payload. The
-     *  message fingerprint is optional and skipped when absent, so backups stay readable both ways. */
+     *  message fingerprint and the account number are optional and skipped when absent, so backups
+     *  stay readable both ways. */
     static String serializeTransactions(List<Transaction> txs) throws Exception {
         JSONArray arr = new JSONArray();
         for (Transaction t : txs) {
@@ -255,6 +279,7 @@ final class BalanceData {
                 .put("bank", t.bank)
                 .put("date", t.date)
                 .put("amount", t.amount);
+            if (t.account != null) e.put("account", t.account);
             if (t.sig != null) e.put("sig", t.sig);
             arr.put(e);
         }
@@ -274,7 +299,8 @@ final class BalanceData {
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject e = arr.getJSONObject(i);
                 String sig = e.has("sig") && !e.isNull("sig") ? e.getString("sig") : null;
-                list.add(new Transaction(e.getString("bank"), e.getLong("date"),
+                String account = e.has("account") && !e.isNull("account") ? e.getString("account") : null;
+                list.add(new Transaction(e.getString("bank"), account, e.getLong("date"),
                     e.getLong("amount"), sig));
             }
         } catch (Exception ex) {
@@ -446,7 +472,7 @@ final class BalanceData {
         // that sends a fee and the transfer it belongs to in the wrong order surfaces here as two
         // rows whose device dates disagree with their true chronology; the recent-movements window
         // below reconciles that before the balance is chosen.
-        Map<String, List<Object[]>> rowsByBank = new LinkedHashMap<>();
+        Map<String, List<Object[]>> rowsByKey = new LinkedHashMap<>();
         try (Cursor cursor = context.getContentResolver().query(
             Telephony.Sms.Inbox.CONTENT_URI,
             new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
@@ -461,7 +487,8 @@ final class BalanceData {
                 long value = extract(cursor.getString(1));
                 if (value < 0) continue;
                 matchedBanks.add(bank);
-                rowsByBank.computeIfAbsent(bank, k -> new ArrayList<>())
+                String key = storageKey(bank, BankRules.extractAccount(bank, cursor.getString(1)));
+                rowsByKey.computeIfAbsent(key, k -> new ArrayList<>())
                     .add(new Object[]{sender, cursor.getString(1), date});
                 if (full && matchedBanks.size() == senderTarget) break;
             }
@@ -470,14 +497,15 @@ final class BalanceData {
         }
 
         Map<String, List<Reconcile.Entry>> windows = loadRecentMovements(context);
-        for (Map.Entry<String, List<Object[]>> e : rowsByBank.entrySet()) {
-            String bank = e.getKey();
+        for (Map.Entry<String, List<Object[]>> e : rowsByKey.entrySet()) {
+            String key = e.getKey();
+            String bank = bankOfKey(key);
             List<Object[]> rows = e.getValue();
             // Merge this scan's movements into the recent-movements window and reconcile the unique
             // balance chain, so a fee and its transfer that the bank sent in the wrong order are seen
             // in their true order instead of by arrival time.
             Map<String, String> sigSender = new HashMap<>();
-            List<Reconcile.Entry> merged = mergedForWindow(windows.get(bank), rows, sigSender);
+            List<Reconcile.Entry> merged = mergedForWindow(windows.get(key), rows, sigSender);
             List<Reconcile.Entry> chain = reconcile(merged);
 
             Object[] newestArr = newestRow(rows);
@@ -497,18 +525,19 @@ final class BalanceData {
                 }
             }
             if (chosen != null) {
-                Bank existing = current.get(bank);
+                Bank existing = current.get(key);
                 // Only move the stored balance forward in time. The chain-resolved branch must not
                 // regress a newer stored entry when the last message is gone or a late,
                 // out-of-order movement resolves as the chain tail.
                 boolean changed = existing == null || chosen.date > existing.date;
                 if (changed) {
                     matched++;
-                    current.put(bank, new Bank(bank, chosen.balance, chosen.date,
-                        chosenSender != null ? chosenSender : (existing != null ? existing.sender : null)));
+                    current.put(key, new Bank(bank, chosen.balance, chosen.date,
+                        chosenSender != null ? chosenSender : (existing != null ? existing.sender : null),
+                        accountOfKey(key)));
                 }
             }
-            windows.put(bank, pruneWindow(merged));
+            windows.put(key, pruneWindow(merged));
         }
         saveRecentMovements(context, windows);
 
@@ -517,7 +546,7 @@ final class BalanceData {
         // must not confirm the rules version or advance the watermark: the stored balances may be
         // stale (the messages they came from are gone, or the SMS store is not available yet) and
         // the rebuild must be retried on the next open instead of being marked as done.
-        boolean emptyFullScan = full && rowsByBank.isEmpty() && !current.isEmpty();
+        boolean emptyFullScan = full && rowsByKey.isEmpty() && !current.isEmpty();
         if (!emptyFullScan) {
             SharedPreferences.Editor editor = prefs.edit().putInt(KEY_RULES_VERSION, rulesVersion);
             if (newest > watermark) editor.putLong(KEY_SCANNED_THROUGH, newest);
@@ -569,7 +598,7 @@ final class BalanceData {
             if (!full) {
                 for (Transaction t : stored) {
                     if (t.sig != null) seenSigs.add(t.sig);
-                    else seenLegacy.add(t.bank + "|" + t.date + "|" + t.amount);
+                    else seenLegacy.add(legacyEntryKey(t));
                 }
             }
             int added = 0;
@@ -601,28 +630,28 @@ final class BalanceData {
                 // order are processed (and stored) in their true order instead of by arrival time.
                 Map<String, List<Object[]>> rowsByBank = new LinkedHashMap<>();
                 for (Object[] row : rows) {
-                    rowsByBank.computeIfAbsent((String) row[0], k -> new ArrayList<>()).add(row);
+                    rowsByBank.computeIfAbsent(rowCompositeKey(row), k -> new ArrayList<>()).add(row);
                 }
                 Map<String, List<Reconcile.Entry>> windows = loadRecentMovements(context);
                 Map<String, Map<String, Integer>> chainPosByBank = new LinkedHashMap<>();
                 Map<String, List<Reconcile.Entry>> chainByBank = new LinkedHashMap<>();
                 for (Map.Entry<String, List<Object[]>> e : rowsByBank.entrySet()) {
-                    String bank = e.getKey();
+                    String key = e.getKey();
                     // History rows carry [bank, sender, body, date]; the window merger reads them as
                     // [sender, body, date] (the layout scanSms builds), so rebind before merging.
-                    List<Reconcile.Entry> merged = mergedForWindow(windows.get(bank),
+                    List<Reconcile.Entry> merged = mergedForWindow(windows.get(key),
                         senderBodyDate(e.getValue()));
                     List<Reconcile.Entry> chain = reconcile(merged);
                     if (chain != null && !chain.isEmpty()) {
-                        chainByBank.put(bank, chain);
+                        chainByBank.put(key, chain);
                         Map<String, Integer> pos = new HashMap<>();
                         for (int i = 0; i < chain.size(); i++) {
                             Reconcile.Entry en = chain.get(i);
                             if (en.sig != null) pos.put(en.sig, i);
                         }
-                        chainPosByBank.put(bank, pos);
+                        chainPosByBank.put(key, pos);
                     }
-                    windows.put(bank, pruneWindow(merged));
+                    windows.put(key, pruneWindow(merged));
                 }
                 saveRecentMovements(context, windows);
 
@@ -638,7 +667,8 @@ final class BalanceData {
                     String sender = (String) row[1];
                     String body = (String) row[2];
                     long date = (Long) row[3];
-                    Long last = lastBalance.get(bank);
+                    String key = rowCompositeKey(row);
+                    Long last = lastBalance.get(key);
                     Transaction t = parseMovement(bank, sender, body, date,
                         last != null, last != null ? last : 0);
                     if (t != null) {
@@ -652,7 +682,7 @@ final class BalanceData {
                         // dedup runs against the stored history; on a full scan the stored history is
                         // not consulted (the inbox is the source of truth being re-processed), so this
                         // only collapses the scan's own duplicates via the addedSigs set.
-                        String legacyKey = bank + "|" + date + "|" + t.amount;
+                        String legacyKey = legacyEntryKey(t);
                         if (seenLegacy.contains(legacyKey)) continue;
                         String sig = t.sig;
                         if (sig != null) {
@@ -669,7 +699,7 @@ final class BalanceData {
                     // against it, across scans. OTP messages and balance-less prompts return -1 here
                     // and leave the chain untouched.
                     long bal = extract(body);
-                    if (bal >= 0) lastBalance.put(bank, bal);
+                    if (bal >= 0) lastBalance.put(key, bal);
                 }
                 // Chain banks: keep the balance chain end correct when the true-newest movement was not
                 // among the rows scanned now (a previous scan already committed it), and place fresh
@@ -677,10 +707,10 @@ final class BalanceData {
                 // recorded earlier (split scans). A full re-scan additionally reorders any stored
                 // entries the arrival order previously put back-to-front.
                 for (Map.Entry<String, List<Reconcile.Entry>> e : chainByBank.entrySet()) {
-                    String bank = e.getKey();
+                    String key = e.getKey();
                     List<Reconcile.Entry> chain = e.getValue();
                     List<Transaction> txs = new ArrayList<>();
-                    for (Transaction t : fresh) if (bank.equals(t.bank)) txs.add(t);
+                    for (Transaction t : fresh) if (key.equals(transactionCompositeKey(t))) txs.add(t);
                     // Chain banks: keep the persisted last balance at the chain end (the true-newest
                     // movement) unless the chain-last movement itself was committed now, or a movement
                     // OUTSIDE the chain was recorded this scan and superseded it (a delta-derived
@@ -688,7 +718,7 @@ final class BalanceData {
                     Reconcile.Entry last = chain.get(chain.size() - 1);
                     if (last.sig != null && !addedSigs.contains(last.sig)
                             && !hasFreshOutsideChain(txs, chain)) {
-                        lastBalance.put(bank, last.balance);
+                        lastBalance.put(key, last.balance);
                     }
                     // Place freshly scanned chain members next to their already-stored siblings when
                     // part of the pair was recorded earlier (split scans). Only chain members are ever
@@ -697,13 +727,13 @@ final class BalanceData {
                     // this pass, so the chain order already comes from the row reorder above plus the
                     // stored reorder below, and sibling placement can't reference stale fingerprints.
                     if (txs.isEmpty() || full) continue;
-                    if (hasStoredChainMember(stored, bank, chain)) {
+                    if (hasStoredChainMember(stored, key, chain)) {
                         Set<String> chainSigs = new HashSet<>();
                         for (Reconcile.Entry ce : chain) if (ce.sig != null) chainSigs.add(ce.sig);
                         Map<String, Transaction> bySig = new HashMap<>();
                         for (Transaction t : txs)
                             if (t.sig != null && chainSigs.contains(t.sig)) bySig.put(t.sig, t);
-                        placeReconciled(stored, bank, chain, bySig);
+                        placeReconciled(stored, key, chain, bySig);
                         placed.addAll(bySig.values());
                     }
                 }
@@ -726,7 +756,7 @@ final class BalanceData {
                     Map<String, Integer> freshAtKey = new HashMap<>();
                     for (Transaction t : fresh) {
                         if (t.sig != null) freshSigs.add(t.sig);
-                        String key = t.bank + "|" + t.date;
+                        String key = transactionCompositeKey(t) + "|" + t.date;
                         freshAtKey.put(key, freshAtKey.getOrDefault(key, 0) + 1);
                     }
                     List<Transaction> rebuilt = new ArrayList<>(fresh.size() + stored.size());
@@ -738,7 +768,7 @@ final class BalanceData {
                     for (Transaction t : stored) {
                         if (t.sig != null && freshSigs.contains(t.sig)) {
                             identityClaimed.add(t);
-                            String key = t.bank + "|" + t.date;
+                            String key = transactionCompositeKey(t) + "|" + t.date;
                             identityClaimsPerKey.put(key,
                                 identityClaimsPerKey.getOrDefault(key, 0) + 1);
                         }
@@ -751,7 +781,7 @@ final class BalanceData {
                     }
                     for (Transaction t : stored) {
                         if (identityClaimed.contains(t)) continue;
-                        String key = t.bank + "|" + t.date;
+                        String key = transactionCompositeKey(t) + "|" + t.date;
                         Integer left = budget.get(key);
                         if (left != null && left > 0) {
                             budget.put(key, left - 1);
@@ -851,9 +881,31 @@ final class BalanceData {
     }
 
     /** Uniquely identifies a stored transaction for dedup: the message fingerprint when known, or the
-     *  legacy bank/date/amount triple for entries written before signatures existed. */
+     *  legacy bank/date/amount triple for entries written before signatures existed. The account
+     *  number is appended to the triple when the entry carried one, so two same-amount, same-moment
+     *  movements across two accounts of one bank never collide. */
     static String txIdentityKey(Transaction t) {
-        return t.sig != null ? "s:" + t.sig : t.bank + "|" + t.date + "|" + t.amount;
+        if (t.sig != null) return "s:" + t.sig;
+        String base = t.bank + "|" + t.date + "|" + t.amount;
+        return t.account == null ? base : base + "|" + t.account;
+    }
+
+    /** The composite storage key for a transaction's own bank slot. */
+    private static String transactionCompositeKey(Transaction t) {
+        return storageKey(t.bank, t.account);
+    }
+
+    /** The composite storage key a [bank, sender, body, date] history row belongs to. */
+    private static String rowCompositeKey(Object[] row) {
+        String bank = (String) row[0];
+        return storageKey(bank, BankRules.extractAccount(bank, (String) row[2]));
+    }
+
+    /** The legacy no-fingerprint dedup key of a transaction (bank/date/amount, plus account when
+     *  stated), mirroring {@link #txIdentityKey}. */
+    private static String legacyEntryKey(Transaction t) {
+        String base = t.bank + "|" + t.date + "|" + t.amount;
+        return t.account == null ? base : base + "|" + t.account;
     }
 
     static long extract(String raw) {
@@ -973,7 +1025,7 @@ final class BalanceData {
             if (delta == 0) return null;
             txn = delta;
         }
-        return new Transaction(bank, date, txn, messageSig(sender, body));
+        return new Transaction(bank, BankRules.extractAccount(bank, body), date, txn, messageSig(sender, body));
     }
 
     /** The last number captured by the given pattern in the string, or null if it matched nothing. */
@@ -1109,12 +1161,13 @@ final class BalanceData {
         return false;
     }
 
-    /** Reorders the date-sorted scan rows so that adjacent same-bank movements known to a unique
-     *  chain appear in its true order. Only adjacent same-bank rows are ever swapped, so unrelated
-     *  messages (other banks, balance-only snapshots) keep their current relative positions. */
+    /** Reorders the date-sorted scan rows so that adjacent same-bank-account movements known to a
+     *  unique chain appear in its true order. Only adjacent same-slot rows are ever swapped, so
+     *  unrelated messages (other banks/accounts, balance-only snapshots) keep their current relative
+     *  positions. */
     private static List<Object[]> reorderByChains(List<Object[]> rows,
-            Map<String, Map<String, Integer>> posByBank) {
-        if (posByBank.isEmpty() || rows.size() < 2) return rows;
+            Map<String, Map<String, Integer>> posByKey) {
+        if (posByKey.isEmpty() || rows.size() < 2) return rows;
         List<Object[]> out = new ArrayList<>(rows);
         boolean changed = true;
         while (changed) {
@@ -1122,8 +1175,8 @@ final class BalanceData {
             for (int i = 0; i + 1 < out.size(); i++) {
                 Object[] a = out.get(i);
                 Object[] b = out.get(i + 1);
-                if (!a[0].equals(b[0])) continue;
-                Map<String, Integer> pos = posByBank.get(a[0]);
+                if (!rowCompositeKey(a).equals(rowCompositeKey(b))) continue;
+                Map<String, Integer> pos = posByKey.get(rowCompositeKey(a));
                 if (pos == null) continue;
                 Integer pa = chainPosOfRow(pos, a);
                 Integer pb = chainPosOfRow(pos, b);
@@ -1145,23 +1198,25 @@ final class BalanceData {
         return sig == null ? null : pos.get(sig);
     }
 
-    /** Whether any entry of a bank's reconciled chain was already saved to the stored history, which
-     *  is the signature of a split scan (part of a reversal pair committed earlier). */
-    private static boolean hasStoredChainMember(List<Transaction> stored, String bank,
+    /** Whether any entry of a bank-account slot's reconciled chain was already saved to the stored
+     *  history, which is the signature of a split scan (part of a reversal pair committed earlier). */
+    private static boolean hasStoredChainMember(List<Transaction> stored, String key,
             List<Reconcile.Entry> chain) {
         for (Reconcile.Entry e : chain) {
             if (e.sig == null) continue;
             for (Transaction t : stored) {
-                if (t.sig != null && t.sig.equals(e.sig) && bank.equals(t.bank)) return true;
+                if (t.sig != null && t.sig.equals(e.sig) && transactionCompositeKey(t).equals(key)) {
+                    return true;
+                }
             }
         }
         return false;
     }
 
-    /** Places the freshly scanned chain members of a bank into the stored history at the position
-     *  their already-stored siblings dictate (newest first), instead of appending on top. This keeps
-     *  a fee that arrives in a later scan below the transfer it belongs to. */
-    private static void placeReconciled(List<Transaction> stored, String bank,
+    /** Places the freshly scanned chain members of a bank-account slot into the stored history at the
+     *  position their already-stored siblings dictate (newest first), instead of appending on top.
+     *  This keeps a fee that arrives in a later scan below the transfer it belongs to. */
+    private static void placeReconciled(List<Transaction> stored, String key,
             List<Reconcile.Entry> chain, Map<String, Transaction> freshBySig) {
         for (int k = chain.size() - 1; k >= 0; k--) {
             Reconcile.Entry e = chain.get(k);
@@ -1172,7 +1227,7 @@ final class BalanceData {
                 if (t.sig != null && t.sig.equals(e.sig)) { dup = true; break; }
             }
             if (dup) continue;
-            stored.add(chainInsertIndex(stored, bank, chain, k), tx);
+            stored.add(chainInsertIndex(stored, key, chain, k), tx);
         }
     }
 
@@ -1192,15 +1247,15 @@ final class BalanceData {
     }
 
     /** The stored-history index at which chain entry {@code k} (0 = oldest) must be inserted so the
-     *  bank's chain reads newest-first: after its newest already-stored sibling, or before its oldest
-     *  already-stored sibling, or at the top when it has none. */
-    private static int chainInsertIndex(List<Transaction> stored, String bank,
+     *  bank-account slot's chain reads newest-first: after its newest already-stored sibling, or
+     *  before its oldest already-stored sibling, or at the top when it has none. */
+    private static int chainInsertIndex(List<Transaction> stored, String key,
             List<Reconcile.Entry> chain, int k) {
         int maxNewer = -1;
         int minOlder = Integer.MAX_VALUE;
         for (int i = 0; i < stored.size(); i++) {
             Transaction t = stored.get(i);
-            if (t.bank == null || !t.bank.equals(bank) || t.sig == null) continue;
+            if (t.sig == null || !transactionCompositeKey(t).equals(key)) continue;
             for (int p = 0; p < chain.size(); p++) {
                 Reconcile.Entry ce = chain.get(p);
                 if (ce.sig != null && ce.sig.equals(t.sig)) {
@@ -1215,20 +1270,23 @@ final class BalanceData {
         return 0;
     }
 
-    /** On a full re-scan, bubbles adjacent same-bank stored entries that a reversed arrival order
-     *  previously saved back-to-front into their true chain order. Entries that are adjacent and both
-     *  known to a unique chain are the only ones moved, mirroring {@link #reorderByChains}. */
+    /** On a full re-scan, bubbles adjacent same-slot stored entries (bank + account) that a reversed
+     *  arrival order previously saved back-to-front into their true chain order. Entries that are
+     *  adjacent and both known to a unique chain are the only ones moved, mirroring
+     *  {@link #reorderByChains}. */
     private static void reorderStoredByChains(List<Transaction> stored,
-            Map<String, Map<String, Integer>> posByBank) {
-        if (posByBank.isEmpty() || stored.size() < 2) return;
+            Map<String, Map<String, Integer>> posByKey) {
+        if (posByKey.isEmpty() || stored.size() < 2) return;
         boolean changed = true;
         while (changed) {
             changed = false;
             for (int i = 0; i + 1 < stored.size(); i++) {
                 Transaction a = stored.get(i);
                 Transaction b = stored.get(i + 1);
-                if (a.bank == null || !a.bank.equals(b.bank)) continue;
-                Map<String, Integer> pos = posByBank.get(a.bank);
+                if (a.bank == null || !transactionCompositeKey(a).equals(transactionCompositeKey(b))) {
+                    continue;
+                }
+                Map<String, Integer> pos = posByKey.get(transactionCompositeKey(a));
                 if (pos == null) continue;
                 Integer pa = a.sig != null ? pos.get(a.sig) : null;
                 Integer pb = b.sig != null ? pos.get(b.sig) : null;

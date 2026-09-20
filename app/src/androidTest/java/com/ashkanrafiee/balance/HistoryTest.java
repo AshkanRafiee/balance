@@ -468,6 +468,17 @@ public class HistoryTest {
         assertEquals("Saman|5|100", BalanceData.txIdentityKey(new Transaction("Saman", 5, 100)));
     }
 
+    @Test public void txIdentityKey_appendsAccount_sameSlotMovementsStayDistinct() {
+        // Sigless legacy entries for the same amount and moment on two different accounts of one
+        // bank must not collide: the account number keeps the identity per bank|account slot.
+        assertEquals("Mellat|5|100|1110000222",
+            BalanceData.txIdentityKey(new Transaction("Mellat", "1110000222", 5, 100, null)));
+        assertEquals("Mellat|5|100|1111111111",
+            BalanceData.txIdentityKey(new Transaction("Mellat", "1111111111", 5, 100, null)));
+        assertEquals("s:abc", BalanceData.txIdentityKey(
+            new Transaction("Mellat", "1110000222", 5, 100, "abc")));
+    }
+
     @Test public void buildLists_doesNotMutateInput() {
         List<Transaction> txs = new ArrayList<>();
         txs.add(new Transaction("Saman", epoch(2026, 9, 10), 1000000L));

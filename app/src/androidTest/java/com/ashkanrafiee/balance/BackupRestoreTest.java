@@ -1,6 +1,7 @@
 package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -113,6 +114,51 @@ public class BackupRestoreTest {
         assertEquals(0, res.added);
         assertEquals(0, res.updated);
         assertTrue(BalanceData.read(ctx).isEmpty());
+    }
+
+    @Test public void roundTrip_accountCompositeKeys_survive() throws Exception {
+        LinkedHashMap<String, Bank> m = new LinkedHashMap<>();
+        m.put("Mellat|1110000222", new Bank("Mellat", 2_000_000L, T + 1000, "x", "1110000222"));
+        BalanceData.write(ctx, m);
+
+        LinkedHashMap<String, Bank> out = BalanceData.read(ctx);
+        assertEquals(1, out.size());
+        Bank b = out.get("Mellat|1110000222");
+        assertEquals("Mellat", b.name);
+        assertEquals("1110000222", b.account);
+        assertEquals(2_000_000L, b.amount);
+
+        LinkedHashMap<String, Bank> parsed =
+            BalanceData.deserialize(BalanceData.serialize(out));
+        assertEquals("Mellat", parsed.get("Mellat|1110000222").name);
+        assertEquals("1110000222", parsed.get("Mellat|1110000222").account);
+    }
+
+    @Test public void roundTrip_accountLessBank_keepsPlainKey() throws Exception {
+        LinkedHashMap<String, Bank> m = new LinkedHashMap<>();
+        m.put("Tejarat", new Bank("Tejarat", 1_000_000L, T + 1000, "x"));
+        BalanceData.write(ctx, m);
+
+        LinkedHashMap<String, Bank> out = BalanceData.read(ctx);
+        assertEquals(1, out.size());
+        assertNull(out.get("Tejarat").account);
+        assertNull(BalanceData.deserialize(BalanceData.serialize(out))
+            .get("Tejarat").account);
+    }
+
+    @Test public void roundTrip_transactions_withAccount() throws Exception {
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Mellat", "1110000222", T + 1000, -500_000L, null));
+        BalanceData.writeTransactions(ctx, txs);
+
+        List<Transaction> out = BalanceData.readTransactions(ctx);
+        assertEquals(1, out.size());
+        assertEquals("Mellat", out.get(0).bank);
+        assertEquals("1110000222", out.get(0).account);
+
+        List<Transaction> parsed = BalanceData.deserializeTransactions(
+            BalanceData.serializeTransactions(out));
+        assertEquals("1110000222", parsed.get(0).account);
     }
 
     @Test public void headerCarriesSelfDescribingEncryptionParameters() throws Exception {
