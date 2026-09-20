@@ -105,6 +105,8 @@
     <string name="history_filter_from_without_to">از %1$s به بعد</string>
     <string name="history_filter_to_without_from">تا %1$s</string>
     <string name="history_empty_filtered">هیچ تراکنشی با فیلترهای فعلی مطابقت ندارد.</string>
+    <string name="history_empty_account">هنوز تراکنشی برای این حساب یافت نشده است.</string>
+    <string name="history_account_all">همهٔ حساب‌ها</string>
     <plurals name="history_n_tx">
         <item quantity="one">%1$d تراکنش</item>
         <item quantity="other">%1$d تراکنش</item>

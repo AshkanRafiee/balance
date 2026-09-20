@@ -519,6 +519,45 @@ public class HistoryTest {
         assertEquals(copy, txs);
     }
 
+    // ---- per-account history filter ---------------------------------------------
+
+    @Test public void filterByAccount_isolatesOneAccount_totalsMatch() {
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Mellat", "1110000222", epoch(2026, 9, 10), 1000000L, null));
+        txs.add(new Transaction("Mellat", "1111111111", epoch(2026, 9, 10), -500000L, null));
+        txs.add(new Transaction("Mellat", "1110000222", epoch(2026, 9, 11), 2000000L, null));
+        List<Transaction> only = HistoryActivity.filterByAccount(txs, "1110000222");
+        assertEquals(2, only.size());
+        for (Transaction t : only) assertEquals("1110000222", t.account);
+        assertEquals(3000000L, HistoryActivity.buildLists(only).total);
+    }
+
+    @Test public void filterByAccount_unknownAccount_isEmpty() {
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Mellat", "1110000222", epoch(2026, 9, 10), 1000000L, null));
+        assertTrue(HistoryActivity.filterByAccount(txs, "7777777777").isEmpty());
+        assertTrue(HistoryActivity.filterByAccount(new ArrayList<>(), "1110000222").isEmpty());
+    }
+
+    @Test public void filterByAccount_keepsInputUnchanged() {
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Mellat", "1110000222", epoch(2026, 9, 10), 1000000L, null));
+        List<Transaction> copy = new ArrayList<>(txs);
+        HistoryActivity.filterByAccount(txs, "1110000222");
+        assertEquals(copy, txs);
+    }
+
+    @Test public void filterByAccount_composesAfterBank() {
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Mellat", "1110000222", epoch(2026, 9, 10), 1000000L, null));
+        txs.add(new Transaction("Mellat", "1111111111", epoch(2026, 9, 10), -500000L, null));
+        List<Transaction> only = HistoryActivity.filterByAccount(
+            HistoryActivity.filterByBank(txs, "Mellat"), "1110000222");
+        assertEquals(1, only.size());
+        assertEquals("Mellat", only.get(0).bank);
+        assertEquals("1110000222", only.get(0).account);
+    }
+
     // ---- history filters: direction --------------------------------------------------
 
     @Test public void filter_direction_depositsOnly() {

@@ -83,6 +83,10 @@ public final class HistoryActivity extends Activity {
     /** Optional canonical bank name; when set, only that bank's transactions are shown. */
     private String bankFilter;
 
+    /** Optional account number (only meaningful alongside {@link #bankFilter}); when set, only
+     *  transactions of that account of the bank are shown. */
+    private String accountFilter;
+
     /** The active direction and date bounds, applied before the transactions are grouped so the hero
      *  and the breakdown always match what is on screen. Starts from {@link Filter#ALL} on every open
      *  and survives rotation through the saved state; never persisted across sessions. */
@@ -91,6 +95,10 @@ public final class HistoryActivity extends Activity {
     /** The filter controls row (direction segment above the date presets), rebuilt by every render
      *  so its highlight and labels always mirror {@link #filter}. */
     private LinearLayout filterBar;
+
+    /** The per-bank account chip row, rebuilt by every render so its highlight mirrors
+     *  {@link #accountFilter}; hidden outside the per-bank view. */
+    private LinearLayout accountBar;
 
     /** Watches for new bank SMS while the screen is open, triggering a silent history re-scan. */
     private ContentObserver smsObserver;
@@ -288,6 +296,8 @@ public final class HistoryActivity extends Activity {
             restoreFilter(state);
         }
         bankFilter = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_BANK);
+        accountFilter = bankFilter == null ? null
+            : (getIntent() == null ? null : getIntent().getStringExtra(EXTRA_ACCOUNT));
         bg = color(R.color.bg);
         card = color(R.color.panel);
         muted = color(R.color.muted);
@@ -337,6 +347,10 @@ public final class HistoryActivity extends Activity {
         host.addView(root, new FrameLayout.LayoutParams(-1, -1));
 
         root.addView(buildHeader(), margin(0, 0, 0, 14));
+        accountBar = new LinearLayout(this);
+        accountBar.setOrientation(LinearLayout.VERTICAL);
+        accountBar.setVisibility(View.GONE);
+        root.addView(accountBar, margin(0, 0, 0, 10));
         filterBar = new LinearLayout(this);
         filterBar.setOrientation(LinearLayout.VERTICAL);
         root.addView(filterBar, margin(0, 0, 0, 12));
@@ -474,6 +488,51 @@ public final class HistoryActivity extends Activity {
             sumLp.topMargin = dp(6);
             filterBar.addView(summary, sumLp);
         }
+    }
+
+    /** Rebuilds the per-bank account chips: "All accounts" plus one chip per account the bank has
+     *  transactions for. The row only appears in the per-bank view and derives from the whole bank's
+     *  history (before the direction/date filters), so its choices stay stable while narrowing. */
+    private void rebuildAccountBar(List<Transaction> bankTxs) {
+        accountBar.removeAllViews();
+        accountBar.setVisibility(bankFilter == null ? View.GONE : View.VISIBLE);
+        if (bankFilter == null) return;
+        List<String> accounts = new ArrayList<>();
+        for (Transaction t : bankTxs)
+            if (t.account != null && !accounts.contains(t.account)) accounts.add(t.account);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        addAccountChip(row, getString(R.string.history_account_all), null, () -> applyAccount(null));
+        for (String account : accounts)
+            addAccountChip(row, getString(R.string.account_label) + " " + digits(account),
+                account, () -> applyAccount(account));
+        android.widget.HorizontalScrollView scroller = new android.widget.HorizontalScrollView(this);
+        scroller.setHorizontalScrollBarEnabled(false);
+        scroller.addView(row, new android.widget.HorizontalScrollView.LayoutParams(-2, -2));
+        accountBar.addView(scroller, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    /** One account chip; highlights when it is the active filter. */
+    private void addAccountChip(LinearLayout host, String label, String account, Runnable action) {
+        boolean selected = account == null ? accountFilter == null : account.equals(accountFilter);
+        TextView chip = text(label, 12, selected ? Color.WHITE : fg, MEDIUM);
+        chip.setGravity(Gravity.CENTER);
+        chip.setSingleLine(true);
+        chip.setPadding(dp(8), dp(7), dp(8), dp(7));
+        chip.setBackground(rounded(selected ? accent : chipBg, 10));
+        chip.setContentDescription(label);
+        chip.setClickable(true);
+        chip.setFocusable(true);
+        chip.setOnClickListener(v -> action.run());
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.setMarginStart(dp(2));
+        lp.setMarginEnd(dp(2));
+        host.addView(chip, lp);
+    }
+
+    private void applyAccount(String account) {
+        accountFilter = account;
+        render();
     }
 
     /** The three-way movement segment: All / Deposits / Withdrawals, the active choice highlighted
@@ -915,8 +974,12 @@ public final class HistoryActivity extends Activity {
      *  computed over the filtered list, so every figure on screen reflects exactly what is shown. */
     private void render() {
         refreshDates();
-        List<Transaction> txs = applyFilters(filtered(BalanceData.readTransactions(this)), filter);
+        List<Transaction> all = BalanceData.readTransactions(this);
+        List<Transaction> bankTxs = bankFilter == null ? all : filterByBank(all, bankFilter);
+        List<Transaction> acctTxs = accountFilter == null ? bankTxs : filterByAccount(bankTxs, accountFilter);
+        List<Transaction> txs = applyFilters(acctTxs, filter);
         rebuildFilterBar();
+        rebuildAccountBar(bankTxs);
         Lists lists = buildLists(txs);
         body.removeAllViews();
         if (lists.years.isEmpty()) {
@@ -930,17 +993,19 @@ public final class HistoryActivity extends Activity {
         }
     }
 
-    /** Isolates the saved transactions that belong to {@link #bankFilter}, returning the input
-     *  unchanged when no filter is set (the plain full-history view). */
-    private List<Transaction> filtered(List<Transaction> txs) {
-        return bankFilter == null ? txs : filterByBank(txs, bankFilter);
-    }
-
     /** Returns only the transactions whose bank equals {@code bank}, preserving input order.
      *  Kept static so the instrumented tests can cover the per-bank filter directly. */
     static List<Transaction> filterByBank(List<Transaction> txs, String bank) {
         List<Transaction> only = new ArrayList<>();
         for (Transaction t : txs) if (bank.equals(t.bank)) only.add(t);
+        return only;
+    }
+
+    /** Returns only the transactions whose account equals {@code account}, preserving input order.
+     *  Kept static so the instrumented tests can cover the per-account filter directly. */
+    static List<Transaction> filterByAccount(List<Transaction> txs, String account) {
+        List<Transaction> only = new ArrayList<>();
+        for (Transaction t : txs) if (account.equals(t.account)) only.add(t);
         return only;
     }
 
@@ -957,6 +1022,8 @@ public final class HistoryActivity extends Activity {
         if (filter.isActive()) {
             // A filter may hide every transaction even though history exists.
             empty = getString(R.string.history_empty_filtered);
+        } else if (accountFilter != null) {
+            empty = getString(R.string.history_empty_account);
         } else if (bankFilter != null) {
             empty = getString(R.string.history_empty_bank, BankRules.displayName(this, bankFilter));
         } else {
@@ -1330,6 +1397,13 @@ public final class HistoryActivity extends Activity {
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-2, -2);
         if (!perBank) tp.topMargin = dp(2);
         col.addView(time, tp);
+        if (perBank && t.account != null) {
+            TextView account = text(getString(R.string.account_label) + " " + digits(t.account),
+                10.5f, muted);
+            LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(-2, -2);
+            ap.topMargin = dp(1);
+            col.addView(account, ap);
+        }
         LinearLayout.LayoutParams colLp = new LinearLayout.LayoutParams(0, -2, 1);
         colLp.setMarginStart(dp(9));
         row.addView(col, colLp);
@@ -1743,6 +1817,11 @@ public final class HistoryActivity extends Activity {
             else b.append(c);
         }
         return b.toString();
+    }
+
+    /** Account numbers follow the app language's digit rules, like the displayed amounts. */
+    private String digits(String s) {
+        return "fa".equals(LocaleHelper.currentTag(this)) ? faDigitsString(s) : s;
     }
 
     /** Formats a rial amount as a signed toman string, following the app language's digit rules. */
