@@ -713,6 +713,7 @@ final class BalanceData {
                 List<Transaction> fresh = new ArrayList<>();
                 List<Transaction> placed = new ArrayList<>();
                 Set<String> addedSigs = new HashSet<>();
+                Map<Transaction, String> freeByFresh = new HashMap<>();
                 for (Object[] row : rows) {
                     String bank = (String) row[0];
                     String sender = (String) row[1];
@@ -742,6 +743,15 @@ final class BalanceData {
                             addedSigs.add(sig);
                         } else if (seenSigs.contains(legacyKey)) {
                             continue;
+                        }
+                        // Remember the account-free fingerprint of every fresh account-bearing parse.
+                        // When rules start recognizing an account, a full re-scan re-parses a
+                        // still-present message with the account while its account-less twin (stored
+                        // under the older rules) keeps an account-free fingerprint; the twin is
+                        // reconciled against this in the rebuild below.
+                        if (t.account != null && t.sig != null) {
+                            String accountFree = messageSig(sender, body, null);
+                            if (accountFree != null) freeByFresh.put(t, accountFree);
                         }
                         fresh.add(t);
                         added++;
@@ -830,8 +840,34 @@ final class BalanceData {
                             - identityClaimsPerKey.getOrDefault(e.getKey(), 0);
                         if (left > 0) budget.put(e.getKey(), left);
                     }
+                    // Rules that now recognize an account re-parse a still-present message with that
+                    // account, while its stored twin from the older account-less era keeps an
+                    // account-free fingerprint: neither the fingerprint identity nor the
+                    // (bank|account, date) budget can bridge the two, so the same event would be
+                    // recorded twice. Claim the account-less twin when a fresh parse is the exact same
+                    // content — same bank, same moment, and the identical message (its account-free
+                    // fingerprint equals the stored one; legacy sig-less entries match by amount).
+                    Set<Transaction> accountTwins = new HashSet<>();
+                    if (!freeByFresh.isEmpty()) {
+                        Map<String, Transaction> byContent = new HashMap<>();
+                        Map<String, Transaction> byAmount = new HashMap<>();
+                        for (Transaction f : fresh) {
+                            String free = freeByFresh.get(f);
+                            if (free == null || f.account == null) continue;
+                            byContent.putIfAbsent(f.bank + "|" + f.date + "|" + free, f);
+                            byAmount.putIfAbsent(f.bank + "|" + f.date + "|" + f.amount, f);
+                        }
+                        for (Transaction s : stored) {
+                            if (s.account != null) continue;
+                            String claimed = s.bank + "|" + s.date + "|"
+                                + (s.sig != null ? s.sig : Long.toString(s.amount));
+                            Transaction f = s.sig != null
+                                ? byContent.remove(claimed) : byAmount.remove(claimed);
+                            if (f != null) accountTwins.add(s);
+                        }
+                    }
                     for (Transaction t : stored) {
-                        if (identityClaimed.contains(t)) continue;
+                        if (identityClaimed.contains(t) || accountTwins.contains(t)) continue;
                         String key = transactionCompositeKey(t) + "|" + t.date;
                         Integer left = budget.get(key);
                         if (left != null && left > 0) {

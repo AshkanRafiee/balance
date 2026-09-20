@@ -253,6 +253,32 @@ public class HistoryScanTest {
         assertEquals(2, txs.size());
     }
 
+    @Test public void rulesNowRecognizeAccount_storedAccountlessTwin_isNotDoubled() throws Exception {
+        // A bank that used to be scanned without account rules may have left account-less entries whose
+        // messages are still present. Once rules recognize the account, the same message re-parses with
+        // an account, and without reconciliation the stored account-less twin and the fresh
+        // account-bearing row would both surface as the same event. Same bank, same moment and
+        // identical content must collapse into a single account-bearing entry.
+        String sender = "TejaratBank";
+        long date = T + 42;
+        seed(sender, TEJARAT_DEPOSIT, date);
+
+        // The state the older account-less rules would have left: the same movement stored without an
+        // account and with its account-free fingerprint.
+        String freeSig = BalanceData.messageSig(sender, TEJARAT_DEPOSIT);
+        List<Transaction> oldRules = new java.util.ArrayList<>();
+        oldRules.add(new Transaction("Tejarat", null, date, 115000000L, freeSig));
+        BalanceData.writeTransactions(ctx, oldRules);
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(1, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(1, txs.size());
+        assertEquals(115000000L, txs.get(0).amount);
+        assertEquals("01351234567890", txs.get(0).account);
+    }
+
     @Test public void fullFirstScan_oldMovementsBeyondBalanceTail_areStillCaptured() throws Exception {
         // The balance scan stops per bank at the newest message; history must reach back further
         // and pick up the older movements too.
