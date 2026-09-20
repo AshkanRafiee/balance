@@ -279,6 +279,30 @@ public class HistoryScanTest {
         assertEquals("01351234567890", txs.get(0).account);
     }
 
+    @Test public void rulesChangingParseAndAccount_twinIsClaimedByContentDigest() throws Exception {
+        // The strongest claim: a rules update that re-measures the same message's amount entirely
+        // breaks both the fingerprint (different parsed values) and the amount match, but the
+        // parse-independent content digest still proves the stored entry and the fresh parse are the
+        // same physical message. The stored twin is written with a content digest (as entries are after
+        // the feature ships); the claim drops it and keeps the fresh account-bearing parse.
+        String sender = "TejaratBank";
+        long date = T + 77;
+        seed(sender, TEJARAT_DEPOSIT, date);
+
+        String content = BalanceData.contentHash(sender, TEJARAT_DEPOSIT);
+        List<Transaction> oldRules = new java.util.ArrayList<>();
+        oldRules.add(new Transaction("Tejarat", null, date, 1L, "stale-fingerprint", content));
+        BalanceData.writeTransactions(ctx, oldRules);
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(1, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(1, txs.size());
+        assertEquals(115000000L, txs.get(0).amount);
+        assertEquals("01351234567890", txs.get(0).account);
+    }
+
     @Test public void rulesNowRecognizeAccount_twinWithDifferentOldParse_isClaimedByAmount() throws Exception {
         // If the older rules parsed the same still-present message into a different looking content, its
         // fingerprint no longer matches the fresh account-bearing parse; same bank, same moment and same
