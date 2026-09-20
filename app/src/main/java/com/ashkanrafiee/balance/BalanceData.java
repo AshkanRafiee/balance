@@ -433,48 +433,24 @@ final class BalanceData {
         }
     }
 
-    /** Orders the stored balances for the bank-list UI, keeping every account of a bank together:
-     *  each bank becomes one contiguous block — included banks first (ranked by the given sort mode,
-     *  using each bank's largest-balance account or newest account as its representative), then
-     *  excluded banks in the same order. Accounts inside a block are sorted newest-first, so a
-     *  multi-account bank reads as one unit even when its amounts would interleave another bank
-     *  under a flat balance sort. The input map's own order is never modified. */
+    /** Orders the stored balances for the bank-list UI as one flat card per bank entry: every
+     *  account of a multi-account bank ranks by its own sort key, exactly like a separate bank.
+     *  Included entries come first (sorted by the given mode), then excluded banks' entries in the
+     *  same order. The input map's own order is never modified. */
     static List<List<Bank>> groupedForDisplay(Map<String, Bank> banks, Set<String> excluded, int sort) {
-        LinkedHashMap<String, List<Bank>> byBank = new LinkedHashMap<>();
-        for (Bank b : banks.values())
-            byBank.computeIfAbsent(b.name, k -> new ArrayList<Bank>()).add(b);
-        List<List<Bank>> included = new ArrayList<>();
-        List<List<Bank>> excludedBanks = new ArrayList<>();
-        for (List<Bank> block : byBank.values()) {
-            block.sort((a, b) -> {
-                int c = Long.compare(b.date, a.date);
-                return c != 0 ? c : Long.compare(b.amount, a.amount);
-            });
-            if (excluded.contains(block.get(0).name)) excludedBanks.add(block);
-            else included.add(block);
+        List<Bank> included = new ArrayList<>();
+        List<Bank> excludedBanks = new ArrayList<>();
+        for (Bank b : banks.values()) {
+            if (excluded.contains(b.name)) excludedBanks.add(b);
+            else included.add(b);
         }
-        java.util.Comparator<List<Bank>> cmp = (a, b) -> {
-            int c = Long.compare(blockKey(a, sort), blockKey(b, sort));
-            boolean high = sort == SORT_BALANCE_HIGH || sort == SORT_DATE_RECENT;
-            return high ? -c : c;
-        };
-        included.sort(cmp);
-        excludedBanks.sort(cmp);
+        sortBanks(included, sort);
+        sortBanks(excludedBanks, sort);
         included.addAll(excludedBanks);
-        return included;
-    }
-
-    /** The representative value a bank block is ranked by in {@link #groupedForDisplay}: its largest
-     *  balance in balance modes, its newest account date in date modes. */
-    private static long blockKey(List<Bank> block, int sort) {
-        if (sort == SORT_BALANCE_HIGH || sort == SORT_BALANCE_LOW) {
-            long max = Long.MIN_VALUE;
-            for (Bank b : block) max = Math.max(max, b.amount);
-            return max;
-        }
-        long max = 0;
-        for (Bank b : block) max = Math.max(max, b.date);
-        return max;
+        List<List<Bank>> out = new ArrayList<>();
+        for (Bank b : included)
+            out.add(java.util.Collections.singletonList(b));
+        return out;
     }
 
     /** The persisted bank-list sort mode, {@link #SORT_BALANCE_HIGH} when never chosen. */

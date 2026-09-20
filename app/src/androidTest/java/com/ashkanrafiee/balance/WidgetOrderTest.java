@@ -116,7 +116,7 @@ public class WidgetOrderTest {
 
         List<Bank> widget = BalanceWidgetService.widgetBanks(ctx);
         assertEquals(3, widget.size());
-        assertEquals("Tejarat", widget.get(0).name);       // blockKey 5M ranks first in balance-high
+        assertEquals("Tejarat", widget.get(0).name);       // 5M balance ranks first in balance-high
         assertEquals(5_000_000, widget.get(0).amount);
         assertEquals("Mellat", widget.get(1).name);        // one row per account, own balance
         assertEquals("1110000333", widget.get(1).account);
