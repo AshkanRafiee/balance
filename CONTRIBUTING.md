@@ -31,6 +31,34 @@ will add or fix the rule.
 
 We integrate reported bank formats into the next update either way.
 
+## Before you report: try resetting the data
+
+Some balance and history problems — wrong, missing or duplicated entries, most
+often right after an update changed the parsing rules — come from stale data and
+can be fixed with a reset. It is the quickest thing to try first:
+
+Open **Data → Reset & rescan**. Balance discards its stored balances and
+transaction history and rebuilds them from the messages currently in your SMS
+inbox, exactly like a fresh install. If the problem disappears, you are done — no
+report needed. If it still shows up after the rebuild, please report it and we
+will get to the parsing rule straight away.
+
+What a reset does, so there are no surprises:
+
+- **Stored balances and history are erased and rebuilt** from the messages that
+  are in your inbox *right now*. Messages you have deleted from SMS cannot be
+  rebuilt — the transactions they contained will not come back.
+- **Backup first.** Make an encrypted backup beforehand (**Data → Create
+  backup**; restoring merges with your current data), so you can always go back.
+  A reset does not touch your backup files.
+- **Excluded banks are reset** — every bank is included in the combined total
+  again, so re-exclude any you had switched off.
+- **Nothing else is lost** — privacy exposure (mask/unmask), Toman display,
+  bank order, lock PIN/password, and every other setting stay as they are.
+
+If a problem survives a reset, tell us that you already tried it; it rules out
+stale data and points us straight at the format rule.
+
 ## Reporting a wrong balance, account split or history entry
 
 Always include:
@@ -80,8 +108,9 @@ Always include:
 - **What you expected vs. what happened.**
 - Useful extras: screenshots, a screen recording, and log output if you can
   capture it.
-- If the issue involves balances/history, mention whether it still happens
-  after “Reset and rescan” in the app's Data menu — that rules out stale data.
+- If the issue involves balances or history, try the data reset described in
+  “Before you report: try resetting the data” above, and tell us whether the
+  problem survived it.
 
 ## What happens next
 
