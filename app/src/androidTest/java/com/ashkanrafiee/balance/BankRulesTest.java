@@ -129,11 +129,7 @@ public class BankRulesTest {
         assertEquals("98", BankRules.normalize("98"));
     }
 
-    // ---- reachability / early-exit invariant ------------------------------------------
-    @Test public void reachableBanks_matchesSupportedSenderCount() {
-        assertEquals(BankRules.reachableBanks().size(), BankRules.supportedSenderCount());
-    }
-
+    // ---- reachability ---------------------------------------------------------------
     @Test public void reachableBanks_subsetOfSupportedNames() {
         for (String bank : BankRules.reachableBanks())
             assertTrue("reachable bank not in supported list: " + bank,

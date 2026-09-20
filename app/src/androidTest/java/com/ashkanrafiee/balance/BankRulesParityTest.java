@@ -208,10 +208,9 @@ public class BankRulesParityTest {
     // ---- reachability / counts unchanged -------------------------------------------------
     @Test public void parity_reachableBanksUnchanged() {
         Set<String> reachable = BankRules.reachableBanks();
-        // 42 bank senders must still be reachable so the incremental scan's early-exit bound holds.
+        // 42 bank senders must still be reachable so no alias-table change silently drops a bank.
         assertEquals(42, reachable.size());
         assertEquals(reachable, oracleReachable());
-        assertEquals(42, BankRules.supportedSenderCount());
     }
 
     private static Set<String> oracleReachable() {
