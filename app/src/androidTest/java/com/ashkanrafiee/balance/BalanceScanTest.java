@@ -166,6 +166,89 @@ public class BalanceScanTest {
         assertEquals(5000000L, amount(find(reread, "Saman")));
     }
 
+    @Test public void fullScan_supersedesLegacyPlainSlot_whenMessagesAreReKeyedPerAccount() throws Exception {
+        // Upgrade path from before account keys: the stored map holds a plain "Melli" slot carrying the
+        // balance merged across accounts. A full re-scan that re-keys Melli messages per account must
+        // drop that legacy slot, or the old merged balance is shown (and summed) beside the new
+        // per-account rows.
+        LinkedHashMap<String, Bank> legacy = new LinkedHashMap<>();
+        legacy.put("Melli", new Bank("Melli", 1_058_405L, T, "9830009417", null));
+        BalanceData.write(ctx, legacy);
+
+        seed("9830009417", "\u0627\u0646\u062A\u0642\u0627\u0644\u06CC:87,925,688-\n"
+            + "\u062D\u0633\u0627\u0628:10001\n"
+            + "\u0645\u0627\u0646\u062F\u0647:1,058,405\n"
+            + "0620-17:09", T + 1000);
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+
+        LinkedHashMap<String, Bank> after = BalanceData.read(ctx);
+        assertEquals(1, after.size());
+        assertNull(after.get("Melli"));
+        Bank acct = after.get("Melli|10001");
+        assertNotNull(acct);
+        assertEquals(1_058_405L, acct.amount);
+        assertEquals("10001", acct.account);
+        assertEquals("9830009417", acct.sender);
+    }
+
+    @Test public void tejaratMessagesWithTwoAccounts_staySeparateEntries() throws Exception {
+        // Tejarat movement messages state their account on the "حساب:" line. A single bank with two
+        // accounts is no exception: each account keeps its own balance entry beside the other.
+        seed("TejaratBank", "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A*\n"
+            + "\u062D\u0633\u0627\u0628: 01351234567890 \n"
+            + "\u0628\u0631\u062F\u0627\u0634\u062A: 70,014,000 \u0631\u06CC\u0627\u0644 \n"
+            + "\u0627\u0632 \u0637\u0631\u06CC\u0642: \u0633\u0627\u0645\u0627\u0646\u0647 \u067E\u0644 (\u067E\u0631\u062F\u0627\u062E\u062A \u0644\u062D\u0638\u0647 \u0627\u06CC)  \n"
+            + "\u0645\u0627\u0646\u062F\u0647: 1,209,288 \u0631\u06CC\u0627\u0644 \n"
+            + "1405/06/07\n20:16", T + 1000);
+        seed("TejaratBank", "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A*\n"
+            + "\u062D\u0633\u0627\u0628: 01351234567890 \n"
+            + "\u0648\u0627\u0631\u06CC\u0632: 15,000,000 \u0631\u06CC\u0627\u0644 \n"
+            + "\u0627\u0632 \u0637\u0631\u06CC\u0642: \u0633\u0627\u0645\u0627\u0646\u0647 \u067E\u0644 (\u067E\u0631\u062F\u0627\u062E\u062A \u0644\u062D\u0638\u0647 \u0627\u06CC)  \n"
+            + "\u0645\u0627\u0646\u062F\u0647: 16,209,288 \u0631\u06CC\u0627\u0644 \n"
+            + "1405/06/07\n20:17", T + 2000);
+        seed("TejaratBank", "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A*\n"
+            + "\u062D\u0633\u0627\u0628: 01351234567891 \n"
+            + "\u0648\u0627\u0631\u06CC\u0632: 115,000,000 \u0631\u06CC\u0627\u0644 \n"
+            + "\u0627\u0632 \u0637\u0631\u06CC\u0642: \u0633\u0627\u0645\u0627\u0646\u0647 \u067E\u0644 (\u067E\u0631\u062F\u0627\u062E\u062A \u0644\u062D\u0638\u0647 \u0627\u06CC)  \n"
+            + "\u0645\u0627\u0646\u062F\u0647: 361,919,288 \u0631\u06CC\u0627\u0644 \n"
+            + "1405/06/06\n00:08", T + 3000);
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(2, BalanceData.scanSms(ctx, saved));   // one entry per account
+
+        LinkedHashMap<String, Bank> after = BalanceData.read(ctx);
+        assertEquals(2, after.size());
+        Bank acct1 = after.get("Tejarat|01351234567890");
+        Bank acct2 = after.get("Tejarat|01351234567891");
+        assertNotNull(acct1);
+        assertNotNull(acct2);
+        assertEquals(16_209_288L, acct1.amount);      // account 1 latest balance of its pair
+        assertEquals(361_919_288L, acct2.amount);
+        assertEquals("01351234567890", acct1.account);
+        assertEquals("01351234567891", acct2.account);
+    }
+
+    @Test public void parsianAccountOpeningLine_singleAccountEntry() throws Exception {
+        // Parsian movement messages open with the account on its own line, so they land in a
+        // per-account entry instead of a bank-wide slot.
+        seed("PARSIANBANK", "30101234567890\n"
+            + "\u0645\u0628\u0644\u063A:500,000-\n"
+            + "\u0645\u0627\u0646\u062F\u0647:1,076,220\n"
+            + "05/06\n06:12", T + 1000);
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+
+        LinkedHashMap<String, Bank> after = BalanceData.read(ctx);
+        assertEquals(1, after.size());
+        Bank acct = after.get("Parsian|30101234567890");
+        assertNotNull(acct);
+        assertEquals(1_076_220L, acct.amount);
+        assertEquals("30101234567890", acct.account);
+    }
+
     @Test public void freshInstallPersianDigitMessage_parsesValue() throws Exception {
         seed("5000973189",
                 "\u0645\u0648\u062C\u0648\u062F\u06CC \u062D\u0633\u0627\u0628 \u0634\u0645\u0627: \u06F1\u066C\u06F2\u06F5\u06F0\u066C\u06F0\u06F0\u06F0 \u0631\u06CC\u0627\u0644",

@@ -195,9 +195,50 @@ public class BankRulesTest {
     }
 
     @Test public void extractAccount_noRuleBank_accountNotExtracted() {
-        assertNull(BankRules.extractAccount("Tejarat", "\u062D\u0633\u0627\u0628" + ": 01351234567890"));
+        assertNull(BankRules.extractAccount("Karafarin", "\u062D\u0633\u0627\u0628" + ": 01351234567890"));
         assertNull(BankRules.extractAccount("Saman", "\u0645\u062C\u0648\u062F\u06CC: 1,250,000"));
         assertNull(BankRules.extractAccount("Blu", "\u06F1\u06F4\u06F0\u06F5.\u06F0\u06F6.\u06F1\u06F5"));
+    }
+
+    @Test public void extractAccount_tejaratColonDigits_returnsAccount() {
+        // Real Tejarat movement messages open "*بانک تجارت* / حساب: 0135…".
+        assertEquals("01351234567890", BankRules.extractAccount("Tejarat",
+            "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A*\n"
+            + "\u062D\u0633\u0627\u0628: 01351234567890\n"
+            + "\u0628\u0631\u062F\u0627\u0634\u062A: 70,014,000 \u0631\u06CC\u0627\u0644\n"
+            + "\u0645\u0627\u0646\u062F\u0647: 1,209,288 \u0631\u06CC\u0627\u0644"));
+        assertEquals("01351234567890", BankRules.extractAccount("Tejarat",
+            "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A*\n"
+            + "\u062D\u0633\u0627\u0628: \u06F0\u06F1\u06F3\u06F5\u06F1\u06F2\u06F3\u06F4\u06F5\u06F6\u06F7\u06F8\u06F9\u06F0\n"
+            + "\u0648\u0627\u0631\u06CC\u0632: 1,000,000 \u0631\u06CC\u0627\u0644\n"
+            + "\u0645\u0627\u0646\u062F\u0647: 2,000,000 \u0631\u06CC\u0627\u0644"));
+    }
+
+    @Test public void extractAccount_tejaratBalanceOnly_notCaptured() {
+        // Balance notifications have no "حساب:" label of their own, and a comma-grouped figure next
+        // to "حساب شما:" is rejected by the no-thousand-separator guard.
+        assertNull(BankRules.extractAccount("Tejarat",
+            "\u0645\u0648\u062C\u0648\u062F\u06CC \u062D\u0633\u0627\u0628 \u0634\u0645\u0627: 5,000,000 \u0631\u06CC\u0627\u0644"));
+        assertNull(BankRules.extractAccount("Tejarat",
+            "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A*\n\u0645\u0627\u0646\u062F\u0647: 1,209,288 \u0631\u06CC\u0627\u0644"));
+    }
+
+    @Test public void extractAccount_parsianAccountLine_returnsAccount() {
+        // Real Parsian movements open with the account on its own line, the "مبلغ:" amount line
+        // right below it.
+        assertEquals("30101234567890", BankRules.extractAccount("Parsian",
+            "30101234567890\n\u0645\u0628\u0644\u063A:500,000-\n\u0645\u0627\u0646\u062F\u0647:1,076,220"));
+        assertEquals("30101234567890", BankRules.extractAccount("Parsian",
+            "\u06F3\u06F0\u06F1\u06F0\u06F1\u06F2\u06F3\u06F4\u06F5\u06F6\u06F7\u06F8\u06F9\u06F0\n"
+            + "\u0645\u0628\u0644\u063A:3,000,000+\n\u0645\u0627\u0646\u062F\u0647:97,450,279"));
+    }
+
+    @Test public void extractAccount_parsianWithoutAmountLine_notCaptured() {
+        // A one-off code or an activity notice has no "مبلغ:" movement line under the number (or a
+        // too-short code), so it is not mistaken for an account-bearing movement.
+        assertNull(BankRules.extractAccount("Parsian", "966935"));
+        assertNull(BankRules.extractAccount("Parsian",
+            "\u0648\u0631\u0648\u062F \u0628\u0647 \u0647\u0645\u0631\u0627\u0647 \u0628\u0627\u0646\u06A9 1405/06/07"));
     }
 
     @Test public void extractAccount_nullArguments_notCaptured() {

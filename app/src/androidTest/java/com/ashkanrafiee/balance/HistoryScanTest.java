@@ -71,6 +71,16 @@ public class HistoryScanTest {
         "\u0628\u0631\u062F\u0627\u0634\u062A10,000 \u0645\u0627\u0646\u062F\u0647 177,222,945";
     private static final String MELLAT_DELTA =
         "\u067E\u0631\u062F\u0627\u062E\u062A \u0627\u0646\u062C\u0627\u0645 \u0634\u062F\u060C \u0645\u0627\u0646\u062F\u0647 \u062D\u0633\u0627\u0628: 72,222,945";
+    private static final String MELLI_ACCT_TRANSFER =
+        "\u0627\u0646\u062A\u0642\u0627\u0644\u06CC:100,000,000-\n"
+        + "\u062D\u0633\u0627\u0628:10001\n"
+        + "\u0645\u0627\u0646\u062F\u0647:77,222,945\n"
+        + "0620-21:16";
+    private static final String MELLI_ACCT_FEE =
+        "\u06A9\u0627\u0631\u0645\u0632\u062F:10,000-\n"
+        + "\u062D\u0633\u0627\u0628:10001\n"
+        + "\u0645\u0627\u0646\u062F\u0647:177,222,945\n"
+        + "0620-21:17";
 
     private Context ctx;
 
@@ -423,6 +433,43 @@ public class HistoryScanTest {
         assertEquals(100000L, acct2);     // +7,700,000 deposit then -7,600,000 purchase on 10002
     }
 
+    @Test public void tejaratAndParsianAccountMovements_splitPerAccount() throws Exception {
+        // Tejarat (the "حساب:" line) and Parsian (the opening account line) also state their account
+        // number in the real messages, so their histories split per account like Melli/Mellat.
+        seed("TejaratBank", TEJARAT_WITHDRAWAL, T);
+        seed("PARSIANBANK", PARSIAN_WITHDRAWAL, T + 1000);
+        seed("TejaratBank", "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n"
+            + "\u062D\u0633\u0627\u0628: 01351234567891 \n"
+            + "\u0648\u0627\u0631\u06CC\u0632: 115,000,000 \u0631\u06CC\u0627\u0644 \n"
+            + "\u0627\u0632 \u0637\u0631\u06CC\u0642: \u0633\u0627\u0645\u0627\u0646\u0647 \u067E\u0644 (\u067E\u0631\u062F\u0627\u062E\u062A \u0644\u062D\u0638\u0647 \u0627\u06CC)  \n"
+            + "\u0645\u0627\u0646\u062F\u0647: 361,919,288 \u0631\u06CC\u0627\u0644 \n"
+            + "1405/06/06\n00:08", T + 2000);
+
+        int added = BalanceData.scanHistory(ctx);
+
+        assertEquals(3, added);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(3, txs.size());
+        int tejaratA = 0, tejaratB = 0, parsian = 0;
+        for (Transaction t : txs) {
+            switch (t.bank) {
+                case "Tejarat":
+                    if ("01351234567890".equals(t.account)) tejaratA += t.amount;
+                    else if ("01351234567891".equals(t.account)) tejaratB += t.amount;
+                    else fail("unexpected Tejarat account " + t.account);
+                    break;
+                case "Parsian":
+                    if ("30101234567890".equals(t.account)) parsian += t.amount;
+                    else fail("unexpected Parsian account " + t.account);
+                    break;
+                default: fail("unexpected bank " + t.bank);
+            }
+        }
+        assertEquals(-70014000L, tejaratA);
+        assertEquals(115000000L, tejaratB);
+        assertEquals(-500000L, parsian);
+    }
+
     // ============================================================
     // Exact-duplicate messages are one entry
     // ============================================================
@@ -581,6 +628,29 @@ public class HistoryScanTest {
         assertEquals(1, second);
         txs = BalanceData.readTransactions(ctx);
         assertEquals(2, txs.size());
+        assertEquals(-100000000L, txs.get(0).amount);      // transfer (true newest) stays on top
+        assertEquals(-10000L, txs.get(1).amount);          // fee placed below it
+    }
+
+    @Test public void splitScan_accountBearingFeeAndTransfer_feePlacedUnderTransfer() throws Exception {
+        // Same reversed-pair arrival as splitScan_transferBeforeFee, but on Melli messages that state
+        // account 10001. Window and chain fingerprints must fold the account so the fee is placed next
+        // to its account-bearing stored sibling instead of being appended on top (the fee and transfer
+        // arrive in reverse order, so a broken fingerprint leaves them back-to-front).
+        String sender = "9830009417";
+        seed(sender, MELLI_ACCT_TRANSFER, T + 1000);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(1, txs.size());
+        assertEquals(-100000000L, txs.get(0).amount);
+
+        seed(sender, MELLI_ACCT_FEE, T + 2000);
+        int second = BalanceData.scanHistory(ctx);
+
+        assertEquals(1, second);
+        txs = BalanceData.readTransactions(ctx);
+        assertEquals(2, txs.size());
+        assertEquals("10001", txs.get(0).account);
         assertEquals(-100000000L, txs.get(0).amount);      // transfer (true newest) stays on top
         assertEquals(-10000L, txs.get(1).amount);          // fee placed below it
     }
