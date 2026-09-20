@@ -341,9 +341,10 @@ final class BalanceData {
     }
 
     /** Discards every saved balance and transaction and forgets both scan watermarks, so the next scans
-     *  behave like a fresh install and rebuild from the messages currently in the inbox. The hide/unmask
-     *  preference is untouched (it is a display choice, not app data); the excluded-banks set is
-     *  forgotten too, because a fresh install has no exclusions. */
+     *  behave like a fresh install and rebuild from the messages currently in the inbox. Display
+     *  preferences are deliberately untouched — the hide/unmask toggle, the language and the sort mode
+     *  are choices, not data (a data reset must not dump the user back to defaults); the excluded-banks
+     *  set is forgotten too, because a fresh install has no exclusions. */
     static void reset(Context context) {
         context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
             .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).remove(KEY_HISTORY_LAST_BALANCE)
@@ -495,13 +496,17 @@ final class BalanceData {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
         long watermark = prefs.getLong(KEY_SCANNED_THROUGH, 0);
         int rulesVersion = BankRules.VERSION;
-        boolean full = watermark == 0 || prefs.getInt(KEY_RULES_VERSION, -1) != rulesVersion;
+        // Inbox dates are trusted as-served and each row is clamped to the device clock, so a forged
+        // or clock-skewed message dated in the future can never push the watermark past real time.
+        // A watermark that now lies AHEAD of the clock means the device clock moved backward since the
+        // last scan (travel, NTP correction): messages arriving after the rollback are dated before the
+        // watermark, so a plain incremental read would skip every one of them. Treat that as a full
+        // rescan, which re-reads the whole inbox and re-pins the watermark under the current clock.
+        long now = System.currentTimeMillis();
+        boolean full = watermark == 0 || watermark > now
+            || prefs.getInt(KEY_RULES_VERSION, -1) != rulesVersion;
         if (full) watermark = 0;
         int matched = 0;
-        // Inbox dates are trusted as-served; a forged or clock-skewed message dated in the future
-        // would otherwise push the scan watermark past every genuine message, freezing incremental
-        // scans forever. Clamp each row's date to now so the watermark can only ever tag real time.
-        long now = System.currentTimeMillis();
         long newest = 0;
         String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
         String[] args = selection != null ? new String[]{Long.toString(watermark)} : null;
@@ -636,7 +641,11 @@ final class BalanceData {
             List<Transaction> stored = readTransactions(context);
             SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
             long hwm = prefs.getLong(KEY_HISTORY_THROUGH, 0);
-            boolean full = hwm == 0
+            // As in scanSms, a history watermark ahead of the current clock means the device clock
+            // moved backward since the last scan; fall back to a full rescan so messages dated after
+            // the rollback are not skipped forever by the incremental "newer than watermark" read.
+            long now = System.currentTimeMillis();
+            boolean full = hwm == 0 || hwm > now
                 || prefs.getInt(KEY_HISTORY_RULES_VERSION, -1) != HISTORY_RULES_VERSION;
             if (full) hwm = 0;
             // On an incremental scan the stored history doubles as the dedup set: a message already
@@ -654,7 +663,6 @@ final class BalanceData {
                 }
             }
             int added = 0;
-            long now = System.currentTimeMillis();
             long newest = 0;
             String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
             String[] args = selection != null ? new String[]{Long.toString(hwm)} : null;
