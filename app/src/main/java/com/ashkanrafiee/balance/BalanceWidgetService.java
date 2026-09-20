@@ -81,7 +81,8 @@ public class BalanceWidgetService extends RemoteViewsService {
             views.setInt(R.id.bank_name, "setGravity", Gravity.CENTER_VERTICAL | Gravity.START);
             views.setInt(R.id.bank_amount, "setGravity", Gravity.CENTER_VERTICAL | Gravity.END);
             if (b.account != null) {
-                views.setTextViewText(R.id.bank_account, accountLabel(c, b.account));
+                views.setTextViewText(R.id.bank_account, hidden
+                    ? "\u2022\u2022\u2022\u2022\u2022\u2022" : accountLabel(c, b.account));
                 views.setViewVisibility(R.id.bank_account, View.VISIBLE);
             } else {
                 views.setViewVisibility(R.id.bank_account, View.GONE);

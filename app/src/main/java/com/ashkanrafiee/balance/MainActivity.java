@@ -1174,8 +1174,11 @@ public class MainActivity extends Activity {
                     } else {
                         value(c, row.amount, valueX, yy + 35, valueWidth, 17, valueAlign);
                         if (row.bank.account != null) {
-                            String accountText = getString(R.string.account_label) + " "
-                                + faDigits(row.bank.account);
+                            // The mask hides the account number too: it is as identifiable as the
+                            // balance itself, so a shoulder-surf must not see either.
+                            String accountText = hidden
+                                ? "\u2022\u2022\u2022\u2022\u2022\u2022"
+                                : getString(R.string.account_label) + " " + faDigits(row.bank.account);
                             text(c, fit(accountText, 12, Math.max(40, valueLeft - 100)), nameX, yy + 60, 12,
                                 muted, nameAlign);
                         }
