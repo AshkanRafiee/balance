@@ -239,7 +239,10 @@ final class BackupManager {
             if (payload.has("transactions"))
                 backupTxs = BalanceData.deserializeTransactions(
                     payload.getJSONObject("transactions").toString());
-        } catch (Exception e) {
+        } catch (Throwable e) {
+            // A validly-decrypted but hostile payload can nest its JSON so deeply that parsing
+            // exhausts the stack; that must land on the same "wrong password or corrupted backup"
+            // path as any other malformed payload, not crash the restore.
             Log.w(TAG, "payload parse failed");
             throw new BackupException(R.string.backup_error_password);
         }
