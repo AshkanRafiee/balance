@@ -8,6 +8,8 @@ package com.ashkanrafiee.balance;
 final class Transaction {
     /** Canonical bank name (the storage/lookup key used by {@link BankRules}). */
     final String bank;
+    /** Account number this transaction belongs to, or null when the bank message did not state one. */
+    final String account;
     /** Epoch millis of the SMS that reported the transaction. */
     final long date;
     /** Signed amount in rials: positive for a deposit, negative for a withdrawal. */
@@ -20,7 +22,12 @@ final class Transaction {
     }
 
     Transaction(String bank, long date, long amount, String sig) {
+        this(bank, null, date, amount, sig);
+    }
+
+    Transaction(String bank, String account, long date, long amount, String sig) {
         this.bank = bank;
+        this.account = account;
         this.date = date;
         this.amount = amount;
         this.sig = sig;

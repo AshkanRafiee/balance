@@ -90,7 +90,7 @@ public class HistoryTest {
     @Test public void txn_tejarat_bardashtLabel() {
         assertEquals(-70014000L, (long) BalanceData.extractTransaction(
             "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n"
-            + "\u062D\u0633\u0627\u0628: 0135399698887 \n"
+            + "\u062D\u0633\u0627\u0628: 01351234567890 \n"
             + "\u0628\u0631\u062F\u0627\u0634\u062A: 70,014,000 \u0631\u06CC\u0627\u0644 \n"
             + "\u0627\u0632 \u0637\u0631\u06CC\u0642: \u0633\u0627\u0645\u0627\u0646\u0647 \u067E\u0644 (\u067E\u0631\u062F\u0627\u062E\u062A \u0644\u062D\u0638\u0647 \u0627\u06CC)  \n"
             + "\u0645\u0627\u0646\u062F\u0647: 1,209,288 \u0631\u06CC\u0627\u0644 \n"
@@ -102,7 +102,7 @@ public class HistoryTest {
         // right after "واریز:" must decide the direction instead of the keyword sets.
         assertEquals(115000000L, (long) BalanceData.extractTransaction(
             "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n"
-            + "\u062D\u0633\u0627\u0628: 0135399698887 \n"
+            + "\u062D\u0633\u0627\u0628: 01351234567890 \n"
             + "\u0648\u0627\u0631\u06CC\u0632: 115,000,000 \u0631\u06CC\u0627\u0644 \n"
             + "\u0627\u0632 \u0637\u0631\u06CC\u0642: \u0633\u0627\u0645\u0627\u0646\u0647 \u067E\u0644 (\u067E\u0631\u062F\u0627\u062E\u062A \u0644\u062D\u0638\u0647 \u0627\u06CC)  \n"
             + "\u0645\u0627\u0646\u062F\u0647: 361,919,288 \u0631\u06CC\u0627\u0644 \n"
@@ -121,7 +121,7 @@ public class HistoryTest {
 
     @Test public void txn_parsian_trailingMinusSign() {
         assertEquals(-500000L, (long) BalanceData.extractTransaction(
-            "30103348179608\n"
+            "30101234567890\n"
             + "\u0645\u0628\u0644\u063A:500,000-\n"
             + "\u0645\u0627\u0646\u062F\u0647:1,076,220\n"
             + "05/26\n08:22"));
