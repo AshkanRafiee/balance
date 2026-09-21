@@ -60,6 +60,9 @@ public class MainActivity extends Activity {
      *  so re-tapping the lock button or options can not open a second flow over the first. */
     private boolean lockChangeBusy = false;
     private ContentObserver smsObserver;
+    /** Canvas text font; created once and reused, so drawing frames never fabricate a new font. */
+    private static final android.graphics.Typeface SANS = android.graphics.Typeface.create("sans",
+        android.graphics.Typeface.NORMAL);
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -150,6 +153,18 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onDestroy() {
+        // Drop pending canvas callbacks so a finishing activity is not held (or an auto-field refired)
+        // after destruction; the copy-clear in particular would otherwise linger a minute on a finished
+        // screen while still holding the clipboard target.
+        if (view != null) {
+            view.handler.removeCallbacks(view.clearClipRunnable);
+            view.handler.removeCallbacks(view.refreshTicker);
+        }
+        super.onDestroy();
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         LockManager.cancelPendingLock();
@@ -202,6 +217,18 @@ public class MainActivity extends Activity {
     public void onRequestPermissionsResult(int r, String[] p, int[] g) {
         super.onRequestPermissionsResult(r, p, g);
         if (r == SMS_REQUEST) {
+            boolean granted = g.length > 0
+                && g[0] == PackageManager.PERMISSION_GRANTED;
+            if (!granted && !shouldShowRequestPermissionRationale(Manifest.permission.READ_SMS)) {
+                // A permanent denial (check "don't ask again") can no longer be lifted by re-requesting;
+                // point the user at the app's settings screen instead of silently ignoring the result.
+                showDialog(new android.app.AlertDialog.Builder(this)
+                    .setTitle(getString(R.string.permission_title))
+                    .setMessage(getString(R.string.permission_settings_message))
+                    .setPositiveButton(getString(R.string.permission_open_settings), (d, w) -> openSmsSettings())
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .create());
+            }
             view.refresh();
             registerSmsObserver();
         }
@@ -973,8 +1000,7 @@ public class MainActivity extends Activity {
             autoHide = BalanceData.isAutoHide(MainActivity.this);
             if (autoHide) hidden = true;
             sortMode = BalanceData.getSort(MainActivity.this);
-            p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
-            setBackgroundColor(bg);
+            p.setTypeface(SANS);
             scroller = new OverScroller(MainActivity.this);
         }
 
@@ -1227,13 +1253,11 @@ public class MainActivity extends Activity {
 
         float measure(String value, float size) {
             p.setTextSize(size * fs);
-            p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
             return p.measureText(value);
         }
 
         String fit(String value, float size, float max) {
             p.setTextSize(size * fs);
-            p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
             if (p.measureText(value) <= max) return value;
             String s = value;
             while (s.length() > 1 && p.measureText(s + "\u2026") > max)
@@ -1246,7 +1270,6 @@ public class MainActivity extends Activity {
             p.setTextSize(size * fs);
             p.setColor(color);
             p.setTextAlign(align);
-            p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
             c.drawText(s, x, y, p);
         }
 
@@ -1360,7 +1383,6 @@ public class MainActivity extends Activity {
             c.restore();
 
             p.setTextSize(13);
-            p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
             String aboutText = getString(R.string.footer_about);
             String langText = getString(R.string.footer_language);
             String backupText = getString(R.string.footer_data);
@@ -1458,7 +1480,7 @@ public class MainActivity extends Activity {
         /** Account numbers and other plain numerals follow the app language's digit rules, matching
          *  how {@link BalanceData#toman} formats amounts. */
         String faDigits(String s) {
-            return "fa".equals(LocaleHelper.currentTag(MainActivity.this))
+            return LocaleHelper.isPersian(MainActivity.this)
                 ? HistoryActivity.faDigitsString(s) : s;
         }
 
