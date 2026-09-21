@@ -15,6 +15,10 @@ package com.ashkanrafiee.balance;
  * transactions by Persian day / month / year.
  */
 final class JalaliCalendar {
+    /** Jalali leap-year breakpoints (years of Persian leap runs); hoisted so date math never re-mints it. */
+    private static final int[] BREAKS = {-61, 9, 38, 199, 426, 686, 756, 818, 1111, 1181, 1210, 1635,
+        2060, 2097, 2192, 2262, 2324, 2394, 2456, 3178};
+
     final int year;
     final int month;
     final int day;
@@ -99,20 +103,18 @@ final class JalaliCalendar {
      * falls.
      */
     private static int[] jalCal(int jy) {
-        int[] breaks = {-61, 9, 38, 199, 426, 686, 756, 818, 1111, 1181, 1210, 1635,
-            2060, 2097, 2192, 2262, 2324, 2394, 2456, 3178};
-        int bl = breaks.length;
+        int bl = BREAKS.length;
         int gy = jy + 621;
         int leapJ = -14;
-        int jp = breaks[0];
+        int jp = BREAKS[0];
         int jump = 0;
         int leap;
         int march;
         int n;
         for (int i = 1; i < bl; i++) {
-            jp = breaks[i - 1];
-            jump = breaks[i] - jp;
-            if (jy < breaks[i]) break;
+            jp = BREAKS[i - 1];
+            jump = BREAKS[i] - jp;
+            if (jy < BREAKS[i]) break;
             leapJ += (int) (div(jump, 33) * 8 + div(mod(jump, 33), 4));
         }
         n = jy - jp;
