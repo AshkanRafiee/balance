@@ -266,10 +266,11 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** The combined Region & Language dialog behind the footer item: two dropdowns in a single menu,
-     *  so the calendar system (see {@link RegionHelper}) and the interface language are chosen in
-     *  one place. A changed region applies immediately; a changed language recreates the screen,
-     *  exactly like the former standalone language dialog. */
+    /** The combined Region & Language & Currency dialog behind the footer item: the dropdowns in a
+     *  single menu, so the calendar system (see {@link RegionHelper}), the interface language and
+     *  the currency unit (see {@link CurrencyHelper}) are all chosen in one place. A changed region
+     *  applies on the next history open; a changed currency re-renders the dashboard and the
+     *  widget; a changed language recreates the screen, exactly like the former standalone dialog. */
     private void regionLanguageDialog() {
         int pad = dp(14);
         LinearLayout box = new LinearLayout(this);
@@ -282,6 +283,10 @@ public class MainActivity extends Activity {
         for (int i = 0; i < langTags.length; i++)
             langLabels[i] = langTags[i].isEmpty()
                 ? getString(R.string.language_system_default) : LocaleHelper.displayName(langTags[i]);
+        String[] currencyLabels = {
+            getString(R.string.currency_toman), getString(R.string.currency_usd),
+            getString(R.string.currency_eur), getString(R.string.currency_custom)
+        };
 
         Spinner regionSpin = new Spinner(this);
         ArrayAdapter<String> regionAdapter = new ArrayAdapter<>(this,
@@ -299,12 +304,39 @@ public class MainActivity extends Activity {
         for (int i = 0; i < langTags.length; i++)
             if (langTags[i].equals(current)) { langSpin.setSelection(i); break; }
 
+        String storedCurrency = CurrencyHelper.currency(this);
+        final EditText customInput = new EditText(this);
+        customInput.setSingleLine(true);
+        customInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+        if (storedCurrency.startsWith(CurrencyHelper.CUSTOM_PREFIX))
+            customInput.setText(storedCurrency.substring(CurrencyHelper.CUSTOM_PREFIX.length()));
+        Spinner currencySpin = new Spinner(this);
+        ArrayAdapter<String> currencyAdapter = new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item, currencyLabels);
+        currencyAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        currencySpin.setAdapter(currencyAdapter);
+        int curIdx = 0;
+        if (CurrencyHelper.CURRENCY_USD.equals(storedCurrency)) curIdx = 1;
+        else if (CurrencyHelper.CURRENCY_EUR.equals(storedCurrency)) curIdx = 2;
+        else if (storedCurrency.startsWith(CurrencyHelper.CUSTOM_PREFIX)) curIdx = 3;
+        currencySpin.setSelection(curIdx);
+        customInput.setVisibility(curIdx == 3 ? View.VISIBLE : View.GONE);
+        currencySpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
+                customInput.setVisibility(pos == 3 ? View.VISIBLE : View.GONE);
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
+        });
+
         TextView regionLabel = new TextView(this);
         regionLabel.setText(getString(R.string.settings_region_label));
         regionLabel.setTextSize(14);
         TextView langLabel = new TextView(this);
         langLabel.setText(getString(R.string.settings_language_label));
         langLabel.setTextSize(14);
+        TextView currencyLabel = new TextView(this);
+        currencyLabel.setText(getString(R.string.settings_currency_label));
+        currencyLabel.setTextSize(14);
 
         box.addView(regionLabel);
         box.addView(regionSpin);
@@ -312,6 +344,13 @@ public class MainActivity extends Activity {
         langLp.topMargin = dp(18);
         box.addView(langLabel, langLp);
         box.addView(langSpin);
+        LinearLayout.LayoutParams curLp = new LinearLayout.LayoutParams(-1, -2);
+        curLp.topMargin = dp(18);
+        box.addView(currencyLabel, curLp);
+        box.addView(currencySpin);
+        LinearLayout.LayoutParams curInLp = new LinearLayout.LayoutParams(-1, -2);
+        curInLp.topMargin = dp(8);
+        box.addView(customInput, curInLp);
 
         showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.footer_region_language))
@@ -321,10 +360,25 @@ public class MainActivity extends Activity {
                     ? RegionHelper.REGION_INTERNATIONAL : RegionHelper.REGION_IRAN;
                 String tag = langTags[Math.min(langSpin.getSelectedItemPosition(), langTags.length - 1)];
                 boolean langChanged = !tag.equals(LocaleHelper.currentTag(this));
+                String chosenCurrency = null;
+                int curPos = currencySpin.getSelectedItemPosition();
+                if (curPos == 3) {
+                    String typed = customInput.getText().toString().trim();
+                    if (!typed.isEmpty()) chosenCurrency = CurrencyHelper.CUSTOM_PREFIX + typed;
+                } else {
+                    chosenCurrency = new String[]{CurrencyHelper.CURRENCY_TOMAN,
+                        CurrencyHelper.CURRENCY_USD, CurrencyHelper.CURRENCY_EUR}[curPos];
+                }
+                boolean currencyChanged = chosenCurrency != null
+                    && !chosenCurrency.equals(CurrencyHelper.currency(this));
                 RegionHelper.setRegion(this, chosen);
+                if (chosenCurrency != null) CurrencyHelper.setCurrency(this, chosenCurrency);
                 if (langChanged) {
                     LocaleHelper.setLanguage(this, tag);
                     recreate();
+                } else if (currencyChanged) {
+                    view.invalidate();
+                    BalanceWidgetProvider.push(MainActivity.this);
                 }
             })
             .setNegativeButton(getString(R.string.lock_cancel), null)
@@ -1195,7 +1249,8 @@ public class MainActivity extends Activity {
          *  followed by the status line. Rebuilt every frame, but only announced on change. */
         String announce() {
             String totalText = hidden ? getString(R.string.accessibility_total_masked)
-                : BalanceData.toman(MainActivity.this, total) + " " + getString(R.string.unit_toman);
+                : CurrencyHelper.amount(MainActivity.this, total) + " "
+                    + CurrencyHelper.label(MainActivity.this);
             return getString(R.string.accessibility_total_balance, totalText) + " " + status + ".";
         }
 
@@ -1282,11 +1337,11 @@ public class MainActivity extends Activity {
                 text(c, "\u2022\u2022\u2022\u2022\u2022\u2022", x, baseline, size, fg, align);
                 return;
             }
-            String number = BalanceData.toman(MainActivity.this, n);
+            String number = CurrencyHelper.amount(MainActivity.this, n);
             float current = size;
             while (current > 10 && measure(number, current) > width) current -= 1;
             text(c, number, x, baseline, current, accent, align);
-            text(c, getString(R.string.unit_toman), x, baseline + 19, 11, muted, align);
+            text(c, CurrencyHelper.label(MainActivity.this), x, baseline + 19, 11, muted, align);
             if (strikethrough) {
                 float numW = measure(number, current);
                 float lineX1 = align == Paint.Align.RIGHT ? x - numW : x;
@@ -1308,8 +1363,8 @@ public class MainActivity extends Activity {
                 text(c, "\u2022\u2022\u2022\u2022\u2022\u2022", x, baseline, 34, fg, anchor);
                 return;
             }
-            String number = BalanceData.toman(MainActivity.this, n);
-            String unit = getString(R.string.unit_toman);
+            String number = CurrencyHelper.amount(MainActivity.this, n);
+            String unit = CurrencyHelper.label(MainActivity.this);
             float unitSize = 13, unitGap = 10, unitWidth = measure(unit, unitSize);
             float current = 34;
             while (current > 16 && measure(number, current) + unitGap + unitWidth > width) current -= 1;
@@ -1702,7 +1757,9 @@ public class MainActivity extends Activity {
                 return;
             }
             ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-            String amount = Long.toString(value / 10);
+            long shown = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(MainActivity.this))
+                ? value / 10 : value;
+            String amount = Long.toString(shown);
             clipboard.setPrimaryClip(ClipData.newPlainText(label, amount));
             Toast.makeText(MainActivity.this, getString(R.string.toast_copied_balance, label), Toast.LENGTH_SHORT).show();
             // Sensitive numbers must not linger in the system clipboard (other apps can read it):

@@ -49,8 +49,13 @@
 
     <string name="settings_region_label">منطقه</string>
     <string name="settings_language_label">زبان</string>
+    <string name="settings_currency_label">واحد پول</string>
     <string name="region_iran">ایران</string>
     <string name="region_international">بین‌المللی</string>
+    <string name="currency_toman">تومان</string>
+    <string name="currency_usd">دلار</string>
+    <string name="currency_eur">یورو</string>
+    <string name="currency_custom">دلخواه</string>
 
     <string name="data_title">داده‌ها</string>
     <string name="backup_action_create">ایجاد پشتیبان</string>

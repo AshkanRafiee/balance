@@ -1088,7 +1088,7 @@ public final class HistoryActivity extends Activity {
         hero.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
         // The lifetime total.
-        TextView total = bold(signedToman(lists.total), 32, valueColor(lists.total));
+        TextView total = bold(signedAmount(lists.total), 32, valueColor(lists.total));
         total.setGravity(Gravity.START);
         fitToWidth(total, 32, 12, 0);
         hero.addView(total, margin(0, 2, 0, 0));
@@ -1134,7 +1134,7 @@ public final class HistoryActivity extends Activity {
         l.setGravity(Gravity.CENTER_HORIZONTAL);
         fitToWidth(l, 12, 9, 0);
         cell.addView(l, new LinearLayout.LayoutParams(-1, -2));
-        TextView v = bold(signedToman(value), 20, color);
+        TextView v = bold(signedAmount(value), 20, color);
         v.setGravity(Gravity.CENTER_HORIZONTAL);
         fitToWidth(v, 20, 8, 0);
         LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(-1, -2);
@@ -1208,7 +1208,7 @@ public final class HistoryActivity extends Activity {
         head.addView(countChip(y.n), chipsOnHead);
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
-        TextView sum = bold(signedToman(y.sum), 16, valueColor(y.sum));
+        TextView sum = bold(signedAmount(y.sum), 16, valueColor(y.sum));
         fitToWidth(sum, 16, 11, 0);
         head.addView(sum, sumParams);
         head.setContentDescription(state(yTitle, y.sum, open));
@@ -1291,7 +1291,7 @@ public final class HistoryActivity extends Activity {
         head.addView(count);
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
-        TextView sum = bold(signedToman(m.sum), 14, valueColor(m.sum));
+        TextView sum = bold(signedAmount(m.sum), 14, valueColor(m.sum));
         fitToWidth(sum, 14, 10, 0);
         head.addView(sum, sumParams);
         head.setContentDescription(state(monthName(m.month), m.sum, open));
@@ -1379,7 +1379,7 @@ public final class HistoryActivity extends Activity {
         if (g.txs.size() > 1) head.addView(countChip(g.txs.size()));
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
-        TextView sum = bold(signedToman(g.sum), 13, valueColor(g.sum));
+        TextView sum = bold(signedAmount(g.sum), 13, valueColor(g.sum));
         fitToWidth(sum, 13, 10, 0);
         head.addView(sum, sumParams);
         head.setContentDescription(state(dateText(g.date), g.sum, open));
@@ -1441,7 +1441,7 @@ public final class HistoryActivity extends Activity {
         colLp.setMarginStart(dp(9));
         row.addView(col, colLp);
 
-        TextView amt = bold(signedToman(t.amount), 13, valueColor(t.amount));
+        TextView amt = bold(signedAmount(t.amount), 13, valueColor(t.amount));
         fitToWidth(amt, 13, 10, 0);
         row.addView(amt, new LinearLayout.LayoutParams(-2, -2));
         return row;
@@ -1472,7 +1472,7 @@ public final class HistoryActivity extends Activity {
 
     /** Content description for a collapsible group header also states its current expansion. */
     private String state(String title, long sum, boolean open) {
-        return title + ", " + signedToman(sum) + ", "
+        return title + ", " + signedAmount(sum) + ", "
             + getString(open ? R.string.history_expanded : R.string.history_collapsed);
     }
 
@@ -1481,11 +1481,11 @@ public final class HistoryActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         if (deposits > 0) {
-            row.addView(chip("\u2191 " + BalanceData.toman(this, deposits), depBg, depFg,
+            row.addView(chip("\u2191 " + CurrencyHelper.amount(this, deposits), depBg, depFg,
                 getString(R.string.history_deposit)));
         }
         if (withdrawals < 0) {
-            row.addView(chip("\u2193 " + BalanceData.toman(this, -withdrawals), witBg, witFg,
+            row.addView(chip("\u2193 " + CurrencyHelper.amount(this, -withdrawals), witBg, witFg,
                 getString(R.string.history_withdrawal)));
         }
         return row;
@@ -1878,9 +1878,10 @@ public final class HistoryActivity extends Activity {
         return LocaleHelper.isPersian(this) ? faDigitsString(s) : s;
     }
 
-    /** Formats a rial amount as a signed toman string, following the app language's digit rules. */
-    private String signedToman(long n) {
-        String mag = BalanceData.toman(this, Math.abs(n));
+    /** Formats an amount as a signed currency string, following the app language's digit rules and
+     *  the chosen currency's value (toman divides by ten, other currencies show the raw amount). */
+    private String signedAmount(long n) {
+        String mag = CurrencyHelper.amount(this, Math.abs(n));
         if (n == 0) return mag;
         String sign = (n < 0 ? "\u2212" : "+");
         if (!LocaleHelper.isPersian(this)) return sign + mag;

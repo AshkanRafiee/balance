@@ -114,8 +114,8 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         views.setInt(R.id.widget_root, "setLayoutDirection",
             c.getResources().getConfiguration().getLayoutDirection());
         views.setTextViewText(R.id.widget_total,
-            hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : BalanceData.toman(c, total));
-        views.setTextViewText(R.id.widget_unit, c.getString(R.string.unit_toman));
+            hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : CurrencyHelper.amount(c, total));
+        views.setTextViewText(R.id.widget_unit, CurrencyHelper.label(c));
         views.setImageViewResource(R.id.widget_mask,
             hidden ? R.drawable.ic_visibility_off : R.drawable.ic_visibility);
         views.setContentDescription(R.id.widget_mask, c.getString(R.string.widget_action_mask));

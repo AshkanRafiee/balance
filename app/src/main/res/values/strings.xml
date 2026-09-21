@@ -49,8 +49,13 @@
 
     <string name="settings_region_label">Region</string>
     <string name="settings_language_label">Language</string>
+    <string name="settings_currency_label">Currency</string>
     <string name="region_iran">Iran</string>
     <string name="region_international">International</string>
+    <string name="currency_toman">Toman</string>
+    <string name="currency_usd">USD</string>
+    <string name="currency_eur">EUR</string>
+    <string name="currency_custom">Custom</string>
 
     <string name="data_title">Data</string>
     <string name="backup_action_create">Create backup</string>
