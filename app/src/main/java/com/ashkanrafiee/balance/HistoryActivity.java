@@ -1788,6 +1788,8 @@ public final class HistoryActivity extends Activity {
     private String signedToman(long n) {
         String mag = BalanceData.toman(this, Math.abs(n));
         if (n == 0) return mag;
-        return (n < 0 ? "\u2212" : "+") + mag;
+        String sign = (n < 0 ? "\u2212" : "+");
+        if (!LocaleHelper.isPersian(this)) return sign + mag;
+        return "\u2066" + sign + mag + "\u2069";
     }
 }
