@@ -520,7 +520,7 @@ public final class LockOverlay extends FrameLayout {
             startCooldown();
             return;
         }
-        String code = pinMode ? pinBuffer.toString() : passwordInput.getText().toString();
+        String code = pinMode ? pinBuffer.toString() : passwordInput.getText().toString().trim();
         if (code.isEmpty()) {
             showError(R.string.lock_validate_empty);
             return;
