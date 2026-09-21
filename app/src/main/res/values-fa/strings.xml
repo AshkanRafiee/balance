@@ -6,6 +6,7 @@
     <string name="total_empty_value">—</string>
     <string name="section_banks">بانک‌ها</string>
     <string name="unit_toman">تومان</string>
+    <string name="unit_rial">ریال</string>
     <string name="total_label">مجموع</string>
     <string name="total_history_hint">برای دیدن تاریخچه لمس کنید</string>
     <string name="accessibility_total_masked">مخفی است</string>
@@ -53,6 +54,7 @@
     <string name="region_iran">ایران</string>
     <string name="region_international">بین‌المللی</string>
     <string name="currency_toman">تومان</string>
+    <string name="currency_rial">ریال</string>
     <string name="currency_usd">دلار</string>
     <string name="currency_eur">یورو</string>
     <string name="currency_custom">دلخواه</string>

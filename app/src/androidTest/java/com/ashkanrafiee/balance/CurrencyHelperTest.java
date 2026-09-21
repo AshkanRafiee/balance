@@ -36,6 +36,9 @@ public class CurrencyHelperTest {
     }
 
     @Test public void fixedCurrenciesCarryTheirOwnCode() {
+        CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_RIAL);
+        assertEquals(ctx.getString(R.string.unit_rial), CurrencyHelper.label(ctx));
+        assertFalse(CurrencyHelper.isCustom(ctx));
         CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_USD);
         assertEquals("USD", CurrencyHelper.label(ctx));
         assertFalse(CurrencyHelper.isCustom(ctx));
@@ -53,6 +56,8 @@ public class CurrencyHelperTest {
     @Test public void amount_dividesByTenOnlyForToman() {
         assertEquals(BalanceData.toman(ctx, 123450), CurrencyHelper.amount(ctx, 123450));
         java.text.NumberFormat us = java.text.NumberFormat.getNumberInstance(java.util.Locale.US);
+        CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_RIAL);
+        assertEquals(us.format(123450), CurrencyHelper.amount(ctx, 123450));
         CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_USD);
         assertEquals(us.format(123450), CurrencyHelper.amount(ctx, 123450));
         CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_EUR);

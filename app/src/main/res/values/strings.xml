@@ -6,6 +6,7 @@
     <string name="total_empty_value">—</string>
     <string name="section_banks">Banks</string>
     <string name="unit_toman">Toman</string>
+    <string name="unit_rial">Rial</string>
     <string name="total_label">Total</string>
     <string name="total_history_hint">Tap to open history</string>
     <string name="accessibility_total_masked">hidden</string>
@@ -53,6 +54,7 @@
     <string name="region_iran">Iran</string>
     <string name="region_international">International</string>
     <string name="currency_toman">Toman</string>
+    <string name="currency_rial">Rial</string>
     <string name="currency_usd">USD</string>
     <string name="currency_eur">EUR</string>
     <string name="currency_custom">Custom</string>

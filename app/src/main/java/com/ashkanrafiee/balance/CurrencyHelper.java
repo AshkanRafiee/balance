@@ -9,14 +9,15 @@ import java.util.Locale;
  * Persists and reads the currency whose value and unit label the app shows for amounts. Amounts
  * are stored in rial; the currency decides both the number and the unit drawn beside it:
  * Toman (the default) converts rial to toman by dividing by ten, exactly as before, while every
- * other currency — USD, EUR, or a custom name the user types — shows the raw rial figure with the
- * chosen unit text. No exchange rate is applied, so everything works fully offline.
+ * other currency — Rial as stored, USD, EUR, or a custom name the user types — shows the raw rial
+ * figure with the chosen unit text. No exchange rate is applied, so everything works fully offline.
  *
  * <p>Kept in its own preference file (like the language and the region) so a single key controls
  * the whole app, including the home-screen widget.
  */
 public final class CurrencyHelper {
     public static final String CURRENCY_TOMAN = "toman";
+    public static final String CURRENCY_RIAL = "rial";
     public static final String CURRENCY_USD = "usd";
     public static final String CURRENCY_EUR = "eur";
 
@@ -39,11 +40,12 @@ public final class CurrencyHelper {
         return currency(context).startsWith(CUSTOM_PREFIX);
     }
 
-    /** The unit label shown next to amounts: the localized toman word, USD, EUR, or the verbatim
-     *  text the user typed for their custom currency. */
+    /** The unit label shown next to amounts: the localized toman or rial word, USD, EUR, or the
+     *  verbatim text the user typed for their custom currency. */
     public static String label(Context context) {
         String v = currency(context);
         if (v.startsWith(CUSTOM_PREFIX)) return v.substring(CUSTOM_PREFIX.length());
+        if (CURRENCY_RIAL.equals(v)) return context.getString(R.string.unit_rial);
         if (CURRENCY_USD.equals(v)) return "USD";
         if (CURRENCY_EUR.equals(v)) return "EUR";
         return context.getString(R.string.unit_toman);

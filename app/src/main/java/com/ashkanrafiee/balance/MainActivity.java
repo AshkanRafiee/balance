@@ -284,8 +284,9 @@ public class MainActivity extends Activity {
             langLabels[i] = langTags[i].isEmpty()
                 ? getString(R.string.language_system_default) : LocaleHelper.displayName(langTags[i]);
         String[] currencyLabels = {
-            getString(R.string.currency_toman), getString(R.string.currency_usd),
-            getString(R.string.currency_eur), getString(R.string.currency_custom)
+            getString(R.string.currency_toman), getString(R.string.currency_rial),
+            getString(R.string.currency_usd), getString(R.string.currency_eur),
+            getString(R.string.currency_custom)
         };
 
         Spinner regionSpin = new Spinner(this);
@@ -316,14 +317,14 @@ public class MainActivity extends Activity {
         currencyAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         currencySpin.setAdapter(currencyAdapter);
         int curIdx = 0;
-        if (CurrencyHelper.CURRENCY_USD.equals(storedCurrency)) curIdx = 1;
-        else if (CurrencyHelper.CURRENCY_EUR.equals(storedCurrency)) curIdx = 2;
-        else if (storedCurrency.startsWith(CurrencyHelper.CUSTOM_PREFIX)) curIdx = 3;
+        if (CurrencyHelper.CURRENCY_USD.equals(storedCurrency)) curIdx = 2;
+        else if (CurrencyHelper.CURRENCY_EUR.equals(storedCurrency)) curIdx = 3;
+        else if (storedCurrency.startsWith(CurrencyHelper.CUSTOM_PREFIX)) curIdx = 4;
         currencySpin.setSelection(curIdx);
-        customInput.setVisibility(curIdx == 3 ? View.VISIBLE : View.GONE);
+        customInput.setVisibility(curIdx == 4 ? View.VISIBLE : View.GONE);
         currencySpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
-                customInput.setVisibility(pos == 3 ? View.VISIBLE : View.GONE);
+                customInput.setVisibility(pos == 4 ? View.VISIBLE : View.GONE);
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
         });
@@ -362,12 +363,13 @@ public class MainActivity extends Activity {
                 boolean langChanged = !tag.equals(LocaleHelper.currentTag(this));
                 String chosenCurrency = null;
                 int curPos = currencySpin.getSelectedItemPosition();
-                if (curPos == 3) {
+                if (curPos == 4) {
                     String typed = customInput.getText().toString().trim();
                     if (!typed.isEmpty()) chosenCurrency = CurrencyHelper.CUSTOM_PREFIX + typed;
                 } else {
                     chosenCurrency = new String[]{CurrencyHelper.CURRENCY_TOMAN,
-                        CurrencyHelper.CURRENCY_USD, CurrencyHelper.CURRENCY_EUR}[curPos];
+                        CurrencyHelper.CURRENCY_RIAL, CurrencyHelper.CURRENCY_USD,
+                        CurrencyHelper.CURRENCY_EUR}[curPos];
                 }
                 boolean currencyChanged = chosenCurrency != null
                     && !chosenCurrency.equals(CurrencyHelper.currency(this));
