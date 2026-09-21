@@ -274,7 +274,7 @@ public class MainActivity extends Activity {
         int pad = dp(14);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(pad, dp(4), pad, 0);
+        box.setPadding(pad + dp(12), dp(4), pad, 0);
 
         String[] regionLabels = {getString(R.string.region_iran), getString(R.string.region_international)};
         String[] langTags = LocaleHelper.SUPPORTED;
