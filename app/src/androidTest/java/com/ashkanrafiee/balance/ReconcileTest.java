@@ -9,6 +9,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -117,5 +118,13 @@ public class ReconcileTest {
         Reconcile.Entry b = e(2, 1L, Long.MIN_VALUE);
         Reconcile.Entry c = e(3, 1L, Long.MIN_VALUE + 1);
         assertNull("Overflow must not connect these entries", Reconcile.order(Arrays.asList(a, b, c)));
+    }
+
+    @Test public void order_overClusterLimit_returnsNull() {
+        // The O(n^2) matcher is only walked for small windows; a larger fold must bail out cleanly
+        // and leave the caller on the original arrival order.
+        List<Reconcile.Entry> in = new ArrayList<>();
+        for (int i = 0; i < 65; i++) in.add(e(i, 100L, 1000L + i));
+        assertNull(Reconcile.order(in));
     }
 }
