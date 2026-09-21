@@ -1591,15 +1591,8 @@ final class BalanceData {
         return b.toString();
     }
 
-    static String digits(String s) {        StringBuilder b = new StringBuilder();
-        for (char c : s.toCharArray()) {
-            if (c >= '\u06F0' && c <= '\u06F9')
-                b.append((char) ('0' + c - '\u06F0'));
-            else if (c >= '\u0660' && c <= '\u0669')
-                b.append((char) ('0' + c - '\u0660'));
-            else b.append(c);
-        }
-        return b.toString();
+    static String digits(String s) {
+        return Digits.ascii(s);
     }
 
     /** Formats a rial amount as toman using the app language (Persian digits for Persian). */

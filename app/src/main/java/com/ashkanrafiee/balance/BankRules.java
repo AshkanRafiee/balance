@@ -266,9 +266,7 @@ final class BankRules {
     }
     static String normalize(String raw) {
         StringBuilder out = new StringBuilder();
-        for (char c : raw.toCharArray()) {
-            if (c >= '۰' && c <= '۹') c = (char) ('0' + c - '۰');
-            else if (c >= '٠' && c <= '٩') c = (char) ('0' + c - '٠');
+        for (char c : Digits.ascii(raw).toCharArray()) {
             if (Character.isLetterOrDigit(c)) out.append(Character.toLowerCase(c));
         }
         String s = out.toString();
@@ -349,12 +347,6 @@ final class BankRules {
     }
 
     private static String digitsToAscii(String raw) {
-        StringBuilder out = new StringBuilder(raw.length());
-        for (char c : raw.toCharArray()) {
-            if (c >= '\u06F0' && c <= '\u06F9') out.append((char) ('0' + c - '\u06F0'));
-            else if (c >= '\u0660' && c <= '\u0669') out.append((char) ('0' + c - '\u0660'));
-            else out.append(c);
-        }
-        return out.toString();
+        return Digits.ascii(raw);
     }
 }
