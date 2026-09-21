@@ -1,6 +1,6 @@
 Balance reads supported bank balance SMS messages locally and shows the latest balance for each bank — split per account number when the bank SMS states one — plus the combined total.
 
-Currently designed for users in Iran, with support for Iranian banks and Persian bank SMS formats.
+Currently designed for users in Iran, with support for Iranian banks and Persian bank SMS formats. A Region setting (footer » Region &amp; Language) switches the app's calendar system between the Persian (Jalali) calendar for Iran and the Gregorian calendar for International, with localized month and weekday names for both; the same menu also overrides the interface language.
 
 Features:
 - Offline SMS parsing with no internet permission
@@ -11,7 +11,7 @@ Features:
 - Balances update automatically as bank SMS arrive, plus pull-to-refresh
 - Home-screen widget mirroring the same bank order, totals and privacy mask; it locks together with the app when the lock is enabled
 - Transaction history with deposit and withdrawal tracking per day, month and year, refreshing automatically as new bank SMS arrive, with out-of-order messages (like a transfer and its fee) shown in their true order
-- Filter history by movement type (all, deposits or withdrawals) and by date — today, this month, this year or a custom Persian date range — applied to the whole screen
+- Filter history by movement type (all, deposits or withdrawals) and by date — today, this month, this year or a custom date range in the active calendar (Persian for Iran, Gregorian for International) — applied to the whole screen
 - Bank rule updates rebuild history from your SMS and match it to what is already stored, so nothing is ever counted twice
 - Full history from the total card; tap a bank for just that bank's transactions, or tap one of its accounts for a single account's history
 - Long-press the total card, a bank card or an account row to copy that balance; long-press the eye for auto-mask (balances start hidden on every open), and long-press the lock icon for the lock settings
@@ -22,10 +22,10 @@ Features:
 - Encrypted storage on device
 - Password-protected backup and restore
 - Optional in-app lock with PIN, password or fingerprint, protecting the app, the widget and screenshots/recents; after a few wrong attempts, code entry locks for a growing cooldown
-- Report (the Scan diagnostics screen): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout are flagged first, then senders not recognized yet. Tap any flagged sender to open its messages (the checkmarks live there — nothing is preselected) and send or copy exactly those, with a live count; a prefilled email is only sent after you approve
+- Report (the Scan diagnostics screen): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout are flagged first, then senders not recognized yet. Tap any flagged sender to open its messages (the checkmarks live there — nothing is preselected) and send or copy exactly those, with a live count; you can also mark what is wrong — account, balance or sender-number detection — and the issue goes into the prefilled email so the maintainer knows which stage failed; the email is only sent after you approve
 
 SMS and financial data stay on the device, encrypted. No account, cloud service, analytics, or network access is required.
 
-Your bank's SMS not recognized, the wrong account detected, or a history entry off? Report it — include the exact message text (real or scrubbed numbers, same length and format), its sender number, and your Android version and phone model — via the issue tracker or by email; see the project's contribution guide for details. The Scan diagnostics screen flags every unparsed message — naming the bank when it is one of ours — and opens the sender's messages for you to tick and send exactly those.
+Your bank's SMS not recognized, the wrong account detected, or a history entry off? Report it — include the exact message text (real or scrubbed numbers, same length and format), its sender number, and your Android version and phone model — via the issue tracker or by email; see the project's contribution guide for details. The Scan diagnostics screen flags every unparsed message — naming the bank when it is one of ours — and opens the sender's messages for you to tick and send exactly those, marking which stage failed.
 
 Balance is free and open source. If you find it useful, you can support its development — see the donation options in the project README: https://github.com/AshkanRafiee/balance#donate

@@ -2,7 +2,7 @@
 
 Balance is a small, offline-first Android app that reads supported bank SMS messages locally and shows the latest balance for each recognized bank — broken out per account number when the bank states one — plus the combined total.
 
-The current release is designed for users in Iran. It recognizes Iranian banks and the Persian SMS formats used by those banks.
+The current release is designed for users in Iran. It recognizes Iranian banks and the Persian SMS formats used by those banks. A Region setting in the footer switches the app's calendar between the Persian (Jalali) calendar (Iran) and the Gregorian calendar (International), with localized month and weekday names for both.
 
 ## Features
 
@@ -10,7 +10,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Latest balance per supported bank — split per account number when the bank SMS state one — without accumulating repeated messages
 - Combined total balance, with the option to exclude individual accounts from the total
 - Transaction history with deposits and withdrawals, broken down by day, month and year
-- History filters by movement type (all, deposits or withdrawals) and by date — today, this month, this year or a custom Persian date range — applied to every figure on the screen
+- History filters by movement type (all, deposits or withdrawals) and by date — today, this month, this year or a custom date range in the active calendar (Persian for Iran, Gregorian for International) — applied to every figure on the screen
 - Full history from the total card, per-bank history from any bank card, and single-account history by tapping an account row in the list
 - Long-press the total card to copy the combined total, or long-press a bank or account card to copy that balance; long-press the eye to switch auto-mask on or off (balances start hidden on every open), and long-press the lock icon for the lock settings
 - Bank sorting by balance or update time, mirrored in the list and the home-screen widget
@@ -18,10 +18,10 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Password-encrypted backup and restore
 - Auto light/dark theme, persistent masked-balance and Toman display mode preference
 - Automatic refresh as bank SMS arrive, plus pull-to-refresh
-- English and Persian (فارسی) interface, with automatic system-language detection and localized bank names
+- English and Persian (فارسی) interface, with automatic system-language detection and localized bank names; the footer's single "Region & Language" menu holds both selectors — the Region (Iran / International) chooses the calendar system, the Language overrides the interface language
 - Optional in-app lock with a PIN, password or fingerprint, covering the app, the home-screen widget and screenshots/recents, with progressive cooldown delays against wrong-entry guessing
 - About screen with direct links to the website and issue tracker
-- Report (the Scan diagnostics screen): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout, and senders not recognized yet. Tap any flagged sender to open its messages and pick exactly which ones to send or copy — the prefilled email is only sent after you approve — feeding straight into the contribution flow »Contributing« below
+- Report (the Scan diagnostics screen): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout, and senders not recognized yet. Tap any flagged sender to open its messages and pick exactly which ones to send or copy — and mark what is wrong (account, balance or sender-number detection) so the prefilled email tells the maintainer which stage failed. The email is only sent after you approve — feeding straight into the contribution flow »Contributing« below
 
 ## Download
 
@@ -70,7 +70,8 @@ length and format for privacy. The fastest way to hand us every unparsed
 message is the **Report** item in the footer:
 known banks with an unreadable message layout are highlighted first, then
 unknown senders — tap any flagged sender to open its messages, tick the ones to
-share, and send or copy exactly those. Nothing is sent until you confirm in
+share, mark what seems wrong (account, balance or sender-number detection), and
+send or copy exactly those. Nothing is sent until you confirm in
 your mail app.
 Otherwise, open an [issue](https://github.com/AshkanRafiee/balance/issues)
 or email us; see [CONTRIBUTING.md](CONTRIBUTING.md) for the full checklist.
