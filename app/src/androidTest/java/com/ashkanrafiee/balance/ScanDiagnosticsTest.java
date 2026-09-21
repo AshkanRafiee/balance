@@ -369,8 +369,13 @@ public class ScanDiagnosticsTest {
             assertTrue(all.contains("پرداخت قبض انجام شد")); // the known-bank message that failed
             assertTrue(all.contains(UNKNOWN_1));
             assertTrue(all.contains(UNKNOWN_2));
-            assertTrue(all.contains(ctx.getString(R.string.scan_diag_copy_selected, 0)));
-            assertTrue(all.contains(ctx.getString(R.string.scan_diag_email_selected, 0)));
+            // Selection is not on this screen: it happens inside each sender's messages, so there
+            // must be no checkboxes or whole-report buttons here.
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                List<android.widget.CheckBox> checks = new ArrayList<>();
+                findChecks(act.getWindow().getDecorView(), checks);
+                assertTrue("the diagnostics screen must not carry its own checkboxes", checks.isEmpty());
+            });
         } finally {
             InstrumentationRegistry.getInstrumentation().runOnMainSync(act::finish);
         }
