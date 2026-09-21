@@ -39,7 +39,7 @@ public final class SenderShareActivity extends Activity {
 
     /** How long a copied report stays in the system clipboard before it is cleared (see
      *  {@link #copySelected}); the report holds raw message text, so it must not linger. */
-    private static final long CLIP_CLEAR_MS = 60_000L;
+    private static final long CLIP_CLEAR_MS = 15_000L;
     private static final Handler HANDLER = new Handler(android.os.Looper.getMainLooper());
 
     int bg, card, muted, accent, heroColor, fg;
@@ -335,20 +335,22 @@ public final class SenderShareActivity extends Activity {
         if (clearClipRunnable != null) HANDLER.removeCallbacks(clearClipRunnable);
         clearClipRunnable = () -> {
             clearClipRunnable = null;
-            CharSequence current = clipboard.hasPrimaryClip()
-                && clipboard.getPrimaryClip() != null
-                && clipboard.getPrimaryClip().getItemCount() > 0
-                ? clipboard.getPrimaryClip().getItemAt(0).getText() : null;
-            if (report.equals(String.valueOf(current))) {
-                if (android.os.Build.VERSION.SDK_INT >= 28) {
-                    try {
+            try {
+                CharSequence current = clipboard.hasPrimaryClip()
+                    && clipboard.getPrimaryClip() != null
+                    && clipboard.getPrimaryClip().getItemCount() > 0
+                    ? clipboard.getPrimaryClip().getItemAt(0).getText() : null;
+                if (report.equals(String.valueOf(current))) {
+                    if (android.os.Build.VERSION.SDK_INT >= 28) {
                         clipboard.clearPrimaryClip();
-                    } catch (Exception e) {
-                        Log.w(TAG, "clipboard clear failed", e);
+                    } else {
+                        clipboard.setPrimaryClip(ClipData.newPlainText("", ""));
                     }
-                } else {
-                    clipboard.setPrimaryClip(ClipData.newPlainText("", ""));
                 }
+            } catch (Exception e) {
+                // On Android 10+ a background process may be denied reading a clip another app
+                // has taken; fail as cleared and keep the app alive.
+                Log.w(TAG, "clipboard read failed", e);
             }
         };
         HANDLER.postDelayed(clearClipRunnable, CLIP_CLEAR_MS);
