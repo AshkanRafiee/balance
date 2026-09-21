@@ -18,6 +18,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.RectF;
+import android.graphics.Path;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.text.InputType;
@@ -876,6 +877,13 @@ public class MainActivity extends Activity {
         final OverScroller scroller;
         VelocityTracker velocityTracker;
         boolean dragging;
+        /** Pull-to-refresh indicator: {@code pullShift/pullFrac} track the finger while it drags down
+         *  at the top; once released past {@link #PULL_TRIGGER} the arrow spins (ticker) until the
+         *  SMS scan settles, then glides back up. All values are dp in the canvas' scaled space. */
+        static final float PULL_TRIGGER = 55f, PULL_CAP = 44f;
+        float pullShift, pullFrac, pullFade, spinAngle;
+        boolean indicatorVisible, spinnerRunning, retracting;
+        long spinDeadline;
         boolean lockArmed;
         boolean lockProbeFired;
         boolean eyeArmed;
@@ -914,6 +922,34 @@ public class MainActivity extends Activity {
             if (row.bank != null && row.bank.account != null)
                 label += " " + faDigits(row.bank.account);
             copyBalance(label, row.amount);
+        };
+        final Runnable refreshTicker = new Runnable() {
+            @Override public void run() {
+                if (MainActivity.this.isFinishing() || MainActivity.this.isDestroyed()) return;
+                if (spinnerRunning) {
+                    spinAngle += 6f;                       // about one turn per second
+                    pullShift = Math.min(PULL_CAP, pullShift + 5f);
+                    // Stop the moment the scan settles; only a short beat (a fraction of a turn) is kept
+                    // so an almost-instant refresh still reads as a completed spin, not a flicker.
+                    if (System.currentTimeMillis() >= spinDeadline && !refreshing) {
+                        spinnerRunning = false;
+                        retracting = true;
+                    }
+                    invalidate();
+                    handler.postDelayed(this, 16);
+                } else if (retracting || pullFade > 0.02f) {
+                    pullShift = Math.max(0, pullShift - 10f);
+                    pullFrac = Math.max(0, pullFrac - 0.12f);
+                    pullFade = Math.max(0, pullFade - 0.12f);
+                    if (pullFade <= 0.02f) {
+                        pullFade = 0;
+                        indicatorVisible = false;
+                        retracting = false;
+                    }
+                    invalidate();
+                    if (indicatorVisible) handler.postDelayed(this, 16);
+                }
+            }
         };
         String status = getString(R.string.status_reading_sms);
         long total;
@@ -988,9 +1024,60 @@ public class MainActivity extends Activity {
                 scroller.fling(0, Math.round(scrollY), 0, -Math.round(vy),
                     0, 0, 0, Math.round(maxScroll()), 0, 0);
                 invalidate();
-            } else if (downY < 360 && y - downY > 55 && scrollY == 0) {
+            } else if (downY < 360 && y - downY > PULL_TRIGGER && scrollY == 0) {
+                beginSpin();
                 refresh();
+            } else if (indicatorVisible) {
+                retractIndicator();
             }
+        }
+
+        /** Starts (or resumes) the finger-following phase of the indicator for a downward pull. */
+        void startPull(float delta, float trigger) {
+            indicatorVisible = true;
+            spinnerRunning = false;
+            retracting = false;
+            pullShift = Math.max(0, Math.min(PULL_CAP, delta));
+            pullFrac = Math.max(0, Math.min(1, delta / trigger));
+            pullFade = Math.min(1, pullFrac * 1.7f);
+            spinAngle = pullFrac * 180f;
+            invalidate();
+        }
+
+        /** Release past the trigger: the arrow goes fully down and spins while the scan runs. */
+        void beginSpin() {
+            spinnerRunning = true;
+            retracting = false;
+            indicatorVisible = true;
+            pullFade = 1;
+            pullShift = PULL_CAP;
+            pullFrac = 1;
+            spinDeadline = System.currentTimeMillis() + 400;
+            handler.removeCallbacks(refreshTicker);
+            handler.postDelayed(refreshTicker, 16);
+            invalidate();
+        }
+
+        /** Lift short of the trigger (or a cancelled gesture): glide the arrow back up. */
+        void retractIndicator() {
+            if (!indicatorVisible) {
+                pullShift = pullFrac = pullFade = 0;
+                return;
+            }
+            spinnerRunning = false;
+            retracting = true;
+            handler.removeCallbacks(refreshTicker);
+            handler.postDelayed(refreshTicker, 16);
+        }
+
+        /** A new finger put down: drop whatever indicator state is current so the next pull restarts. */
+        void hideIndicator() {
+            handler.removeCallbacks(refreshTicker);
+            indicatorVisible = false;
+            spinnerRunning = false;
+            retracting = false;
+            pullShift = pullFrac = pullFade = 0;
+            invalidate();
         }
 
         boolean isRtl() {
@@ -1297,7 +1384,47 @@ public class MainActivity extends Activity {
                 footerBackupStart = x0; text(c, backupText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += backupW * scale; footerBackupEnd = x0;
             }
             footerY = by;
+            if (indicatorVisible) drawPullIndicator(c, w);
             c.restore();
+        }
+
+        /** The pull-to-refresh arrow: a small chip with a circular arrow that follows the finger down
+         *  while rotated by how far the pull has gone, then spins on release. Drawn last, on top. */
+        void drawPullIndicator(Canvas c, int w) {
+            if (pullFade <= 0.02f) return;
+            float cx = w / 2f, cy = 58f + pullShift;
+            int alpha = (int) (255 * Math.min(1, pullFade));
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(bg);
+            p.setAlpha(alpha);
+            c.drawCircle(cx, cy, 17, p);
+            p.setColor(accent);
+            p.setAlpha(alpha);
+            c.save();
+            c.translate(cx, cy);
+            c.rotate(spinAngle);
+            float g = 9.5f;
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(2.4f);
+            p.setStrokeCap(Paint.Cap.ROUND);
+            Path ring = new Path();
+            ring.addArc(new RectF(-g, -g, g, g), -90, 290);
+            c.drawPath(ring, p);
+            float tipX = (float) (g * Math.cos(Math.toRadians(200)));
+            float tipY = (float) (g * Math.sin(Math.toRadians(200)));
+            Path head = new Path();
+            head.moveTo(tipX, tipY);
+            head.lineTo((float) (tipX + 3.2 * Math.cos(Math.toRadians(170))),
+                (float) (tipY + 3.2 * Math.sin(Math.toRadians(170))));
+            head.lineTo((float) (tipX + 3.2 * Math.cos(Math.toRadians(230))),
+                (float) (tipY + 3.2 * Math.sin(Math.toRadians(230))));
+            head.close();
+            p.setStyle(Paint.Style.FILL);
+            p.setStrokeWidth(0);
+            c.drawPath(head, p);
+            c.restore();
+            p.setAlpha(255);
+            p.setStrokeCap(Paint.Cap.BUTT);
         }
 
         /** Uses the canonical (English) name so a bank's badge stays stable across languages: the bank's
@@ -1536,6 +1663,7 @@ public class MainActivity extends Activity {
             if (velocityTracker == null) velocityTracker = VelocityTracker.obtain();
             velocityTracker.addMovement(e);
             if (e.getAction() == MotionEvent.ACTION_DOWN) {
+                hideIndicator();
                 scroller.forceFinished(true);
                 velocityTracker.clear();
                 lastY = y; downY = y; dragging = false;
@@ -1570,6 +1698,8 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (e.getAction() == MotionEvent.ACTION_MOVE) {
+                if (scrollY == 0 && downY < 360 && y > downY)
+                    startPull(y - downY, PULL_TRIGGER);
                 if (Math.abs(y - lastY) > 3) {
                     dragging = true;
                     scroller.forceFinished(true);
@@ -1593,6 +1723,7 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (e.getAction() == MotionEvent.ACTION_CANCEL) {
+                hideIndicator();
                 velocityTracker.recycle();
                 velocityTracker = null;
                 scroller.forceFinished(true);
