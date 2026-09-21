@@ -8,7 +8,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 
 - Local SMS parsing only — no account, cloud service, analytics, or internet permission
 - Latest balance per supported bank — split per account number when the bank SMS state one — without accumulating repeated messages
-- Combined total balance, with the option to exclude individual banks from the total
+- Combined total balance, with the option to exclude individual accounts from the total
 - Transaction history with deposits and withdrawals, broken down by day, month and year
 - History filters by movement type (all, deposits or withdrawals) and by date — today, this month, this year or a custom Persian date range — applied to every figure on the screen
 - Full history from the total card, per-bank history from any bank card, and single-account history by tapping an account row in the list or an account chip in the history screen

@@ -16,7 +16,7 @@ Features:
 - Full history from the total card; tap a bank for just that bank's transactions, or tap one of its accounts (a row or an account chip) for a single account's history
 - Long-press the total card, a bank card or an account row to copy that balance
 - Bank sorting by balance or update time, applied to the list and the widget
-- Exclude banks from the combined total
+- Exclude individual accounts from the combined total
 - Automatic light and dark theme that follows your device
 - Reset and rescan balances from the data menu
 - Encrypted storage on device

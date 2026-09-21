@@ -1097,12 +1097,12 @@ public class MainActivity extends Activity {
             }
         }
 
-        /** Recomputes the total from included banks only. Exclusion is per bank name, so composite
-         *  {@code bank|account} storage keys are matched on their bank. */
+        /** Recomputes the total from included entries only. Exclusion is per account, matched on the
+         *  entry's own {@code bank|account} storage key. */
         void recalcTotal() {
             total = 0;
             for (java.util.Map.Entry<String, Bank> e : banks.entrySet())
-                if (!excluded.contains(e.getValue().name)) total += e.getValue().amount;
+                if (!excluded.contains(e.getKey())) total += e.getValue().amount;
         }
 
         /** Reloads the saved balances (e.g. after a restore) without re-scanning SMS. */
@@ -1465,14 +1465,16 @@ public class MainActivity extends Activity {
             final int kind;
             final Bank bank;
             final String bankName;
+            final String key;
             final long amount;
             final boolean excluded;
             final float top, height;
-            BankRow(int kind, Bank bank, String bankName, long amount, boolean excluded,
+            BankRow(int kind, Bank bank, String bankName, String key, long amount, boolean excluded,
                     float top, float height) {
                 this.kind = kind;
                 this.bank = bank;
                 this.bankName = bankName;
+                this.key = key;
                 this.amount = amount;
                 this.excluded = excluded;
                 this.top = top;
@@ -1488,9 +1490,10 @@ public class MainActivity extends Activity {
             java.util.List<BankRow> out = new java.util.ArrayList<>();
             float cursor = 352;
             for (java.util.List<Bank> block : BalanceData.groupedForDisplay(banks, excluded, sortMode)) {
-                boolean ex = excluded.contains(block.get(0).name);
                 for (Bank b : block) {
-                    out.add(new BankRow(BankRow.SINGLE, b, b.name, b.amount, ex, cursor, 82));
+                    String key = BalanceData.storageKey(b.name, b.account);
+                    out.add(new BankRow(BankRow.SINGLE, b, b.name, key, b.amount,
+                        excluded.contains(key), cursor, 82));
                     cursor += 96;
                 }
             }
@@ -1621,9 +1624,11 @@ public class MainActivity extends Activity {
             handler.postDelayed(clearClipRunnable, CLIP_CLEAR_MS);
         }
 
-        void showBankMenu(String bankName, long amount) {
+        /** Opens the row menu for one entry. {@code key} is that entry's {@code bank|account} storage
+         *  key, so exclude/include affects only the tapped account, never its siblings. */
+        void showBankMenu(String key, String bankName, long amount) {
             String displayName = BankRules.displayName(MainActivity.this, bankName);
-            boolean isExcluded = excluded.contains(bankName);
+            boolean isExcluded = excluded.contains(key);
             String[] options = {
                 getString(isExcluded ? R.string.action_include : R.string.action_exclude),
                 getString(R.string.action_copy_balance)
@@ -1632,14 +1637,14 @@ public class MainActivity extends Activity {
                 .setTitle(displayName)
                 .setItems(options, (d, which) -> {
                     if (which == 0) {
-                        BalanceData.toggleExcluded(MainActivity.this, bankName);
+                        BalanceData.toggleExcluded(MainActivity.this, key);
                         excluded.clear();
                         excluded.addAll(BalanceData.getExcluded(MainActivity.this));
                         recalcTotal();
                         invalidate();
                         BalanceWidgetProvider.push(MainActivity.this);
                         Toast.makeText(MainActivity.this,
-                            getString(excluded.contains(bankName)
+                            getString(excluded.contains(key)
                                 ? R.string.toast_excluded : R.string.toast_included),
                             Toast.LENGTH_SHORT).show();
                     } else {
@@ -1797,7 +1802,7 @@ public class MainActivity extends Activity {
                         ? x >= 16 && x <= 56
                         : x >= getWidth() / d - 56 && x <= getWidth() / d - 16;
                     if (onMenu) {
-                        showBankMenu(row.bankName, row.amount);
+                        showBankMenu(row.key, row.bankName, row.amount);
                     } else {
                         Intent history = new Intent(MainActivity.this, HistoryActivity.class);
                         history.putExtra(HistoryActivity.EXTRA_BANK, row.bankName);

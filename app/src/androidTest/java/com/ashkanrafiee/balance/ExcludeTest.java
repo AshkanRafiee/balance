@@ -209,6 +209,52 @@ public class ExcludeTest {
         assertTrue(BalanceData.orderForDisplay(new LinkedHashMap<>(), setOf("Tejarat")).isEmpty());
     }
 
+    // ---- Per-account exclusion: one account of a bank, not all of them ----
+
+    private static LinkedHashMap<String, Bank> multiAccount() {
+        LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
+        map.put("Melli|1111", new Bank("Melli", 2_000_000, 1000L, "5001", "1111"));
+        map.put("Melli|2222", new Bank("Melli", 4_000_000, 1100L, "5001", "2222"));
+        map.put("Tejarat", new Bank("Tejarat", 3_000_000, 900L, "5000"));
+        return map;
+    }
+
+    @Test public void orderForDisplay_excludingOneAccount_keepsItsSiblingIncluded() {
+        List<String> result = names(BalanceData.orderForDisplay(
+            multiAccount(), setOf("Melli|2222")));
+        // Sort balance-high: Tejarat (3M) and the sibling Melli|1111 (2M) come first, the excluded
+        // Melli|2222 (4M) sinks to the end even though it ranks highest by amount.
+        assertEquals(java.util.Arrays.asList("Tejarat", "Melli", "Melli"), result);
+        assertEquals(3, result.size());
+    }
+
+    @Test public void orderForDisplay_excludingBankName_doesNotCatchItsAccounts() {
+        // A plain bank name is only the storage key of an account-less entry; it must not match the
+        // composite bank|account keys of a multi-account bank.
+        List<String> result = names(BalanceData.orderForDisplay(
+            multiAccount(), setOf("Melli")));
+        assertEquals(java.util.Arrays.asList("Melli", "Tejarat", "Melli"), result);
+    }
+
+    @Test public void toggleExcluded_perAccount_onlyTogglesTarget() {
+        BalanceData.toggleExcluded(ctx, "Melli|2222");
+        assertTrue(BalanceData.isExcluded(ctx, "Melli|2222"));
+        assertFalse(BalanceData.isExcluded(ctx, "Melli|1111"));
+        assertFalse(BalanceData.isExcluded(ctx, "Tejarat"));
+    }
+
+    @Test public void totalCalculation_excludesOnlyTheChosenAccount() {
+        LinkedHashMap<String, Bank> banks = multiAccount();
+        BalanceData.setExcluded(ctx, setOf("Melli|2222"));
+
+        long total = 0;
+        for (java.util.Map.Entry<String, Bank> e : banks.entrySet())
+            if (!BalanceData.isExcluded(ctx, e.getKey())) total += e.getValue().amount;
+
+        // Melli|1111 (2M) + Tejarat (3M); only Melli|2222 (4M) is out.
+        assertEquals(5_000_000L, total);
+    }
+
     // ---- Total exclusion integration ----
 
     @Test public void totalCalculation_skipsExcludedBanks() {

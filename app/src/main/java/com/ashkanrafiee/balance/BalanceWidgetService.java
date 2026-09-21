@@ -16,20 +16,20 @@ public class BalanceWidgetService extends RemoteViewsService {
         return new Factory(getApplicationContext());
     }
 
-    /** The ordered list the widget shows: only included banks, one row per bank entry — a
+    /** The ordered list the widget shows: only included entries, one row per bank entry — a
      *  multi-account bank contributes a row per account, exactly as on the main screen — in the
-     *  same order the app shows them (persisted sort mode), with excluded banks dropped entirely so
-     *  the widget stays a glanceable summary of the total. */
+     *  same order the app shows them (persisted sort mode), with excluded accounts dropped entirely
+     *  so the widget stays a glanceable summary of the total. */
     static List<Bank> widgetBanks(Context context) {
         Context c = LocaleHelper.wrap(context);
         Set<String> excluded = BalanceData.getExcluded(c);
         List<Bank> included = new ArrayList<>();
         for (List<Bank> block : BalanceData.groupedForDisplay(
                 BalanceData.read(c), excluded, BalanceData.getSort(c))) {
-            String name = block.get(0).name;
-            if (excluded.contains(name)) continue;
-            for (Bank b : block)
+            for (Bank b : block) {
+                if (excluded.contains(BalanceData.storageKey(b.name, b.account))) continue;
                 included.add(new Bank(b.name, b.amount, b.date, b.sender, b.account));
+            }
         }
         return included;
     }

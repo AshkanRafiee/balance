@@ -343,8 +343,8 @@ final class BalanceData {
     /** Discards every saved balance and transaction and forgets both scan watermarks, so the next scans
      *  behave like a fresh install and rebuild from the messages currently in the inbox. Display
      *  preferences are deliberately untouched — the hide/unmask toggle, the language and the sort mode
-     *  are choices, not data (a data reset must not dump the user back to defaults); the excluded-banks
-     *  set is forgotten too, because a fresh install has no exclusions. */
+     *  are choices, not data (a data reset must not dump the user back to defaults); the excluded
+     *  entries are forgotten too, because a fresh install has no exclusions. */
     static void reset(Context context) {
         context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
             .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).remove(KEY_HISTORY_LAST_BALANCE)
@@ -374,6 +374,8 @@ final class BalanceData {
             .putBoolean(KEY_AUTO_HIDE, on).apply();
     }
 
+    /** The set of excluded entries, each stored under its {@link #storageKey} — so exclusion is per
+     *  account: {@code bank} for an account-less bank, {@code bank|account} for a specific one. */
     static Set<String> getExcluded(Context context) {
         Set<String> set = new HashSet<>();
         try {
@@ -388,24 +390,24 @@ final class BalanceData {
 
     static void setExcluded(Context context, Set<String> excluded) {
         JSONArray arr = new JSONArray();
-        for (String name : excluded) arr.put(name);
+        for (String key : excluded) arr.put(key);
         context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
             .putString(KEY_EXCLUDED, arr.toString()).apply();
     }
 
-    static boolean isExcluded(Context context, String bankName) {
-        return getExcluded(context).contains(bankName);
+    static boolean isExcluded(Context context, String key) {
+        return getExcluded(context).contains(key);
     }
 
-    static void toggleExcluded(Context context, String bankName) {
+    static void toggleExcluded(Context context, String key) {
         Set<String> excluded = getExcluded(context);
-        if (excluded.contains(bankName)) excluded.remove(bankName);
-        else excluded.add(bankName);
+        if (excluded.contains(key)) excluded.remove(key);
+        else excluded.add(key);
         setExcluded(context, excluded);
     }
 
     /** Orders the supplied banks for display: included banks first (sorted by the given mode),
-     *  followed by excluded banks (also sorted among themselves). The input map's own order is
+     *  followed by excluded accounts (also sorted among themselves). The input map's own order is
      *  never modified. */
     static List<Bank> orderForDisplay(Map<String, Bank> banks, Set<String> excluded) {
         return orderForDisplay(banks, excluded, SORT_BALANCE_HIGH);
@@ -415,7 +417,7 @@ final class BalanceData {
         List<Bank> included = new ArrayList<>();
         List<Bank> excludedBanks = new ArrayList<>();
         for (Bank b : banks.values()) {
-            if (excluded.contains(b.name)) excludedBanks.add(b);
+            if (excluded.contains(storageKey(b.name, b.account))) excludedBanks.add(b);
             else included.add(b);
         }
         sortBanks(included, sort);
@@ -445,13 +447,13 @@ final class BalanceData {
 
     /** Orders the stored balances for the bank-list UI as one flat card per bank entry: every
      *  account of a multi-account bank ranks by its own sort key, exactly like a separate bank.
-     *  Included entries come first (sorted by the given mode), then excluded banks' entries in the
+     *  Included entries come first (sorted by the given mode), then excluded entries in the
      *  same order. The input map's own order is never modified. */
     static List<List<Bank>> groupedForDisplay(Map<String, Bank> banks, Set<String> excluded, int sort) {
         List<Bank> included = new ArrayList<>();
         List<Bank> excludedBanks = new ArrayList<>();
         for (Bank b : banks.values()) {
-            if (excluded.contains(b.name)) excludedBanks.add(b);
+            if (excluded.contains(storageKey(b.name, b.account))) excludedBanks.add(b);
             else included.add(b);
         }
         sortBanks(included, sort);

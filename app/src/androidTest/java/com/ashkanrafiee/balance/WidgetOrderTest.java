@@ -53,7 +53,7 @@ public class WidgetOrderTest {
     private static List<String> appIncludedOrder(Set<String> excluded, int mode) {
         List<String> n = new ArrayList<>();
         for (Bank b : BalanceData.orderForDisplay(banks(), excluded, mode)) {
-            if (!excluded.contains(b.name)) n.add(b.name);
+            if (!excluded.contains(BalanceData.storageKey(b.name, b.account))) n.add(b.name);
         }
         return n;
     }
@@ -102,6 +102,26 @@ public class WidgetOrderTest {
 
         BalanceData.reset(ctx);
         assertEquals(0, BalanceWidgetService.widgetBanks(ctx).size());
+    }
+
+    /** Excluding one account of a multi-account bank must drop only that account; its sibling and
+     *  every other bank stay in the widget list. */
+    @Test public void widgetBanks_excludesOnlyTheChosenAccount() {
+        LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
+        map.put("Mellat|1110000222", new Bank("Mellat", 1_000_000, 1000L, "5300", "1110000222"));
+        map.put("Mellat|1110000333", new Bank("Mellat", 2_000_000, 2000L, "5300", "1110000333"));
+        map.put("Tejarat", new Bank("Tejarat", 5_000_000, 3000L, "5301"));
+        BalanceData.write(ctx, map);
+
+        Set<String> excluded = new HashSet<>();
+        excluded.add("Mellat|1110000222");
+        BalanceData.setExcluded(ctx, excluded);
+
+        List<Bank> widget = BalanceWidgetService.widgetBanks(ctx);
+        assertEquals(2, widget.size());
+        assertEquals("Tejarat", widget.get(0).name);
+        assertEquals("Mellat", widget.get(1).name);
+        assertEquals("1110000333", widget.get(1).account);
     }
 
     /** A multi-account bank contributes one widget row per account, each with its own balance, so the
