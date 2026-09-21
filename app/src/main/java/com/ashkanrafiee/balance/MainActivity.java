@@ -269,8 +269,10 @@ public class MainActivity extends Activity {
     /** The combined Display dialog behind the footer item: the dropdowns in a single menu, so the
      *  calendar system (see {@link RegionHelper}), the interface language, the currency unit (see
      *  {@link CurrencyHelper}) and the color theme (see {@link ThemeHelper}) are all chosen in one
-     *  place. A changed region applies on the next history open; a changed theme or language
-     *  recreates the screen; a changed currency re-renders the dashboard and the widget. */
+     *  place. Every picker applies its choice as soon as it is selected — a changed region applies
+     *  on the next history open, a changed theme or language recreates the screen, a changed
+     *  currency re-renders the dashboard and the widget — so only a typed custom currency name
+     *  waits for the OK button. */
     private void displayDialog() {
         int pad = dp(14);
         LinearLayout box = new LinearLayout(this);
@@ -297,6 +299,13 @@ public class MainActivity extends Activity {
         calendarAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         calendarSpin.setAdapter(calendarAdapter);
         calendarSpin.setSelection(RegionHelper.region(this) == RegionHelper.REGION_INTERNATIONAL ? 1 : 0);
+        calendarSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
+                int chosen = pos == 1 ? RegionHelper.REGION_INTERNATIONAL : RegionHelper.REGION_IRAN;
+                if (chosen != RegionHelper.region(MainActivity.this)) RegionHelper.setRegion(MainActivity.this, chosen);
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
+        });
 
         Spinner langSpin = new Spinner(this);
         ArrayAdapter<String> langAdapter = new ArrayAdapter<>(this,
@@ -306,6 +315,16 @@ public class MainActivity extends Activity {
         String current = LocaleHelper.currentTag(this);
         for (int i = 0; i < langTags.length; i++)
             if (langTags[i].equals(current)) { langSpin.setSelection(i); break; }
+        langSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
+                String tag = langTags[Math.min(pos, langTags.length - 1)];
+                if (!tag.equals(LocaleHelper.currentTag(MainActivity.this))) {
+                    LocaleHelper.setLanguage(MainActivity.this, tag);
+                    recreate();
+                }
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
+        });
 
         String storedCurrency = CurrencyHelper.currency(this);
         final EditText customInput = new EditText(this);
@@ -324,6 +343,14 @@ public class MainActivity extends Activity {
         currencySpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
                 customInput.setVisibility(pos == 2 ? View.VISIBLE : View.GONE);
+                if (pos != 2) {
+                    String chosen = CurrencyHelper.fixedCurrency(pos);
+                    if (!chosen.equals(CurrencyHelper.currency(MainActivity.this))) {
+                        CurrencyHelper.setCurrency(MainActivity.this, chosen);
+                        view.invalidate();
+                        BalanceWidgetProvider.push(MainActivity.this);
+                    }
+                }
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
         });
@@ -336,6 +363,16 @@ public class MainActivity extends Activity {
         String storedTheme = ThemeHelper.theme(this);
         for (int i = 0; i < ThemeHelper.CHOICES.length; i++)
             if (ThemeHelper.CHOICES[i].equals(storedTheme)) { themeSpin.setSelection(i); break; }
+        themeSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
+                String chosen = ThemeHelper.CHOICES[Math.min(pos, ThemeHelper.CHOICES.length - 1)];
+                if (!chosen.equals(ThemeHelper.theme(MainActivity.this))) {
+                    ThemeHelper.setTheme(MainActivity.this, chosen);
+                    recreate();
+                }
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
+        });
 
         TextView calendarLabel = new TextView(this);
         calendarLabel.setText(getString(R.string.settings_calendar_label));
@@ -372,32 +409,16 @@ public class MainActivity extends Activity {
             .setTitle(getString(R.string.footer_display))
             .setView(box)
             .setPositiveButton(android.R.string.ok, (d, w) -> {
-                int chosen = calendarSpin.getSelectedItemPosition() == 1
-                    ? RegionHelper.REGION_INTERNATIONAL : RegionHelper.REGION_IRAN;
-                String tag = langTags[Math.min(langSpin.getSelectedItemPosition(), langTags.length - 1)];
-                boolean langChanged = !tag.equals(LocaleHelper.currentTag(this));
-                String chosenCurrency = null;
-                int curPos = currencySpin.getSelectedItemPosition();
-                if (curPos == 2) {
+                if (currencySpin.getSelectedItemPosition() == 2) {
                     String typed = customInput.getText().toString().trim();
-                    if (!typed.isEmpty()) chosenCurrency = CurrencyHelper.CUSTOM_PREFIX + typed;
-                } else {
-                    chosenCurrency = CurrencyHelper.fixedCurrency(curPos);
-                }
-                boolean currencyChanged = chosenCurrency != null
-                    && !chosenCurrency.equals(CurrencyHelper.currency(this));
-                String chosenTheme = ThemeHelper.CHOICES[
-                    Math.min(themeSpin.getSelectedItemPosition(), ThemeHelper.CHOICES.length - 1)];
-                boolean themeChanged = !chosenTheme.equals(ThemeHelper.theme(this));
-                RegionHelper.setRegion(this, chosen);
-                if (chosenCurrency != null) CurrencyHelper.setCurrency(this, chosenCurrency);
-                ThemeHelper.setTheme(this, chosenTheme);
-                if (langChanged) LocaleHelper.setLanguage(this, tag);
-                if (langChanged || themeChanged) {
-                    recreate();
-                } else if (currencyChanged) {
-                    view.invalidate();
-                    BalanceWidgetProvider.push(MainActivity.this);
+                    if (!typed.isEmpty()) {
+                        String chosen = CurrencyHelper.CUSTOM_PREFIX + typed;
+                        if (!chosen.equals(CurrencyHelper.currency(this))) {
+                            CurrencyHelper.setCurrency(this, chosen);
+                            view.invalidate();
+                            BalanceWidgetProvider.push(MainActivity.this);
+                        }
+                    }
                 }
             })
             .setNegativeButton(getString(R.string.lock_cancel), null)
