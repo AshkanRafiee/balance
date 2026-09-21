@@ -72,7 +72,7 @@ public class BalanceWidgetService extends RemoteViewsService {
         private RemoteViews bankViews(Bank b) {
             Context c = LocaleHelper.wrap(context);
             int dir = c.getResources().getConfiguration().getLayoutDirection();
-            boolean hidden = BalanceData.isHidden(c);
+            boolean hidden = BalanceData.isWidgetHidden(c);
             RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance_item);
             views.setInt(R.id.widget_item_root, "setLayoutDirection", dir);
             views.setTextViewText(R.id.bank_name, BankRules.displayName(c, b.name));

@@ -38,6 +38,7 @@ final class BalanceData {
     static final String KEY_TRANSACTIONS = "transactions";
     static final String PREFS_PREF = "balance_preferences";
     static final String KEY_HIDDEN = "balances_hidden";
+    static final String KEY_WIDGET_HIDDEN = "widget_balances_hidden";
     static final String KEY_AUTO_HIDE = "balances_auto_hide";
     static final String KEY_SCANNED_THROUGH = "scanned_through";
     static final String KEY_RULES_VERSION = "rules_version";
@@ -363,6 +364,19 @@ final class BalanceData {
     static boolean isHidden(Context context) {
         return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
             .getBoolean(KEY_HIDDEN, false);
+    }
+
+    /** The widget keeps its own mask state so hiding the widget never hides (or reveals) the app,
+     *  and vice versa. The initial value follows the app mask so a long-time user's expectation on
+     *  a freshly added widget matches their existing preference. */
+    static boolean isWidgetHidden(Context context) {
+        return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+            .getBoolean(KEY_WIDGET_HIDDEN, isHidden(context));
+    }
+
+    static void setWidgetHidden(Context context, boolean hidden) {
+        context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_WIDGET_HIDDEN, hidden).apply();
     }
 
     /** Whether balances are re-masked automatically whenever the app goes to the background. */

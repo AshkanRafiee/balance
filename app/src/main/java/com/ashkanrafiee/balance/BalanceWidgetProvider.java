@@ -105,7 +105,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     static RemoteViews buildViews(Context context) {
         Context c = LocaleHelper.wrap(context);
         if (LockManager.isEnabled(c)) return lockedViews(c);
-        boolean hidden = BalanceData.isHidden(c);
+        boolean hidden = BalanceData.isWidgetHidden(c);
         long total = 0;
         for (java.util.Map.Entry<String, Bank> e : BalanceData.read(c).entrySet())
             if (!BalanceData.isExcluded(c, e.getKey())) total += e.getValue().amount;
@@ -258,9 +258,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
             if (ACTION_ALARM.equals(action)) scheduleAlarm(context);
             refreshData(context);
         } else if (ACTION_MASK.equals(action)) {
-            boolean hidden = !BalanceData.isHidden(context);
-            context.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE)
-                .edit().putBoolean(BalanceData.KEY_HIDDEN, hidden).apply();
+            BalanceData.setWidgetHidden(context, !BalanceData.isWidgetHidden(context));
             updateAll(context);
         } else if (ACTION_BOOT_COMPLETED.equals(action) && hasWidgets(context)) {
             scheduleAlarm(context);
