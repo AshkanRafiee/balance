@@ -221,7 +221,9 @@ public final class SenderShareActivity extends Activity {
             box.addView(section(getString(R.string.sender_share_no_messages)), margin(2, 4, 2, 4));
         }
         for (String b : bodies) box.addView(messageRow(b));
-        body.addView(box);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = dp(14);
+        body.addView(box, lp);
     }
 
     private LinearLayout messageRow(String b) {
