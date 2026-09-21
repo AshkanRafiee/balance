@@ -2,7 +2,7 @@
 
 Balance is a small, offline-first Android app that reads supported bank SMS messages locally and shows the latest balance for each recognized bank — broken out per account number when the bank states one — plus the combined total.
 
-The current release is designed for users in Iran. It recognizes Iranian banks and the Persian SMS formats used by those banks. A Region setting in the footer switches the app's calendar between the Persian (Jalali) calendar (Iran) and the Gregorian calendar (International) — International is the default, with localized month and weekday names for both.
+The current release is designed for users in Iran. It recognizes Iranian banks and the Persian SMS formats used by those banks. A Region setting in the footer switches the app's calendar between the Persian (Jalali) calendar (Iran — the default) and the Gregorian calendar (International), with localized month and weekday names for both; the same menu picks the currency shown next to amounts — Toman by default, or USD, EUR, or any custom currency you type. Only Toman divides the rial figure by ten (the familiar toman amount); every other currency shows the raw number under its own label.
 
 ## Features
 
@@ -16,9 +16,9 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Bank sorting by balance or update time, mirrored in the list and the home-screen widget
 - Home-screen widget with the same bank order, totals, and privacy mask as the app
 - Password-encrypted backup and restore
-- Auto light/dark theme, persistent masked-balance and Toman display mode preference
+- Auto light/dark theme, persistent masked-balance and currency display preference
 - Automatic refresh as bank SMS arrive, plus pull-to-refresh
-- English and Persian (فارسی) interface, with automatic system-language detection and localized bank names; the footer's single "Region & Language" menu holds both selectors — the Region (Iran / International) chooses the calendar system, the Language overrides the interface language
+- English and Persian (فارسی) interface, with automatic system-language detection and localized bank names; the footer's single "Region & Language" menu holds its selectors — the Region (Iran / International) chooses the calendar system, the Currency (Toman / USD / EUR / custom) chooses the value and unit shown next to amounts (Toman divides by ten, others show the raw figure), and the Language overrides the interface language
 - Optional in-app lock with a PIN, password or fingerprint, covering the app, the home-screen widget and screenshots/recents, with progressive cooldown delays against wrong-entry guessing
 - About screen with direct links to the website and issue tracker
 - Report (the Scan diagnostics screen): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout, and senders not recognized yet. Tap any flagged sender to open its messages and pick exactly which ones to send or copy — and mark what is wrong (account, balance or sender-number detection) so the prefilled email tells the maintainer which stage failed. The email is only sent after you approve — feeding straight into the contribution flow »Contributing« below
