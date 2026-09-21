@@ -9,6 +9,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.Gravity;
@@ -36,6 +37,11 @@ public final class SenderShareActivity extends Activity {
 
     private static final String TAG = "SenderShare";
 
+    /** How long a copied report stays in the system clipboard before it is cleared (see
+     *  {@link #copySelected}); the report holds raw message text, so it must not linger. */
+    private static final long CLIP_CLEAR_MS = 60_000L;
+    private static final Handler HANDLER = new Handler(android.os.Looper.getMainLooper());
+
     int bg, card, muted, accent, heroColor, fg;
     private String sender;
     private String bank;
@@ -43,6 +49,7 @@ public final class SenderShareActivity extends Activity {
     private List<CheckBox> checks = new ArrayList<>();
     private LinearLayout body;
     private TextView select, copy, send;
+    private Runnable clearClipRunnable;
     private boolean allChecked = false;
 
     int color(int res) {
@@ -202,6 +209,7 @@ public final class SenderShareActivity extends Activity {
         select = text(getString(R.string.sender_share_select_all), 13, fg);
         select.setGravity(Gravity.CENTER);
         select.setPadding(dp(14), dp(11), dp(14), dp(11));
+        select.setMinHeight(dp(48));
         select.setBackground(rounded(heroColor, 13));
         select.setOnClickListener(v -> {
             allChecked = !allChecked;
@@ -215,8 +223,9 @@ public final class SenderShareActivity extends Activity {
         copy = text(getString(R.string.sender_share_copy, 0), 13, fg);
         copy.setGravity(Gravity.CENTER);
         copy.setPadding(dp(14), dp(11), dp(14), dp(11));
+        copy.setMinHeight(dp(48));
         LinearLayout.LayoutParams copyP = new LinearLayout.LayoutParams(-2, -2);
-        copyP.leftMargin = dp(10);
+        copyP.setMarginStart(dp(10));
         copy.setBackground(rounded(heroColor, 13));
         copy.setOnClickListener(v -> {
             int n = copySelected();
@@ -228,8 +237,9 @@ public final class SenderShareActivity extends Activity {
         send.setGravity(Gravity.CENTER);
         send.setTypeface(null, Typeface.BOLD);
         send.setPadding(dp(18), dp(11), dp(18), dp(11));
+        send.setMinHeight(dp(48));
         LinearLayout.LayoutParams sendP = new LinearLayout.LayoutParams(0, -2, 1);
-        sendP.leftMargin = dp(10);
+        sendP.setMarginStart(dp(10));
         send.setBackground(rounded(accent, 13));
         send.setOnClickListener(v -> {
             String report = selectedText();
@@ -271,6 +281,29 @@ public final class SenderShareActivity extends Activity {
         int n = selected().size();
         ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
         clipboard.setPrimaryClip(ClipData.newPlainText(sender, report));
+        // The report holds raw message text; do not leave it readably in the system clipboard for any
+        // longer than the paste window. Clear it again once that has passed, unless the user copied
+        // something else in the meantime (then that newer clip is left alone).
+        if (clearClipRunnable != null) HANDLER.removeCallbacks(clearClipRunnable);
+        clearClipRunnable = () -> {
+            clearClipRunnable = null;
+            CharSequence current = clipboard.hasPrimaryClip()
+                && clipboard.getPrimaryClip() != null
+                && clipboard.getPrimaryClip().getItemCount() > 0
+                ? clipboard.getPrimaryClip().getItemAt(0).getText() : null;
+            if (report.equals(String.valueOf(current))) {
+                if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    try {
+                        clipboard.clearPrimaryClip();
+                    } catch (Exception e) {
+                        Log.w(TAG, "clipboard clear failed", e);
+                    }
+                } else {
+                    clipboard.setPrimaryClip(ClipData.newPlainText("", ""));
+                }
+            }
+        };
+        HANDLER.postDelayed(clearClipRunnable, CLIP_CLEAR_MS);
         return n;
     }
 
