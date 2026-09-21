@@ -34,10 +34,9 @@
     <string name="toast_copied_balance">موجودی %1$s کپی شد</string>
 
     <string name="footer_about">درباره</string>
-    <string name="footer_language">زبان</string>
+    <string name="footer_region_language">منطقه و زبان</string>
     <string name="footer_data">داده‌ها</string>
 
-    <string name="dialog_language_title">زبان برنامه</string>
     <string name="dialog_hard_refresh_title">بازنشانی موجودی‌ها و خواندن دوباره؟</string>
     <string name="dialog_hard_refresh_message">با انجام این کار همهٔ موجودی‌های ذخیره‌شده حذف و فقط پیامک‌هایی که هم‌اکنون در صندوق پیامک این دستگاه هستند دوباره خوانده می‌شوند. بانکی که پیامک موجودی آن دیگر در دسترس نباشد از فهرست حذف می‌شود. این کار قابل بازگشت نیست.</string>
     <string name="dialog_hard_refresh_confirm">بازنشانی و خواندن</string>
@@ -47,6 +46,11 @@
     <string name="widget_action_refresh">به‌روزرسانی</string>
     <string name="widget_action_mask">نمایش یا مخفی کردن موجودی</string>
     <string name="language_system_default">پیش‌فرض سیستم</string>
+
+    <string name="settings_region_label">منطقه</string>
+    <string name="settings_language_label">زبان</string>
+    <string name="region_iran">ایران</string>
+    <string name="region_international">بین‌المللی</string>
 
     <string name="data_title">داده‌ها</string>
     <string name="backup_action_create">ایجاد پشتیبان</string>
@@ -117,6 +121,10 @@
     <string name="sender_share_pick_one">دست‌کم یک پیامک را انتخاب کنید</string>
     <string name="sender_share_privacy">تا وقتی برنامه‌ای را انتخاب و ارسال را در آن تأیید نکنید، چیزی ارسال نمی‌شود.</string>
     <string name="sender_share_no_messages">هیچ نمونهٔ پیامکی ذخیره نشده است.</string>
+    <string name="sender_share_issue_title">مشکل این فرستنده چیست؟</string>
+    <string name="sender_share_issue_account">تشخیص حساب</string>
+    <string name="sender_share_issue_balance">تشخیص موجودی</string>
+    <string name="sender_share_issue_number">تشخیص شمارهٔ فرستنده</string>
 
     <string name="history_title">تاریخچه</string>
     <string name="history_bank_chip">بانک</string>

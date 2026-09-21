@@ -27,11 +27,13 @@ import android.view.MotionEvent;
 import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.OverScroller;
 import android.widget.ProgressBar;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.util.LinkedHashMap;
@@ -264,20 +266,69 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void languageDialog() {
-        String[] tags = LocaleHelper.SUPPORTED;
-        String[] labels = new String[tags.length];
-        for (int i = 0; i < tags.length; i++)
-            labels[i] = tags[i].isEmpty() ? getString(R.string.language_system_default) : LocaleHelper.displayName(tags[i]);
+    /** The combined Region & Language dialog behind the footer item: two dropdowns in a single menu,
+     *  so the calendar system (see {@link RegionHelper}) and the interface language are chosen in
+     *  one place. A changed region applies immediately; a changed language recreates the screen,
+     *  exactly like the former standalone language dialog. */
+    private void regionLanguageDialog() {
+        int pad = dp(14);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(pad, dp(4), pad, 0);
+
+        String[] regionLabels = {getString(R.string.region_iran), getString(R.string.region_international)};
+        String[] langTags = LocaleHelper.SUPPORTED;
+        String[] langLabels = new String[langTags.length];
+        for (int i = 0; i < langTags.length; i++)
+            langLabels[i] = langTags[i].isEmpty()
+                ? getString(R.string.language_system_default) : LocaleHelper.displayName(langTags[i]);
+
+        Spinner regionSpin = new Spinner(this);
+        ArrayAdapter<String> regionAdapter = new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item, regionLabels);
+        regionAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        regionSpin.setAdapter(regionAdapter);
+        regionSpin.setSelection(RegionHelper.region(this) == RegionHelper.REGION_INTERNATIONAL ? 1 : 0);
+
+        Spinner langSpin = new Spinner(this);
+        ArrayAdapter<String> langAdapter = new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item, langLabels);
+        langAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        langSpin.setAdapter(langAdapter);
         String current = LocaleHelper.currentTag(this);
-        int checkedIndex = 0;
-        for (int i = 0; i < tags.length; i++) if (tags[i].equals(current)) { checkedIndex = i; break; }
-        showDialog(new android.app.AlertDialog.Builder(this).setTitle(getString(R.string.dialog_language_title))
-            .setSingleChoiceItems(labels, checkedIndex, (dialogInterface, which) -> {
-                LocaleHelper.setLanguage(this, tags[which]);
-                dialogInterface.dismiss();
-                recreate();
-            }).create());
+        for (int i = 0; i < langTags.length; i++)
+            if (langTags[i].equals(current)) { langSpin.setSelection(i); break; }
+
+        TextView regionLabel = new TextView(this);
+        regionLabel.setText(getString(R.string.settings_region_label));
+        regionLabel.setTextSize(14);
+        TextView langLabel = new TextView(this);
+        langLabel.setText(getString(R.string.settings_language_label));
+        langLabel.setTextSize(14);
+
+        box.addView(regionLabel);
+        box.addView(regionSpin);
+        LinearLayout.LayoutParams langLp = new LinearLayout.LayoutParams(-1, -2);
+        langLp.topMargin = dp(18);
+        box.addView(langLabel, langLp);
+        box.addView(langSpin);
+
+        showDialog(new android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.footer_region_language))
+            .setView(box)
+            .setPositiveButton(android.R.string.ok, (d, w) -> {
+                int chosen = regionSpin.getSelectedItemPosition() == 1
+                    ? RegionHelper.REGION_INTERNATIONAL : RegionHelper.REGION_IRAN;
+                String tag = langTags[Math.min(langSpin.getSelectedItemPosition(), langTags.length - 1)];
+                boolean langChanged = !tag.equals(LocaleHelper.currentTag(this));
+                RegionHelper.setRegion(this, chosen);
+                if (langChanged) {
+                    LocaleHelper.setLanguage(this, tag);
+                    recreate();
+                }
+            })
+            .setNegativeButton(getString(R.string.lock_cancel), null)
+            .create());
     }
 
     void hardRefreshDialog() {
@@ -1402,7 +1453,7 @@ public class MainActivity extends Activity {
 
             p.setTextSize(13);
             String aboutText = getString(R.string.footer_about);
-            String langText = getString(R.string.footer_language);
+            String langText = getString(R.string.footer_region_language);
             String backupText = getString(R.string.footer_data);
             String reportText = getString(R.string.footer_report);
             String sep = "  \u00b7  ";
@@ -1819,7 +1870,7 @@ public class MainActivity extends Activity {
                 if (x >= footerAboutStart - 10 && x <= footerAboutEnd + 10) {
                     startActivity(new Intent(MainActivity.this, AboutActivity.class));
                 } else if (x >= footerLangStart - 10 && x <= footerLangEnd + 10) {
-                    MainActivity.this.languageDialog();
+                    MainActivity.this.regionLanguageDialog();
                 } else if (x >= footerBackupStart - 10 && x <= footerBackupEnd + 10) {
                     MainActivity.this.dataDialog();
                 } else if (x >= footerReportStart - 10 && x <= footerReportEnd + 10) {
