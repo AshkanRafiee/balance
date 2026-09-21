@@ -199,11 +199,15 @@ public final class ScanDiagnosticsActivity extends Activity {
         for (ScanDiagnostics.BankHit h : s.banks) {
             LinearLayout line = new LinearLayout(this);
             line.setGravity(Gravity.CENTER_VERTICAL);
-            TextView name = text(h.bank, 14, fg);
+            TextView name = text(BankRules.displayName(this, h.bank), 14, fg);
+            name.setMaxLines(1);
+            name.setEllipsize(TextUtils.TruncateAt.END);
             line.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
             TextView count = text(count(h.messages), 13, muted);
-            line.addView(count);
-            line.setPadding(0, dp(2), 0, dp(2));
+            LinearLayout.LayoutParams countLp = new LinearLayout.LayoutParams(-2, -2);
+            countLp.setMarginStart(dp(10));
+            line.addView(count, countLp);
+            line.setPadding(dp(4), dp(3), dp(4), dp(3));
             box.addView(line);
         }
         body.addView(box, margin(0, 0, 0, 12));
@@ -263,7 +267,7 @@ public final class ScanDiagnosticsActivity extends Activity {
         LinearLayout texts = new LinearLayout(this);
         texts.setOrientation(LinearLayout.VERTICAL);
         if (knownBank) {
-            TextView bank = text(h.bank, 13, fg);
+            TextView bank = text(BankRules.displayName(this, h.bank), 13, fg);
             bank.setTypeface(null, Typeface.BOLD);
             texts.addView(bank, new LinearLayout.LayoutParams(-1, -2));
         }
