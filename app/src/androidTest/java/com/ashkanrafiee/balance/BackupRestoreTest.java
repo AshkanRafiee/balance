@@ -180,7 +180,7 @@ public class BackupRestoreTest {
         int headerLen = ((bytes[9] & 0xFF) << 24) | ((bytes[10] & 0xFF) << 16)
             | ((bytes[11] & 0xFF) << 8) | (bytes[12] & 0xFF);
         String header = new String(bytes, 13, headerLen, StandardCharsets.UTF_8);
-        android.util.Log.i("BackupRestoreTest", "HEADER=" + header);
+        android.util.Log.i("BackupRestoreTest", "header JSON bytes=" + header.length());
         org.json.JSONObject h = new org.json.JSONObject(header);
         assertEquals(1, h.getInt("format"));
         assertEquals(600000, h.getJSONObject("kdf").getInt("iterations"));
