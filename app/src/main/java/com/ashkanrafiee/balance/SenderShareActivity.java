@@ -24,11 +24,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Sender report chooser: the confirmation step before any unrecognized-sender text leaves the
- *  device. Lists the sender's messages with a checkbox each, so the user picks exactly which
- *  samples to send; nothing happens until they tap Copy selected or Send, and Send itself opens a
- *  prefilled email to the maintainer through the system chooser, which is the final approval. */
+ *  device. Lists the sender's messages with a checkbox each so the user picks exactly which samples
+ *  to include — nothing is preselected. The action buttons show a live count of the chosen messages;
+ *  nothing else happens until the user taps Copy selected or Send, and Send itself opens a prefilled
+ *  email to the maintainer through the system chooser, which is the final approval. */
 public final class SenderShareActivity extends Activity {
     static final String EXTRA_SENDER = "sender";
+    static final String EXTRA_BANK = "bank";
     static final String EXTRA_MESSAGES = "messages";
     static final String MAILTO = "balance.plausible268@passmail.net";
 
@@ -36,11 +38,12 @@ public final class SenderShareActivity extends Activity {
 
     int bg, card, muted, accent, heroColor, fg;
     private String sender;
+    private String bank;
     private List<String> bodies = new ArrayList<>();
     private List<CheckBox> checks = new ArrayList<>();
     private LinearLayout body;
-    private TextView select;
-    private boolean allChecked = true;
+    private TextView select, copy, send;
+    private boolean allChecked = false;
 
     int color(int res) {
         return getResources().getColor(res, getTheme());
@@ -81,6 +84,7 @@ public final class SenderShareActivity extends Activity {
         super.onCreate(state);
         sender = getIntent().getStringExtra(EXTRA_SENDER);
         if (sender == null) sender = "";
+        bank = getIntent().getStringExtra(EXTRA_BANK);
         ArrayList<String> b = getIntent().getStringArrayListExtra(EXTRA_MESSAGES);
         if (b != null) bodies.addAll(b);
 
@@ -144,6 +148,11 @@ public final class SenderShareActivity extends Activity {
         scroll.addView(body, new ScrollView.LayoutParams(-1, -1));
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
+        if (bank != null) {
+            TextView known = text(getString(R.string.sender_share_known_bank, bank), 13, accent);
+            known.setTypeface(null, Typeface.BOLD);
+            body.addView(known, margin(2, 0, 2, 6));
+        }
         body.addView(section(getString(R.string.sender_share_note, bodies.size())), margin(2, 2, 2, 10));
         messagesCard();
         body.addView(privacyNote(), margin(18, 14, 18, 0));
@@ -167,7 +176,7 @@ public final class SenderShareActivity extends Activity {
         line.setGravity(Gravity.CENTER_VERTICAL);
         line.setPadding(0, dp(6), 0, dp(6));
         CheckBox box = new CheckBox(this);
-        box.setChecked(true);
+        box.setChecked(false);
         checks.add(box);
         line.addView(box, new LinearLayout.LayoutParams(dp(46), -2));
         TextView preview = new TextView(this);
@@ -178,7 +187,11 @@ public final class SenderShareActivity extends Activity {
         String flat = b.replace("\n", " ");
         preview.setText(flat);
         line.addView(preview, new LinearLayout.LayoutParams(0, -2, 1));
-        line.setOnClickListener(v -> box.setChecked(!box.isChecked()));
+        line.setOnClickListener(v -> {
+            box.setChecked(!box.isChecked());
+            updateButtons();
+        });
+        box.setOnClickListener(v -> updateButtons());
         return line;
     }
 
@@ -186,7 +199,7 @@ public final class SenderShareActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
 
-        select = text(getString(R.string.sender_share_select_none), 13, fg);
+        select = text(getString(R.string.sender_share_select_all), 13, fg);
         select.setGravity(Gravity.CENTER);
         select.setPadding(dp(14), dp(11), dp(14), dp(11));
         select.setBackground(rounded(heroColor, 13));
@@ -195,10 +208,11 @@ public final class SenderShareActivity extends Activity {
             for (CheckBox c : checks) c.setChecked(allChecked);
             select.setText(getString(allChecked ? R.string.sender_share_select_none
                 : R.string.sender_share_select_all));
+            updateButtons();
         });
         row.addView(select);
 
-        TextView copy = text(getString(R.string.sender_share_copy), 13, fg);
+        copy = text(getString(R.string.sender_share_copy, 0), 13, fg);
         copy.setGravity(Gravity.CENTER);
         copy.setPadding(dp(14), dp(11), dp(14), dp(11));
         LinearLayout.LayoutParams copyP = new LinearLayout.LayoutParams(-2, -2);
@@ -210,7 +224,7 @@ public final class SenderShareActivity extends Activity {
         });
         row.addView(copy, copyP);
 
-        TextView send = text(getString(R.string.sender_share_send), 14, bg);
+        send = text(getString(R.string.sender_share_send, 0), 14, bg);
         send.setGravity(Gravity.CENTER);
         send.setTypeface(null, Typeface.BOLD);
         send.setPadding(dp(18), dp(11), dp(18), dp(11));
@@ -227,6 +241,12 @@ public final class SenderShareActivity extends Activity {
         });
         row.addView(send, sendP);
         return row;
+    }
+
+    private void updateButtons() {
+        int n = selected().size();
+        copy.setText(getString(R.string.sender_share_copy, n));
+        send.setText(getString(R.string.sender_share_send, n));
     }
 
     private List<ScanDiagnostics.Message> selected() {
