@@ -70,7 +70,7 @@ or email us; see [CONTRIBUTING.md](CONTRIBUTING.md) for the full checklist.
 
 ## Donate
 
-Balance is free and open source, and always will be. If you find it useful, you can support its development with a donation in GRAM (prev. TON):
+Balance is free and open source, and always will be. If you find it useful, you can support its development with a donation in GRAM (prev. TON). Scan the QR code or tap "open in wallet" on the [donation page](https://balance.ashkanrafiee.com/#donate), or send straight from your wallet to:
 
 ```
 UQB4goexr3cp0QIdd2_fAJPW9REwZvrRQm-mltr1dMQtV9ig
