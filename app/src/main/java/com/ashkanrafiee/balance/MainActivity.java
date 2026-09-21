@@ -160,6 +160,7 @@ public class MainActivity extends Activity {
         if (view != null) {
             view.handler.removeCallbacks(view.clearClipRunnable);
             view.handler.removeCallbacks(view.refreshTicker);
+            if (view.clearClipRunnable != null) view.clearClipRunnable.run();
         }
         super.onDestroy();
     }
@@ -219,7 +220,16 @@ public class MainActivity extends Activity {
         if (r == SMS_REQUEST) {
             boolean granted = g.length > 0
                 && g[0] == PackageManager.PERMISSION_GRANTED;
-            if (!granted && !shouldShowRequestPermissionRationale(Manifest.permission.READ_SMS)) {
+            if (!granted && shouldShowRequestPermissionRationale(Manifest.permission.READ_SMS)) {
+                // A casual first denial: explain briefly and offer to re-ask right here, instead of
+                // silently doing nothing or burying the fix in the system settings.
+                showDialog(new android.app.AlertDialog.Builder(this)
+                    .setTitle(getString(R.string.permission_rationale_title))
+                    .setMessage(getString(R.string.permission_rationale_message))
+                    .setPositiveButton(getString(R.string.permission_ask_again), (d, w) -> requestSms())
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .create());
+            } else if (!granted) {
                 // A permanent denial (check "don't ask again") can no longer be lifted by re-requesting;
                 // point the user at the app's settings screen instead of silently ignoring the result.
                 showDialog(new android.app.AlertDialog.Builder(this)
@@ -1116,11 +1126,10 @@ public class MainActivity extends Activity {
         /** When auto-mask is on, the balances must start (and stay) masked; call this from the
          *  lifecycle so every app open or return from the background re-hides them. */
         void enforceAutoHide() {
+            hidden = BalanceData.isHidden(MainActivity.this);
             autoHide = BalanceData.isAutoHide(MainActivity.this);
-            if (autoHide && !hidden) {
-                hidden = true;
-                invalidate();
-            }
+            if (autoHide) hidden = true;
+            invalidate();
         }
 
         /** Recomputes the total from included entries only. Exclusion is per account, matched on the
@@ -1129,6 +1138,14 @@ public class MainActivity extends Activity {
             total = 0;
             for (java.util.Map.Entry<String, Bank> e : banks.entrySet())
                 if (!excluded.contains(e.getKey())) total += e.getValue().amount;
+        }
+
+        /** A short live summary of the dashboard for screen readers: the total (or its mask state)
+         *  followed by the status line. Rebuilt every frame, but only announced on change. */
+        String announce() {
+            String totalText = hidden ? getString(R.string.accessibility_total_masked)
+                : BalanceData.toman(MainActivity.this, total) + " " + getString(R.string.unit_toman);
+            return getString(R.string.accessibility_total_balance, totalText) + " " + status + ".";
         }
 
         /** Reloads the saved balances (e.g. after a restore) without re-scanning SMS. */
@@ -1305,9 +1322,10 @@ public class MainActivity extends Activity {
             round(c, 24, 120, w - 24, 270, 28, panel);
             float totalLabelX = rtl ? w - 48 : 48;
             text(c, getString(R.string.total_balance_label), totalLabelX, 156, 13, muted, edgeAlign);
-            if (banks.isEmpty()) {
-                // No balances yet: a dash, not a literal zero, so a fresh install or a bank-less
-                // state never reads as a real zero-rial balance.
+            if (banks.isEmpty() || excluded.containsAll(banks.keySet())) {
+                // No counts yet — or nothing counts anymore (every account excluded): a dash, not
+                // a literal zero, so a fresh install or an all-excluded state never reads as a
+                // real zero-rial balance.
                 text(c, getString(R.string.total_empty_value), totalLabelX, 208, 34, fg, edgeAlign);
             } else {
                 totalValue(c, total, totalLabelX, 208, w - 150, rtl);
@@ -1413,6 +1431,8 @@ public class MainActivity extends Activity {
             }
             footerY = by;
             if (indicatorVisible) drawPullIndicator(c, w);
+            String summary = announce();
+            if (!summary.equals(getContentDescription())) setContentDescription(summary);
             c.restore();
         }
 
