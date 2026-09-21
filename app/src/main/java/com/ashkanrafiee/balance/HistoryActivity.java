@@ -511,6 +511,7 @@ public final class HistoryActivity extends Activity {
         TextView chip = text(label, 12, selected ? Color.WHITE : fg, MEDIUM);
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
+        chip.setAutoSizeTextTypeWithDefaults(android.widget.TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM);
         chip.setPadding(dp(6), dp(8), dp(6), dp(8));
         chip.setBackground(rounded(selected ? accent : chipBg, 11));
         chip.setContentDescription(label);
@@ -527,6 +528,7 @@ public final class HistoryActivity extends Activity {
         TextView chip = text(label, 12, selected ? Color.WHITE : fg, MEDIUM);
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
+        chip.setAutoSizeTextTypeWithDefaults(android.widget.TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM);
         chip.setPadding(dp(4), dp(7), dp(4), dp(7));
         chip.setBackground(rounded(selected ? accent : chipBg, 10));
         chip.setContentDescription(label);
@@ -629,6 +631,8 @@ public final class HistoryActivity extends Activity {
             b.setGravity(Gravity.CENTER);
             b.setPadding(dp(12), dp(2), dp(12), dp(2));
             b.setBackground(rounded(chipBg, 10));
+            b.setContentDescription(getString("\u2039".equals(arrow)
+                ? R.string.history_prev_month : R.string.history_next_month));
             return b;
         }
 
@@ -661,7 +665,7 @@ public final class HistoryActivity extends Activity {
                     int d = offset + col - firstDay + 1;
                     TextView cell = d < 1 || d > days
                         ? text("", 0, fg) : dayCell(JalaliCalendar.of(viewYear, viewMonth, d), today);
-                    row.addView(cell, new LinearLayout.LayoutParams(0, dp(38), 1));
+                    row.addView(cell, new LinearLayout.LayoutParams(0, dp(48), 1));
                 }
                 grid.addView(row, new LinearLayout.LayoutParams(-1, -2));
             }
@@ -690,7 +694,10 @@ public final class HistoryActivity extends Activity {
                 int rangeFill = (accent & 0x00FFFFFF) | 0x26000000;
                 cell.setBackground(rounded(rangeFill, 10));
             }
-            cell.setContentDescription(persianDate(day));
+            cell.setContentDescription(persianDate(day)
+                + (fromSel ? " \u2014 " + getString(R.string.history_range_start)
+                    : toSel ? " \u2014 " + getString(R.string.history_range_end)
+                    : inRange ? " \u2014 " + getString(R.string.history_range_selected) : ""));
             cell.setClickable(true);
             cell.setFocusable(true);
             cell.setOnClickListener(v -> {
