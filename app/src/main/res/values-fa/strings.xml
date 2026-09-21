@@ -8,12 +8,17 @@
     <string name="unit_toman">تومان</string>
     <string name="total_label">مجموع</string>
     <string name="total_history_hint">برای دیدن تاریخچه لمس کنید</string>
+    <string name="accessibility_total_masked">مخفی است</string>
+    <string name="accessibility_total_balance">موجودی کل %1$s</string>
 
     <string name="status_reading_sms">در حال خواندن پیامک‌های بانکی این دستگاه…</string>
     <string name="status_permission_needed">برای خواندن موجودی به اجازهٔ دسترسی به پیامک نیاز است</string>
     <string name="permission_title">اجازهٔ دسترسی به پیامک</string>
     <string name="permission_settings_message">اجازهٔ دسترسی به پیامک برای همیشه رد شده است. برای استفاده دوباره از Balance، دسترسی به پیامک را از تنظیمات برنامه فعال کنید.</string>
     <string name="permission_open_settings">باز کردن تنظیمات</string>
+    <string name="permission_rationale_title">اجازهٔ دسترسی به پیامک</string>
+    <string name="permission_rationale_message">Balance پیامک‌های بانکی پشتیبانی‌شده را روی همین دستگاه و به‌صورت محلی می‌خواند تا موجودی شما را نشان دهد. فقط پیامک‌های شناخته‌شدهٔ موجودی استفاده می‌شوند و هیچ چیزی هرگز از دستگاه خارج نمی‌شود. برای ادامه، دسترسی به پیامک را بدهید.</string>
+    <string name="permission_ask_again">درخواست دوباره</string>
     <string name="status_refreshing">در حال به‌روزرسانی موجودی‌ها…</string>
     <string name="status_no_sms_found">هنوز پیامک موجودی از بانک‌های پشتیبانی‌شده یافت نشد</string>
     <string name="status_loaded_from_saved">موجودی‌ها از داده‌های ذخیره‌شده بارگذاری شد</string>
@@ -141,6 +146,11 @@
     <string name="history_filter_to_without_from">تا %1$s</string>
     <string name="history_empty_filtered">هیچ تراکنشی با فیلترهای فعلی مطابقت ندارد.</string>
     <string name="history_empty_account">هنوز تراکنشی برای این حساب یافت نشده است.</string>
+    <string name="history_prev_month">ماه قبل</string>
+    <string name="history_next_month">ماه بعد</string>
+    <string name="history_range_start">آغاز بازه</string>
+    <string name="history_range_end">پایان بازه</string>
+    <string name="history_range_selected">در بازه</string>
     <plurals name="history_n_tx">
         <item quantity="one">%1$d تراکنش</item>
         <item quantity="other">%1$d تراکنش</item>

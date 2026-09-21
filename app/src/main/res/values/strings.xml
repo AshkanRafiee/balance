@@ -8,12 +8,17 @@
     <string name="unit_toman">Toman</string>
     <string name="total_label">Total</string>
     <string name="total_history_hint">Tap to open history</string>
+    <string name="accessibility_total_masked">hidden</string>
+    <string name="accessibility_total_balance">Total balance %1$s.</string>
 
     <string name="status_reading_sms">Reading bank SMS on this device…</string>
     <string name="status_permission_needed">SMS permission is needed to read balances</string>
     <string name="permission_title">SMS permission</string>
     <string name="permission_settings_message">SMS permission was permanently declined. To use Balance again, grant SMS access in the app settings.</string>
     <string name="permission_open_settings">Open settings</string>
+    <string name="permission_rationale_title">SMS permission</string>
+    <string name="permission_rationale_message">Balance reads supported bank SMS locally on this device to show your balances. Only recognized bank balance messages are used, and nothing ever leaves the device. Grant SMS access to continue.</string>
+    <string name="permission_ask_again">Request again</string>
     <string name="status_refreshing">Refreshing balances…</string>
     <string name="status_no_sms_found">No supported bank balance SMS found yet</string>
     <string name="status_loaded_from_saved">Balances loaded from saved data</string>
@@ -141,6 +146,11 @@
     <string name="history_filter_to_without_from">Up to %1$s</string>
     <string name="history_empty_filtered">No transactions match the current filters.</string>
     <string name="history_empty_account">No transactions found for this account yet.</string>
+    <string name="history_prev_month">Previous month</string>
+    <string name="history_next_month">Next month</string>
+    <string name="history_range_start">range start</string>
+    <string name="history_range_end">range end</string>
+    <string name="history_range_selected">in range</string>
     <plurals name="history_n_tx">
         <item quantity="one">%1$d transaction</item>
         <item quantity="other">%1$d transactions</item>
