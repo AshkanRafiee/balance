@@ -18,10 +18,13 @@ import android.provider.Telephony;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.ArrayAdapter;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -623,7 +626,74 @@ public final class HistoryActivity extends Activity {
             viewYear = start.year;
             viewMonth = start.month;
             grid.setOrientation(LinearLayout.VERTICAL);
+            title.setClickable(true);
+            title.setFocusable(true);
+            title.setContentDescription(getString(R.string.history_jump_title));
+            title.setOnClickListener(v -> promptJump());
             render();
+        }
+
+        /** A single dialog to jump straight to any Persian month and year instead of stepping
+         *  month by month: a month dropdown plus a typeable year field. */
+        void promptJump() {
+            final List<String> months = new ArrayList<>();
+            for (int m = 1; m <= 12; m++) months.add(monthName(m));
+            final Spinner monthSpin = new Spinner(HistoryActivity.this);
+            ArrayAdapter<String> adapter = new ArrayAdapter<>(HistoryActivity.this,
+                android.R.layout.simple_spinner_dropdown_item, months);
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            monthSpin.setAdapter(adapter);
+            monthSpin.setSelection(viewMonth - 1);
+
+            final EditText year = new EditText(HistoryActivity.this);
+            year.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+            year.setText(Integer.toString(viewYear));
+            year.selectAll();
+
+            LinearLayout box = new LinearLayout(HistoryActivity.this);
+            box.setOrientation(LinearLayout.VERTICAL);
+            box.setPadding(dp(8), dp(4), dp(8), dp(4));
+            TextView mLabel = text(getString(R.string.history_month_label), 13, muted);
+            box.addView(mLabel);
+            box.addView(monthSpin, new LinearLayout.LayoutParams(-1, -2));
+            TextView yLabel = text(getString(R.string.history_year_label), 13, muted);
+            LinearLayout.LayoutParams yLp = new LinearLayout.LayoutParams(-1, -2);
+            yLp.setMargins(0, dp(10), 0, 0);
+            box.addView(yLabel, yLp);
+            box.addView(year, new LinearLayout.LayoutParams(-1, -2));
+
+            android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(HistoryActivity.this)
+                .setTitle(getString(R.string.history_jump_title))
+                .setView(box)
+                .setPositiveButton(getString(R.string.history_jump_apply), null)
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+            dlg.setOnShowListener(d -> dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(v -> {
+                    int month = monthSpin.getSelectedItemPosition() + 1;
+                    viewMonth = month;
+                    viewYear = parseYear(year.getText());
+                    dlg.dismiss();
+                    render();
+                }));
+            dlg.show();
+        }
+
+        /** Reads the entered year, accepting Latin or Persian digits, and clamps it to the
+         *  navigable 1100-1700 band that the chevrons already bound to. */
+        int parseYear(CharSequence s) {
+            StringBuilder b = new StringBuilder(s.length());
+            for (char c : s.toString().trim().toCharArray()) {
+                if (c >= '\u06f0' && c <= '\u06f9') b.append((char) ('0' + c - '\u06f0'));
+                else if (c >= '0' && c <= '9') b.append(c);
+            }
+            int year;
+            try {
+                year = Integer.parseInt(b.toString());
+            } catch (NumberFormatException e) {
+                return viewYear;
+            }
+            return Math.max(1100, Math.min(1700, year));
         }
 
         TextView navButton(String arrow) {
@@ -640,7 +710,7 @@ public final class HistoryActivity extends Activity {
         void render() {
             boolean fa = LocaleHelper.isPersian(HistoryActivity.this);
             title.setText(monthName(viewMonth) + " "
-                + (fa ? faDigits(viewYear) : Integer.toString(viewYear)));
+                + (fa ? faDigits(viewYear) : Integer.toString(viewYear)) + " \u25be");
             title.setGravity(Gravity.CENTER);
             bindNav(prev, viewYear > 1100 || viewYear == 1100 && viewMonth > 1, -1);
             bindNav(next, viewYear < 1700 || viewYear == 1700 && viewMonth < 12, 1);

@@ -151,6 +151,10 @@
     <string name="history_range_start">آغاز بازه</string>
     <string name="history_range_end">پایان بازه</string>
     <string name="history_range_selected">در بازه</string>
+    <string name="history_jump_title">انتخاب ماه</string>
+    <string name="history_month_label">ماه</string>
+    <string name="history_year_label">سال (بین ۱۱۰۰ و ۱۷۰۰)</string>
+    <string name="history_jump_apply">برو</string>
     <plurals name="history_n_tx">
         <item quantity="one">%1$d تراکنش</item>
         <item quantity="other">%1$d تراکنش</item>
