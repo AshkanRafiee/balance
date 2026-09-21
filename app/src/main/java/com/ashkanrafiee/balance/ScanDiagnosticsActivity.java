@@ -2,8 +2,6 @@ package com.ashkanrafiee.balance;
 
 import android.Manifest;
 import android.app.Activity;
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -17,30 +15,26 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
-import android.widget.CheckBox;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /** Scan diagnostics: shows which SMS Balance recognized fully (per bank) and which it could not
  *  parse — senders that are a known bank's but whose message layout failed, plus wholly unknown
- *  senders, each with its newest sample. The user ticks the rows to include (nothing is preselected)
- *  and the report buttons copy or email exactly those, pre-filled; email goes to the maintainer's
- *  address and is only sent after the user confirms in their mail app. The inbox is read on demand
- *  for this screen only — nothing is stored, so the feature adds no new persisted data to a device. */
+ *  senders, each with its newest sample. Every flagged sender is a compact, tappable entry that
+ *  opens its message chooser, where the user ticks the exact messages to share (nothing is
+ *  preselected) and copies or sends them from there — the checkmarks live inside the messages,
+ *  not on this screen. The inbox is read on demand for this screen only — nothing is stored, so
+ *  the feature adds no new persisted data to a device. */
 public final class ScanDiagnosticsActivity extends Activity {
     private static final String TAG = "ScanDiag";
     int bg, card, muted, accent, heroColor, fg;
     private LockOverlay lockOverlay;
     private LinearLayout body;
-    private final List<ScanDiagnostics.SenderHit> problems = new ArrayList<>();
-    private final List<CheckBox> problemChecks = new ArrayList<>();
-    private TextView copyButton, emailButton;
 
     int color(int res) {
         return getResources().getColor(res, getTheme());
@@ -181,17 +175,13 @@ public final class ScanDiagnosticsActivity extends Activity {
     private void render(ScanDiagnostics.Summary s) {
         summaryCard(s);
         recognizedCard(s);
-        problems.clear();
-        problemChecks.clear();
-        problems.addAll(ScanDiagnostics.problemSenders(s));
-        if (problems.isEmpty()) {
+        if (s.unparsedSenders.isEmpty() && s.unknownSenders.isEmpty()) {
             body.addView(section(getString(R.string.scan_diag_none_skipped)), margin(0, 12, 0, 0));
             return;
         }
         unparsedCard(s);
         unknownCard(s);
         body.addView(privacyNote(), margin(18, 14, 18, 0));
-        body.addView(actionButtons(), margin(0, 14, 0, 0));
     }
 
     /** The banks Balance parsed successfully and how many of their messages — the workload that is
@@ -235,7 +225,7 @@ public final class ScanDiagnosticsActivity extends Activity {
         box.addView(cardTitle(getString(R.string.scan_diag_unparsed_banks_title)));
         box.addView(section(getString(R.string.scan_diag_unparsed_bank_hint)), margin(2, 0, 2, 6));
         for (ScanDiagnostics.SenderHit h : s.unparsedSenders) {
-            problemChecks.add(addProblemRow(box, h, true));
+            addSenderRow(box, h, true);
         }
         body.addView(box, margin(0, 0, 0, 12));
     }
@@ -246,50 +236,52 @@ public final class ScanDiagnosticsActivity extends Activity {
         box.addView(cardTitle(getString(R.string.scan_diag_skipped_senders)));
         box.addView(section(getString(R.string.scan_diag_skipped_hint)), margin(2, 0, 2, 6));
         for (ScanDiagnostics.SenderHit h : s.unknownSenders) {
-            problemChecks.add(addProblemRow(box, h, false));
+            addSenderRow(box, h, false);
         }
         body.addView(box, margin(0, 0, 0, 12));
     }
 
-    /** One selectable problem sender: bank line (for known banks) + sender + newest-message preview,
-     *  a checkbox on the right to include it, and a tap anywhere to open its message-level chooser. */
-    private CheckBox addProblemRow(LinearLayout in, ScanDiagnostics.SenderHit h, boolean knownBank) {
+    /** One compact, obviously-tappable sender: bank name when known + sender on the first line, the
+     *  newest-message preview below, a count and a chevron on the right. Tapping opens the message
+     *  chooser — the checkmarks live on the messages themselves inside that screen. */
+    private void addSenderRow(LinearLayout in, ScanDiagnostics.SenderHit h, boolean knownBank) {
+        boolean rtl = getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
         LinearLayout line = new LinearLayout(this);
-        line.setOrientation(LinearLayout.VERTICAL);
-        line.setPadding(0, dp(5), 0, dp(5));
-        in.addView(line);
+        line.setGravity(Gravity.CENTER_VERTICAL);
+        line.setPadding(dp(12), dp(8), dp(10), dp(8));
+        line.setBackground(rounded(knownBank
+            ? (accent & 0xFFFFFF) | 0x1C000000
+            : (fg & 0xFFFFFF) | 0x0D000000, 13));
+        in.addView(line, margin(0, 0, 0, 6));
 
-        LinearLayout head = new LinearLayout(this);
-        head.setGravity(Gravity.CENTER_VERTICAL);
-        CheckBox box = new CheckBox(this);
-        box.setChecked(false);
-        head.addView(box, new LinearLayout.LayoutParams(dp(46), -2));
-        LinearLayout headTexts = new LinearLayout(this);
-        headTexts.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
         if (knownBank) {
-            TextView bank = text(h.bank, 14, fg);
+            TextView bank = text(h.bank, 13, fg);
             bank.setTypeface(null, Typeface.BOLD);
-            headTexts.addView(bank, new LinearLayout.LayoutParams(0, -2, 1));
+            texts.addView(bank, new LinearLayout.LayoutParams(-1, -2));
         }
-        TextView who = text(h.sender, 14, knownBank ? fg : fg);
-        headTexts.addView(who, new LinearLayout.LayoutParams(0, -2, 1));
-        head.addView(headTexts, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView count = text(String.valueOf(h.messages), 13, muted);
-        head.addView(count);
-        line.addView(head, margin(0, 0, 0, 0));
-
-        TextView preview = new TextView(this);
-        preview.setTextSize(12);
-        preview.setTextColor(muted);
-        preview.setMaxLines(2);
+        TextView who = text(h.sender, 14, fg);
+        who.setMaxLines(1);
+        who.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        TextView preview = text(h.stored.isEmpty() ? "" : h.stored.get(0).body.replace("\n", " "), 12, muted);
+        preview.setMaxLines(1);
         preview.setEllipsize(TextUtils.TruncateAt.END);
-        preview.setText(h.stored.isEmpty() ? "" : h.stored.get(0).body.replace("\n", " "));
-        preview.setPadding(dp(46), 0, 0, dp(4));
-        line.addView(preview);
+        texts.addView(who, new LinearLayout.LayoutParams(-1, -2));
+        texts.addView(preview, new LinearLayout.LayoutParams(-1, -2));
+        line.addView(texts, new LinearLayout.LayoutParams(0, -2, 1));
+
+        LinearLayout right = new LinearLayout(this);
+        right.setGravity(Gravity.CENTER_VERTICAL);
+        TextView count = text(String.valueOf(h.messages), 13, muted);
+        count.setPadding(dp(10), 0, dp(4), 0);
+        right.addView(count);
+        TextView chevron = text(rtl ? "\u2039" : "\u203A", 20, fg);
+        right.addView(chevron);
+        line.addView(right);
 
         line.setOnClickListener(v -> openChooser(h));
-        box.setOnClickListener(v -> updateButtons());
-        return box;
+        line.setContentDescription(getString(R.string.scan_diag_open_sender, h.sender));
     }
 
     private void openChooser(ScanDiagnostics.SenderHit h) {
@@ -300,62 +292,6 @@ public final class ScanDiagnosticsActivity extends Activity {
         if (h.bank != null) i.putExtra(SenderShareActivity.EXTRA_BANK, h.bank);
         i.putStringArrayListExtra(SenderShareActivity.EXTRA_MESSAGES, bodies);
         startActivity(i);
-    }
-
-    private List<ScanDiagnostics.SenderHit> selectedProblems() {
-        List<ScanDiagnostics.SenderHit> sel = new ArrayList<>();
-        for (int i = 0; i < problems.size() && i < problemChecks.size(); i++)
-            if (problemChecks.get(i).isChecked()) sel.add(problems.get(i));
-        return sel;
-    }
-
-    private void updateButtons() {
-        int n = selectedProblems().size();
-        copyButton.setText(getString(R.string.scan_diag_copy_selected, n));
-        emailButton.setText(getString(R.string.scan_diag_email_selected, n));
-    }
-
-    private LinearLayout actionButtons() {
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER);
-        copyButton = button(getString(R.string.scan_diag_copy_selected, 0), () -> {
-            List<ScanDiagnostics.SenderHit> sel = selectedProblems();
-            if (sel.isEmpty()) { Toast.makeText(this, getString(R.string.scan_diag_pick_sender), Toast.LENGTH_SHORT).show(); return; }
-            String report = ScanDiagnostics.reportText(sel);
-            copy(report);
-            Toast.makeText(this, getString(R.string.scan_diag_copied_report), Toast.LENGTH_SHORT).show();
-        });
-        emailButton = button(getString(R.string.scan_diag_email_selected, 0), () -> {
-            List<ScanDiagnostics.SenderHit> sel = selectedProblems();
-            if (sel.isEmpty()) { Toast.makeText(this, getString(R.string.scan_diag_pick_sender), Toast.LENGTH_SHORT).show(); return; }
-            sendMail(ScanDiagnostics.reportText(sel));
-        });
-        row.addView(copyButton);
-        row.addView(emailButton);
-        return row;
-    }
-
-    /** Prefills a mail to the maintainer with the chosen report; the system chooser is the user's
-     *  approval before anything leaves the device. */
-    private void sendMail(String report) {
-        try {
-            Intent mail = new Intent(Intent.ACTION_SENDTO);
-            mail.setData(Uri.parse("mailto:" + SenderShareActivity.MAILTO));
-            mail.putExtra(Intent.EXTRA_SUBJECT, getString(R.string.scan_diag_email_subject));
-            mail.putExtra(Intent.EXTRA_TEXT, report);
-            startActivity(Intent.createChooser(mail, getString(R.string.scan_diag_email_via)));
-        } catch (Exception e) {
-            Log.w(TAG, "no mail app; falling back to the share sheet");
-            try {
-                Intent share = new Intent(Intent.ACTION_SEND);
-                share.setType("text/plain");
-                share.putExtra(Intent.EXTRA_SUBJECT, getString(R.string.scan_diag_email_subject));
-                share.putExtra(Intent.EXTRA_TEXT, report);
-                startActivity(Intent.createChooser(share, getString(R.string.scan_diag_email_via)));
-            } catch (Exception e2) {
-                Log.w(TAG, "no share target at all");
-            }
-        }
     }
 
     private void permissionCard() {
@@ -372,11 +308,6 @@ public final class ScanDiagnosticsActivity extends Activity {
         } catch (Exception e) {
             finish();
         }
-    }
-
-    private void copy(String content) {
-        ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-        clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.scan_diag_title), content));
     }
 
     TextView button(String label, Runnable action) {

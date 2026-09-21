@@ -95,14 +95,9 @@
     <string name="scan_diag_unparsed_banks_title">Known senders, unrecognized messages</string>
     <string name="scan_diag_unparsed_bank_hint">The sender is a supported bank, but this message layout could not be parsed — a format gap just like an unknown sender.</string>
     <string name="scan_diag_skipped_senders">Senders not recognized yet</string>
-    <string name="scan_diag_skipped_hint">Tick the senders to include, then copy or email the report. Nothing is sent until you confirm.</string>
+    <string name="scan_diag_skipped_hint">Tap a sender to open its messages and tick the ones to share — nothing is sent until you confirm.</string>
     <string name="scan_diag_none_skipped">Every message is recognized — nothing to report.</string>
-    <string name="scan_diag_copy_selected">Copy report (%1$d)</string>
-    <string name="scan_diag_copied_report">Report copied</string>
-    <string name="scan_diag_email_selected">Email report (%1$d)</string>
-    <string name="scan_diag_email_subject">Unrecognized bank SMS formats</string>
-    <string name="scan_diag_email_via">Send report via</string>
-    <string name="scan_diag_pick_sender">Select at least one sender</string>
+    <string name="scan_diag_open_sender">Report sender %1$s</string>
     <string name="scan_diag_privacy">Nothing leaves this device unless you copy it or send it yourself.</string>
 
     <string name="sender_share_note">%1$d SMS from this sender — tick the samples to include.</string>

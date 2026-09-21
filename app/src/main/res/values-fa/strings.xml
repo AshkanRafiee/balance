@@ -95,14 +95,9 @@
     <string name="scan_diag_unparsed_banks_title">فرستنده‌های شناخته‌شده با پیامک ناخوانا</string>
     <string name="scan_diag_unparsed_bank_hint">فرستنده یک بانک پشتیبانی‌شده است، اما قالب این پیامک را نتوانستیم بخوانیم — درست مانند یک فرستندهٔ ناشناخته، نقیصهٔ قالب است.</string>
     <string name="scan_diag_skipped_senders">فرستنده‌هایی که هنوز شناخته نشده‌اند</string>
-    <string name="scan_diag_skipped_hint">فرستنده‌هایی که می‌خواهید در گزارش باشند را علامت بزنید، سپس گزارش را کپی یا با ایمیل بفرستید. تا وقتی تأیید نکنید، چیزی ارسال نمی‌شود.</string>
+    <string name="scan_diag_skipped_hint">روی هر فرستنده بزنید تا پیامک‌هایش باز شود و کدام‌ها برای گزارش باشند را علامت بزنید — تا وقتی تأیید نکنید، چیزی ارسال نمی‌شود.</string>
     <string name="scan_diag_none_skipped">همه‌ٔ پیامک‌ها شناخته‌شده‌اند — چیزی برای گزارش نیست.</string>
-    <string name="scan_diag_copy_selected">کپی گزارش (%1$d)</string>
-    <string name="scan_diag_copied_report">گزارش کپی شد</string>
-    <string name="scan_diag_email_selected">ارسال گزارش با ایمیل (%1$d)</string>
-    <string name="scan_diag_email_subject">قالب‌های پیامک بانکی ناشناخته</string>
-    <string name="scan_diag_email_via">ارسال گزارش از طریق</string>
-    <string name="scan_diag_pick_sender">دست‌کم یک فرستنده را انتخاب کنید</string>
+    <string name="scan_diag_open_sender">گزارش فرستندهٔ %1$s</string>
     <string name="scan_diag_privacy">هیچ داده‌ای از این دستگاه خارج نمی‌شود، مگر اینکه خودتان آن را کپی یا ارسال کنید.</string>
 
     <string name="sender_share_note">%1$d پیامک از این فرستنده — نمونه‌هایی را که می‌خواهید در گزارش باشند علامت بزنید.</string>
