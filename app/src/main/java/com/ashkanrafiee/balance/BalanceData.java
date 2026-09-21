@@ -206,7 +206,9 @@ final class BalanceData {
                 map.put(key, new Bank(bankOfKey(key), entry.getLong("amount"),
                     entry.getLong("date"), entry.getString("sender"), account));
             }
-        } catch (Exception e) { }
+        } catch (Exception e) {
+            Log.w(TAG, "stored balances unreadable; starting empty", e);
+        }
         return map;
     }
 
@@ -384,7 +386,9 @@ final class BalanceData {
             if (raw == null) return set;
             JSONArray arr = new JSONArray(raw);
             for (int i = 0; i < arr.length(); i++) set.add(arr.getString(i));
-        } catch (Exception e) { }
+        } catch (Exception e) {
+            Log.w(TAG, "excluded entries unreadable; treating as none", e);
+        }
         return set;
     }
 
@@ -1584,18 +1588,9 @@ final class BalanceData {
         return b.toString();
     }
 
-    /** Formats a rial amount as toman using the device/app language (Persian digits for Persian). */
+    /** Formats a rial amount as toman using the app language (Persian digits for Persian). */
     static String toman(Context context, long n) {
-        Locale locale;
-        String tag = LocaleHelper.currentTag(context);
-        if ("fa".equals(tag)) {
-            locale = new Locale("fa");
-        } else if (tag.isEmpty()) {
-            Locale device = context.getResources().getConfiguration().getLocales().get(0);
-            locale = device != null && "fa".equals(device.getLanguage()) ? device : Locale.US;
-        } else {
-            locale = Locale.US;
-        }
+        Locale locale = LocaleHelper.isPersian(context) ? new Locale("fa") : Locale.US;
         return NumberFormat.getNumberInstance(locale).format(n / 10);
     }
 }

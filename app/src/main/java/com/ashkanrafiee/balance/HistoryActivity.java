@@ -420,7 +420,7 @@ public final class HistoryActivity extends Activity {
         back.setContentDescription(getString(R.string.history_back));
         back.setBackground(ripple(rounded(chipBg, 20)));
         back.setOnClickListener(v -> finish());
-        bar.addView(back, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        bar.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-2, -2);
         titleParams.setMarginStart(dp(10));
@@ -634,7 +634,7 @@ public final class HistoryActivity extends Activity {
 
         /** Rebuilds the month title, the prev/next affordance and the day grid for the viewed month. */
         void render() {
-            boolean fa = "fa".equals(LocaleHelper.currentTag(HistoryActivity.this));
+            boolean fa = LocaleHelper.isPersian(HistoryActivity.this);
             title.setText(monthName(viewMonth) + " "
                 + (fa ? faDigits(viewYear) : Integer.toString(viewYear)));
             title.setGravity(Gravity.CENTER);
@@ -670,7 +670,7 @@ public final class HistoryActivity extends Activity {
 
         /** One tappable day, highlighted as a range bound, today's outline, or the ranged tint. */
         TextView dayCell(JalaliCalendar day, JalaliCalendar today) {
-            boolean fa = "fa".equals(LocaleHelper.currentTag(HistoryActivity.this));
+            boolean fa = LocaleHelper.isPersian(HistoryActivity.this);
             boolean fromSel = picked[0] != null && picked[0].year == day.year
                 && picked[0].month == day.month && picked[0].day == day.day;
             boolean toSel = picked[1] != null && picked[1].year == day.year
@@ -1735,7 +1735,7 @@ public final class HistoryActivity extends Activity {
 
     /** The 7 weekday grid headings, Saturday first, in the app language. */
     private String[] weekdayLabels() {
-        boolean fa = "fa".equals(LocaleHelper.currentTag(this));
+        boolean fa = LocaleHelper.isPersian(this);
         return fa
             ? new String[]{"ش", "ی", "د", "س", "چ", "پ", "ج"}
             : new String[]{"Sa", "Su", "Mo", "Tu", "We", "Th", "Fr"};
@@ -1743,8 +1743,7 @@ public final class HistoryActivity extends Activity {
 
     /** Formats a Persian date in the app language, e.g. "Khordad 12 1403" / "۱۲ خرداد ۱۴۰۳". */
     private String persianDate(JalaliCalendar jc) {
-        String tag = LocaleHelper.currentTag(this);
-        boolean fa = "fa".equals(tag);
+        boolean fa = LocaleHelper.isPersian(this);
         if (fa) {
             return faDigits(jc.day) + " " + monthName(jc.month) + " " + faDigits(jc.year);
         }
@@ -1755,14 +1754,14 @@ public final class HistoryActivity extends Activity {
      *  the app language's digits. */
     private String compactDate(JalaliCalendar jc) {
         String s = jc.year + "/" + jc.month + "/" + jc.day;
-        return "fa".equals(LocaleHelper.currentTag(this)) ? faDigitsString(s) : s;
+        return LocaleHelper.isPersian(this) ? faDigitsString(s) : s;
     }
 
     /** The movement's time of day as a compact "HH:mm" string in the app digits. */
     private String timeText(long date) {
         String s = new java.text.SimpleDateFormat("HH:mm", Locale.US)
             .format(new java.util.Date(date));
-        return "fa".equals(LocaleHelper.currentTag(this)) ? faDigitsString(s) : s;
+        return LocaleHelper.isPersian(this) ? faDigitsString(s) : s;
     }
 
     /** Converts a calendar number (year, day) to Persian digits without any thousands grouping —
@@ -1782,7 +1781,7 @@ public final class HistoryActivity extends Activity {
 
     /** Account numbers follow the app language's digit rules, like the displayed amounts. */
     private String digits(String s) {
-        return "fa".equals(LocaleHelper.currentTag(this)) ? faDigitsString(s) : s;
+        return LocaleHelper.isPersian(this) ? faDigitsString(s) : s;
     }
 
     /** Formats a rial amount as a signed toman string, following the app language's digit rules. */

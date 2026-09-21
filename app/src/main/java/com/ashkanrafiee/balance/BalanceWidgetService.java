@@ -96,8 +96,8 @@ public class BalanceWidgetService extends RemoteViewsService {
 
         /** "Account 30101…" with the digits in the app's language, matching the app's cards. */
         private String accountLabel(Context c, String account) {
-            String digits = "fa".equals(LocaleHelper.currentTag(c))
-                ? HistoryActivity.faDigitsString(account) : account;
+            String digits = LocaleHelper.isPersian(c)
+                    ? HistoryActivity.faDigitsString(account) : account;
             return c.getString(R.string.account_label) + " " + digits;
         }
 

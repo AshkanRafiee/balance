@@ -33,6 +33,19 @@ public final class LocaleHelper {
         BalanceWidgetProvider.push(context);
     }
 
+    /** Whether the effective app language is Persian — the explicit fa override, or (when following the
+     *  system) a device whose primary language is Persian. Drives Persian-digit rendering so every
+     *  value (amounts, dates, counts) uses the same digit style in both cases. */
+    public static boolean isPersian(Context context) {
+        String tag = currentTag(context);
+        if ("fa".equals(tag)) return true;
+        if (tag == null || tag.isEmpty()) {
+            Locale device = context.getResources().getConfiguration().getLocales().get(0);
+            return device != null && "fa".equals(device.getLanguage());
+        }
+        return false;
+    }
+
     /** Wraps a base Context so its resources resolve using the saved language override, if any. */
     public static Context wrap(Context base) {
         String tag = currentTag(base);
