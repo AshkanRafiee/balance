@@ -11,6 +11,9 @@
 
     <string name="status_reading_sms">Reading bank SMS on this device…</string>
     <string name="status_permission_needed">SMS permission is needed to read balances</string>
+    <string name="permission_title">SMS permission</string>
+    <string name="permission_settings_message">SMS permission was permanently declined. To use Balance again, grant SMS access in the app settings.</string>
+    <string name="permission_open_settings">Open settings</string>
     <string name="status_refreshing">Refreshing balances…</string>
     <string name="status_no_sms_found">No supported bank balance SMS found yet</string>
     <string name="status_loaded_from_saved">Balances loaded from saved data</string>
@@ -84,8 +87,6 @@
     <string name="footer_report">Report</string>
 
     <string name="scan_diag_title">Scan diagnostics</string>
-    <string name="scan_diag_about_label">Scan diagnostics</string>
-    <string name="scan_diag_about_value">Which SMS are recognized, and report the rest</string>
     <string name="scan_diag_reading">Reading SMS on this device…</string>
     <string name="scan_diag_permission">SMS permission is needed to inspect which messages are recognized.</string>
     <string name="scan_diag_permission_action">Open settings</string>
@@ -267,7 +268,7 @@
     <string name="lock_progress_saving">Saving…</string>
     <string name="lock_error_generic">Could not save the lock. Please try again.</string>
     <string name="lock_fingerprint_negative_button">Use PIN or password</string>
-    <string name="widget_locked_message">Balance is locked — unlock the app to see your balances</string>
+    <string name="widget_locked_message">Balance is locked — balances stay hidden while the app lock is on</string>
     <string name="toast_auto_hide_on">Auto-mask turned on</string>
     <string name="toast_auto_hide_off">Auto-mask turned off</string>
 </resources>

@@ -11,6 +11,9 @@
 
     <string name="status_reading_sms">در حال خواندن پیامک‌های بانکی این دستگاه…</string>
     <string name="status_permission_needed">برای خواندن موجودی به اجازهٔ دسترسی به پیامک نیاز است</string>
+    <string name="permission_title">اجازهٔ دسترسی به پیامک</string>
+    <string name="permission_settings_message">اجازهٔ دسترسی به پیامک برای همیشه رد شده است. برای استفاده دوباره از Balance، دسترسی به پیامک را از تنظیمات برنامه فعال کنید.</string>
+    <string name="permission_open_settings">باز کردن تنظیمات</string>
     <string name="status_refreshing">در حال به‌روزرسانی موجودی‌ها…</string>
     <string name="status_no_sms_found">هنوز پیامک موجودی از بانک‌های پشتیبانی‌شده یافت نشد</string>
     <string name="status_loaded_from_saved">موجودی‌ها از داده‌های ذخیره‌شده بارگذاری شد</string>
@@ -84,8 +87,6 @@
     <string name="footer_report">گزارش</string>
 
     <string name="scan_diag_title">تشخیص اسکن پیامک</string>
-    <string name="scan_diag_about_label">تشخیص اسکن پیامک</string>
-    <string name="scan_diag_about_value">کدام پیامک‌ها شناخته می‌شوند و گزارش بقیه</string>
     <string name="scan_diag_reading">در حال خواندن پیامک‌های این دستگاه…</string>
     <string name="scan_diag_permission">برای دیدن کدام پیامک‌ها شناخته می‌شوند، مجوز پیامک لازم است.</string>
     <string name="scan_diag_permission_action">باز کردن تنظیمات</string>
@@ -267,7 +268,7 @@
     <string name="lock_progress_saving">در حال ذخیره…</string>
     <string name="lock_error_generic">ذخیرهٔ قفل انجام نشد. لطفاً دوباره تلاش کنید.</string>
     <string name="lock_fingerprint_negative_button">استفاده از رمز عددی یا رمز عبور</string>
-    <string name="widget_locked_message">Balance قفل است — برای دیدن موجودی‌ها برنامه را باز کنید</string>
+    <string name="widget_locked_message">Balance قفل است — تا وقتی قفل برنامه روشن است، موجودی‌ها پنهان می‌مانند</string>
     <string name="toast_auto_hide_on">ماسک خودکار فعال شد</string>
     <string name="toast_auto_hide_off">ماسک خودکار غیرفعال شد</string>
 </resources>
