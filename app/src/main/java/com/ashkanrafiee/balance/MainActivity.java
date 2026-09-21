@@ -23,10 +23,13 @@ import android.graphics.drawable.GradientDrawable;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.VelocityTracker;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.OverScroller;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -868,6 +871,10 @@ public class MainActivity extends Activity {
         int sortMode;
         float scrollY = 0, lastY, downY;
         float bankListHeight;
+        /** Kinetic scrolling, so the bank list coasts the way the system ScrollView in the history
+         *  screen does instead of stopping dead when the finger lifts. */
+        final OverScroller scroller;
+        VelocityTracker velocityTracker;
         boolean dragging;
         boolean lockArmed;
         boolean lockProbeFired;
@@ -932,6 +939,58 @@ public class MainActivity extends Activity {
             sortMode = BalanceData.getSort(MainActivity.this);
             p.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.NORMAL));
             setBackgroundColor(bg);
+            scroller = new OverScroller(MainActivity.this);
+        }
+
+        /** The list's visible height after the system bars (dp), mirroring the touch calculation. */
+        float listViewH() {
+            int top = insetsTop, bottom = insetsBottom;
+            if (top == 0 && bottom == 0 && android.os.Build.VERSION.SDK_INT >= 23
+                    && getRootWindowInsets() != null) {
+                top = getRootWindowInsets().getSystemWindowInsetTop();
+                bottom = getRootWindowInsets().getSystemWindowInsetBottom();
+            }
+            return (getHeight() - top - bottom) / d;
+        }
+
+        /** The farthest the list can be scrolled (dp), i.e. its content height minus the viewport
+         *  minus the fixed non-list chrome; never below zero. */
+        float maxScroll() {
+            return Math.max(0, bankListHeight - (listViewH() - 440));
+        }
+
+        /** Advances the inertia of a finished drag, redrawing each frame until it settles at a
+         *  hard-bounded resting position exactly like a native scroller. */
+        @Override
+        public void computeScroll() {
+            if (scroller.computeScrollOffset()) {
+                scrollY = Math.max(0, Math.min(maxScroll(), scroller.getCurrY()));
+                invalidate();
+            }
+        }
+
+        /** Ends a drag: a released finger with enough velocity coasts the list the way the history
+         *  screen does, while a slow deliberate pull at the very top keeps the pull-to-refresh. A
+         *  downward release spent at the top cannot scroll (nothing above the viewport), so it falls
+         *  through to the refresh gesture exactly as before. */
+        private void handleDragRelease(float downY, float y) {
+            float vy = 0;
+            if (velocityTracker != null) {
+                velocityTracker.computeCurrentVelocity(1000, 20000f);
+                vy = velocityTracker.getYVelocity() / d;
+                velocityTracker.recycle();
+                velocityTracker = null;
+            }
+            float minFling = ViewConfiguration.get(MainActivity.this).getScaledMinimumFlingVelocity() / d;
+            boolean roomy = (vy < 0 && scrollY < maxScroll()) || (vy > 0 && scrollY > 0);
+            if (roomy && Math.abs(vy) >= minFling) {
+                rows();
+                scroller.fling(0, Math.round(scrollY), 0, -Math.round(vy),
+                    0, 0, 0, Math.round(maxScroll()), 0, 0);
+                invalidate();
+            } else if (downY < 360 && y - downY > 55 && scrollY == 0) {
+                refresh();
+            }
         }
 
         boolean isRtl() {
@@ -1474,7 +1533,11 @@ public class MainActivity extends Activity {
             }
             float x = e.getX() / d, y = (e.getY() - top) / d,
                 h = (getHeight() - top - bottom) / d;
+            if (velocityTracker == null) velocityTracker = VelocityTracker.obtain();
+            velocityTracker.addMovement(e);
             if (e.getAction() == MotionEvent.ACTION_DOWN) {
+                scroller.forceFinished(true);
+                velocityTracker.clear();
                 lastY = y; downY = y; dragging = false;
                 downIcon = iconId(x, y);
                 lockArmed = downIcon == ICON_LOCK;
@@ -1509,6 +1572,7 @@ public class MainActivity extends Activity {
             if (e.getAction() == MotionEvent.ACTION_MOVE) {
                 if (Math.abs(y - lastY) > 3) {
                     dragging = true;
+                    scroller.forceFinished(true);
                     handler.removeCallbacks(lockLongProbe);
                     handler.removeCallbacks(eyeLongProbe);
                     handler.removeCallbacks(totalLongProbe);
@@ -1529,6 +1593,9 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (e.getAction() == MotionEvent.ACTION_CANCEL) {
+                velocityTracker.recycle();
+                velocityTracker = null;
+                scroller.forceFinished(true);
                 // A cancelled gesture must behave like a lift that triggers nothing: drop every
                 // pending long-press probe and disarm so nothing fires after the touch is gone.
                 handler.removeCallbacks(lockLongProbe);
@@ -1561,7 +1628,7 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (dragging) {
-                if (downY < 360 && y - downY > 55 && scrollY == 0) refresh();
+                handleDragRelease(downY, y);
                 return true;
             }
             if (y > footerY - 20 && y < footerY + 24) {
