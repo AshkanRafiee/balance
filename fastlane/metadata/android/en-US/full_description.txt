@@ -13,8 +13,8 @@ Features:
 - Transaction history with deposit and withdrawal tracking per day, month and year, refreshing automatically as new bank SMS arrive, with out-of-order messages (like a transfer and its fee) shown in their true order
 - Filter history by movement type (all, deposits or withdrawals) and by date — today, this month, this year or a custom Persian date range — applied to the whole screen
 - Bank rule updates rebuild history from your SMS and match it to what is already stored, so nothing is ever counted twice
-- Full history from the total card; tap a bank for just that bank's transactions, or tap one of its accounts (a row or an account chip) for a single account's history
-- Long-press the total card, a bank card or an account row to copy that balance
+- Full history from the total card; tap a bank for just that bank's transactions, or tap one of its accounts for a single account's history
+- Long-press the total card, a bank card or an account row to copy that balance; long-press the eye for auto-mask (balances start hidden on every open), and long-press the lock icon for the lock settings
 - Bank sorting by balance or update time, applied to the list and the widget
 - Exclude individual accounts from the combined total
 - Automatic light and dark theme that follows your device
@@ -22,7 +22,7 @@ Features:
 - Encrypted storage on device
 - Password-protected backup and restore
 - Optional in-app lock with PIN, password or fingerprint, protecting the app, the widget and screenshots/recents; after a few wrong attempts, code entry locks for a growing cooldown
-- Scan diagnostics (first item in the footer): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout are flagged first, then senders not recognized yet. Tap any flagged sender to open its messages (the checkmarks live there — nothing is preselected) and send or copy exactly those, with a live count; a prefilled email is only sent after you approve
+- Report (the Scan diagnostics screen): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout are flagged first, then senders not recognized yet. Tap any flagged sender to open its messages (the checkmarks live there — nothing is preselected) and send or copy exactly those, with a live count; a prefilled email is only sent after you approve
 
 SMS and financial data stay on the device, encrypted. No account, cloud service, analytics, or network access is required.
 

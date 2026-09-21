@@ -23,8 +23,8 @@ will add or fix the rule.
 
 ## See what Balance skipped, right in the app
 
-Before writing a report manually, try **Scan diagnostics** — it is the first
-item in the footer of the main screen (and also **About → Scan diagnostics**).
+Before writing a report manually, try **Scan diagnostics** — it is the
+**Report** item in the footer of the main screen.
 It reads the messages on your device and shows, per recognized bank, how many
 SMS it parsed, and below that every **message it could not parse**:
 

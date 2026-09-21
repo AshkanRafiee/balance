@@ -11,8 +11,8 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Combined total balance, with the option to exclude individual accounts from the total
 - Transaction history with deposits and withdrawals, broken down by day, month and year
 - History filters by movement type (all, deposits or withdrawals) and by date — today, this month, this year or a custom Persian date range — applied to every figure on the screen
-- Full history from the total card, per-bank history from any bank card, and single-account history by tapping an account row in the list or an account chip in the history screen
-- Long-press the total card to copy the combined total, or long-press a bank or account card to copy that balance
+- Full history from the total card, per-bank history from any bank card, and single-account history by tapping an account row in the list
+- Long-press the total card to copy the combined total, or long-press a bank or account card to copy that balance; long-press the eye to switch auto-mask on or off (balances start hidden on every open), and long-press the lock icon for the lock settings
 - Bank sorting by balance or update time, mirrored in the list and the home-screen widget
 - Home-screen widget with the same bank order, totals, and privacy mask as the app
 - Password-encrypted backup and restore
@@ -21,7 +21,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - English and Persian (فارسی) interface, with automatic system-language detection and localized bank names
 - Optional in-app lock with a PIN, password or fingerprint, covering the app, the home-screen widget and screenshots/recents, with progressive cooldown delays against wrong-entry guessing
 - About screen with direct links to the website and issue tracker
-- Scan diagnostics (the first item in the footer): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout, and senders not recognized yet. Tap any flagged sender to open its messages and pick exactly which ones to send or copy — the prefilled email is only sent after you approve — feeding straight into the contribution flow »Contributing« below
+- Report (the Scan diagnostics screen): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout, and senders not recognized yet. Tap any flagged sender to open its messages and pick exactly which ones to send or copy — the prefilled email is only sent after you approve — feeding straight into the contribution flow »Contributing« below
 
 ## Download
 
