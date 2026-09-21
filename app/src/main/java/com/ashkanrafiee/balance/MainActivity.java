@@ -1101,11 +1101,6 @@ public class MainActivity extends Activity {
         final int purple = resColor(R.color.purple);
         final int panel = resColor(R.color.panel);
         final int bg = resColor(R.color.bg);
-        final int[] bankColors = {
-            Color.rgb(14, 165, 233), Color.rgb(139, 92, 246),
-            Color.rgb(16, 185, 129), Color.rgb(245, 158, 11),
-            Color.rgb(244, 63, 94), Color.rgb(20, 184, 166)
-        };
         BalanceView() {
             super(MainActivity.this);
             hidden = BalanceData.isHidden(MainActivity.this);
@@ -1595,16 +1590,9 @@ public class MainActivity extends Activity {
                 icon.draw(c);
                 return;
             }
-            int color = bankColors[Math.floorMod(canonicalName.hashCode(), bankColors.length)];
+            int color = BankBadge.colorFor(canonicalName);
             round(c, x - 18, centerY - 18, x + 18, centerY + 18, 12, color);
-            text(c, bankInitials(canonicalName), x, centerY + 5, 11, Color.WHITE, Paint.Align.CENTER);
-        }
-
-        String bankInitials(String name) {
-            String[] words = name.split(" ");
-            if (words.length > 1)
-                return (words[0].substring(0, 1) + words[1].substring(0, 1)).toUpperCase(Locale.US);
-            return name.substring(0, Math.min(2, name.length())).toUpperCase(Locale.US);
+            text(c, BankBadge.initials(canonicalName), x, centerY + 5, 11, Color.WHITE, Paint.Align.CENTER);
         }
 
         /** Account numbers and other plain numerals follow the app language's digit rules, matching

@@ -76,11 +76,6 @@ public final class HistoryActivity extends Activity {
     private int todayColor, monthColor, yearColor;
     private int heroTop, heroBottom, rail, openBg, chipBg;
     private int depBg, depFg, witBg, witFg, badgeFg, badgeBg;
-    private final int[] bankColors = {
-        Color.rgb(14, 165, 233), Color.rgb(139, 92, 246),
-        Color.rgb(16, 185, 129), Color.rgb(245, 158, 11),
-        Color.rgb(244, 63, 94), Color.rgb(20, 184, 166)
-    };
     private LinearLayout body;
     private LockOverlay lockOverlay;
     /** The user's calendar system: true for the Persian (Jalali) calendar, false for Gregorian.
@@ -1573,27 +1568,17 @@ public final class HistoryActivity extends Activity {
             iv.setContentDescription(BankRules.displayName(this, canonicalName));
             return iv;
         }
-        int color = bankColors[Math.floorMod(canonicalName.hashCode(), bankColors.length)];
+        int color = BankBadge.colorFor(canonicalName);
         GradientDrawable bg = rounded(color, 10);
         LinearLayout sq = new LinearLayout(this);
         sq.setOrientation(LinearLayout.VERTICAL);
         sq.setGravity(Gravity.CENTER);
         sq.setBackground(bg);
         sq.setContentDescription(BankRules.displayName(this, canonicalName));
-        TextView init = text(bankInitials(canonicalName), 11, Color.WHITE);
+        TextView init = text(BankBadge.initials(canonicalName), 11, Color.WHITE);
         init.setTypeface(null, Typeface.BOLD);
         sq.addView(init);
         return sq;
-    }
-
-    private String bankInitials(String name) {
-        String canonical = name.trim();
-        if (canonical.isEmpty()) return "?";
-        String[] words = canonical.split(" ");
-        if (words.length > 1 && words[0].length() > 0 && words[1].length() > 0) {
-            return (words[0].substring(0, 1) + words[1].substring(0, 1)).toUpperCase(Locale.US);
-        }
-        return canonical.substring(0, Math.min(2, canonical.length())).toUpperCase(Locale.US);
     }
 
     // ====================================================================
