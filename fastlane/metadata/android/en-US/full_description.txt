@@ -1,6 +1,6 @@
 Balance reads supported bank balance SMS messages locally and shows the latest balance for each bank — split per account number when the bank SMS states one — plus the combined total.
 
-Currently designed for users in Iran, with support for Iranian banks and Persian bank SMS formats. A Region setting (footer » Region &amp; Language) switches the app's calendar system between the Persian (Jalali) calendar for Iran and the Gregorian calendar for International, with localized month and weekday names for both; the same menu also overrides the interface language.
+Currently designed for users in Iran, with support for Iranian banks and Persian bank SMS formats. A Region setting (footer » Region &amp; Language) switches the app's calendar system between the Persian (Jalali) calendar for Iran and the Gregorian calendar for International — International is the default — with localized month and weekday names for both; the same menu also overrides the interface language.
 
 Features:
 - Offline SMS parsing with no internet permission

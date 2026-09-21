@@ -8,7 +8,8 @@ import android.content.Context;
  *
  * <p>The region is the app-wide settings knob that decides which calendar system history
  * screens use: {@code Iran} maps to the Persian (Jalali) calendar, {@code International} to the
- * Gregorian calendar. The default is Iran, preserving the app's historic calendar.
+ * Gregorian calendar. The default is International; users who install for the Iranian market can
+ * switch to Iran for the Persian calendar.
  */
 public final class RegionHelper {
     public static final int REGION_IRAN = 1;
@@ -23,7 +24,7 @@ public final class RegionHelper {
 
     public static int region(Context context) {
         String v = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_REGION, VALUE_IRAN);
+            .getString(KEY_REGION, VALUE_INTERNATIONAL);
         return VALUE_INTERNATIONAL.equals(v) ? REGION_INTERNATIONAL : REGION_IRAN;
     }
 
