@@ -19,10 +19,18 @@ import org.junit.runner.RunWith;
 import java.io.File;
 import java.io.FileInputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.spec.KeySpec;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import javax.crypto.Cipher;
+import javax.crypto.SecretKey;
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.PBEKeySpec;
+import javax.crypto.spec.SecretKeySpec;
 
 /**
  * Tests for the encrypted backup / restore feature: file format, tamper and wrong-password
@@ -467,6 +475,103 @@ public class BackupRestoreTest {
         assertEquals(0, res.added);
         assertEquals(0, res.updated);
         assertEquals(1_000_000L, BalanceData.read(ctx).get("Tejarat").amount);
+    }
+
+    @Test public void merge_accountCompositeKeys_keepsAccountsSeparate() throws Exception {
+        // Accounts of one bank are distinct storage keys, so a restore must never conflate them:
+        // a newer backup of account 222 updates only that composite key, while another account of the
+        // same bank, and the bank's account-less slot, remain their own entries.
+        LinkedHashMap<String, Bank> backupMap = new LinkedHashMap<>();
+        backupMap.put("Mellat|1110000222", new Bank("Mellat", 2_000_000L, T + 3000, "x", "1110000222"));
+        backupMap.put("Mellat|1110000333", new Bank("Mellat", 9_000_000L, T + 2500, "x", "1110000333"));
+        BalanceData.write(ctx, backupMap);
+        Uri u = uri("composite.balance");
+        BackupManager.create(ctx, u, PASSWORD);
+
+        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        LinkedHashMap<String, Bank> current = new LinkedHashMap<>();
+        current.put("Mellat|1110000222", new Bank("Mellat", 1_000_000L, T + 1000, "x", "1110000222"));
+        current.put("Mellat", new Bank("Mellat", 4_000_000L, T + 2000, "x"));
+        BalanceData.write(ctx, current);
+
+        BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
+
+        assertEquals(1, res.added);     // account 333 never seen before
+        assertEquals(1, res.updated);   // account 222 replaced by the newer backup value
+        LinkedHashMap<String, Bank> out = BalanceData.read(ctx);
+        assertEquals(3, out.size());
+        assertEquals(2_000_000L, out.get("Mellat|1110000222").amount);
+        assertEquals(9_000_000L, out.get("Mellat|1110000333").amount);
+        assertEquals(4_000_000L, out.get("Mellat").amount);  // account-less slot kept
+    }
+
+    @Test public void restore_legacyPayloadWithoutTransactions_restoresBalancesOnly() throws Exception {
+        // Versions before transactions were recorded wrote payloads with only a "balances" object
+        // (payloadFormat 1). A restore must still accept them, restore the balances, and leave any
+        // locally scanned history untouched.
+        String legacyPayload = "{\"payloadFormat\":1,\"balances\":{"
+            + "\"Tejarat\":{\"amount\":1000000,\"date\":" + (T + 1000)
+            + ",\"sender\":\"x\"}}}";
+        File f = file("legacy.balance");
+        writeLegacyBackup(f, legacyPayload, PASSWORD);
+
+        BalanceData.writeTransactions(ctx, Arrays.asList(
+            new Transaction("Melat", T + 200, -50_000L, "sig-local")));
+
+        BackupManager.RestoreResult res = BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
+        assertEquals(1, res.added);
+        assertEquals(0, res.updated);
+        LinkedHashMap<String, Bank> out = BalanceData.read(ctx);
+        assertEquals(1, out.size());
+        assertEquals(1_000_000L, out.get("Tejarat").amount);
+
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(1, txs.size());
+        assertEquals(-50_000L, txs.get(0).amount);
+        assertEquals("Melat", txs.get(0).bank);
+    }
+
+    /** Writes a balances-only (payloadFormat 1) backup exactly as older releases produced them:
+     *  same header shape, KDF and cipher, but no "transactions" section in the payload. */
+    private void writeLegacyBackup(File f, String payloadJson, String password) throws Exception {
+        byte[] salt = new byte[16];
+        byte[] iv = new byte[12];
+        new SecureRandom().nextBytes(salt);
+        new SecureRandom().nextBytes(iv);
+        org.json.JSONObject header = new org.json.JSONObject()
+            .put("format", 1)
+            .put("createdAt", 1_000_000_000L)
+            .put("appVersion", "1.0.0")
+            .put("kdf", new org.json.JSONObject()
+                .put("algorithm", "PBKDF2WithHmacSHA256")
+                .put("iterations", 600000)
+                .put("salt", android.util.Base64.encodeToString(salt, android.util.Base64.NO_WRAP))
+                .put("keyBits", 256))
+            .put("cipher", new org.json.JSONObject()
+                .put("algorithm", "AES/GCM/NoPadding")
+                .put("iv", android.util.Base64.encodeToString(iv, android.util.Base64.NO_WRAP))
+                .put("tagBits", 128));
+        byte[] headerBytes = header.toString().getBytes(StandardCharsets.UTF_8);
+        KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, 600000, 256);
+        SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+        SecretKey key = new SecretKeySpec(factory.generateSecret(spec).getEncoded(), "AES");
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(128, iv));
+        cipher.updateAAD(headerBytes);
+        byte[] ct = cipher.doFinal(payloadJson.getBytes(StandardCharsets.UTF_8));
+
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        out.write("BALNCEBK".getBytes(StandardCharsets.US_ASCII));
+        out.write(1);
+        out.write((headerBytes.length >> 24) & 0xFF);
+        out.write((headerBytes.length >> 16) & 0xFF);
+        out.write((headerBytes.length >> 8) & 0xFF);
+        out.write(headerBytes.length & 0xFF);
+        out.write(headerBytes);
+        out.write(ct);
+        try (java.io.FileOutputStream fo = new java.io.FileOutputStream(f)) {
+            fo.write(out.toByteArray());
+        }
     }
 
     // ============================================================
