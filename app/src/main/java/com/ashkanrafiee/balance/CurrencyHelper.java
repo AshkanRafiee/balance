@@ -9,8 +9,8 @@ import java.util.Locale;
  * Persists and reads the currency whose value and unit label the app shows for amounts. Amounts
  * are stored in rial; the currency decides both the number and the unit drawn beside it:
  * Toman (the default) converts rial to toman by dividing by ten, exactly as before, while every
- * other currency — Rial as stored, USD, EUR, or a custom name the user types — shows the raw rial
- * figure with the chosen unit text. No exchange rate is applied, so everything works fully offline.
+ * other currency — Rial as stored or a custom name the user types — shows the raw rial figure with
+ * the chosen unit text. No exchange rate is applied, so everything works fully offline.
  *
  * <p>Kept in its own preference file (like the language and the region) so a single key controls
  * the whole app, including the home-screen widget.
@@ -18,8 +18,6 @@ import java.util.Locale;
 public final class CurrencyHelper {
     public static final String CURRENCY_TOMAN = "toman";
     public static final String CURRENCY_RIAL = "rial";
-    public static final String CURRENCY_USD = "usd";
-    public static final String CURRENCY_EUR = "eur";
 
     /** Marker prepended to user-typed currency names so they can never collide with the fixed ones. */
     public static final String CUSTOM_PREFIX = "custom:";
@@ -40,14 +38,12 @@ public final class CurrencyHelper {
         return currency(context).startsWith(CUSTOM_PREFIX);
     }
 
-    /** The unit label shown next to amounts: the localized toman or rial word, USD, EUR, or the
-     *  verbatim text the user typed for their custom currency. */
+    /** The unit label shown next to amounts: the localized toman or rial word, or the verbatim text
+     *  the user typed for their custom currency. */
     public static String label(Context context) {
         String v = currency(context);
         if (v.startsWith(CUSTOM_PREFIX)) return v.substring(CUSTOM_PREFIX.length());
         if (CURRENCY_RIAL.equals(v)) return context.getString(R.string.unit_rial);
-        if (CURRENCY_USD.equals(v)) return "USD";
-        if (CURRENCY_EUR.equals(v)) return "EUR";
         return context.getString(R.string.unit_toman);
     }
 
@@ -64,25 +60,19 @@ public final class CurrencyHelper {
             .edit().putString(KEY_CURRENCY, value).apply();
     }
 
-    /** The position of a stored currency value in the fixed choice list — Toman, Rial, USD, EUR,
-     *  or the Custom slot (4) for a user-typed entry. Kept here so the picker and the storage
-     *  always agree on which entry a value maps to. */
+    /** The position of a stored currency value in the fixed choice list — Toman, Rial, or the
+     *  Custom slot (2) for a user-typed entry. Kept here so the picker and the storage always
+     *  agree on which entry a value maps to. */
     public static int fixedIndex(String value) {
         if (CURRENCY_RIAL.equals(value)) return 1;
-        if (CURRENCY_USD.equals(value)) return 2;
-        if (CURRENCY_EUR.equals(value)) return 3;
-        if (value != null && value.startsWith(CUSTOM_PREFIX)) return 4;
+        if (value != null && value.startsWith(CUSTOM_PREFIX)) return 2;
         return 0;
     }
 
-    /** The stored currency value for a fixed-list position; position 4 (Custom) has no fixed value
+    /** The stored currency value for a fixed-list position; position 2 (Custom) has no fixed value
      *  and must be built from the user's typed text with {@link #CUSTOM_PREFIX}. */
     public static String fixedCurrency(int position) {
-        switch (position) {
-            case 1: return CURRENCY_RIAL;
-            case 2: return CURRENCY_USD;
-            case 3: return CURRENCY_EUR;
-            default: return CURRENCY_TOMAN;
-        }
+        if (position == 1) return CURRENCY_RIAL;
+        return CURRENCY_TOMAN;
     }
 }

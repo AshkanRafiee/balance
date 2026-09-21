@@ -32,12 +32,10 @@ public class CurrencyHelperTest {
     @Test public void fixedIndex_roundTripsEveryCurrency() {
         assertEquals(0, CurrencyHelper.fixedIndex(CurrencyHelper.CURRENCY_TOMAN));
         assertEquals(1, CurrencyHelper.fixedIndex(CurrencyHelper.CURRENCY_RIAL));
-        assertEquals(2, CurrencyHelper.fixedIndex(CurrencyHelper.CURRENCY_USD));
-        assertEquals(3, CurrencyHelper.fixedIndex(CurrencyHelper.CURRENCY_EUR));
-        assertEquals(4, CurrencyHelper.fixedIndex(CurrencyHelper.CUSTOM_PREFIX + "Rupee"));
-        for (int pos = 0; pos <= 3; pos++)
+        assertEquals(2, CurrencyHelper.fixedIndex(CurrencyHelper.CUSTOM_PREFIX + "Rupee"));
+        for (int pos = 0; pos <= 1; pos++)
             assertEquals(pos, CurrencyHelper.fixedIndex(CurrencyHelper.fixedCurrency(pos)));
-        assertEquals(CurrencyHelper.CURRENCY_TOMAN, CurrencyHelper.fixedCurrency(4));
+        assertEquals(CurrencyHelper.CURRENCY_TOMAN, CurrencyHelper.fixedCurrency(2));
         assertEquals(0, CurrencyHelper.fixedIndex(null));
     }
 
@@ -47,15 +45,10 @@ public class CurrencyHelperTest {
         assertEquals(ctx.getString(R.string.unit_toman), CurrencyHelper.label(ctx));
     }
 
-    @Test public void fixedCurrenciesCarryTheirOwnCode() {
+    @Test public void fixedCurrencyCarriesItsOwnCode() {
         CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_RIAL);
         assertEquals(ctx.getString(R.string.unit_rial), CurrencyHelper.label(ctx));
         assertFalse(CurrencyHelper.isCustom(ctx));
-        CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_USD);
-        assertEquals("USD", CurrencyHelper.label(ctx));
-        assertFalse(CurrencyHelper.isCustom(ctx));
-        CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_EUR);
-        assertEquals("EUR", CurrencyHelper.label(ctx));
     }
 
     @Test public void customCurrencyShowsTheTypedNameVerbatim() {
@@ -70,10 +63,6 @@ public class CurrencyHelperTest {
         java.text.NumberFormat us = java.text.NumberFormat.getNumberInstance(java.util.Locale.US);
         CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_RIAL);
         assertEquals(us.format(123450), CurrencyHelper.amount(ctx, 123450));
-        CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_USD);
-        assertEquals(us.format(123450), CurrencyHelper.amount(ctx, 123450));
-        CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_EUR);
-        assertEquals(us.format(99900000), CurrencyHelper.amount(ctx, 99900000));
         CurrencyHelper.setCurrency(ctx, CurrencyHelper.CUSTOM_PREFIX + "KW");
         assertEquals(us.format(123450), CurrencyHelper.amount(ctx, 123450));
     }
