@@ -21,7 +21,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - English and Persian (فارسی) interface, with automatic system-language detection and localized bank names
 - Optional in-app lock with a PIN, password or fingerprint, covering the app, the home-screen widget and screenshots/recents, with progressive cooldown delays against wrong-entry guessing
 - About screen with direct links to the website and issue tracker
-- Scan diagnostics (the first item in the footer, and About → Scan diagnostics): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout, and senders not recognized yet. Tick any mix (nothing preselected) and the report buttons show a live count: tap a sender to choose which of its messages to send (prefilled email, sent only after you approve), or copy/email exactly the senders you ticked — feeding straight into the contribution flow »Contributing« below
+- Scan diagnostics (the first item in the footer, and About → Scan diagnostics): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout, and senders not recognized yet. Tap any flagged sender to open its messages and pick exactly which ones to send or copy — the prefilled email is only sent after you approve — feeding straight into the contribution flow »Contributing« below
 
 ## Download
 
@@ -66,11 +66,12 @@ Is your bank's SMS not recognized, the per-account split wrong, or a balance or
 history entry off? We need the bank's exact message format — verbatim, line
 breaks and spacing included — plus the sender number, your Android version and
 your phone model. You may swap the real numbers for made-up ones of the same
-length and format for privacy. The fastest way to hand us all the unparsed
-senders at once is the **Report** item in the footer (or About → Scan
-diagnostics): tick the senders — recognized banks with an unreadable message
-layout are flagged right at the top — then copy/email exactly those; nothing is
-sent until you confirm in your mail app.
+length and format for privacy. The fastest way to hand us every unparsed
+message is the **Report** item in the footer (or About → Scan diagnostics):
+known banks with an unreadable message layout are highlighted first, then
+unknown senders — tap any flagged sender to open its messages, tick the ones to
+share, and send or copy exactly those. Nothing is sent until you confirm in
+your mail app.
 Otherwise, open an [issue](https://github.com/AshkanRafiee/balance/issues)
 or email us; see [CONTRIBUTING.md](CONTRIBUTING.md) for the full checklist.
 

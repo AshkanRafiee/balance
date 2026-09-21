@@ -32,18 +32,17 @@ SMS it parsed, and below that every **message it could not parse**:
   message layout we could not read (a format gap, just like an unknown sender).
 - **Senders not recognized yet** — sender numbers Balance does not know at all.
 
-Tick any mix of these senders — nothing is preselected — and the report buttons
-show a live count of what you chose:
+Each sender is a compact, tappable entry (a chevron marks it): tapping it opens
+its message chooser, where the checkmarks live — tick exactly which of its
+messages to share, nothing is preselected, and then:
 
-- Tap a sender to open its report chooser: pick exactly which of its messages
-  to share, then **Send (n)** (a prefilled email to us opens — nothing is sent
-  until you choose your mail app and confirm there) or **Copy selected (n)**.
-- **Copy report (n) / Email report (n)** above the list gathers exactly the
-  senders you ticked, newest sample each.
+- **Send (n)** — a prefilled email to us opens; nothing is sent until you
+  choose your mail app and confirm there.
+- **Copy selected (n)** — copies exactly the ticked messages.
 
 That screen is the fastest contribution funnel there is: every unparsed message
 is a bank SMS layout we haven't got on file (the bank is named when we know
-it), and the report already contains exactly the sender numbers and sample
+it), and the chooser already holds exactly the sender number and sample
 messages a new rule needs. Nothing from the scan leaves your device until you
 copy it or send it yourself.
 
