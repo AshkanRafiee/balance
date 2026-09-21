@@ -106,6 +106,15 @@ public final class HistoryActivity extends Activity {
     /** Watches for new bank SMS while the screen is open, triggering a silent history re-scan. */
     private ContentObserver smsObserver;
 
+    /** Coalesces bursty inbox-change notifications into a single background re-scan: inbox apps
+     *  often touch many rows at once, and each touch would otherwise spawn its own scan thread. */
+    private final Handler smsHandler = new Handler(Looper.getMainLooper());
+    private boolean scanPending;
+
+    /** Bumped on every render request; the finished render applies its result only if it is still
+     *  the newest, so a quick filter change never gets overwritten by a stale slower build. */
+    private int renderGen;
+
     // ====================================================================
     // Shared drawing helpers
     // ====================================================================
@@ -659,7 +668,10 @@ public final class HistoryActivity extends Activity {
             TextView mLabel = text(getString(R.string.history_month_label), 13, muted);
             box.addView(mLabel);
             box.addView(monthSpin, new LinearLayout.LayoutParams(-1, -2));
-            TextView yLabel = text(getString(R.string.history_year_label), 13, muted);
+            String yRange = getString(R.string.history_year_label,
+                CalDate.minYear(iranCalendar), CalDate.maxYear(iranCalendar));
+            if (LocaleHelper.isPersian(HistoryActivity.this)) yRange = faDigitsString(yRange);
+            TextView yLabel = text(yRange, 13, muted);
             LinearLayout.LayoutParams yLp = new LinearLayout.LayoutParams(-1, -2);
             yLp.setMargins(0, dp(10), 0, 0);
             box.addView(yLabel, yLp);
@@ -980,7 +992,12 @@ public final class HistoryActivity extends Activity {
         smsObserver = new ContentObserver(new Handler(Looper.getMainLooper())) {
             @Override public void onChange(boolean selfChange) { onChange(selfChange, null); }
             @Override public void onChange(boolean selfChange, Uri uri) {
-                new Thread(() -> BalanceData.scanHistory(HistoryActivity.this)).start();
+                if (scanPending) return;
+                scanPending = true;
+                smsHandler.postDelayed(() -> {
+                    scanPending = false;
+                    new Thread(() -> BalanceData.scanHistory(HistoryActivity.this)).start();
+                }, 400);
             }
         };
         getContentResolver().registerContentObserver(
@@ -992,33 +1009,53 @@ public final class HistoryActivity extends Activity {
             getContentResolver().unregisterContentObserver(smsObserver);
             smsObserver = null;
         }
+        smsHandler.removeCallbacksAndMessages(null);
+        scanPending = false;
     }
 
     // ====================================================================
     // Screen rendering
     // ====================================================================
 
-    /** Re-reads the saved history, applies the current filters and rebuilds the whole screen from it:
-     *  the filter bar first (so its chips mirror the active filter), then the hero and the breakdown
-     *  computed over the filtered list, so every figure on screen reflects exactly what is shown. */
+    /** Re-reads the saved history, applies the current filters and rebuilds the whole screen from
+     *  it: the filter bar first (so its chips mirror the active filter), then the hero and the
+     *  breakdown computed over the filtered list, so every figure on screen reflects exactly what
+     *  is shown. The decrypt-and-parse plus the per-movement calendar math run on a worker thread
+     *  so a large story never stalls the UI; only the finished groups are drawn here. */
     private void render() {
-        refreshDates();
-        List<Transaction> all = BalanceData.readTransactions(this);
-        List<Transaction> bankTxs = bankFilter == null ? all : filterByBank(all, bankFilter);
-        List<Transaction> acctTxs = accountFilter == null ? bankTxs : filterByAccount(bankTxs, accountFilter);
-        List<Transaction> txs = applyFilters(acctTxs, filter, iranCalendar);
-        rebuildFilterBar();
-        Lists lists = buildLists(txs, iranCalendar);
-        body.removeAllViews();
-        if (lists.years.isEmpty()) {
-            emptyState();
-        } else {
-            body.addView(heroCard(lists), margin(0, 0, 0, 6));
-            body.addView(sectionLabel(getString(R.string.history_breakdown)), margin(0, 16, 0, 12));
-            allYears = lists.years;
-            seedExpanded();
-            renderYears(body, allYears);
-        }
+        final int gen = ++renderGen;
+        final Filter f = filter;
+        final String bank = bankFilter;
+        final String acct = accountFilter;
+        final boolean iran = iranCalendar;
+        new Thread(() -> {
+            try {
+                List<Transaction> txs = BalanceData.readTransactions(getApplicationContext());
+                if (bank != null) txs = filterByBank(txs, bank);
+                if (acct != null) txs = filterByAccount(txs, acct);
+                final List<Transaction> filtered = applyFilters(txs, f, iran);
+                final Lists lists = buildLists(filtered, iran);
+                runOnUiThread(() -> {
+                    if (gen != renderGen || isDestroyed() || isFinishing()) return;
+                    refreshDates();
+                    rebuildFilterBar();
+                    body.removeAllViews();
+                    if (lists.years.isEmpty()) {
+                        emptyState();
+                    } else {
+                        body.addView(heroCard(lists), margin(0, 0, 0, 6));
+                        body.addView(sectionLabel(getString(R.string.history_breakdown)), margin(0, 16, 0, 12));
+                        allYears = lists.years;
+                        seedExpanded();
+                        renderYears(body, allYears);
+                    }
+                });
+            } catch (Exception e) {
+                // A corrupt store or a scan race must never blank the screen; keep the previous
+                // render and flag the failure quietly.
+                android.util.Log.w("BalanceHistory", "render failed", e);
+            }
+        }).start();
     }
 
     /** Returns only the transactions whose bank equals {@code bank}, preserving input order.
