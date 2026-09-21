@@ -147,9 +147,7 @@ public final class AboutActivity extends Activity {
         body.addView(info(getString(R.string.about_website_label), "balance.ashkanrafiee.com", APP_WEBSITE), margin(0, 0, 0, 8));
         body.addView(info(getString(R.string.about_suggestions_label), "github.com/ashkanrafiee/balance/issues", ISSUES_URL), margin(0, 0, 0, 8));
         body.addView(info(getString(R.string.about_donate_label), "balance.ashkanrafiee.com/#donate", DONATION_URL), margin(0, 0, 0, 8));
-        body.addView(info(getString(R.string.about_privacy_label), getString(R.string.about_privacy_value)), margin(0, 0, 0, 8));
-        body.addView(infoIntent(getString(R.string.scan_diag_about_label), getString(R.string.scan_diag_about_value),
-            new Intent(this, ScanDiagnosticsActivity.class)), margin(0, 0, 0, 20));
+        body.addView(info(getString(R.string.about_privacy_label), getString(R.string.about_privacy_value)), margin(0, 0, 0, 20));
 
         TextView footerView = text(getString(R.string.about_footer, appVersion()), 11, footerColor);
         footerView.setGravity(Gravity.CENTER);
@@ -253,19 +251,6 @@ public final class AboutActivity extends Activity {
             });
         }
         box.addView(v);
-        return box;
-    }
-
-    /** Like {@link #info(String, String)} but the whole card taps through to another screen. */
-    LinearLayout infoIntent(String h, String value, Intent target) {
-        LinearLayout box = info(h, value);
-        box.setOnClickListener(view -> {
-            try {
-                startActivity(target);
-            } catch (Exception e) {
-                Log.w(TAG, "cannot open " + target.getComponent());
-            }
-        });
         return box;
     }
 }

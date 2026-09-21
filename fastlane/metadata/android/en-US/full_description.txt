@@ -22,7 +22,7 @@ Features:
 - Encrypted storage on device
 - Password-protected backup and restore
 - Optional in-app lock with PIN, password or fingerprint, protecting the app, the widget and screenshots/recents; after a few wrong attempts, code entry locks for a growing cooldown
-- Scan diagnostics (first item in the footer, and About): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout are flagged first, then senders not recognized yet. Tap any flagged sender to open its messages (the checkmarks live there — nothing is preselected) and send or copy exactly those, with a live count; a prefilled email is only sent after you approve
+- Scan diagnostics (first item in the footer): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout are flagged first, then senders not recognized yet. Tap any flagged sender to open its messages (the checkmarks live there — nothing is preselected) and send or copy exactly those, with a live count; a prefilled email is only sent after you approve
 
 SMS and financial data stay on the device, encrypted. No account, cloud service, analytics, or network access is required.
 
