@@ -21,7 +21,7 @@ public final class AboutActivity extends Activity {
     static final String APP_WEBSITE = "https://balance.ashkanrafiee.com/";
     static final String ISSUES_URL = "https://github.com/AshkanRafiee/balance/issues";
     static final String DONATION_URL = "https://balance.ashkanrafiee.com/#donate";
-    int bg, card, muted, accent, purple, heroColor, link, footerColor, fg;
+    int bg, card, muted, accent, heroColor, link, footerColor, fg;
     private LockOverlay lockOverlay;
 
     int color(int res) {
@@ -65,7 +65,6 @@ public final class AboutActivity extends Activity {
         card = color(R.color.panel);
         muted = color(R.color.muted);
         accent = color(R.color.accent);
-        purple = color(R.color.purple);
         heroColor = color(R.color.hero);
         link = color(R.color.link);
         footerColor = color(R.color.footer);
