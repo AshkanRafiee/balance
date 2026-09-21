@@ -15,12 +15,13 @@ import org.junit.runner.RunWith;
 
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
- * Tests for the scan diagnostics classifier: splitting an SMS-inbox snapshot into recognized banks
- * and unrecognized senders (counts, newest sample), and assembling the contributor report that
- * feeds the CONTRIBUTING.md issue flow.
+ * Tests for the scan diagnostics classifier: splitting an SMS-inbox snapshot into (a) content that
+ * parsed into balances per bank, (b) senders of a known bank whose message layout did not parse, and
+ * (c) wholly unknown senders — with counts, newest samples, and selection-aware report text.
  */
 @RunWith(AndroidJUnit4.class)
 public class ScanDiagnosticsTest {
@@ -35,52 +36,70 @@ public class ScanDiagnosticsTest {
         return list;
     }
 
-    // ---- analyze: counts ----
+    // ---- analyze: counts and buckets ----
 
-    @Test public void analyze_mixedSenders_countsRecognizedMessages() {
+    @Test public void analyze_mixed_bucketsMessages() {
         ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
             new Object[]{TEJARAT, "balance 1000", 1000L},
             new Object[]{SAMAN, "balance 2000", 2000L},
-            new Object[]{"+98unknown1", "otp 123456", 3000L}));
-        assertEquals(3, s.messages);
-        assertEquals(2, s.recognizedMessages);
-        assertEquals(1, s.skippedMessages);
+            new Object[]{TEJARAT, "payment bill done", 3000L},
+            new Object[]{"+98unknown1", "otp 123456", 4000L}));
+        assertEquals(4, s.messages);
+        assertEquals(2, s.parsedMessages);
+        assertEquals(2, s.unparsedMessages());
+        // The known-bank message with unparsed layout is a format gap too.
+        assertEquals(1, s.unparsedSendersMessages);
+        assertEquals(1, s.unknownSendersMessages);
     }
 
-    @Test public void analyze_allRecognized_noSkippedSenders() {
+    @Test public void analyze_allParsed_noReportableSenders() {
         ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
             new Object[]{TEJARAT, "balance 1000", 1000L},
             new Object[]{SAMAN, "balance 2000", 2000L}));
-        assertEquals(0, s.skippedMessages);
-        assertTrue(s.senders.isEmpty());
+        assertEquals(0, s.unparsedMessages());
+        assertTrue(s.unknownSenders.isEmpty());
+        assertTrue(s.unparsedSenders.isEmpty());
         assertEquals(2, s.banks.size());
     }
 
-    @Test public void analyze_allSkipped_noBanks() {
+    @Test public void analyze_allUnrecognized_noBanks() {
         ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
             new Object[]{"+98unknown1", "hi", 1000L},
             new Object[]{"+98unknown2", "hi", 2000L}));
-        assertEquals(2, s.skippedMessages);
+        assertEquals(2, s.unparsedMessages());
         assertTrue(s.banks.isEmpty());
-        assertEquals(2, s.senders.size());
+        assertEquals(2, s.unknownSenders.size());
+        assertTrue(s.unparsedSenders.isEmpty());
+    }
+
+    @Test public void analyze_knownBankSenderWithUnparsedContent_flaggedSeparately() {
+        ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
+            new Object[]{TEJARAT, "some message without a balance word", 1000L}));
+        assertEquals(0, s.parsedMessages);
+        assertEquals(1, s.unparsedSenders.size());
+        ScanDiagnostics.SenderHit h = s.unparsedSenders.get(0);
+        assertEquals(TEJARAT, h.sender);
+        assertEquals("Tejarat", h.bank);
+        assertTrue(s.unknownSenders.isEmpty());
     }
 
     @Test public void analyze_emptyInbox_zeroCounts() {
         ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows());
         assertEquals(0, s.messages);
-        assertEquals(0, s.recognizedMessages);
-        assertEquals(0, s.skippedMessages);
+        assertEquals(0, s.parsedMessages);
+        assertEquals(0, s.unparsedMessages());
         assertTrue(s.banks.isEmpty());
-        assertTrue(s.senders.isEmpty());
+        assertTrue(s.unknownSenders.isEmpty());
+        assertTrue(s.unparsedSenders.isEmpty());
     }
 
     // ---- analyze: segmentation and ordering ----
 
     @Test public void analyze_groupsBanksByResolvedName_sortedByCount() {
         ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
-            new Object[]{TEJARAT, "b", 1000L},
-            new Object[]{SAMAN, "b", 2000L},
-            new Object[]{TEJARAT, "b", 3000L}));
+            new Object[]{TEJARAT, "balance 1000", 1000L},
+            new Object[]{SAMAN, "balance 2000", 2000L},
+            new Object[]{TEJARAT, "balance 3000", 3000L}));
         // Tejarat twice, Saman once -> Tejarat first.
         assertEquals(2, s.banks.size());
         ScanDiagnostics.BankHit top = s.banks.get(0);
@@ -94,40 +113,64 @@ public class ScanDiagnosticsTest {
             new Object[]{"+98frequent", "a", 2000L},
             new Object[]{"+98frequent", "b", 2100L},
             new Object[]{"+98frequent", "c", 2200L}));
-        assertEquals(2, s.senders.size());
-        assertEquals("+98frequent", s.senders.get(0).sender);
-        assertEquals(3, s.senders.get(0).messages);
-        assertEquals("+98rare", s.senders.get(1).sender);
-        assertEquals(1, s.senders.get(1).messages);
+        assertEquals(2, s.unknownSenders.size());
+        assertEquals("+98frequent", s.unknownSenders.get(0).sender);
+        assertEquals(3, s.unknownSenders.get(0).messages);
+        assertEquals("+98rare", s.unknownSenders.get(1).sender);
+        assertEquals(1, s.unknownSenders.get(1).messages);
+    }
+
+    @Test public void problemSenders_knownBankSendersFirst_thenUnknown() {
+        ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
+            new Object[]{TEJARAT, "unparsed layout here", 1000L},
+            new Object[]{"+98unknown", "hi", 2000L}));
+        List<ScanDiagnostics.SenderHit> all = ScanDiagnostics.problemSenders(s);
+        assertEquals(2, all.size());
+        assertEquals("Tejarat", all.get(0).bank);
+        assertNull(all.get(1).bank);
     }
 
     // ---- reportText / senderReport / stored samples ----
 
-    @Test public void reportText_includesSenderCountAndNewestSample() {
+    @Test public void reportText_selection_includesSenderCountAndNewestSample() {
         ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
             new Object[]{"+98unknown", "maskan 12,000 Rial", 1000L}));
-        String txt = ScanDiagnostics.reportText(s);
+        String txt = ScanDiagnostics.reportText(ScanDiagnostics.problemSenders(s));
         assertNotNull(txt);
         assertTrue(txt.contains("+98unknown"));
         assertTrue(txt.contains("maskan 12,000 Rial"));
         assertTrue(txt.contains("1 message"));
     }
 
-    @Test public void reportText_allRecognized_returnsNull() {
+    @Test public void reportText_knownBankSender_namesTheBank() {
         ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
-            new Object[]{TEJARAT, "balance 1000", 1000L}));
-        assertNull(ScanDiagnostics.reportText(s));
+            new Object[]{TEJARAT, "bill paid", 1000L}));
+        String txt = ScanDiagnostics.reportText(ScanDiagnostics.problemSenders(s));
+        assertTrue(txt.contains("Tejarat"));
+        assertTrue(txt.contains(TEJARAT));
     }
 
-    @Test public void reportText_emptySummary_returnsNull() {
-        assertNull(ScanDiagnostics.reportText(ScanDiagnostics.analyze(rows())));
+    @Test public void reportText_emptySelection_headersOnlyNoNull() {
+        String txt = ScanDiagnostics.reportText(new ArrayList<>());
+        assertNotNull(txt);
+        assertTrue(txt.contains("## Bank SMS formats Balance could not parse"));
+    }
+
+    @Test public void reportText_knownBankAndUnknown_union() {
+        ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
+            new Object[]{TEJARAT, "layout that failed", 1000L},
+            new Object[]{"+98x", "unknown one", 2000L}));
+        // Pick only the unknown sender -> the known-bank entry must not leak in.
+        String txt = ScanDiagnostics.reportText(s.unknownSenders);
+        assertTrue(txt.contains("+98x"));
+        assertTrue(!txt.contains(TEJARAT));
     }
 
     @Test public void reportText_pluralMessages() {
         ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
             new Object[]{"+98x", "a", 1000L},
             new Object[]{"+98x", "b", 2000L}));
-        assertTrue(ScanDiagnostics.reportText(s).contains("2 messages"));
+        assertTrue(ScanDiagnostics.reportText(s.unknownSenders).contains("2 messages"));
     }
 
     @Test public void storedMessages_newestFirst_andCapped() {
@@ -136,7 +179,7 @@ public class ScanDiagnosticsTest {
         for (int i = ScanDiagnostics.MAX_SAMPLES_PER_SENDER + 4; i >= 0; i--)
             r.add(new Object[]{"+98bulk", "msg " + i, 1000L + i});
         ScanDiagnostics.Summary s = ScanDiagnostics.analyze(r);
-        ScanDiagnostics.SenderHit h = s.senders.get(0);
+        ScanDiagnostics.SenderHit h = s.unknownSenders.get(0);
         assertEquals(ScanDiagnostics.MAX_SAMPLES_PER_SENDER + 5, h.messages);
         assertEquals(ScanDiagnostics.MAX_SAMPLES_PER_SENDER, h.stored.size());
         assertEquals("msg " + (ScanDiagnostics.MAX_SAMPLES_PER_SENDER + 4), h.stored.get(0).body);
@@ -146,20 +189,22 @@ public class ScanDiagnosticsTest {
         ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
             new Object[]{"+98x", "newest", 2000L},
             new Object[]{"+98x", "older", 1000L}));
-        ScanDiagnostics.SenderHit h = s.senders.get(0);
+        ScanDiagnostics.SenderHit h = s.unknownSenders.get(0);
         assertEquals(2, h.stored.size());
         assertEquals("newest", h.stored.get(0).body);
         assertEquals("older", h.stored.get(1).body);
-        assertTrue(ScanDiagnostics.reportText(s).contains("newest"));
+        assertTrue(ScanDiagnostics.reportText(s.unknownSenders).contains("newest"));
     }
 
     @Test public void nullBodyOrSender_tolerated() {
         ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
             new Object[]{TEJARAT, null, 1000L},
             new Object[]{null, null, 2000L}));
-        assertEquals(1, s.recognizedMessages);
-        assertEquals(1, s.skippedMessages);
-        assertEquals("", s.senders.get(0).stored.get(0).body);
+        assertEquals(0, s.parsedMessages);
+        assertEquals(2, s.unparsedMessages());
+        assertEquals(1, s.unparsedSenders.size());
+        assertEquals(1, s.unknownSenders.size());
+        assertTrue(ScanDiagnostics.problemSenders(s).get(0).stored.get(0).body != null);
     }
 
     // ---- senderReport: the per-sender chooser text ----
@@ -169,7 +214,7 @@ public class ScanDiagnosticsTest {
             new Object[]{"+98x", "first msg", 1000L},
             new Object[]{"+98x", "second msg", 2000L},
             new Object[]{"+98x", "third msg", 3000L}));
-        ScanDiagnostics.SenderHit h = s.senders.get(0);
+        ScanDiagnostics.SenderHit h = s.unknownSenders.get(0);
         List<ScanDiagnostics.Message> chosen = new ArrayList<>();
         chosen.add(h.stored.get(1)); // only "second msg"
         String txt = ScanDiagnostics.senderReport(h.sender, h.messages, chosen);
@@ -307,45 +352,65 @@ public class ScanDiagnosticsTest {
         }
     }
 
-    @Test public void screen_seededMix_countsRecognizedAndListsSkippedSenders() throws Exception {
+    @Test public void screen_seededMix_separatesRecognizedKnownBankAndUnknownSenders() throws Exception {
         seed(TEJARAT, "موجودی شما: 1,250,000 تومان", 1_710_000_000_000L);
-        seed(UNKNOWN_1, "card purchase 45,000 T", 1_710_000_001_000L);
-        seed(UNKNOWN_1, "transfer 10,500 T", 1_710_000_002_000L);
-        seed(UNKNOWN_2, "otp 123456", 1_710_000_003_000L);
+        seed(TEJARAT, "پرداخت قبض انجام شد", 1_710_000_001_000L);
+        seed(UNKNOWN_1, "card purchase 45,000 T", 1_710_000_002_000L);
+        seed(UNKNOWN_1, "transfer 10,500 T", 1_710_000_003_000L);
+        seed(UNKNOWN_2, "otp 123456", 1_710_000_004_000L);
         ScanDiagnosticsActivity act = launch();
         try {
-            String all = waitFor(act, ctx.getString(R.string.scan_diag_skipped_senders));
+            String all = waitFor(act, ctx.getString(R.string.scan_diag_unparsed_banks_title));
             assertTrue(all.contains(ctx.getString(R.string.scan_diag_recognized)));
-            assertTrue(all.contains("Tejarat"));
+            assertTrue(all.contains(ctx.getString(R.string.scan_diag_recognized_banks)));
+            assertTrue(all.contains(ctx.getString(R.string.scan_diag_unparsed_banks_title)));
+            assertTrue(all.contains(ctx.getString(R.string.scan_diag_skipped_senders)));
+            assertTrue(all.contains("Tejarat")); // the parses card and the flagged bank line
+            assertTrue(all.contains("پرداخت قبض انجام شد")); // the known-bank message that failed
             assertTrue(all.contains(UNKNOWN_1));
             assertTrue(all.contains(UNKNOWN_2));
-            assertTrue(all.contains(ctx.getString(R.string.scan_diag_copy_report)));
-            assertTrue(all.contains(ctx.getString(R.string.scan_diag_email_report)));
+            assertTrue(all.contains(ctx.getString(R.string.scan_diag_copy_selected, 0)));
+            assertTrue(all.contains(ctx.getString(R.string.scan_diag_email_selected, 0)));
         } finally {
             InstrumentationRegistry.getInstrumentation().runOnMainSync(act::finish);
         }
     }
 
     /** Launches the per-sender chooser with two sample messages and checks it renders both with the
-     *  multi-selection controls, without sending anything. */
+     *  multi-selection controls, nothing preselected and counters at zero, without sending anything. */
     @Test public void senderScreen_listsMessagesAndOffersSelectionButDoesNotSend() throws Exception {
         android.content.Intent i = new android.content.Intent(ctx, SenderShareActivity.class)
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 .putExtra(SenderShareActivity.EXTRA_SENDER, UNKNOWN_1)
                 .putStringArrayListExtra(SenderShareActivity.EXTRA_MESSAGES,
-                    new ArrayList<>(java.util.Arrays.asList("sample one", "sample two")));
+                    new ArrayList<>(Arrays.asList("sample one", "sample two")));
         SenderShareActivity act = (SenderShareActivity) InstrumentationRegistry.getInstrumentation()
                 .startActivitySync(i);
         try {
-            String all = waitFor(act, ctx.getString(R.string.sender_share_send));
+            String all = waitFor(act, ctx.getString(R.string.sender_share_send, 0));
             assertTrue(all.contains(UNKNOWN_1));
             assertTrue(all.contains("sample one"));
             assertTrue(all.contains("sample two"));
-            assertTrue(all.contains(ctx.getString(R.string.sender_share_select_none)));
-            assertTrue(all.contains(ctx.getString(R.string.sender_share_copy)));
-            assertTrue(all.contains(ctx.getString(R.string.sender_share_send)));
+            assertTrue(all.contains(ctx.getString(R.string.sender_share_select_all)));
+            assertTrue(all.contains(ctx.getString(R.string.sender_share_copy, 0)));
+            assertTrue(all.contains(ctx.getString(R.string.sender_share_send, 0)));
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                List<android.widget.CheckBox> checks = new ArrayList<>();
+                findChecks(act.getWindow().getDecorView(), checks);
+                for (android.widget.CheckBox c : checks) {
+                    assertTrue("no message should be preselected", !c.isChecked());
+                }
+            });
         } finally {
             InstrumentationRegistry.getInstrumentation().runOnMainSync(act::finish);
+        }
+    }
+
+    private void findChecks(android.view.View v, List<android.widget.CheckBox> out) {
+        if (v instanceof android.widget.CheckBox) out.add((android.widget.CheckBox) v);
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) findChecks(g.getChildAt(i), out);
         }
     }
 }
