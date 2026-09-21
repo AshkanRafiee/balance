@@ -55,7 +55,7 @@ public final class AboutActivity extends Activity {
 
     @Override
     protected void attachBaseContext(Context base) {
-        super.attachBaseContext(LocaleHelper.wrap(base));
+        super.attachBaseContext(LocaleHelper.wrap(ThemeHelper.wrap(base)));
     }
 
     @Override

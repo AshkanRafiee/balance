@@ -35,7 +35,7 @@
     <string name="toast_copied_balance">Copied %1$s balance</string>
 
     <string name="footer_about">About</string>
-    <string name="footer_region_language">Region &amp; Language</string>
+    <string name="footer_display">Display</string>
     <string name="footer_data">Data</string>
 
     <string name="dialog_hard_refresh_title">Reset balances and rescan?</string>
@@ -49,15 +49,17 @@
     <string name="widget_permission_hint">Open Balance to allow SMS access</string>
     <string name="language_system_default">System default</string>
 
-    <string name="settings_region_label">Region</string>
+    <string name="settings_calendar_label">Calendar</string>
     <string name="settings_language_label">Language</string>
     <string name="settings_currency_label">Currency</string>
-    <string name="region_iran">Iran</string>
-    <string name="region_international">International</string>
+    <string name="settings_theme_label">Theme</string>
+    <string name="calendar_persian">Persian (Jalali)</string>
+    <string name="calendar_gregorian">Gregorian</string>
+    <string name="theme_system">System default</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_light">Light</string>
     <string name="currency_toman">Toman</string>
     <string name="currency_rial">Rial</string>
-    <string name="currency_usd">USD</string>
-    <string name="currency_eur">EUR</string>
     <string name="currency_custom">Custom</string>
 
     <string name="data_title">Data</string>

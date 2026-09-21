@@ -79,7 +79,7 @@ public final class ScanDiagnosticsActivity extends Activity {
 
     @Override
     protected void attachBaseContext(Context base) {
-        super.attachBaseContext(LocaleHelper.wrap(base));
+        super.attachBaseContext(LocaleHelper.wrap(ThemeHelper.wrap(base)));
     }
 
     @Override

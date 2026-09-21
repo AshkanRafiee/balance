@@ -35,7 +35,7 @@
     <string name="toast_copied_balance">موجودی %1$s کپی شد</string>
 
     <string name="footer_about">درباره</string>
-    <string name="footer_region_language">منطقه و زبان</string>
+    <string name="footer_display">نمایش</string>
     <string name="footer_data">داده‌ها</string>
 
     <string name="dialog_hard_refresh_title">بازنشانی موجودی‌ها و خواندن دوباره؟</string>
@@ -49,15 +49,17 @@
     <string name="widget_permission_hint">برای دسترسی به پیامک‌ها، برنامهٔ Balance را باز کنید</string>
     <string name="language_system_default">پیش‌فرض سیستم</string>
 
-    <string name="settings_region_label">منطقه</string>
+    <string name="settings_calendar_label">تقویم</string>
     <string name="settings_language_label">زبان</string>
     <string name="settings_currency_label">واحد پول</string>
-    <string name="region_iran">ایران</string>
-    <string name="region_international">بین‌المللی</string>
+    <string name="settings_theme_label">پوسته</string>
+    <string name="calendar_persian">شمسی (جلالی)</string>
+    <string name="calendar_gregorian">میلادی</string>
+    <string name="theme_system">پیش‌فرض سیستم</string>
+    <string name="theme_dark">تیره</string>
+    <string name="theme_light">روشن</string>
     <string name="currency_toman">تومان</string>
     <string name="currency_rial">ریال</string>
-    <string name="currency_usd">دلار</string>
-    <string name="currency_eur">یورو</string>
     <string name="currency_custom">دلخواه</string>
 
     <string name="data_title">داده‌ها</string>

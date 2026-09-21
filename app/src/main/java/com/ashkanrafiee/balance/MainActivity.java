@@ -68,7 +68,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void attachBaseContext(Context base) {
-        super.attachBaseContext(LocaleHelper.wrap(base));
+        super.attachBaseContext(LocaleHelper.wrap(ThemeHelper.wrap(base)));
     }
 
     @Override
@@ -266,18 +266,18 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** The combined Region & Language & Currency dialog behind the footer item: the dropdowns in a
-     *  single menu, so the calendar system (see {@link RegionHelper}), the interface language and
-     *  the currency unit (see {@link CurrencyHelper}) are all chosen in one place. A changed region
-     *  applies on the next history open; a changed currency re-renders the dashboard and the
-     *  widget; a changed language recreates the screen, exactly like the former standalone dialog. */
-    private void regionLanguageDialog() {
+    /** The combined Display dialog behind the footer item: the dropdowns in a single menu, so the
+     *  calendar system (see {@link RegionHelper}), the interface language, the currency unit (see
+     *  {@link CurrencyHelper}) and the color theme (see {@link ThemeHelper}) are all chosen in one
+     *  place. A changed region applies on the next history open; a changed theme or language
+     *  recreates the screen; a changed currency re-renders the dashboard and the widget. */
+    private void displayDialog() {
         int pad = dp(14);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(pad + dp(12), dp(4), pad, 0);
 
-        String[] regionLabels = {getString(R.string.region_iran), getString(R.string.region_international)};
+        String[] calendarLabels = {getString(R.string.calendar_persian), getString(R.string.calendar_gregorian)};
         String[] langTags = LocaleHelper.SUPPORTED;
         String[] langLabels = new String[langTags.length];
         for (int i = 0; i < langTags.length; i++)
@@ -285,16 +285,18 @@ public class MainActivity extends Activity {
                 ? getString(R.string.language_system_default) : LocaleHelper.displayName(langTags[i]);
         String[] currencyLabels = {
             getString(R.string.currency_toman), getString(R.string.currency_rial),
-            getString(R.string.currency_usd), getString(R.string.currency_eur),
             getString(R.string.currency_custom)
         };
+        String[] themeLabels = {
+            getString(R.string.theme_system), getString(R.string.theme_dark), getString(R.string.theme_light)
+        };
 
-        Spinner regionSpin = new Spinner(this);
-        ArrayAdapter<String> regionAdapter = new ArrayAdapter<>(this,
-            android.R.layout.simple_spinner_item, regionLabels);
-        regionAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        regionSpin.setAdapter(regionAdapter);
-        regionSpin.setSelection(RegionHelper.region(this) == RegionHelper.REGION_INTERNATIONAL ? 1 : 0);
+        Spinner calendarSpin = new Spinner(this);
+        ArrayAdapter<String> calendarAdapter = new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item, calendarLabels);
+        calendarAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        calendarSpin.setAdapter(calendarAdapter);
+        calendarSpin.setSelection(RegionHelper.region(this) == RegionHelper.REGION_INTERNATIONAL ? 1 : 0);
 
         Spinner langSpin = new Spinner(this);
         ArrayAdapter<String> langAdapter = new ArrayAdapter<>(this,
@@ -318,26 +320,38 @@ public class MainActivity extends Activity {
         currencySpin.setAdapter(currencyAdapter);
         int curIdx = CurrencyHelper.fixedIndex(storedCurrency);
         currencySpin.setSelection(curIdx);
-        customInput.setVisibility(curIdx == 4 ? View.VISIBLE : View.GONE);
+        customInput.setVisibility(curIdx == 2 ? View.VISIBLE : View.GONE);
         currencySpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
-                customInput.setVisibility(pos == 4 ? View.VISIBLE : View.GONE);
+                customInput.setVisibility(pos == 2 ? View.VISIBLE : View.GONE);
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
         });
 
-        TextView regionLabel = new TextView(this);
-        regionLabel.setText(getString(R.string.settings_region_label));
-        regionLabel.setTextSize(14);
+        Spinner themeSpin = new Spinner(this);
+        ArrayAdapter<String> themeAdapter = new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item, themeLabels);
+        themeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        themeSpin.setAdapter(themeAdapter);
+        String storedTheme = ThemeHelper.theme(this);
+        for (int i = 0; i < ThemeHelper.CHOICES.length; i++)
+            if (ThemeHelper.CHOICES[i].equals(storedTheme)) { themeSpin.setSelection(i); break; }
+
+        TextView calendarLabel = new TextView(this);
+        calendarLabel.setText(getString(R.string.settings_calendar_label));
+        calendarLabel.setTextSize(14);
         TextView langLabel = new TextView(this);
         langLabel.setText(getString(R.string.settings_language_label));
         langLabel.setTextSize(14);
         TextView currencyLabel = new TextView(this);
         currencyLabel.setText(getString(R.string.settings_currency_label));
         currencyLabel.setTextSize(14);
+        TextView themeLabel = new TextView(this);
+        themeLabel.setText(getString(R.string.settings_theme_label));
+        themeLabel.setTextSize(14);
 
-        box.addView(regionLabel);
-        box.addView(regionSpin);
+        box.addView(calendarLabel);
+        box.addView(calendarSpin);
         LinearLayout.LayoutParams langLp = new LinearLayout.LayoutParams(-1, -2);
         langLp.topMargin = dp(18);
         box.addView(langLabel, langLp);
@@ -349,18 +363,22 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams curInLp = new LinearLayout.LayoutParams(-1, -2);
         curInLp.topMargin = dp(8);
         box.addView(customInput, curInLp);
+        LinearLayout.LayoutParams themeLp = new LinearLayout.LayoutParams(-1, -2);
+        themeLp.topMargin = dp(18);
+        box.addView(themeLabel, themeLp);
+        box.addView(themeSpin);
 
         showDialog(new android.app.AlertDialog.Builder(this)
-            .setTitle(getString(R.string.footer_region_language))
+            .setTitle(getString(R.string.footer_display))
             .setView(box)
             .setPositiveButton(android.R.string.ok, (d, w) -> {
-                int chosen = regionSpin.getSelectedItemPosition() == 1
+                int chosen = calendarSpin.getSelectedItemPosition() == 1
                     ? RegionHelper.REGION_INTERNATIONAL : RegionHelper.REGION_IRAN;
                 String tag = langTags[Math.min(langSpin.getSelectedItemPosition(), langTags.length - 1)];
                 boolean langChanged = !tag.equals(LocaleHelper.currentTag(this));
                 String chosenCurrency = null;
                 int curPos = currencySpin.getSelectedItemPosition();
-                if (curPos == 4) {
+                if (curPos == 2) {
                     String typed = customInput.getText().toString().trim();
                     if (!typed.isEmpty()) chosenCurrency = CurrencyHelper.CUSTOM_PREFIX + typed;
                 } else {
@@ -368,10 +386,14 @@ public class MainActivity extends Activity {
                 }
                 boolean currencyChanged = chosenCurrency != null
                     && !chosenCurrency.equals(CurrencyHelper.currency(this));
+                String chosenTheme = ThemeHelper.CHOICES[
+                    Math.min(themeSpin.getSelectedItemPosition(), ThemeHelper.CHOICES.length - 1)];
+                boolean themeChanged = !chosenTheme.equals(ThemeHelper.theme(this));
                 RegionHelper.setRegion(this, chosen);
                 if (chosenCurrency != null) CurrencyHelper.setCurrency(this, chosenCurrency);
-                if (langChanged) {
-                    LocaleHelper.setLanguage(this, tag);
+                ThemeHelper.setTheme(this, chosenTheme);
+                if (langChanged) LocaleHelper.setLanguage(this, tag);
+                if (langChanged || themeChanged) {
                     recreate();
                 } else if (currencyChanged) {
                     view.invalidate();
@@ -1507,7 +1529,7 @@ public class MainActivity extends Activity {
 
             p.setTextSize(13);
             String aboutText = getString(R.string.footer_about);
-            String langText = getString(R.string.footer_region_language);
+            String langText = getString(R.string.footer_display);
             String backupText = getString(R.string.footer_data);
             String reportText = getString(R.string.footer_report);
             String sep = "  \u00b7  ";
@@ -1925,7 +1947,7 @@ public class MainActivity extends Activity {
                 if (x >= footerAboutStart - 10 && x <= footerAboutEnd + 10) {
                     startActivity(new Intent(MainActivity.this, AboutActivity.class));
                 } else if (x >= footerLangStart - 10 && x <= footerLangEnd + 10) {
-                    MainActivity.this.regionLanguageDialog();
+                    MainActivity.this.displayDialog();
                 } else if (x >= footerBackupStart - 10 && x <= footerBackupEnd + 10) {
                     MainActivity.this.dataDialog();
                 } else if (x >= footerReportStart - 10 && x <= footerReportEnd + 10) {
