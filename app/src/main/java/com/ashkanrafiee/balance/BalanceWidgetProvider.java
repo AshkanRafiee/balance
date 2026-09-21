@@ -23,6 +23,8 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
      *  reused rather than re-minted on updates. */
     static final int REQ_MASK = 1, REQ_REFRESH = 2, REQ_OPEN = 3;
     private static final int REQ_ALARM = 100;
+    /** The only releases that minted the repeating alarm at REQ_ALARM + versionCode * 1000. */
+    private static final int[] LEGACY_ALARM_VERSION_CODES = {10400, 10401};
     private static final long MIN_SPIN_DURATION = 700L;
     private static final AtomicBoolean REFRESHING = new AtomicBoolean(false);
     private static volatile float spin;
@@ -189,15 +191,16 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
             REFRESH_INTERVAL, alarmPending(context));
     }
 
-    /** Versions up to 1.4.1 minted the repeating alarm at REQ_ALARM + versionCode * 1000, which survives
-     *  an upgrade as a stale second alarm. Cancel those legacy request codes before re-arming so an
-     *  upgraded install never fires the old and new alarms together. */
+    /** The widget releases v1.4.0 and v1.4.1 minted the repeating alarm at REQ_ALARM + versionCode * 1000
+     *  (10,400,100 and 10,401,100), which survives an upgrade as a stale second alarm. Cancel just those
+     *  fixed legacy request codes before re-arming so an upgraded install never fires the old and new
+     *  alarms together. Since v1.5.0 the alarm is always minted plain at REQ_ALARM, so nothing else can
+     *  leak into this app's request-code space. */
     private static void cancelLegacyAlarms(Context context) {
         AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (am == null) return;
-        int vc = versionCode(context);
-        for (int v = vc; v >= Math.max(10000, vc - 4); v--) {
-            PendingIntent legacy = PendingIntent.getBroadcast(context, REQ_ALARM + v * 1000,
+        for (int legacyVersion : LEGACY_ALARM_VERSION_CODES) {
+            PendingIntent legacy = PendingIntent.getBroadcast(context, REQ_ALARM + legacyVersion * 1000,
                 new Intent(context, BalanceWidgetProvider.class).setAction(ACTION_ALARM),
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
             am.cancel(legacy);
