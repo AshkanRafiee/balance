@@ -649,7 +649,7 @@ public class HistoryTest {
         assertTrue(new HistoryActivity.Filter(HistoryActivity.DIR_WITHDRAWAL,
             HistoryActivity.RANGE_ALL, null, null).isActive());
         assertTrue(new HistoryActivity.Filter(HistoryActivity.DIR_ALL,
-            HistoryActivity.RANGE_CUSTOM, JalaliCalendar.of(1405, 6, 1), null).isActive());
+            HistoryActivity.RANGE_CUSTOM, CalDate.of(1405, 6, 1), null).isActive());
     }
 
     // ---- history filters: date range -------------------------------------------------
@@ -661,7 +661,7 @@ public class HistoryTest {
         txs.add(new Transaction("Saman", epochJ(1405, 6, 15), -300000L));
         txs.add(new Transaction("Saman", epochJ(1405, 7, 1), 500000L));
         HistoryActivity.Filter f = new HistoryActivity.Filter(HistoryActivity.DIR_ALL,
-            HistoryActivity.RANGE_CUSTOM, JalaliCalendar.of(1405, 6, 1), JalaliCalendar.of(1405, 6, 30));
+            HistoryActivity.RANGE_CUSTOM, CalDate.of(1405, 6, 1), CalDate.of(1405, 6, 30));
         List<Transaction> out = HistoryActivity.applyFilters(txs, f);
         assertEquals(2, out.size());
         assertTrue(out.contains(txs.get(0)));
@@ -675,13 +675,13 @@ public class HistoryTest {
         txs.add(new Transaction("Saman", epochJ(1404, 12, 29), 500000L));
         // From 1405/6/1 onward (no upper bound).
         HistoryActivity.Filter from = new HistoryActivity.Filter(HistoryActivity.DIR_ALL,
-            HistoryActivity.RANGE_CUSTOM, JalaliCalendar.of(1405, 6, 1), null);
+            HistoryActivity.RANGE_CUSTOM, CalDate.of(1405, 6, 1), null);
         List<Transaction> outFrom = HistoryActivity.applyFilters(txs, from);
         assertEquals(1, outFrom.size());
         assertEquals(-300000L, outFrom.get(0).amount);
         // Up to 1405/6/1 inclusive (no lower bound).
         HistoryActivity.Filter to = new HistoryActivity.Filter(HistoryActivity.DIR_ALL,
-            HistoryActivity.RANGE_CUSTOM, null, JalaliCalendar.of(1405, 6, 1));
+            HistoryActivity.RANGE_CUSTOM, null, CalDate.of(1405, 6, 1));
         assertEquals(3, HistoryActivity.applyFilters(txs, to).size());
     }
 
@@ -691,7 +691,7 @@ public class HistoryTest {
         txs.add(new Transaction("Saman", epochJ(1405, 6, 2), -300000L));
         txs.add(new Transaction("Saman", epochJ(1405, 7, 1), 500000L));
         HistoryActivity.Filter f = new HistoryActivity.Filter(HistoryActivity.DIR_DEPOSIT,
-            HistoryActivity.RANGE_CUSTOM, JalaliCalendar.of(1405, 6, 1), JalaliCalendar.of(1405, 6, 30));
+            HistoryActivity.RANGE_CUSTOM, CalDate.of(1405, 6, 1), CalDate.of(1405, 6, 30));
         List<Transaction> out = HistoryActivity.applyFilters(txs, f);
         assertEquals(1, out.size());
         assertEquals(1000000L, out.get(0).amount);
@@ -705,7 +705,7 @@ public class HistoryTest {
         txs.add(new Transaction("Mellat", epochJ(1405, 6, 5), 2000000L));
         txs.add(new Transaction("Saman", epochJ(1404, 12, 1), 500000L));
         HistoryActivity.Filter f = new HistoryActivity.Filter(HistoryActivity.DIR_WITHDRAWAL,
-            HistoryActivity.RANGE_CUSTOM, JalaliCalendar.of(1405, 1, 1), null);
+            HistoryActivity.RANGE_CUSTOM, CalDate.of(1405, 1, 1), null);
         List<Transaction> out = HistoryActivity.applyFilters(
             HistoryActivity.filterByBank(txs, "Saman"), f);
         assertEquals(1, out.size());
@@ -720,7 +720,7 @@ public class HistoryTest {
         txs.add(new Transaction("Saman", epochJ(1405, 6, 1), -300000L));
         txs.add(new Transaction("Saman", epochJ(1404, 12, 1), 900000L));
         HistoryActivity.Filter f = new HistoryActivity.Filter(HistoryActivity.DIR_ALL,
-            HistoryActivity.RANGE_CUSTOM, JalaliCalendar.of(1405, 1, 1), null);
+            HistoryActivity.RANGE_CUSTOM, CalDate.of(1405, 1, 1), null);
         HistoryActivity.Lists lists = HistoryActivity.buildLists(HistoryActivity.applyFilters(txs, f));
         assertEquals(700000L, lists.total);
         assertEquals(1, lists.years.size());
@@ -783,7 +783,7 @@ public class HistoryTest {
 
     @Test public void rangePreset_all_clearsBoundsKeepsDirection() {
         HistoryActivity.Filter set = new HistoryActivity.Filter(HistoryActivity.DIR_WITHDRAWAL,
-            HistoryActivity.RANGE_CUSTOM, JalaliCalendar.of(1405, 6, 1), JalaliCalendar.of(1405, 6, 30));
+            HistoryActivity.RANGE_CUSTOM, CalDate.of(1405, 6, 1), CalDate.of(1405, 6, 30));
         HistoryActivity.Filter cleared = HistoryActivity.rangePreset(set, HistoryActivity.RANGE_ALL,
             JalaliCalendar.of(1405, 6, 13));
         assertEquals(HistoryActivity.RANGE_ALL, cleared.rangePreset);
@@ -792,11 +792,85 @@ public class HistoryTest {
         assertEquals(HistoryActivity.DIR_WITHDRAWAL, cleared.direction);
     }
 
+    // ---- Gregorian (International region) calendar -----------------------------------
+
+    @Test public void gregorian_buildLists_wrapsTheYear() {
+        // 2025-12-31 and 2026-01-01 are different Gregorian years and months.
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Saman", epoch(2025, 12, 31), 1000000L));
+        txs.add(new Transaction("Saman", epoch(2026, 1, 1), -500000L));
+        HistoryActivity.Lists lists = HistoryActivity.buildLists(txs, false);
+        assertEquals(500000L, lists.total);
+        assertEquals(2, lists.years.size());
+        HistoryActivity.YearGroup y2026 = lists.years.get(0);
+        assertEquals(2026, y2026.year);
+        assertEquals(-500000L, y2026.sum);
+        assertEquals(1, y2026.months.get(0).month);
+        assertEquals(1, y2026.months.get(0).days.get(0).date.day);
+        HistoryActivity.YearGroup y2025 = lists.years.get(1);
+        assertEquals(2025, y2025.year);
+        assertEquals(12, y2025.months.get(0).month);
+        assertEquals(31, y2025.months.get(0).days.get(0).date.day);
+    }
+
+    @Test public void gregorian_filter_dateRange_inclusiveBoundaries() {
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Saman", epoch(2026, 2, 1), 1000000L));
+        txs.add(new Transaction("Saman", epoch(2026, 2, 28), -300000L));
+        txs.add(new Transaction("Saman", epoch(2026, 3, 1), 500000L));
+        HistoryActivity.Filter f = new HistoryActivity.Filter(HistoryActivity.DIR_ALL,
+            HistoryActivity.RANGE_CUSTOM, CalDate.of(2026, 2, 1), CalDate.of(2026, 2, 28));
+        List<Transaction> out = HistoryActivity.applyFilters(txs, f, false);
+        assertEquals(2, out.size());
+        assertTrue(out.contains(txs.get(0)));
+        assertTrue(out.contains(txs.get(1)));
+    }
+
+    @Test public void gregorian_rangePreset_leapFebruary_gets29Days() {
+        HistoryActivity.Filter f = HistoryActivity.rangePreset(HistoryActivity.Filter.ALL,
+            HistoryActivity.RANGE_MONTH, CalDate.of(2028, 2, 15), false);
+        assertEquals(1, f.from.day);
+        assertEquals(29, f.to.day);
+    }
+
+    @Test public void gregorian_rangePreset_nonLeapFebruary_gets28Days() {
+        HistoryActivity.Filter f = HistoryActivity.rangePreset(HistoryActivity.Filter.ALL,
+            HistoryActivity.RANGE_MONTH, CalDate.of(2026, 2, 15), false);
+        assertEquals(28, f.to.day);
+    }
+
+    @Test public void gregorian_daysInMonth_leapAndNonLeap() {
+        assertEquals(29, CalDate.daysInMonth(2028, 2, false));
+        assertEquals(28, CalDate.daysInMonth(2026, 2, false));
+        assertEquals(31, CalDate.daysInMonth(2026, 12, false));
+        assertEquals(30, CalDate.daysInMonth(2026, 11, false));
+    }
+
+    @Test public void gregorian_conversions_roundTrip() {
+        CalDate d = CalDate.fromGregorian(2026, 9, 21, false);
+        assertEquals(2026, d.year);
+        assertEquals(9, d.month);
+        assertEquals(21, d.day);
+        int[] g = d.toGregorian(false);
+        assertEquals(2026, g[0]);
+        assertEquals(9, g[1]);
+        assertEquals(21, g[2]);
+        // The same Gregorian day named in the Persian calendar converts back unchanged.
+        CalDate j = CalDate.fromGregorian(2026, 9, 21, true);
+        assertEquals(1405, j.year);
+        assertEquals(6, j.month);
+        assertEquals(30, j.day);
+        int[] back = j.toGregorian(true);
+        assertEquals(2026, back[0]);
+        assertEquals(9, back[1]);
+        assertEquals(21, back[2]);
+    }
+
     // ---- history filters: custom-range calendar ----------------------------------
 
     @Test public void pickDay_firstTapSetsFrom() {
-        JalaliCalendar[] picked = new JalaliCalendar[2];
-        HistoryActivity.pickDay(picked, JalaliCalendar.of(1405, 6, 15));
+        CalDate[] picked = new CalDate[2];
+        HistoryActivity.pickDay(picked, CalDate.of(1405, 6, 15));
         assertEquals(1405, picked[0].year);
         assertEquals(6, picked[0].month);
         assertEquals(15, picked[0].day);
@@ -804,17 +878,17 @@ public class HistoryTest {
     }
 
     @Test public void pickDay_secondTapSetsTo() {
-        JalaliCalendar[] picked = new JalaliCalendar[2];
-        HistoryActivity.pickDay(picked, JalaliCalendar.of(1405, 6, 1));
-        HistoryActivity.pickDay(picked, JalaliCalendar.of(1405, 6, 15));
+        CalDate[] picked = new CalDate[2];
+        HistoryActivity.pickDay(picked, CalDate.of(1405, 6, 1));
+        HistoryActivity.pickDay(picked, CalDate.of(1405, 6, 15));
         assertEquals(1, picked[0].day);
         assertEquals(15, picked[1].day);
     }
 
     @Test public void pickDay_toBeforeFromSwapsBounds() {
-        JalaliCalendar[] picked = new JalaliCalendar[2];
-        HistoryActivity.pickDay(picked, JalaliCalendar.of(1405, 6, 15));
-        HistoryActivity.pickDay(picked, JalaliCalendar.of(1405, 6, 1));
+        CalDate[] picked = new CalDate[2];
+        HistoryActivity.pickDay(picked, CalDate.of(1405, 6, 15));
+        HistoryActivity.pickDay(picked, CalDate.of(1405, 6, 1));
         assertEquals(1, picked[0].day);
         assertEquals(15, picked[1].day);
         assertEquals(6, picked[0].month);
@@ -824,10 +898,10 @@ public class HistoryTest {
     }
 
     @Test public void pickDay_tapWhileClosedStartsFreshFrom() {
-        JalaliCalendar[] picked = new JalaliCalendar[2];
-        HistoryActivity.pickDay(picked, JalaliCalendar.of(1405, 6, 1));
-        HistoryActivity.pickDay(picked, JalaliCalendar.of(1405, 6, 15));
-        HistoryActivity.pickDay(picked, JalaliCalendar.of(1405, 7, 1));
+        CalDate[] picked = new CalDate[2];
+        HistoryActivity.pickDay(picked, CalDate.of(1405, 6, 1));
+        HistoryActivity.pickDay(picked, CalDate.of(1405, 6, 15));
+        HistoryActivity.pickDay(picked, CalDate.of(1405, 7, 1));
         assertEquals(1405, picked[0].year);
         assertEquals(7, picked[0].month);
         assertEquals(1, picked[0].day);
@@ -835,8 +909,8 @@ public class HistoryTest {
     }
 
     @Test public void pickDay_sameDayTwiceClosesTheRange() {
-        JalaliCalendar[] picked = new JalaliCalendar[2];
-        JalaliCalendar d = JalaliCalendar.of(1405, 6, 1);
+        CalDate[] picked = new CalDate[2];
+        CalDate d = CalDate.of(1405, 6, 1);
         HistoryActivity.pickDay(picked, d);
         HistoryActivity.pickDay(picked, d);
         assertEquals(1, picked[0].day);
@@ -845,17 +919,24 @@ public class HistoryTest {
 
     @Test public void weekdayIndex_saturdayIsTheLeadingColumn() {
         // Farvardin 1 1403 was Wednesday (index 4); Farvardin 4 was a Saturday (index 0).
-        assertEquals(4, HistoryActivity.weekdayIndex(JalaliCalendar.of(1403, 1, 1)));
-        assertEquals(0, HistoryActivity.weekdayIndex(JalaliCalendar.of(1403, 1, 4)));
-        assertEquals(2, HistoryActivity.weekdayIndex(JalaliCalendar.of(1403, 1, 6)));
+        assertEquals(4, CalDate.weekdayIndex(CalDate.of(1403, 1, 1), true));
+        assertEquals(0, CalDate.weekdayIndex(CalDate.of(1403, 1, 4), true));
+        assertEquals(2, CalDate.weekdayIndex(CalDate.of(1403, 1, 6), true));
     }
 
     @Test public void weekdayIndex_advancesOnePerDay() {
         for (int d = 1; d <= 7; d++) {
             int expected = (4 + (d - 1)) % 7;
             assertEquals("Farvardin " + d + " 1403", expected,
-                HistoryActivity.weekdayIndex(JalaliCalendar.of(1403, 1, d)));
+                CalDate.weekdayIndex(CalDate.of(1403, 1, d), true));
         }
+    }
+
+    @Test public void weekdayIndex_international_mondayIsTheLeadingColumn() {
+        // 2026-02-02 was a Monday (index 0); the preceding Sunday is index 6.
+        assertEquals(0, CalDate.weekdayIndex(CalDate.of(2026, 2, 2), false));
+        assertEquals(6, CalDate.weekdayIndex(CalDate.of(2026, 2, 1), false));
+        assertEquals(1, CalDate.weekdayIndex(CalDate.of(2026, 2, 3), false));
     }
 
     // ---- Persian calendar numerals have no thousands grouping ----
