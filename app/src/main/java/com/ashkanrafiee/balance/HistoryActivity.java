@@ -1333,8 +1333,10 @@ public final class HistoryActivity extends Activity {
         return box;
     }
 
-    /** One movement: bank badge, bank name with time, and the signed amount. In a per-bank view
-     *  every row is the same bank, so the time alone identifies it and the badge/name are dropped. */
+    /** One movement: bank badge, bank name with time, the account number it hit, and the signed
+     *  amount. In a per-bank view every row is the same bank, so the time alone identifies it and
+     *  the badge/name are dropped — but the account number stays in both scopes, because a movement's
+     *  account is meaningful even in the combined view. */
     private LinearLayout txRow(Transaction t) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -1356,7 +1358,7 @@ public final class HistoryActivity extends Activity {
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-2, -2);
         if (!perBank) tp.topMargin = dp(2);
         col.addView(time, tp);
-        if (perBank && t.account != null) {
+        if (t.account != null) {
             TextView account = text(getString(R.string.account_label) + " " + digits(t.account),
                 10.5f, muted);
             LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(-2, -2);
