@@ -52,6 +52,12 @@ public final class ScanDiagnosticsActivity extends Activity {
         return v;
     }
 
+    /** Message counts in the app language's digits, so a Persian screen never mixes scripts. */
+    private String count(int n) {
+        String s = String.valueOf(n);
+        return LocaleHelper.isPersian(this) ? HistoryActivity.faDigitsString(s) : s;
+    }
+
     GradientDrawable rounded(int color, float radius) {
         GradientDrawable g = new GradientDrawable();
         g.setColor(color);
@@ -195,7 +201,7 @@ public final class ScanDiagnosticsActivity extends Activity {
             line.setGravity(Gravity.CENTER_VERTICAL);
             TextView name = text(h.bank, 14, fg);
             line.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
-            TextView count = text(String.valueOf(h.messages), 13, muted);
+            TextView count = text(count(h.messages), 13, muted);
             line.addView(count);
             line.setPadding(0, dp(2), 0, dp(2));
             box.addView(line);
@@ -209,7 +215,7 @@ public final class ScanDiagnosticsActivity extends Activity {
         box.setPadding(dp(16), dp(14), dp(16), dp(14));
         box.setBackground(rounded(heroColor, 18));
         box.addView(text(getString(R.string.scan_diag_recognized), 13, muted));
-        TextView v = text(String.valueOf(s.parsedMessages), 26, fg);
+        TextView v = text(count(s.parsedMessages), 26, fg);
         v.setTypeface(null, Typeface.BOLD);
         box.addView(v);
         box.addView(text(getString(R.string.scan_diag_summary, s.messages, s.unparsedMessages()), 12, muted));
@@ -273,7 +279,7 @@ public final class ScanDiagnosticsActivity extends Activity {
 
         LinearLayout right = new LinearLayout(this);
         right.setGravity(Gravity.CENTER_VERTICAL);
-        TextView count = text(String.valueOf(h.messages), 13, muted);
+        TextView count = text(count(h.messages), 13, muted);
         count.setPadding(dp(10), 0, dp(4), 0);
         right.addView(count);
         TextView chevron = text(rtl ? "\u2039" : "\u203A", 20, fg);
