@@ -47,6 +47,7 @@ public final class SenderShareActivity extends Activity {
     private String bank;
     private List<String> bodies = new ArrayList<>();
     private List<CheckBox> checks = new ArrayList<>();
+    private List<CheckBox> issueChecks = new ArrayList<>();
     private LinearLayout body;
     private TextView select, copy, send;
     private Runnable clearClipRunnable;
@@ -161,9 +162,54 @@ public final class SenderShareActivity extends Activity {
             body.addView(known, margin(2, 0, 2, 6));
         }
         body.addView(section(getString(R.string.sender_share_note, bodies.size())), margin(2, 2, 2, 10));
+        issueCard();
         messagesCard();
         body.addView(privacyNote(), margin(18, 14, 18, 0));
         root.addView(actionBar(), margin(0, 14, 0, 0));
+    }
+
+    /** What the user believes is wrong with this sender, used to point the maintainer at the
+     *  failing stage of detection: the account, the balance, the sender number, or any mix. The
+     *  checks mirror the {@link ScanDiagnostics#ISSUE_*} constants one-to-one in order. */
+    private void issueCard() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(16), dp(10), dp(16), dp(10));
+        box.setBackground(rounded(card, 15));
+        box.addView(section(getString(R.string.sender_share_issue_title)), margin(2, 0, 2, 6));
+        String[] labels = {
+            getString(R.string.sender_share_issue_account),
+            getString(R.string.sender_share_issue_balance),
+            getString(R.string.sender_share_issue_number)
+        };
+        for (String label : labels) box.addView(issueRow(label));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = dp(8);
+        body.addView(box, lp);
+    }
+
+    private LinearLayout issueRow(String label) {
+        LinearLayout line = new LinearLayout(this);
+        line.setGravity(Gravity.CENTER_VERTICAL);
+        line.setPadding(0, dp(6), 0, dp(6));
+        CheckBox box = new CheckBox(this);
+        box.setChecked(false);
+        issueChecks.add(box);
+        line.addView(box, new LinearLayout.LayoutParams(dp(46), -2));
+        TextView preview = text(label, 13, fg);
+        line.addView(preview, new LinearLayout.LayoutParams(0, -2, 1));
+        line.setOnClickListener(v -> box.setChecked(!box.isChecked()));
+        return line;
+    }
+
+    /** The picked issue categories as report tags, in the order the checkboxes show them. */
+    private List<String> issueTags() {
+        String[] all = {ScanDiagnostics.ISSUE_ACCOUNT, ScanDiagnostics.ISSUE_BALANCE,
+            ScanDiagnostics.ISSUE_NUMBER};
+        List<String> tags = new ArrayList<>();
+        for (int i = 0; i < issueChecks.size() && i < all.length; i++)
+            if (issueChecks.get(i).isChecked()) tags.add(all[i]);
+        return tags;
     }
 
     private void messagesCard() {
@@ -269,7 +315,7 @@ public final class SenderShareActivity extends Activity {
     private String selectedText() {
         List<ScanDiagnostics.Message> sel = selected();
         if (sel.isEmpty()) return null;
-        return ScanDiagnostics.senderReport(sender, bodies.size(), sel);
+        return ScanDiagnostics.senderReport(sender, bodies.size(), sel, issueTags());
     }
 
     private int copySelected() {

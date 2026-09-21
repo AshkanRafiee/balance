@@ -26,6 +26,13 @@ final class ScanDiagnostics {
     /** Newest messages kept per skipped sender (bounds memory on huge inboxes). */
     static final int MAX_SAMPLES_PER_SENDER = 25;
 
+    /** The report-issue categories a user can flag about a sender, embedded in the prefilled email
+     *  template header. Kept language-neutral English so the maintainer-side report reads the same
+     *  regardless of the reporter's interface language. */
+    static final String ISSUE_ACCOUNT = "Account detection";
+    static final String ISSUE_BALANCE = "Balance detection";
+    static final String ISSUE_NUMBER = "Sender number detection";
+
     /** One recognized bank and how many of its SMS messages the scan parsed. */
     static final class BankHit {
         final String bank;
@@ -147,10 +154,21 @@ final class ScanDiagnostics {
      *  user sees beforehand exactly what leaves the device). {@code total} is the sender's message
      *  count; an empty selection composes a header with no messages. */
     static String senderReport(String sender, int total, List<Message> selected) {
+        return senderReport(sender, total, selected, java.util.Collections.emptyList());
+    }
+
+    /** Like {@link #senderReport(String, int, List)} with the user-picked issue categories listed
+     *  right below the title, so the maintainer knows which stage of detection failed. The list uses
+     *  the {@code ISSUE_*} constants; unselected categories stay out of the report. */
+    static String senderReport(String sender, int total, List<Message> selected,
+            List<String> issues) {
         StringBuilder out = new StringBuilder();
-        out.append("## Bank SMS format Balance could not parse\n\n")
-            .append("Sender `").append(sender).append("` — ").append(total).append(
-                total == 1 ? " message in total" : " messages in total").append(".\n")
+        out.append("## Bank SMS format Balance could not parse\n\n");
+        if (!issues.isEmpty()) {
+            out.append("Issue type(s): ").append(String.join(", ", issues)).append("\n\n");
+        }
+        out.append("Sender `").append(sender).append("` — ").append(total).append(
+            total == 1 ? " message in total" : " messages in total").append(".\n")
             .append("Sample message(s) exactly as the bank sent them:\n\n");
         for (Message m : selected) {
             out.append("```\n").append(m.body).append("\n```\n\n");

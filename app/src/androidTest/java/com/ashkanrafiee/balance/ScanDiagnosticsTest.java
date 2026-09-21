@@ -173,6 +173,25 @@ public class ScanDiagnosticsTest {
         assertTrue(ScanDiagnostics.reportText(s.unknownSenders).contains("2 messages"));
     }
 
+    @Test public void senderReport_marksThePickedIssueTypes() {
+        List<ScanDiagnostics.Message> sel = new ArrayList<>();
+        sel.add(new ScanDiagnostics.Message("lay out 1,000 Toman", 1000L));
+        String txt = ScanDiagnostics.senderReport("+98Saman", 3, sel,
+            java.util.Arrays.asList(ScanDiagnostics.ISSUE_ACCOUNT, ScanDiagnostics.ISSUE_NUMBER));
+        assertTrue(txt.contains("Issue type(s): Account detection, Sender number detection"));
+        assertTrue(txt.contains("+98Saman"));
+        assertTrue(txt.contains("3 message"));
+        assertTrue(!txt.contains("Balance detection"));
+    }
+
+    @Test public void senderReport_noIssues_omitsTheLine() {
+        List<ScanDiagnostics.Message> sel = new ArrayList<>();
+        sel.add(new ScanDiagnostics.Message("lay out 1,000 Toman", 1000L));
+        String txt = ScanDiagnostics.senderReport("+98Saman", 1, sel);
+        assertTrue(!txt.contains("Issue type(s)"));
+        assertTrue(txt.contains("1 message"));
+    }
+
     @Test public void storedMessages_newestFirst_andCapped() {
         // analyze() preserves the inbox stream, which the screen reads newest-first.
         List<Object[]> r = new ArrayList<>();
