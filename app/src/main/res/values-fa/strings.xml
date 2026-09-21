@@ -46,6 +46,7 @@
     <string name="widget_empty">هنوز موجودی‌ای نیست — برای خواندن پیامک‌ها روی دکمهٔ به‌روزرسانی بزنید</string>
     <string name="widget_action_refresh">به‌روزرسانی</string>
     <string name="widget_action_mask">نمایش یا مخفی کردن موجودی</string>
+    <string name="widget_permission_hint">برای دسترسی به پیامک‌ها، برنامهٔ Balance را باز کنید</string>
     <string name="language_system_default">پیش‌فرض سیستم</string>
 
     <string name="settings_region_label">منطقه</string>

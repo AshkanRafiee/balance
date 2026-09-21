@@ -1,5 +1,6 @@
 package com.ashkanrafiee.balance;
 
+import android.Manifest;
 import android.app.AlarmManager;
 import android.app.PendingIntent;
 import android.appwidget.AppWidgetManager;
@@ -7,7 +8,9 @@ import android.appwidget.AppWidgetProvider;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.os.SystemClock;
+import android.view.View;
 import android.widget.RemoteViews;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -36,6 +39,12 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
      *  While the app lock is enabled the widget does not rescan and shows the locked state instead. */
     private static void refreshData(Context context) {
         if (LockManager.isEnabled(context)) {
+            updateAll(context);
+            return;
+        }
+        if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+            // No point scanning without the permission: render the saved values plus the hint row
+            // (and never risk the scan thread crashing on the denied read).
             updateAll(context);
             return;
         }
@@ -113,6 +122,11 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         views.setRemoteAdapter(R.id.widget_list, new Intent(c, BalanceWidgetService.class));
         views.setInt(R.id.widget_root, "setLayoutDirection",
             c.getResources().getConfiguration().getLayoutDirection());
+        boolean smsAllowed = c.checkSelfPermission(Manifest.permission.READ_SMS)
+            == PackageManager.PERMISSION_GRANTED;
+        views.setViewVisibility(R.id.widget_hint, smsAllowed ? View.GONE : View.VISIBLE);
+        if (!smsAllowed) views.setTextViewText(R.id.widget_hint,
+            c.getString(R.string.widget_permission_hint));
         views.setTextViewText(R.id.widget_total,
             hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : CurrencyHelper.amount(c, total));
         views.setTextViewText(R.id.widget_unit, CurrencyHelper.label(c));
