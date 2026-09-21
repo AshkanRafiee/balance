@@ -22,9 +22,10 @@ Features:
 - Encrypted storage on device
 - Password-protected backup and restore
 - Optional in-app lock with PIN, password or fingerprint, protecting the app, the widget and screenshots/recents; after a few wrong attempts, code entry locks for a growing cooldown
+- Scan diagnostics (footer and About): see which SMS senders are recognized per bank and which are skipped; tap an unrecognized sender to choose which of its messages to send (a prefilled email is only sent after you approve), or copy/email a report of all of them at once
 
 SMS and financial data stay on the device, encrypted. No account, cloud service, analytics, or network access is required.
 
-Your bank's SMS not recognized, the wrong account detected, or a history entry off? Report it — include the exact message text (real or scrubbed numbers, same length and format), its sender number, and your Android version and phone model — via the issue tracker or by email; see the project's contribution guide for details.
+Your bank's SMS not recognized, the wrong account detected, or a history entry off? Report it — include the exact message text (real or scrubbed numbers, same length and format), its sender number, and your Android version and phone model — via the issue tracker or by email; see the project's contribution guide for details. The Scan diagnostics screen gathers all the unrecognized senders for you and pre-fills a report.
 
 Balance is free and open source. If you find it useful, you can support its development — see the donation options in the project README: https://github.com/AshkanRafiee/balance#donate

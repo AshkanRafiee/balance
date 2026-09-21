@@ -21,6 +21,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - English and Persian (فارسی) interface, with automatic system-language detection and localized bank names
 - Optional in-app lock with a PIN, password or fingerprint, covering the app, the home-screen widget and screenshots/recents, with progressive cooldown delays against wrong-entry guessing
 - About screen with direct links to the website and issue tracker
+- Scan diagnostics (footer and About → Scan diagnostics): see which SMS senders are recognized per bank and which are skipped, tap a sender to choose which of its messages to send (prefilled email, sent only after you approve), or copy/email a report of all unrecognized senders at once — feeding straight into the contribution flow »Contributing« below
 
 ## Download
 
@@ -65,7 +66,11 @@ Is your bank's SMS not recognized, the per-account split wrong, or a balance or
 history entry off? We need the bank's exact message format — verbatim, line
 breaks and spacing included — plus the sender number, your Android version and
 your phone model. You may swap the real numbers for made-up ones of the same
-length and format for privacy. Open an [issue](https://github.com/AshkanRafiee/balance/issues)
+length and format for privacy. The fastest way to hand us all the unrecognized
+senders at once is the **Scan** item in the footer (or About → Scan
+diagnostics): tap a sender to pick which of its messages to send, or copy/email
+the whole report — nothing is sent until you confirm in your mail app.
+Otherwise, open an [issue](https://github.com/AshkanRafiee/balance/issues)
 or email us; see [CONTRIBUTING.md](CONTRIBUTING.md) for the full checklist.
 
 ## Donate

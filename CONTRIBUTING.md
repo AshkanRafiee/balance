@@ -21,6 +21,25 @@ If your balance, account split or history is wrong, it is almost always because
 a message format differs from the ones we have on file. Tell us about it and we
 will add or fix the rule.
 
+## See what Balance skipped, right in the app
+
+Before writing a report manually, try **Scan diagnostics** — it is in the footer
+of the main screen (and also **About → Scan diagnostics**). It reads the
+messages on your device and shows, per recognized bank, how many SMS it parsed,
+and below that every **sender it did not recognize yet** (sender number, message
+count, and its newest message).
+
+- Tap a sender to open its report chooser: pick exactly which of its messages
+  to share, then **Send** (a prefilled email to us opens — nothing is sent
+  until you choose your mail app and confirm there) or **Copy selected**.
+- **Copy report / Email report** above the list gathers all unrecognized
+  senders at once, newest sample each.
+
+That screen is the fastest contribution funnel there is: every unrecognized
+sender is a bank SMS layout we haven't got on file, and the report already
+contains exactly the sender numbers and sample messages a new rule needs.
+Nothing from the scan leaves your device until you copy it or send it yourself.
+
 ## Two ways to reach us
 
 1. **GitHub issue** — the preferred channel, so everyone can see the fix:
