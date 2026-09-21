@@ -23,22 +23,29 @@ will add or fix the rule.
 
 ## See what Balance skipped, right in the app
 
-Before writing a report manually, try **Scan diagnostics** — it is in the footer
-of the main screen (and also **About → Scan diagnostics**). It reads the
-messages on your device and shows, per recognized bank, how many SMS it parsed,
-and below that every **sender it did not recognize yet** (sender number, message
-count, and its newest message).
+Before writing a report manually, try **Scan diagnostics** — it is the first
+item in the footer of the main screen (and also **About → Scan diagnostics**).
+It reads the messages on your device and shows, per recognized bank, how many
+SMS it parsed, and below that every **message it could not parse**:
+
+- **Known senders, unrecognized messages** — a supported bank's sender, but a
+  message layout we could not read (a format gap, just like an unknown sender).
+- **Senders not recognized yet** — sender numbers Balance does not know at all.
+
+Tick any mix of these senders — nothing is preselected — and the report buttons
+show a live count of what you chose:
 
 - Tap a sender to open its report chooser: pick exactly which of its messages
-  to share, then **Send** (a prefilled email to us opens — nothing is sent
-  until you choose your mail app and confirm there) or **Copy selected**.
-- **Copy report / Email report** above the list gathers all unrecognized
-  senders at once, newest sample each.
+  to share, then **Send (n)** (a prefilled email to us opens — nothing is sent
+  until you choose your mail app and confirm there) or **Copy selected (n)**.
+- **Copy report (n) / Email report (n)** above the list gathers exactly the
+  senders you ticked, newest sample each.
 
-That screen is the fastest contribution funnel there is: every unrecognized
-sender is a bank SMS layout we haven't got on file, and the report already
-contains exactly the sender numbers and sample messages a new rule needs.
-Nothing from the scan leaves your device until you copy it or send it yourself.
+That screen is the fastest contribution funnel there is: every unparsed message
+is a bank SMS layout we haven't got on file (the bank is named when we know
+it), and the report already contains exactly the sender numbers and sample
+messages a new rule needs. Nothing from the scan leaves your device until you
+copy it or send it yourself.
 
 ## Two ways to reach us
 
