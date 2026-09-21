@@ -63,9 +63,10 @@ public class ReconcileTest {
         Reconcile.Entry b = e(2, -200000L, 800000L);
         Reconcile.Entry c = e(3, 50000L, 850000L);
         List<Reconcile.Entry> in = Arrays.asList(c, a, b);
-        assertEquals(3, Reconcile.order(in).size());
+        List<Reconcile.Entry> out = Reconcile.order(in);
+        assertEquals(3, out.size());
         long[] expected = {100000L, -200000L, 50000L};
-        assertEquals(Arrays.toString(expected), Arrays.toString(sums(Reconcile.order(in))));
+        assertEquals(Arrays.toString(expected), Arrays.toString(sums(out)));
     }
 
     @Test public void order_singleEntry_returnsNull() {
