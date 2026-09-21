@@ -46,7 +46,7 @@ public class MainActivity extends Activity {
     private static final int REQ_PICK_RESTORE = 21;
     /** How long a copied balance stays in the system clipboard before it is cleared (see
      *  {@code BalanceView.copyBalance}). */
-    private static final long CLIP_CLEAR_MS = 60_000L;
+    private static final long CLIP_CLEAR_MS = 15_000L;
     /** Shortest acceptable backup password: the backup is an off-device ciphertext that brute force
      *  can grind at, so a very short code would nullify the 600k-iteration KDF. */
     private static final int MIN_BACKUP_PASSWORD_LENGTH = 8;
@@ -1005,7 +1005,7 @@ public class MainActivity extends Activity {
          *  works in normal view hierarchies. */
         final float fs = getResources().getConfiguration().fontScale;
         Drawable lockIcon;
-        boolean hidden, refreshing;
+        boolean hidden, refreshing, refreshAgain;
         boolean autoHide;
         int insetsTop, insetsBottom;
         int sortMode;
@@ -1273,7 +1273,12 @@ public class MainActivity extends Activity {
          *  {@code silent} is true the "Refreshing…" status is suppressed — used by the background
          *  ContentObserver so incoming-SMS updates don't flash status on screen. */
         void refresh(boolean hard, boolean silent) {
-            if (refreshing) return;
+            if (refreshing) {
+                // A scan is already running: remember the request so the moment it completes we
+                // scan again and pick up whatever arrived while the first pass was in flight.
+                refreshAgain = true;
+                return;
+            }
             if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
                 status = getString(R.string.status_permission_needed);
                 invalidate();
@@ -1303,6 +1308,7 @@ public class MainActivity extends Activity {
                         refreshing = false;
                         invalidate();
                         BalanceWidgetProvider.push(app);
+                        if (refreshAgain) { refreshAgain = false; refresh(false, silent); }
                     });
                 } catch (Exception e) {
                     post(() -> {
@@ -1316,6 +1322,7 @@ public class MainActivity extends Activity {
                         refreshing = false;
                         invalidate();
                         BalanceWidgetProvider.push(app);
+                        if (refreshAgain) { refreshAgain = false; refresh(false, silent); }
                     });
                 }
                 BalanceData.scanHistory(app);
@@ -1765,13 +1772,19 @@ public class MainActivity extends Activity {
             if (clearClipRunnable != null) handler.removeCallbacks(clearClipRunnable);
             clearClipRunnable = () -> {
                 clearClipRunnable = null;
-                CharSequence current = clipboard.hasPrimaryClip()
-                    && clipboard.getPrimaryClip() != null
-                    && clipboard.getPrimaryClip().getItemCount() > 0
-                    ? clipboard.getPrimaryClip().getItemAt(0).getText() : null;
-                if (amount.equals(String.valueOf(current))) {
-                    if (android.os.Build.VERSION.SDK_INT >= 28) clipboard.clearPrimaryClip();
-                    else clipboard.setPrimaryClip(ClipData.newPlainText("", ""));
+                try {
+                    CharSequence current = clipboard.hasPrimaryClip()
+                        && clipboard.getPrimaryClip() != null
+                        && clipboard.getPrimaryClip().getItemCount() > 0
+                        ? clipboard.getPrimaryClip().getItemAt(0).getText() : null;
+                    if (amount.equals(String.valueOf(current))) {
+                        if (android.os.Build.VERSION.SDK_INT >= 28) clipboard.clearPrimaryClip();
+                        else clipboard.setPrimaryClip(ClipData.newPlainText("", ""));
+                    }
+                } catch (Exception e) {
+                    // On Android 10+ a background process may be denied reading a clip another app
+                    // has taken; fail the clear silently rather than crashing.
+                    android.util.Log.w("BalanceClip", "clipboard read failed", e);
                 }
             };
             handler.postDelayed(clearClipRunnable, CLIP_CLEAR_MS);
