@@ -29,6 +29,18 @@ public class CurrencyHelperTest {
         ctx.getSharedPreferences("balance_currency", Context.MODE_PRIVATE).edit().clear().commit();
     }
 
+    @Test public void fixedIndex_roundTripsEveryCurrency() {
+        assertEquals(0, CurrencyHelper.fixedIndex(CurrencyHelper.CURRENCY_TOMAN));
+        assertEquals(1, CurrencyHelper.fixedIndex(CurrencyHelper.CURRENCY_RIAL));
+        assertEquals(2, CurrencyHelper.fixedIndex(CurrencyHelper.CURRENCY_USD));
+        assertEquals(3, CurrencyHelper.fixedIndex(CurrencyHelper.CURRENCY_EUR));
+        assertEquals(4, CurrencyHelper.fixedIndex(CurrencyHelper.CUSTOM_PREFIX + "Rupee"));
+        for (int pos = 0; pos <= 3; pos++)
+            assertEquals(pos, CurrencyHelper.fixedIndex(CurrencyHelper.fixedCurrency(pos)));
+        assertEquals(CurrencyHelper.CURRENCY_TOMAN, CurrencyHelper.fixedCurrency(4));
+        assertEquals(0, CurrencyHelper.fixedIndex(null));
+    }
+
     @Test public void defaultIsToman() {
         assertEquals(CurrencyHelper.CURRENCY_TOMAN, CurrencyHelper.currency(ctx));
         assertFalse(CurrencyHelper.isCustom(ctx));

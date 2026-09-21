@@ -63,4 +63,26 @@ public final class CurrencyHelper {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY_CURRENCY, value).apply();
     }
+
+    /** The position of a stored currency value in the fixed choice list — Toman, Rial, USD, EUR,
+     *  or the Custom slot (4) for a user-typed entry. Kept here so the picker and the storage
+     *  always agree on which entry a value maps to. */
+    public static int fixedIndex(String value) {
+        if (CURRENCY_RIAL.equals(value)) return 1;
+        if (CURRENCY_USD.equals(value)) return 2;
+        if (CURRENCY_EUR.equals(value)) return 3;
+        if (value != null && value.startsWith(CUSTOM_PREFIX)) return 4;
+        return 0;
+    }
+
+    /** The stored currency value for a fixed-list position; position 4 (Custom) has no fixed value
+     *  and must be built from the user's typed text with {@link #CUSTOM_PREFIX}. */
+    public static String fixedCurrency(int position) {
+        switch (position) {
+            case 1: return CURRENCY_RIAL;
+            case 2: return CURRENCY_USD;
+            case 3: return CURRENCY_EUR;
+            default: return CURRENCY_TOMAN;
+        }
+    }
 }

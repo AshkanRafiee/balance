@@ -316,10 +316,7 @@ public class MainActivity extends Activity {
             android.R.layout.simple_spinner_item, currencyLabels);
         currencyAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         currencySpin.setAdapter(currencyAdapter);
-        int curIdx = 0;
-        if (CurrencyHelper.CURRENCY_USD.equals(storedCurrency)) curIdx = 2;
-        else if (CurrencyHelper.CURRENCY_EUR.equals(storedCurrency)) curIdx = 3;
-        else if (storedCurrency.startsWith(CurrencyHelper.CUSTOM_PREFIX)) curIdx = 4;
+        int curIdx = CurrencyHelper.fixedIndex(storedCurrency);
         currencySpin.setSelection(curIdx);
         customInput.setVisibility(curIdx == 4 ? View.VISIBLE : View.GONE);
         currencySpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
@@ -367,9 +364,7 @@ public class MainActivity extends Activity {
                     String typed = customInput.getText().toString().trim();
                     if (!typed.isEmpty()) chosenCurrency = CurrencyHelper.CUSTOM_PREFIX + typed;
                 } else {
-                    chosenCurrency = new String[]{CurrencyHelper.CURRENCY_TOMAN,
-                        CurrencyHelper.CURRENCY_RIAL, CurrencyHelper.CURRENCY_USD,
-                        CurrencyHelper.CURRENCY_EUR}[curPos];
+                    chosenCurrency = CurrencyHelper.fixedCurrency(curPos);
                 }
                 boolean currencyChanged = chosenCurrency != null
                     && !chosenCurrency.equals(CurrencyHelper.currency(this));
