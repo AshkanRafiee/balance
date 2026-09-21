@@ -168,7 +168,7 @@
     <string name="history_range_selected">in range</string>
     <string name="history_jump_title">Choose a month</string>
     <string name="history_month_label">Month</string>
-    <string name="history_year_label">Year (1100-1700)</string>
+    <string name="history_year_label">Year (%1$d-%2$d)</string>
     <string name="history_jump_apply">Go</string>
     <plurals name="history_n_tx">
         <item quantity="one">%1$d transaction</item>
