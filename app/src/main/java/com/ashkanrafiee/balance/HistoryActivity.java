@@ -38,10 +38,11 @@ import java.util.Set;
 
 /**
  * Shows the transaction history parsed from supported bank SMS: the net sum of transactions for
- * today, this Persian (Jalali) month and this Persian year, an all-time hero summary, plus a
- * year-by-year breakdown that drills down into months and expandable days, each carrying its own
- * deposit/withdrawal subtotals. Sums always reflect money <em>movements</em> (deposits minus
- * withdrawals), never remaining balances. All date boundaries follow the Persian calendar.
+ * today, this month and this year, an all-time hero summary, plus a year-by-year breakdown that
+ * drills down into months and expandable days, each carrying its own deposit/withdrawal
+ * subtotals. Sums always reflect money <em>movements</em> (deposits minus withdrawals), never
+ * remaining balances. All date boundaries follow the calendar system of the active region: the
+ * Persian (Jalali) calendar for Iran, the Gregorian calendar for International.
  *
  * <p>The screen re-scans the SMS inbox whenever it opens and whenever a new bank message arrives
  * (a ContentObserver, like the main screen), silently re-rendering on completion.
@@ -82,7 +83,10 @@ public final class HistoryActivity extends Activity {
     };
     private LinearLayout body;
     private LockOverlay lockOverlay;
-    private JalaliCalendar todayJalali, yesterdayJalali;
+    /** The user's calendar system: true for the Persian (Jalali) calendar, false for Gregorian.
+     *  Read once per screen, since the region can only change from the main screen. */
+    private boolean iranCalendar = true;
+    private CalDate today, yesterday;
     /** Optional canonical bank name; when set, only that bank's transactions are shown. */
     private String bankFilter;
 
@@ -322,6 +326,7 @@ public final class HistoryActivity extends Activity {
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
         getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(bg));
+        iranCalendar = RegionHelper.isIran(this);
         refreshDates();
 
         LinearLayout root = new LinearLayout(this);
@@ -402,14 +407,11 @@ public final class HistoryActivity extends Activity {
         else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
     }
 
-    /** Refreshes the cached "today" and "yesterday" Jalali dates once per render. */
+    /** Refreshes the cached "today" and "yesterday" dates once per render, in the active calendar
+     *  system (Persian for the Iran region, Gregorian for International). */
     private void refreshDates() {
-        Calendar c = Calendar.getInstance(Locale.getDefault());
-        todayJalali = JalaliCalendar.fromGregorian(
-            c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH));
-        c.add(Calendar.DAY_OF_MONTH, -1);
-        yesterdayJalali = JalaliCalendar.fromGregorian(
-            c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH));
+        today = CalDate.today(iranCalendar);
+        yesterday = CalDate.yesterday(iranCalendar);
     }
 
     /** The sticky top bar: back chevron, the screen title and, per-bank, the bank badge. */
@@ -554,7 +556,7 @@ public final class HistoryActivity extends Activity {
 
     /** Applies one of the clearly-bounded date presets, recomputing its bounds against "now". */
     private void applyRange(int preset) {
-        filter = rangePreset(filter, preset, nowJalali());
+        filter = rangePreset(filter, preset, now(), iranCalendar);
         render();
     }
 
@@ -607,11 +609,12 @@ public final class HistoryActivity extends Activity {
         dlg.show();
     }
 
-    /** The From/To month-grid picker used inside the custom-range dialog. Navigate Persian months
-     *  with the arrows, tap a day for From and a day for To; tapping while a range is closed starts
-     *  a fresh From pick, and a To tapped before From swaps the bounds so the range keeps its order. */
+    /** The From/To month-grid picker used inside the custom-range dialog. Navigate the active
+     *  calendar's months with the arrows, tap a day for From and a day for To; tapping while a range
+     *  is closed starts a fresh From pick, and a To tapped before From swaps the bounds so the
+     *  range keeps its order. */
     private final class RangePicker {
-        final JalaliCalendar[] picked = new JalaliCalendar[]{filter.from, filter.to};
+        final CalDate[] picked = new CalDate[]{filter.from, filter.to};
         final LinearLayout grid = new LinearLayout(HistoryActivity.this);
         final TextView title = text("", 14, fg, MEDIUM);
         final TextView status = text("", 12.5f, muted);
@@ -621,8 +624,8 @@ public final class HistoryActivity extends Activity {
         int viewMonth;
 
         RangePicker() {
-            JalaliCalendar start = picked[0] != null ? picked[0] : picked[1];
-            if (start == null) start = nowJalali();
+            CalDate start = picked[0] != null ? picked[0] : picked[1];
+            if (start == null) start = now();
             viewYear = start.year;
             viewMonth = start.month;
             grid.setOrientation(LinearLayout.VERTICAL);
@@ -633,8 +636,8 @@ public final class HistoryActivity extends Activity {
             render();
         }
 
-        /** A single dialog to jump straight to any Persian month and year instead of stepping
-         *  month by month: a month dropdown plus a typeable year field. */
+        /** A single dialog to jump straight to any month and year of the active calendar instead of
+         *  stepping month by month: a month dropdown plus a typeable year field. */
         void promptJump() {
             final List<String> months = new ArrayList<>();
             for (int m = 1; m <= 12; m++) months.add(monthName(m));
@@ -680,7 +683,7 @@ public final class HistoryActivity extends Activity {
         }
 
         /** Reads the entered year, accepting Latin or Persian digits, and clamps it to the
-         *  navigable 1100-1700 band that the chevrons already bound to. */
+         *  navigable year band that the chevrons already bound to, per calendar system. */
         int parseYear(CharSequence s) {
             StringBuilder b = new StringBuilder(s.length());
             for (char c : s.toString().trim().toCharArray()) {
@@ -693,7 +696,8 @@ public final class HistoryActivity extends Activity {
             } catch (NumberFormatException e) {
                 return viewYear;
             }
-            return Math.max(1100, Math.min(1700, year));
+            return Math.max(CalDate.minYear(iranCalendar),
+                Math.min(CalDate.maxYear(iranCalendar), year));
         }
 
         TextView navButton(String arrow) {
@@ -712,8 +716,10 @@ public final class HistoryActivity extends Activity {
             title.setText(monthName(viewMonth) + " "
                 + (fa ? faDigits(viewYear) : Integer.toString(viewYear)) + " \u25be");
             title.setGravity(Gravity.CENTER);
-            bindNav(prev, viewYear > 1100 || viewYear == 1100 && viewMonth > 1, -1);
-            bindNav(next, viewYear < 1700 || viewYear == 1700 && viewMonth < 12, 1);
+            bindNav(prev, viewYear > CalDate.minYear(iranCalendar)
+                || viewYear == CalDate.minYear(iranCalendar) && viewMonth > 1, -1);
+            bindNav(next, viewYear < CalDate.maxYear(iranCalendar)
+                || viewYear == CalDate.maxYear(iranCalendar) && viewMonth < 12, 1);
             grid.removeAllViews();
 
             String[] weekdays = weekdayLabels();
@@ -726,15 +732,15 @@ public final class HistoryActivity extends Activity {
             grid.addView(weekRow, new LinearLayout.LayoutParams(-1, -2));
 
             int rangeFill = (accent & 0x00FFFFFF) | 0x26000000;
-            JalaliCalendar today = nowJalali();
-            int firstDay = weekdayIndex(JalaliCalendar.of(viewYear, viewMonth, 1));
-            int days = JalaliCalendar.daysInMonth(viewYear, viewMonth);
+            CalDate today = now();
+            int firstDay = CalDate.weekdayIndex(CalDate.of(viewYear, viewMonth, 1), iranCalendar);
+            int days = CalDate.daysInMonth(viewYear, viewMonth, iranCalendar);
             for (int offset = 0; offset < firstDay + days; offset += 7) {
                 LinearLayout row = new LinearLayout(HistoryActivity.this);
                 for (int col = 0; col < 7; col++) {
                     int d = offset + col - firstDay + 1;
                     TextView cell = d < 1 || d > days
-                        ? text("", 0, fg) : dayCell(JalaliCalendar.of(viewYear, viewMonth, d), today);
+                        ? text("", 0, fg) : dayCell(CalDate.of(viewYear, viewMonth, d), today);
                     row.addView(cell, new LinearLayout.LayoutParams(0, dp(48), 1));
                 }
                 grid.addView(row, new LinearLayout.LayoutParams(-1, -2));
@@ -743,16 +749,13 @@ public final class HistoryActivity extends Activity {
         }
 
         /** One tappable day, highlighted as a range bound, today's outline, or the ranged tint. */
-        TextView dayCell(JalaliCalendar day, JalaliCalendar today) {
+        TextView dayCell(CalDate day, CalDate today) {
             boolean fa = LocaleHelper.isPersian(HistoryActivity.this);
-            boolean fromSel = picked[0] != null && picked[0].year == day.year
-                && picked[0].month == day.month && picked[0].day == day.day;
-            boolean toSel = picked[1] != null && picked[1].year == day.year
-                && picked[1].month == day.month && picked[1].day == day.day;
+            boolean fromSel = picked[0] != null && picked[0].sameDay(day);
+            boolean toSel = picked[1] != null && picked[1].sameDay(day);
             boolean inRange = picked[0] != null && picked[1] != null
-                && compareDate(picked[0], day) <= 0 && compareDate(day, picked[1]) <= 0;
-            boolean isToday = today.year == day.year
-                && today.month == day.month && today.day == day.day;
+                && picked[0].compare(day) <= 0 && day.compare(picked[1]) <= 0;
+            boolean isToday = today.sameDay(day);
             TextView cell = text(fa ? faDigits(day.day) : Integer.toString(day.day), 12.5f,
                 fromSel || toSel ? Color.WHITE : fg);
             cell.setGravity(Gravity.CENTER);
@@ -764,7 +767,7 @@ public final class HistoryActivity extends Activity {
                 int rangeFill = (accent & 0x00FFFFFF) | 0x26000000;
                 cell.setBackground(rounded(rangeFill, 10));
             }
-            cell.setContentDescription(persianDate(day)
+            cell.setContentDescription(dateText(day)
                 + (fromSel ? " \u2014 " + getString(R.string.history_range_start)
                     : toSel ? " \u2014 " + getString(R.string.history_range_end)
                     : inRange ? " \u2014 " + getString(R.string.history_range_selected) : ""));
@@ -812,25 +815,16 @@ public final class HistoryActivity extends Activity {
     /** The tap rule for the range calendar, kept pure so the tests cover it: the first pick sets
      *  From, the next sets To, a tap while both are set starts a fresh From, and a To tapped before
      *  From swaps the bounds so From always precedes To. */
-    static void pickDay(JalaliCalendar[] picked, JalaliCalendar day) {
+    static void pickDay(CalDate[] picked, CalDate day) {
         if (picked[0] == null || picked[1] != null) {
             picked[0] = day;
             picked[1] = null;
-        } else if (compareDate(day, picked[0]) < 0) {
+        } else if (day.compare(picked[0]) < 0) {
             picked[1] = picked[0];
             picked[0] = day;
         } else {
             picked[1] = day;
         }
-    }
-
-    /** Weekday of a Persian date as 0..6 for Saturday..Friday (the grid's leading column). */
-    static int weekdayIndex(JalaliCalendar jc) {
-        int[] g = jc.toGregorian();
-        Calendar c = Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"));
-        c.clear();
-        c.set(g[0], g[1] - 1, g[2]);
-        return (c.get(Calendar.DAY_OF_WEEK) - Calendar.SATURDAY + 7) % 7;
     }
 
     /** One-line description of the active custom range, e.g. "From 1403/12/1 to 1404/2/5". */
@@ -885,7 +879,7 @@ public final class HistoryActivity extends Activity {
     private void seedExpanded() {
         if (expandedSeeded) return;
         expandedSeeded = true;
-        JalaliCalendar now = nowJalali();
+        CalDate now = now();
         expandedYears.add(String.valueOf(now.year));
         expandedMonths.add(now.year + "/" + now.month);
         for (YearGroup y : allYears) {
@@ -897,10 +891,8 @@ public final class HistoryActivity extends Activity {
         }
     }
 
-    private JalaliCalendar nowJalali() {
-        Calendar c = Calendar.getInstance(Locale.getDefault());
-        return JalaliCalendar.fromGregorian(
-            c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH));
+    private CalDate now() {
+        return CalDate.today(iranCalendar);
     }
 
     @Override
@@ -919,26 +911,29 @@ public final class HistoryActivity extends Activity {
 
     /** Persists one filter date bound as (year, month, day), leaving the keys out when unbounded. */
     private static void writeDate(Bundle outState, String yKey, String mKey, String dKey,
-            JalaliCalendar jc) {
-        if (jc == null) return;
-        outState.putInt(yKey, jc.year);
-        outState.putInt(mKey, jc.month);
-        outState.putInt(dKey, jc.day);
+            CalDate d) {
+        if (d == null) return;
+        outState.putInt(yKey, d.year);
+        outState.putInt(mKey, d.month);
+        outState.putInt(dKey, d.day);
     }
 
     /** Rebuilds {@link #filter} from the saved state, staying on {@link Filter#ALL} when a fresh
      *  screen (no state, or state saved before filters existed) is shown. */
     private void restoreFilter(Bundle state) {
         if (!state.containsKey(KEY_FILTER_DIRECTION)) return;
-        JalaliCalendar from = readDate(state, KEY_FILTER_FROM_YEAR, KEY_FILTER_FROM_MONTH, KEY_FILTER_FROM_DAY);
-        JalaliCalendar to = readDate(state, KEY_FILTER_TO_YEAR, KEY_FILTER_TO_MONTH, KEY_FILTER_TO_DAY);
+        CalDate from = readDate(state, KEY_FILTER_FROM_YEAR, KEY_FILTER_FROM_MONTH, KEY_FILTER_FROM_DAY);
+        CalDate to = readDate(state, KEY_FILTER_TO_YEAR, KEY_FILTER_TO_MONTH, KEY_FILTER_TO_DAY);
         filter = new Filter(state.getInt(KEY_FILTER_DIRECTION, DIR_ALL),
             state.getInt(KEY_FILTER_RANGE, RANGE_ALL), from, to);
     }
 
-    private static JalaliCalendar readDate(Bundle state, String yKey, String mKey, String dKey) {
+    /** Rebuilds a saved date bound on the active calendar system, dropping the bound when the
+     *  saved day does not exist there (e.g. February 29 after a region switch to Iran). */
+    private CalDate readDate(Bundle state, String yKey, String mKey, String dKey) {
         int y = state.getInt(yKey, -1), m = state.getInt(mKey, -1), d = state.getInt(dKey, -1);
-        return y >= 0 && m >= 1 && d >= 1 ? JalaliCalendar.of(y, m, d) : null;
+        if (y < 0 || m < 1 || d < 1 || d > CalDate.daysInMonth(y, m, iranCalendar)) return null;
+        return CalDate.of(y, m, d);
     }
 
     private final Runnable onHistoryChanged = () -> runOnUiThread(this::render);
@@ -1011,9 +1006,9 @@ public final class HistoryActivity extends Activity {
         List<Transaction> all = BalanceData.readTransactions(this);
         List<Transaction> bankTxs = bankFilter == null ? all : filterByBank(all, bankFilter);
         List<Transaction> acctTxs = accountFilter == null ? bankTxs : filterByAccount(bankTxs, accountFilter);
-        List<Transaction> txs = applyFilters(acctTxs, filter);
+        List<Transaction> txs = applyFilters(acctTxs, filter, iranCalendar);
         rebuildFilterBar();
-        Lists lists = buildLists(txs);
+        Lists lists = buildLists(txs, iranCalendar);
         body.removeAllViews();
         if (lists.years.isEmpty()) {
             emptyState();
@@ -1360,18 +1355,18 @@ public final class HistoryActivity extends Activity {
         LinearLayout dateWrap = new LinearLayout(this);
         dateWrap.setGravity(Gravity.CENTER_VERTICAL);
         dateWrap.setOrientation(LinearLayout.HORIZONTAL);
-        if (sameDay(g.date, todayJalali)) {
+        if (g.date.sameDay(today)) {
             TextView tag = text(getString(R.string.history_today), 11, badgeFg, MEDIUM);
             tag.setPadding(dp(6), dp(2), dp(6), dp(2));
             tag.setBackground(rounded(badgeBg, 8));
             dateWrap.addView(tag);
-        } else if (sameDay(g.date, yesterdayJalali)) {
+        } else if (g.date.sameDay(yesterday)) {
             TextView tag = text(getString(R.string.history_yesterday), 11, muted, MEDIUM);
             tag.setPadding(dp(6), dp(2), dp(6), dp(2));
             tag.setBackground(rounded(chipBg, 8));
             dateWrap.addView(tag);
         }
-        TextView date = text(persianDate(g.date), 13, fg);
+        TextView date = text(dateText(g.date), 13, fg);
         LinearLayout.LayoutParams dateParams = new LinearLayout.LayoutParams(-2, -2);
         dateParams.setMarginStart(dp(6));
         dateWrap.addView(date, dateParams);
@@ -1387,7 +1382,7 @@ public final class HistoryActivity extends Activity {
         TextView sum = bold(signedToman(g.sum), 13, valueColor(g.sum));
         fitToWidth(sum, 13, 10, 0);
         head.addView(sum, sumParams);
-        head.setContentDescription(state(persianDate(g.date), g.sum, open));
+        head.setContentDescription(state(dateText(g.date), g.sum, open));
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
 
         if (open) {
@@ -1578,14 +1573,14 @@ public final class HistoryActivity extends Activity {
     }
 
     static final class DayGroup {
-        final JalaliCalendar date;
+        final CalDate date;
         long sum;
         final List<Transaction> txs = new ArrayList<>();
-        DayGroup(JalaliCalendar date) {
+        DayGroup(CalDate date) {
             this.date = date;
         }
         String key() {
-            return date.year + "/" + date.month + "/" + date.day;
+            return date.key();
         }
     }
 
@@ -1628,11 +1623,11 @@ public final class HistoryActivity extends Activity {
         final int direction;
         final int rangePreset;
         /** Inclusive lower bound, or null for unbounded. */
-        final JalaliCalendar from;
+        final CalDate from;
         /** Inclusive upper bound, or null for unbounded. */
-        final JalaliCalendar to;
+        final CalDate to;
 
-        Filter(int direction, int rangePreset, JalaliCalendar from, JalaliCalendar to) {
+        Filter(int direction, int rangePreset, CalDate from, CalDate to) {
             this.direction = direction;
             this.rangePreset = rangePreset;
             this.from = from;
@@ -1648,24 +1643,28 @@ public final class HistoryActivity extends Activity {
             return new Filter(direction, rangePreset, from, to);
         }
 
-        Filter withRange(int preset, JalaliCalendar from, JalaliCalendar to) {
+        Filter withRange(int preset, CalDate from, CalDate to) {
             return new Filter(direction, preset, from, to);
         }
     }
 
-    /** Keeps the transactions whose movement direction and Persian date fall inside {@code f}; a
+    /** Keeps the transactions whose movement direction and calendar date fall inside {@code f}; a
      *  transaction on a boundary day is included. Never mutates the caller's list, so it composes
      *  safely after the per-bank filter for both the full and the per-bank screens. */
     static List<Transaction> applyFilters(List<Transaction> txs, Filter f) {
+        return applyFilters(txs, f, true);
+    }
+
+    static List<Transaction> applyFilters(List<Transaction> txs, Filter f, boolean iran) {
         List<Transaction> out = new ArrayList<>(txs.size());
         for (Transaction t : txs) {
             if (f.direction == DIR_DEPOSIT && t.amount <= 0) continue;
             if (f.direction == DIR_WITHDRAWAL && t.amount >= 0) continue;
             if (f.from != null || f.to != null) {
                 int[] g = gDate(t.date);
-                JalaliCalendar jc = JalaliCalendar.fromGregorian(g[0], g[1], g[2]);
-                if (f.from != null && compareDate(jc, f.from) < 0) continue;
-                if (f.to != null && compareDate(jc, f.to) > 0) continue;
+                CalDate d = CalDate.fromGregorian(g[0], g[1], g[2], iran);
+                if (f.from != null && d.compare(f.from) < 0) continue;
+                if (f.to != null && d.compare(f.to) > 0) continue;
             }
             out.add(t);
         }
@@ -1675,32 +1674,33 @@ public final class HistoryActivity extends Activity {
     /** Replaces the date bounds with what the preset means on {@code now}; CUSTOM is never applied
      *  here — the dialog sets its own bounds. Kept static so the instrumented tests cover it. */
     static Filter rangePreset(Filter f, int preset, JalaliCalendar now) {
+        return rangePreset(f, preset, CalDate.of(now.year, now.month, now.day), true);
+    }
+
+    static Filter rangePreset(Filter f, int preset, CalDate now, boolean iran) {
         switch (preset) {
             case RANGE_TODAY:
                 return f.withRange(RANGE_TODAY, now, now);
             case RANGE_MONTH:
                 return f.withRange(RANGE_MONTH,
-                    JalaliCalendar.of(now.year, now.month, 1),
-                    JalaliCalendar.of(now.year, now.month, JalaliCalendar.daysInMonth(now.year, now.month)));
+                    CalDate.of(now.year, now.month, 1),
+                    CalDate.of(now.year, now.month, CalDate.daysInMonth(now.year, now.month, iran)));
             case RANGE_YEAR:
                 return f.withRange(RANGE_YEAR,
-                    JalaliCalendar.of(now.year, 1, 1),
-                    JalaliCalendar.of(now.year, 12, JalaliCalendar.daysInMonth(now.year, 12)));
+                    CalDate.of(now.year, 1, 1),
+                    CalDate.of(now.year, 12, CalDate.daysInMonth(now.year, 12, iran)));
             default:
                 return f.withRange(RANGE_ALL, null, null);
         }
     }
 
-    /** Chronological order of two Persian dates, compared field by field (no round trip needed). */
-    private static int compareDate(JalaliCalendar a, JalaliCalendar b) {
-        if (a.year != b.year) return Integer.compare(a.year, b.year);
-        if (a.month != b.month) return Integer.compare(a.month, b.month);
-        return Integer.compare(a.day, b.day);
+    /** Splits the raw transactions into the summary sums and the year-by-year (month-by-month,
+     *  day-by-day) groups of the given calendar system. Never mutates the caller's list. */
+    static Lists buildLists(List<Transaction> txs) {
+        return buildLists(txs, true);
     }
 
-    /** Splits the raw transactions into the summary sums and the year-by-year (month-by-month,
-     *  day-by-day) groups. Never mutates the caller's list. */
-    static Lists buildLists(List<Transaction> txs) {
+    static Lists buildLists(List<Transaction> txs, boolean iran) {
         Lists lists = new Lists();
         if (txs.isEmpty()) return lists;
 
@@ -1712,18 +1712,15 @@ public final class HistoryActivity extends Activity {
             }
         });
 
-        Calendar cal = Calendar.getInstance(Locale.getDefault());
-        long now = cal.getTimeInMillis();
-        JalaliCalendar today = JalaliCalendar.fromGregorian(
-            cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH));
+        CalDate today = CalDate.today(iran);
 
         Map<String, YearGroup> yearIndex = new HashMap<>();
         Map<String, MonthGroup> monthIndex = new HashMap<>();
         for (Transaction t : sorted) {
             lists.total += t.amount;
             int[] g = gDate(t.date);
-            JalaliCalendar jc = JalaliCalendar.fromGregorian(g[0], g[1], g[2]);
-            boolean todayMatch = sameDay(jc, today);
+            CalDate jc = CalDate.fromGregorian(g[0], g[1], g[2], iran);
+            boolean todayMatch = jc.sameDay(today);
             boolean monthMatch = jc.year == today.year && jc.month == today.month;
             boolean yearMatch = jc.year == today.year;
             if (todayMatch) {
@@ -1772,10 +1769,6 @@ public final class HistoryActivity extends Activity {
         return lists;
     }
 
-    private static boolean sameDay(JalaliCalendar a, JalaliCalendar b) {
-        return a.year == b.year && a.month == b.month && a.day == b.day;
-    }
-
     private static int[] gDate(long date) {
         Calendar c = Calendar.getInstance(Locale.getDefault());
         c.setTimeInMillis(date);
@@ -1790,47 +1783,71 @@ public final class HistoryActivity extends Activity {
         return value < 0 ? negativeColor : value > 0 ? positiveColor : muted;
     }
 
-    /** Localized Persian month name from the 1-based month index. */
+    /** Localized month name for the 1-based index, in the active calendar system: the Persian month
+     *  names (Jalali script or the "Farvardin"-style transliteration) for the Iran region, and the
+     *  Gregorian month names (Persian-scripted in the Persian UI) for International. */
     private String monthName(int month) {
-        String tag = LocaleHelper.currentTag(this);
-        boolean fa = "fa".equals(tag);
+        boolean fa = "fa".equals(LocaleHelper.currentTag(this));
+        if (iranCalendar) {
+            switch (month) {
+                case 1: return fa ? "\u0641\u0631\u0648\u0631\u062f\u06cc\u0646" : "Farvardin";
+                case 2: return fa ? "\u0627\u0631\u062f\u06cc\u0628\u0647\u0634\u062a" : "Ordibehesht";
+                case 3: return fa ? "\u062e\u0631\u062f\u0627\u062f" : "Khordad";
+                case 4: return fa ? "\u062a\u06cc\u0631" : "Tir";
+                case 5: return fa ? "\u0645\u0631\u062f\u0627\u062f" : "Mordad";
+                case 6: return fa ? "\u0634\u0647\u0631\u06cc\u0648\u0631" : "Shahrivar";
+                case 7: return fa ? "\u0645\u0647\u0631" : "Mehr";
+                case 8: return fa ? "\u0622\u0628\u0627\u0646" : "Aban";
+                case 9: return fa ? "\u0622\u0630\u0631" : "Azar";
+                case 10: return fa ? "\u062f\u06cc" : "Dey";
+                case 11: return fa ? "\u0628\u0647\u0645\u0646" : "Bahman";
+                default: return fa ? "\u0627\u0633\u0641\u0646\u062f" : "Esfand";
+            }
+        }
         switch (month) {
-            case 1: return fa ? "\u0641\u0631\u0648\u0631\u062f\u06cc\u0646" : "Farvardin";
-            case 2: return fa ? "\u0627\u0631\u062f\u06cc\u0628\u0647\u0634\u062a" : "Ordibehesht";
-            case 3: return fa ? "\u062e\u0631\u062f\u0627\u062f" : "Khordad";
-            case 4: return fa ? "\u062a\u06cc\u0631" : "Tir";
-            case 5: return fa ? "\u0645\u0631\u062f\u0627\u062f" : "Mordad";
-            case 6: return fa ? "\u0634\u0647\u0631\u06cc\u0648\u0631" : "Shahrivar";
-            case 7: return fa ? "\u0645\u0647\u0631" : "Mehr";
-            case 8: return fa ? "\u0622\u0628\u0627\u0646" : "Aban";
-            case 9: return fa ? "\u0622\u0630\u0631" : "Azar";
-            case 10: return fa ? "\u062f\u06cc" : "Dey";
-            case 11: return fa ? "\u0628\u0647\u0645\u0646" : "Bahman";
-            default: return fa ? "\u0627\u0633\u0641\u0646\u062f" : "Esfand";
+            case 1: return fa ? "\u0698\u0627\u0646\u0648\u06cc\u0647" : "January";
+            case 2: return fa ? "\u0641\u0648\u0631\u06cc\u0647" : "February";
+            case 3: return fa ? "\u0645\u0627\u0631\u0633" : "March";
+            case 4: return fa ? "\u0622\u0648\u0631\u06cc\u0644" : "April";
+            case 5: return fa ? "\u0645\u0647" : "May";
+            case 6: return fa ? "\u0698\u0648\u0626\u0646" : "June";
+            case 7: return fa ? "\u0698\u0648\u0626\u06cc\u0647" : "July";
+            case 8: return fa ? "\u0627\u0648\u062a" : "August";
+            case 9: return fa ? "\u0633\u067e\u062a\u0627\u0645\u0628\u0631" : "September";
+            case 10: return fa ? "\u0627\u06a9\u062a\u0628\u0631" : "October";
+            case 11: return fa ? "\u0646\u0648\u0627\u0645\u0628\u0631" : "November";
+            default: return fa ? "\u062f\u0633\u0627\u0645\u0628\u0631" : "December";
         }
     }
 
-    /** The 7 weekday grid headings, Saturday first, in the app language. */
+    /** The 7 weekday grid headings in the app language. The Iran region leads with Saturday, the
+     *  International region leads with Monday (ISO). */
     private String[] weekdayLabels() {
         boolean fa = LocaleHelper.isPersian(this);
+        if (iranCalendar) {
+            return fa
+                ? new String[]{"ش", "ی", "د", "س", "چ", "پ", "ج"}
+                : new String[]{"Sa", "Su", "Mo", "Tu", "We", "Th", "Fr"};
+        }
         return fa
-            ? new String[]{"ش", "ی", "د", "س", "چ", "پ", "ج"}
-            : new String[]{"Sa", "Su", "Mo", "Tu", "We", "Th", "Fr"};
+            ? new String[]{"د", "ی", "س", "چ", "پ", "ج", "ش"}
+            : new String[]{"Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"};
     }
 
-    /** Formats a Persian date in the app language, e.g. "Khordad 12 1403" / "۱۲ خرداد ۱۴۰۳". */
-    private String persianDate(JalaliCalendar jc) {
+    /** Formats a calendar date in the app language, e.g. "Khordad 12 1403" / "۱۲ خرداد ۱۴۰۳" in the
+     *  Iran region and "January 26 2026" / "۲۶ ژانویه ۲۰۲۶" in International. */
+    private String dateText(CalDate d) {
         boolean fa = LocaleHelper.isPersian(this);
         if (fa) {
-            return faDigits(jc.day) + " " + monthName(jc.month) + " " + faDigits(jc.year);
+            return faDigits(d.day) + " " + monthName(d.month) + " " + faDigits(d.year);
         }
-        return monthName(jc.month) + " " + jc.day + " " + jc.year;
+        return monthName(d.month) + " " + d.day + " " + d.year;
     }
 
-    /** Formats a Persian date as the compact "y/m/d" used by the custom-range inputs and summary, in
-     *  the app language's digits. */
-    private String compactDate(JalaliCalendar jc) {
-        String s = jc.year + "/" + jc.month + "/" + jc.day;
+    /** Formats a calendar date as the compact "y/m/d" used by the custom-range inputs and summary,
+     *  in the app language's digits. */
+    private String compactDate(CalDate d) {
+        String s = d.year + "/" + d.month + "/" + d.day;
         return LocaleHelper.isPersian(this) ? faDigitsString(s) : s;
     }
 
