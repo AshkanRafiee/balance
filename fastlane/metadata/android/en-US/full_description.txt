@@ -1,12 +1,12 @@
 Balance reads supported bank balance SMS messages locally and shows the latest balance for each bank — split per account number when the bank SMS states one — plus the combined total.
 
-Currently designed for users in Iran, with support for Iranian banks and Persian bank SMS formats. A Region &amp; Language menu (footer) holds the region, currency and language selectors: the Region switches the app's calendar system between the Persian (Jalali) calendar for Iran (the default) and the Gregorian calendar for International, with localized month and weekday names for both; the Currency setting picks the value and unit shown next to amounts — Toman (the default), which divides the rial figure by ten exactly as before, or Rial as stored, USD, EUR, or any custom currency you type, which show the raw number under their own label; and the Language selector overrides the interface language. No exchange rates are applied — everything works fully offline.
+Currently designed for users in Iran, with support for Iranian banks and Persian bank SMS formats. A Display menu (footer) holds the calendar, currency, language and theme selectors: the Calendar setting switches the app's calendar system between the Persian (Jalali) calendar for Iran (the default) and the Gregorian calendar, with localized month and weekday names for both; the Currency setting picks the value and unit shown next to amounts — Toman (the default), which divides the rial figure by ten exactly as before, or Rial as stored, or any custom currency you type, which show the raw number under their own label; the Language selector overrides the interface language; and the Theme setting switches between the system default, a forced dark and a forced light mode. No exchange rates are applied — everything works fully offline.
 
 Features:
 - Offline SMS parsing with no internet permission
 - Latest balance per supported bank, split per account number when stated, without duplicate accumulation
 - Combined balance total
-- Currency unit choice (Toman / Rial / USD / EUR / custom name) shown next to amounts
+- Currency unit choice (Toman / Rial / custom name) shown next to amounts
 - Persistent privacy masking for balances
 - Balances update automatically as bank SMS arrive, plus pull-to-refresh
 - Home-screen widget mirroring the same bank order, totals and privacy mask; it locks together with the app when the lock is enabled
