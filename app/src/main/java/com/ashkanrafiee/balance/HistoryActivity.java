@@ -655,7 +655,7 @@ public final class HistoryActivity extends Activity {
 
             LinearLayout box = new LinearLayout(HistoryActivity.this);
             box.setOrientation(LinearLayout.VERTICAL);
-            box.setPadding(dp(8) + dp(12), dp(4), dp(8), dp(4));
+            box.setPadding(dp(8) + dp(18), dp(4), dp(8), dp(4));
             TextView mLabel = text(getString(R.string.history_month_label), 13, muted);
             box.addView(mLabel);
             box.addView(monthSpin, new LinearLayout.LayoutParams(-1, -2));
