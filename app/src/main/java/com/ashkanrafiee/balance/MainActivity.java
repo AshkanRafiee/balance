@@ -1184,7 +1184,9 @@ public class MainActivity extends Activity {
         /** Ends a drag: a released finger with enough velocity coasts the list the way the history
          *  screen does, while a slow deliberate pull spent at the very top keeps the pull-to-refresh.
          *  A downward release at the top cannot scroll (nothing above the viewport), so it falls
-         *  through to the refresh gesture wherever the pull started. */
+         *  through to the refresh gesture wherever the pull started. An upward release that instead
+         *  flings the list was never a refresh: the indicator retracts so a scroll never leaves it
+         *  stuck on screen. */
         private void handleDragRelease(float downY, float y) {
             float vy = 0;
             if (velocityTracker != null) {
@@ -1200,6 +1202,7 @@ public class MainActivity extends Activity {
                 scroller.fling(0, Math.round(scrollY), 0, -Math.round(vy),
                     0, 0, 0, Math.round(maxScroll()), 0, 0);
                 invalidate();
+                retractIndicator();
             } else if (y - downY > PULL_TRIGGER && scrollY == 0) {
                 beginSpin();
                 refresh();
