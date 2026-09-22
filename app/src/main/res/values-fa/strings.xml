@@ -15,7 +15,7 @@
     <string name="status_reading_sms">در حال خواندن پیامک‌های بانکی این دستگاه…</string>
     <string name="status_permission_needed">برای خواندن موجودی به اجازهٔ دسترسی به پیامک نیاز است</string>
     <string name="permission_title">اجازهٔ دسترسی به پیامک</string>
-    <string name="permission_settings_message">اجازهٔ دسترسی به پیامک برای همیشه رد شده است. برای استفاده دوباره از Balance، دسترسی به پیامک را از تنظیمات برنامه فعال کنید.</string>
+    <string name="permission_settings_message">دسترسی به پیامک توسط سیستم این دستگاه مسدود شده است و پنجرهٔ معمولی نمی‌تواند آن را بدهد. در اندروید ۱۳ و جدیدتر، برنامه‌هایی که از بیرون فروشگاه پلی نصب می‌شوند معمولاً باید اول گزینهٔ «Allow restricted settings» (اجازهٔ تنظیمات محدود) را روشن کنند.\n\nبرای اجازه دادن:\n۱. تنظیمات برنامه ← Permissions ← SMS ← Allow\n۲. اگر SMS خاکستری بود: More (⋮) ← Allow restricted settings ← و بعد دوباره از Permissions اجازه دهید.</string>
     <string name="permission_open_settings">باز کردن تنظیمات</string>
     <string name="permission_rationale_title">اجازهٔ دسترسی به پیامک</string>
     <string name="permission_rationale_message">Balance پیامک‌های بانکی پشتیبانی‌شده را روی همین دستگاه و به‌صورت محلی می‌خواند تا موجودی شما را نشان دهد. فقط پیامک‌های شناخته‌شدهٔ موجودی استفاده می‌شوند و هیچ چیزی هرگز از دستگاه خارج نمی‌شود. برای ادامه، دسترسی به پیامک را بدهید.</string>
@@ -107,7 +107,7 @@
 
     <string name="scan_diag_title">تشخیص اسکن پیامک</string>
     <string name="scan_diag_reading">در حال خواندن پیامک‌های این دستگاه…</string>
-    <string name="scan_diag_permission">برای دیدن کدام پیامک‌ها شناخته می‌شوند، مجوز پیامک لازم است.</string>
+    <string name="scan_diag_permission">برای دیدن کدام پیامک‌ها شناخته می‌شوند، مجوز پیامک لازم است. در برخی دستگاه‌ها این یک تنظیم محدود است: اگر «SMS» خاکستری بود، «More» ← «Allow restricted settings» را باز کنید و بعد اجازه دهید.</string>
     <string name="scan_diag_permission_action">باز کردن تنظیمات</string>
     <string name="scan_diag_recognized">پیامک‌های بانکی شناخته‌شده</string>
     <string name="scan_diag_summary">%1$d پیامک خوانده شد · %2$d ناشناخته</string>

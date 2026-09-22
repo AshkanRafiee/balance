@@ -15,7 +15,7 @@
     <string name="status_reading_sms">Reading bank SMS on this device…</string>
     <string name="status_permission_needed">SMS permission is needed to read balances</string>
     <string name="permission_title">SMS permission</string>
-    <string name="permission_settings_message">SMS permission was permanently declined. To use Balance again, grant SMS access in the app settings.</string>
+    <string name="permission_settings_message">SMS access is blocked by this device\'s system, and the normal dialog cannot grant it. On Android 13 and newer, apps installed from outside the Play Store usually need \'Allow restricted settings\' switched on first.\n\nTo allow it:\n1. App settings → Permissions → SMS → Allow\n2. If SMS is greyed out: More (⋮) → Allow restricted settings → then grant it from Permissions again.</string>
     <string name="permission_open_settings">Open settings</string>
     <string name="permission_rationale_title">SMS permission</string>
     <string name="permission_rationale_message">Balance reads supported bank SMS locally on this device to show your balances. Only recognized bank balance messages are used, and nothing ever leaves the device. Grant SMS access to continue.</string>
@@ -107,7 +107,7 @@
 
     <string name="scan_diag_title">Scan diagnostics</string>
     <string name="scan_diag_reading">Reading SMS on this device…</string>
-    <string name="scan_diag_permission">SMS permission is needed to inspect which messages are recognized.</string>
+    <string name="scan_diag_permission">SMS permission is needed to inspect which messages are recognized. On some devices it is a restricted setting: if \'SMS\' is greyed out, open \'More\' → \'Allow restricted settings\', then allow it.</string>
     <string name="scan_diag_permission_action">Open settings</string>
     <string name="scan_diag_recognized">Recognized bank messages</string>
     <string name="scan_diag_summary">%1$d SMS read · %2$d not recognized</string>
