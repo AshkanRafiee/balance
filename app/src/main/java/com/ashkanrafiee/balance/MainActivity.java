@@ -1182,9 +1182,9 @@ public class MainActivity extends Activity {
         }
 
         /** Ends a drag: a released finger with enough velocity coasts the list the way the history
-         *  screen does, while a slow deliberate pull at the very top keeps the pull-to-refresh. A
-         *  downward release spent at the top cannot scroll (nothing above the viewport), so it falls
-         *  through to the refresh gesture exactly as before. */
+         *  screen does, while a slow deliberate pull spent at the very top keeps the pull-to-refresh.
+         *  A downward release at the top cannot scroll (nothing above the viewport), so it falls
+         *  through to the refresh gesture wherever the pull started. */
         private void handleDragRelease(float downY, float y) {
             float vy = 0;
             if (velocityTracker != null) {
@@ -1200,7 +1200,7 @@ public class MainActivity extends Activity {
                 scroller.fling(0, Math.round(scrollY), 0, -Math.round(vy),
                     0, 0, 0, Math.round(maxScroll()), 0, 0);
                 invalidate();
-            } else if (downY < 360 && y - downY > PULL_TRIGGER && scrollY == 0) {
+            } else if (y - downY > PULL_TRIGGER && scrollY == 0) {
                 beginSpin();
                 refresh();
             } else if (indicatorVisible) {
@@ -1900,7 +1900,7 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (e.getAction() == MotionEvent.ACTION_MOVE) {
-                if (scrollY == 0 && downY < 360 && y > downY)
+                if (scrollY == 0 && y > downY)
                     startPull(y - downY, PULL_TRIGGER);
                 if (Math.abs(y - lastY) > 3) {
                     dragging = true;
