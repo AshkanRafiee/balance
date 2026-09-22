@@ -146,8 +146,78 @@ final class ScanDiagnostics {
             if (!h.stored.isEmpty()) out.append(h.stored.get(0).body);
             out.append("\n```\n\n");
         }
-        out.append("---\nDevice model and Android version help reproduce the format.");
+        out.append("---\n").append(deviceLine()).append("\n");
         return out.toString();
+    }
+
+    /** Device, Android-version, build and ROM facts embedded in every report footer, so the
+     *  maintainer can reproduce the message layout without asking. Everything is read from the
+     *  platform at report time; a field the system does not expose is simply omitted. */
+    private static String deviceLine() {
+        StringBuilder out = new StringBuilder();
+        String make = android.os.Build.MANUFACTURER == null ? "" : android.os.Build.MANUFACTURER.trim();
+        String model = android.os.Build.MODEL == null ? "" : android.os.Build.MODEL.trim();
+        String device = (make + " " + model).trim();
+        if (device.isEmpty()) device = "Unknown device";
+        out.append("Device: ").append(device).append(" \u00b7 Android ")
+            .append(android.os.Build.VERSION.RELEASE).append(" (API ")
+            .append(android.os.Build.VERSION.SDK_INT).append(")");
+        String display = android.os.Build.DISPLAY == null ? "" : android.os.Build.DISPLAY.trim();
+        if (!display.isEmpty()) out.append(" \u00b7 build ").append(display);
+        String rom = romLine();
+        if (rom != null) out.append('\n').append("ROM: ").append(rom);
+        return out.toString();
+    }
+
+    private static final String[][] ROM_PROPS = {
+        {"ro.mi.os.version.name", "HyperOS"},
+        {"ro.miui.ui.version.name", "MIUI"},
+        {"ro.build.version.emui", "EMUI/HarmonyOS"},
+        {"ro.build.version.oneui", "One UI"},
+        {"ro.vendor.build.version.sem_oneui", "One UI"},
+        {"ro.oxygen.version", "OxygenOS"},
+        {"ro.build.version.oplusrom", "ColorOS"},
+        {"ro.build.version.coloros", "ColorOS"},
+        {"ro.build.version.realmeui", "Realme UI"},
+        {"ro.xos.version", "XOS"},
+        {"ro.hios.version", "HiOS"},
+        {"ro.vivo.os.build.display.id", "FunTouch OS"},
+        {"ro.lineage.version", "LineageOS"},
+        {"ro.crDroid.version", "crDroid"},
+        {"ro.evolution.version", "Evolution X"},
+        {"ro.havoc.version", "HavocOS"},
+        {"ro.dotos.version", "dotOS"},
+        {"ro.modversion", "custom"},
+    };
+
+    /** The OEM/custom-ROM name and version when the firmware exposes it through one of the
+     *  well-known {@code ro.*} properties; otherwise a best-effort stock guess from the build
+     *  fingerprint, or null when nothing can be told (the build id line above already pins the
+     *  exact firmware then). */
+    private static String romLine() {
+        for (String[] p : ROM_PROPS) {
+            String v = sysProp(p[0]);
+            if (v != null && !v.trim().isEmpty()) {
+                String val = v.trim();
+                if (val.length() > 48) val = val.substring(0, 48);
+                return p[1] + " " + val;
+            }
+        }
+        String fp = android.os.Build.FINGERPRINT == null ? "" : android.os.Build.FINGERPRINT;
+        if (fp.startsWith("google/")) return "Google stock firmware";
+        return null;
+    }
+
+    /** Reads one Android {@code ro.*} system property by reflection; the class is hidden from the
+     *  SDK but the read stays usable for apps, and any future restriction degrades to null. */
+    private static String sysProp(String key) {
+        try {
+            java.lang.reflect.Method get = Class.forName("android.os.SystemProperties")
+                .getMethod("get", String.class);
+            return (String) get.invoke(null, key);
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     /** The report body for one sender with a chosen subset of its messages (the originals, so the
@@ -173,7 +243,7 @@ final class ScanDiagnostics {
         for (Message m : selected) {
             out.append("```\n").append(m.body).append("\n```\n\n");
         }
-        out.append("---\nDevice model and Android version help reproduce the format.");
+        out.append("---\n").append(deviceLine()).append("\n");
         return out.toString();
     }
 

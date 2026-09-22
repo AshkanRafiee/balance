@@ -156,6 +156,61 @@ public class ScanDiagnosticsTest {
         assertTrue(txt.contains("## Bank SMS formats Balance could not parse"));
     }
 
+    @Test public void reportText_embedsDeviceModelAndAndroidVersion() {
+        ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
+            new Object[]{"+98x", "a 1000", 1000L}));
+        String txt = ScanDiagnostics.reportText(s.unknownSenders);
+        assertTrue(txt.contains("Device:"));
+        assertTrue(txt.contains(android.os.Build.MANUFACTURER));
+        assertTrue(txt.contains(android.os.Build.MODEL));
+        assertTrue(txt.contains("Android " + android.os.Build.VERSION.RELEASE));
+        assertTrue(txt.contains(String.valueOf(android.os.Build.VERSION.SDK_INT)));
+        if (!android.os.Build.DISPLAY.trim().isEmpty())
+            assertTrue(txt.contains(android.os.Build.DISPLAY.trim()));
+    }
+
+    @Test public void reportText_embedsRomLineWhenFirmwareIsKnown() {
+        // The report must carry a ROM line exactly when the device exposes a readable ro.* prop:
+        // read one back through the same reflection the app uses so the test cannot drift.
+        ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
+            new Object[]{"+98x", "a 1000", 1000L}));
+        String txt = ScanDiagnostics.reportText(s.unknownSenders);
+        String knownProp = firstNonEmptyRomProp();
+        if (knownProp != null) {
+            assertTrue("a recognized ROM must be named: " + txt, txt.contains("ROM: "));
+        }
+    }
+
+    private static String firstNonEmptyRomProp() {
+        String[] props = {
+            "ro.mi.os.version.name", "ro.miui.ui.version.name",
+            "ro.build.version.emui", "ro.build.version.oneui",
+            "ro.vendor.build.version.sem_oneui", "ro.oxygen.version",
+            "ro.build.version.oplusrom", "ro.build.version.coloros",
+            "ro.build.version.realmeui", "ro.xos.version",
+            "ro.hios.version", "ro.vivo.os.build.display.id",
+            "ro.lineage.version", "ro.crDroid.version",
+            "ro.evolution.version", "ro.havoc.version",
+            "ro.dotos.version", "ro.modversion",
+        };
+        for (String key : props) {
+            String v = readSysProp(key);
+            if (v != null && !v.trim().isEmpty()) return key;
+        }
+        return null;
+    }
+
+    // Mirrors ScanDiagnostics.sysProp (the report gets its ROM info through the same path).
+    private static String readSysProp(String key) {
+        try {
+            java.lang.reflect.Method get = Class.forName("android.os.SystemProperties")
+                .getMethod("get", String.class);
+            return (String) get.invoke(null, key);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     @Test public void reportText_knownBankAndUnknown_union() {
         ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
             new Object[]{TEJARAT, "layout that failed", 1000L},
@@ -248,6 +303,15 @@ public class ScanDiagnosticsTest {
         String txt = ScanDiagnostics.senderReport("+98x", 2, new ArrayList<>());
         assertTrue(txt.contains("+98x"));
         assertTrue(txt.contains("2 messages in total"));
+    }
+
+    @Test public void senderReport_embedsDeviceModelAndAndroidVersion() {
+        List<ScanDiagnostics.Message> sel = new ArrayList<>();
+        sel.add(new ScanDiagnostics.Message("lay out 1,000 Toman", 0L));
+        String txt = ScanDiagnostics.senderReport("+98Saman", 1, sel);
+        assertTrue(txt.contains(android.os.Build.MANUFACTURER));
+        assertTrue(txt.contains(android.os.Build.MODEL));
+        assertTrue(txt.contains("Android " + android.os.Build.VERSION.RELEASE));
     }
 
     @Test public void senderSubject_namesTheSender() {
