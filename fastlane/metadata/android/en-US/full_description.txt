@@ -12,7 +12,7 @@ Features:
 - Home-screen widget mirroring the same bank order, totals and privacy mask; it locks together with the app when the lock is enabled
 - Transaction history with deposit and withdrawal tracking per day, month and year, refreshing automatically as new bank SMS arrive, with out-of-order messages (like a transfer and its fee) shown in their true order
 - Filter history by movement type (all, deposits or withdrawals) and by date — today, this month, this year or a custom date range in the active calendar (Persian for Iran, Gregorian for International) — applied to the whole screen
-- Export the transaction history to a CSV file via the system file picker — everything, or exactly the current view (bank, account, movement type and date range) — with ISO-8601 UTC timestamps, the date in the active calendar, raw signed rial amounts, and the amounts as displayed with their currency unit
+- Export exactly what the transaction history currently shows to a CSV file via the system file picker — the active bank, account, movement type and date range (the full history when no filter is active) — with ISO-8601 UTC timestamps, the date in the active calendar, raw signed rial amounts, and the amounts as displayed with their currency unit
 - Bank rule updates rebuild history from your SMS and match it to what is already stored, so nothing is ever counted twice
 - Full history from the total card; tap a bank for just that bank's transactions, or tap one of its accounts for a single account's history
 - Long-press the total card, a bank card or an account row to copy that balance; long-press the eye for auto-mask (balances start hidden on every open), and long-press the lock icon for the lock settings

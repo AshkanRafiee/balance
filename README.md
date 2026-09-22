@@ -11,7 +11,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Combined total balance, with the option to exclude individual accounts from the total
 - Transaction history with deposits and withdrawals, broken down by day, month and year
 - History filters by movement type (all, deposits or withdrawals) and by date — today, this month, this year or a custom date range in the active calendar (Persian for Iran, Gregorian for International) — applied to every figure on the screen
-- CSV export of the transaction history — everything, or exactly the current view (bank, account, movement type and date range filters) — saved through the system file picker as a UTF-8 CSV with ISO-8601 UTC timestamps, the date in the active calendar, raw rial amounts and the amounts as displayed
+- CSV export of the transaction history — exactly what the current view shows (bank, account, movement type and date range filters; the full history when no filter is active) — saved through the system file picker as a UTF-8 CSV with ISO-8601 UTC timestamps, the date in the active calendar, raw rial amounts and the amounts as displayed
 - Full history from the total card, per-bank history from any bank card, and single-account history by tapping an account row in the list
 - Long-press the total card to copy the combined total, or long-press a bank or account card to copy that balance; long-press the eye to switch auto-mask on or off (balances start hidden on every open), and long-press the lock icon for the lock settings
 - Bank sorting by balance or update time, mirrored in the list and the home-screen widget

@@ -1,4 +1,4 @@
 CSV export of the transaction history, and a pull-to-refresh that works from anywhere at the top.
 
-• The History screen gained an Export button that saves your transactions as a CSV file through the system file picker — either everything, or exactly what the current view shows (the active bank, account, movement type and date range). Each row carries the bank name, the account number, an ISO-8601 UTC timestamp, the date in the active calendar, the time of day, the raw signed rial amount, the amount as displayed and the currency unit, so the file stays machine-readable while still being easy to read in a spreadsheet.
+• The History screen gained an Export button that saves your transactions as a CSV file through the system file picker. Each row carries the bank name, the account number, an ISO-8601 UTC timestamp, the date in the active calendar, the time of day, the raw signed rial amount, the amount as displayed and the currency unit, so the file stays machine-readable while still being easy to read in a spreadsheet.
 • Pull-to-refresh on the main screen now also works when the pull starts anywhere on the bank list at the very top, not only on the total card.
