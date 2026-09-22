@@ -180,9 +180,6 @@
     </plurals>
     <string name="history_export">Export transactions</string>
     <string name="history_export_label">Export</string>
-    <string name="history_export_title">Export transactions</string>
-    <string name="history_export_all">All transactions</string>
-    <string name="history_export_filtered">What\'s on screen (filters)</string>
     <string name="history_export_saved">CSV saved</string>
     <string name="history_export_failed">CSV export failed</string>
 
