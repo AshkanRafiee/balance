@@ -129,9 +129,10 @@
     <string name="sender_share_send">ارسال (%1$d)</string>
     <string name="sender_share_send_via">ارسال گزارش از طریق</string>
     <string name="sender_share_pick_one">دست‌کم یک پیامک را انتخاب کنید</string>
+    <string name="sender_share_pick_issue">دست‌کم یک مشکل را انتخاب کنید — بدون آن نمی‌توان مشکل فرستنده را تشخیص داد</string>
     <string name="sender_share_privacy">تا وقتی برنامه‌ای را انتخاب و ارسال را در آن تأیید نکنید، چیزی ارسال نمی‌شود.</string>
     <string name="sender_share_no_messages">هیچ نمونهٔ پیامکی ذخیره نشده است.</string>
-    <string name="sender_share_issue_title">مشکل این فرستنده چیست؟</string>
+    <string name="sender_share_issue_title">مشکل این فرستنده چیست؟ (دست‌کم یکی را انتخاب کنید)</string>
     <string name="sender_share_issue_account">تشخیص حساب</string>
     <string name="sender_share_issue_balance">تشخیص موجودی</string>
     <string name="sender_share_issue_number">تشخیص شمارهٔ فرستنده</string>

@@ -129,9 +129,10 @@
     <string name="sender_share_send">Send (%1$d)</string>
     <string name="sender_share_send_via">Send report via</string>
     <string name="sender_share_pick_one">Select at least one message</string>
+    <string name="sender_share_pick_issue">Select at least one issue — the sender can\'t be diagnosed otherwise</string>
     <string name="sender_share_privacy">Nothing is sent until you choose an app and confirm there.</string>
     <string name="sender_share_no_messages">No message samples are stored.</string>
-    <string name="sender_share_issue_title">What\'s wrong with this sender?</string>
+    <string name="sender_share_issue_title">What\'s wrong with this sender? (choose at least one)</string>
     <string name="sender_share_issue_account">Account detection</string>
     <string name="sender_share_issue_balance">Balance detection</string>
     <string name="sender_share_issue_number">Sender number detection</string>

@@ -212,6 +212,15 @@ public final class SenderShareActivity extends Activity {
         return tags;
     }
 
+    /** Which required piece of the report selection is missing, or 0 when sending/copying is
+     *  allowed. A report leaves the device only with at least one diagnosed issue and at least
+     *  one message, so the maintainer gets both context and content to reproduce a format. */
+    static int missingSelection(boolean issueChosen, int messagesChosen) {
+        if (!issueChosen) return R.string.sender_share_pick_issue;
+        if (messagesChosen == 0) return R.string.sender_share_pick_one;
+        return 0;
+    }
+
     private void messagesCard() {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -290,12 +299,12 @@ public final class SenderShareActivity extends Activity {
         sendP.setMarginStart(dp(10));
         send.setBackground(rounded(accent, 13));
         send.setOnClickListener(v -> {
-            String report = selectedText();
-            if (report == null) {
-                Toast.makeText(this, getString(R.string.sender_share_pick_one), Toast.LENGTH_SHORT).show();
+            int missing = missingSelection(!issueTags().isEmpty(), selected().size());
+            if (missing != 0) {
+                Toast.makeText(this, missing, Toast.LENGTH_SHORT).show();
                 return;
             }
-            sendMail(report);
+            sendMail(selectedText());
         });
         row.addView(send, sendP);
         return row;
@@ -321,11 +330,12 @@ public final class SenderShareActivity extends Activity {
     }
 
     private int copySelected() {
-        String report = selectedText();
-        if (report == null) {
-            Toast.makeText(this, getString(R.string.sender_share_pick_one), Toast.LENGTH_SHORT).show();
+        int missing = missingSelection(!issueTags().isEmpty(), selected().size());
+        if (missing != 0) {
+            Toast.makeText(this, missing, Toast.LENGTH_SHORT).show();
             return 0;
         }
+        String report = selectedText();
         int n = selected().size();
         ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
         clipboard.setPrimaryClip(ClipData.newPlainText(sender, report));

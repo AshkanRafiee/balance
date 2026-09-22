@@ -318,6 +318,13 @@ public class ScanDiagnosticsTest {
         assertTrue(ScanDiagnostics.senderSubject("+98x").contains("+98x"));
     }
 
+    @Test public void senderCheck_requiresAtLeastOneIssueAndOneMessage() {
+        assertEquals(R.string.sender_share_pick_issue, SenderShareActivity.missingSelection(false, 2));
+        assertEquals(R.string.sender_share_pick_issue, SenderShareActivity.missingSelection(false, 0));
+        assertEquals(R.string.sender_share_pick_one, SenderShareActivity.missingSelection(true, 0));
+        assertEquals(0, SenderShareActivity.missingSelection(true, 1));
+    }
+
     // ---- Screen-level smoke tests: the activity reads the real inbox and renders ----
     // The scan tests seed and clear the real SMS table through the smsinject helper app, exactly
     // like HistoryScanTest does, so the screen is verified against a deterministic inbox.
