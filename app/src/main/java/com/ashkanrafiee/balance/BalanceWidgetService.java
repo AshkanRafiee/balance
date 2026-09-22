@@ -78,6 +78,8 @@ public class BalanceWidgetService extends RemoteViewsService {
             views.setTextViewText(R.id.bank_name, BankRules.displayName(c, b.name));
             views.setTextViewText(R.id.bank_amount,
                 hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : CurrencyHelper.amount(c, b.amount));
+            if (BalanceData.isStale(c, b.date) && !hidden)
+                views.setTextColor(R.id.bank_amount, c.getColor(R.color.warn));
             views.setInt(R.id.bank_name, "setGravity", Gravity.CENTER_VERTICAL | Gravity.START);
             views.setInt(R.id.bank_amount, "setGravity", Gravity.CENTER_VERTICAL | Gravity.END);
             if (b.account != null) {

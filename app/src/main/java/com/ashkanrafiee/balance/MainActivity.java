@@ -374,6 +374,32 @@ public class MainActivity extends Activity {
             @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
         });
 
+        Spinner staleSpin = new Spinner(this);
+        final int[] staleChoices = {0, 3, 7, 14, 30};
+        String[] staleLabels = new String[staleChoices.length];
+        for (int i = 0; i < staleChoices.length; i++)
+            staleLabels[i] = staleChoices[i] == 0
+                ? getString(R.string.stale_option_off)
+                : getResources().getQuantityString(R.plurals.stale_days, staleChoices[i], staleChoices[i]);
+        ArrayAdapter<String> staleAdapter = new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item, staleLabels);
+        staleAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        staleSpin.setAdapter(staleAdapter);
+        int storedStale = BalanceData.getStaleDays(MainActivity.this);
+        for (int i = 0; i < staleChoices.length; i++)
+            if (staleChoices[i] == storedStale) { staleSpin.setSelection(i); break; }
+        staleSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
+                int chosen = staleChoices[Math.min(pos, staleChoices.length - 1)];
+                if (chosen != BalanceData.getStaleDays(MainActivity.this)) {
+                    BalanceData.setStaleDays(MainActivity.this, chosen);
+                    view.invalidate();
+                    BalanceWidgetProvider.push(MainActivity.this);
+                }
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
+        });
+
         TextView calendarLabel = new TextView(this);
         calendarLabel.setText(getString(R.string.settings_calendar_label));
         calendarLabel.setTextSize(14);
@@ -386,6 +412,9 @@ public class MainActivity extends Activity {
         TextView themeLabel = new TextView(this);
         themeLabel.setText(getString(R.string.settings_theme_label));
         themeLabel.setTextSize(14);
+        TextView staleLabel = new TextView(this);
+        staleLabel.setText(getString(R.string.settings_stale_label));
+        staleLabel.setTextSize(14);
 
         box.addView(calendarLabel);
         box.addView(calendarSpin);
@@ -404,6 +433,10 @@ public class MainActivity extends Activity {
         themeLp.topMargin = dp(18);
         box.addView(themeLabel, themeLp);
         box.addView(themeSpin);
+        LinearLayout.LayoutParams staleLp = new LinearLayout.LayoutParams(-1, -2);
+        staleLp.topMargin = dp(18);
+        box.addView(staleLabel, staleLp);
+        box.addView(staleSpin);
 
         showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.footer_display))
@@ -1144,6 +1177,8 @@ public class MainActivity extends Activity {
         final int purple = resColor(R.color.purple);
         final int panel = resColor(R.color.panel);
         final int bg = resColor(R.color.bg);
+        final int warn = resColor(R.color.warn);
+        final int warn_bg = resColor(R.color.warn_bg);
         BalanceView() {
             super(MainActivity.this);
             hidden = BalanceData.isHidden(MainActivity.this);
@@ -1289,7 +1324,15 @@ public class MainActivity extends Activity {
             String totalText = hidden ? getString(R.string.accessibility_total_masked)
                 : CurrencyHelper.amount(MainActivity.this, total) + " "
                     + CurrencyHelper.label(MainActivity.this);
-            return getString(R.string.accessibility_total_balance, totalText) + " " + status + ".";
+            int staleCount = 0;
+            for (java.util.Map.Entry<String, Bank> e : banks.entrySet())
+                if (!excluded.contains(e.getKey()) && BalanceData.isStale(MainActivity.this, e.getValue().date))
+                    staleCount++;
+            String note = staleCount > 0
+                ? " " + getResources().getQuantityString(
+                    R.plurals.accessibility_stale_note, staleCount, staleCount)
+                : "";
+            return getString(R.string.accessibility_total_balance, totalText) + " " + status + "." + note;
         }
 
         /** Reloads the saved balances (e.g. after a restore) without re-scanning SMS. */
@@ -1399,7 +1442,22 @@ public class MainActivity extends Activity {
 
         void value(Canvas c, long n, float x, float baseline, float width,
                    float size, Paint.Align align) {
-            value(c, n, x, baseline, width, size, align, false);
+            value(c, n, x, baseline, width, size, align, accent);
+        }
+
+        /** Same as {@link #value(Canvas, long, float, float, float, float, Paint.Align)} but with the
+         *  amount in a chosen color (used to flag stale balances in the warning amber). */
+        void value(Canvas c, long n, float x, float baseline, float width,
+                   float size, Paint.Align align, int color) {
+            if (hidden) {
+                text(c, "\u2022\u2022\u2022\u2022\u2022\u2022", x, baseline, size, fg, align);
+                return;
+            }
+            String number = CurrencyHelper.amount(MainActivity.this, n);
+            float current = size;
+            while (current > 10 && measure(number, current) > width) current -= 1;
+            text(c, number, x, baseline, current, color, align);
+            text(c, CurrencyHelper.label(MainActivity.this), x, baseline + 19, 11, muted, align);
         }
 
         void totalValue(Canvas c, long n, float x, float baseline, float width, boolean rtl) {
@@ -1424,6 +1482,27 @@ public class MainActivity extends Activity {
             return p.measureText(value);
         }
 
+        /** A small amber pill right after the bank name showing how many days old the balance is.
+         *  Skipped when it would crowd the amount column; the amber amount and the card ring still
+         *  carry the warning on their own. */
+        void drawStaleBadge(Canvas c, String nameShown, float nameX, float yy,
+                            Paint.Align nameAlign, int staleDays, float guardX) {
+            String txt = getResources().getQuantityString(R.plurals.stale_days, staleDays, staleDays);
+            float tx = 11, h = 18, pw = measure(txt, tx) + 12;
+            float x;
+            if (nameAlign == Paint.Align.LEFT) {
+                x = nameX + measure(nameShown, 17) + 8;
+                if (x + pw > guardX) return;
+            } else {
+                x = nameX - measure(nameShown, 17) - 8 - pw;
+                if (x < guardX) return;
+            }
+            float y = yy + 25;
+            round(c, x, y, x + pw, y + h, h / 2, warn_bg);
+            roundStroke(c, x, y, x + pw, y + h, h / 2, 1f, warn);
+            text(c, txt, x + 6, y + 13, tx, warn, Paint.Align.LEFT);
+        }
+
         String fit(String value, float size, float max) {
             p.setTextSize(size * fs);
             if (p.measureText(value) <= max) return value;
@@ -1445,6 +1524,16 @@ public class MainActivity extends Activity {
                    float rad, int color) {
             p.setColor(color);
             c.drawRoundRect(new RectF(l, t, r, b), rad, rad, p);
+        }
+
+        /** A thin outline around a rounded rect; restores the shared paint to fill afterwards. */
+        void roundStroke(Canvas c, float l, float t, float r, float b,
+                         float rad, float width, int color) {
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(width);
+            p.setColor(color);
+            c.drawRoundRect(new RectF(l, t, r, b), rad, rad, p);
+            p.setStyle(Paint.Style.FILL);
         }
 
         @Override
@@ -1524,19 +1613,27 @@ public class MainActivity extends Activity {
                 for (BankRow row : rows()) {
                     float yy = row.top - scrollY;
                     String displayName = BankRules.displayName(MainActivity.this, row.bankName);
+                    String nameShown = fit(displayName, 17, Math.max(40, valueLeft - 100));
+                    boolean stale = !row.excluded
+                        && BalanceData.isStale(MainActivity.this, row.bank.date);
                     round(c, 24, yy, w - 24, yy + 82, 20, row.excluded ? bg : panel);
+                    if (stale) roundStroke(c, 24, yy, w - 24, yy + 82, 20, 1.8f, warn);
                     bankBadge(c, row.bankName, badgeX, yy + 41);
                     p.setColor(muted);
                     for (int dot = -1; dot <= 1; dot++)
                         c.drawCircle(menuX, yy + 41 + dot * 4.5f, 1.8f, p);
-                    text(c, fit(displayName, 17, Math.max(40, valueLeft - 100)), nameX, yy + 36, 17,
-                        row.excluded ? muted : fg, nameAlign);
+                    text(c, nameShown, nameX, yy + 36, 17, row.excluded ? muted : fg, nameAlign);
+                    if (stale)
+                        drawStaleBadge(c, nameShown, nameX, yy, nameAlign,
+                            BalanceData.staleDays(MainActivity.this, row.bank.date),
+                            rtl ? w - valueLeft + 4 : valueLeft - 4);
                     if (row.excluded) {
                         value(c, row.amount, valueX, yy + 35, valueWidth, 17, valueAlign, true);
                         String exLabel = getString(R.string.excluded_label);
                         text(c, exLabel, nameX, yy + 68, 11, muted, nameAlign);
                     } else {
-                        value(c, row.amount, valueX, yy + 35, valueWidth, 17, valueAlign);
+                        value(c, row.amount, valueX, yy + 35, valueWidth, 17, valueAlign,
+                            stale ? warn : accent);
                         if (row.bank.account != null) {
                             // The mask hides the account number too: it is as identifiable as the
                             // balance itself, so a shoulder-surf must not see either.
