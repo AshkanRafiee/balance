@@ -474,12 +474,13 @@ public final class HistoryActivity extends Activity {
         LinearLayout.LayoutParams barSpacer = new LinearLayout.LayoutParams(0, 0, 1);
         bar.addView(new View(this), barSpacer);
 
-        TextView export = text("\u2193", 17, muted, MEDIUM);
+        TextView export = text(getString(R.string.history_export_label), 14, muted, MEDIUM);
         export.setGravity(Gravity.CENTER);
         export.setContentDescription(getString(R.string.history_export));
+        export.setPadding(dp(14), 0, dp(14), 0);
         export.setBackground(ripple(rounded(chipBg, 20)));
         export.setOnClickListener(v -> startExport());
-        LinearLayout.LayoutParams exportParams = new LinearLayout.LayoutParams(dp(40), dp(40));
+        LinearLayout.LayoutParams exportParams = new LinearLayout.LayoutParams(-2, dp(40));
         exportParams.setMarginStart(dp(6));
         bar.addView(export, exportParams);
         return bar;
