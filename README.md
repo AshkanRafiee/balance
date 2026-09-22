@@ -11,13 +11,14 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Combined total balance, with the option to exclude individual accounts from the total
 - Transaction history with deposits and withdrawals, broken down by day, month and year
 - History filters by movement type (all, deposits or withdrawals) and by date — today, this month, this year or a custom date range in the active calendar (Persian for Iran, Gregorian for International) — applied to every figure on the screen
+- CSV export of the transaction history — everything, or exactly the current view (bank, account, movement type and date range filters) — saved through the system file picker as a UTF-8 CSV with ISO-8601 UTC timestamps, the date in the active calendar, raw rial amounts and the amounts as displayed
 - Full history from the total card, per-bank history from any bank card, and single-account history by tapping an account row in the list
 - Long-press the total card to copy the combined total, or long-press a bank or account card to copy that balance; long-press the eye to switch auto-mask on or off (balances start hidden on every open), and long-press the lock icon for the lock settings
 - Bank sorting by balance or update time, mirrored in the list and the home-screen widget
 - Home-screen widget with the same bank order, totals, and privacy mask as the app
 - Password-encrypted backup and restore
 - Auto light/dark theme, persistent masked-balance and currency display preference
-- Automatic refresh as bank SMS arrive, plus pull-to-refresh
+- Automatic refresh as bank SMS arrive, plus pull-to-refresh from anywhere at the top of the list
 - English and Persian (فارسی) interface, with automatic system-language detection and localized bank names; the footer's single "Display" menu holds its selectors — the Calendar (Persian Jalali / Gregorian) chooses the calendar system, the Currency (Toman / Rial / custom) chooses the value and unit shown next to amounts (Toman divides by ten, others show the raw figure), the Language overrides the interface language, and the Theme (system / dark / light) forces the color scheme
 - Optional in-app lock with a PIN, password or fingerprint, covering the app, the home-screen widget and screenshots/recents, with progressive cooldown delays against wrong-entry guessing
 - About screen with direct links to the website and issue tracker
