@@ -53,6 +53,16 @@
     <string name="settings_language_label">Language</string>
     <string name="settings_currency_label">Currency</string>
     <string name="settings_theme_label">Theme</string>
+    <string name="settings_stale_label">Stale balance warning</string>
+    <string name="stale_option_off">Off</string>
+    <plurals name="stale_days">
+        <item quantity="one">%1$d day</item>
+        <item quantity="other">%1$d days</item>
+    </plurals>
+    <plurals name="accessibility_stale_note">
+        <item quantity="one">Note: %1$d balance is out of date.</item>
+        <item quantity="other">Note: %1$d balances are out of date.</item>
+    </plurals>
     <string name="calendar_persian">Persian (Jalali)</string>
     <string name="calendar_gregorian">Gregorian</string>
     <string name="theme_system">System default</string>

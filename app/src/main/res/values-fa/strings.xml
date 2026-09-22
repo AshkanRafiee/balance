@@ -53,6 +53,16 @@
     <string name="settings_language_label">زبان</string>
     <string name="settings_currency_label">واحد پول</string>
     <string name="settings_theme_label">پوسته</string>
+    <string name="settings_stale_label">هشدار ماندهٔ قدیمی</string>
+    <string name="stale_option_off">خاموش</string>
+    <plurals name="stale_days">
+        <item quantity="one">%1$d روز</item>
+        <item quantity="other">%1$d روز</item>
+    </plurals>
+    <plurals name="accessibility_stale_note">
+        <item quantity="one">توجه: ماندهٔ %1$d بانک قدیمی است.</item>
+        <item quantity="other">توجه: ماندهٔ %1$d بانک قدیمی است.</item>
+    </plurals>
     <string name="calendar_persian">شمسی (جلالی)</string>
     <string name="calendar_gregorian">میلادی</string>
     <string name="theme_system">پیش‌فرض سیستم</string>

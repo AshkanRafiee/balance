@@ -47,6 +47,8 @@ final class BalanceData {
     static final String KEY_HISTORY_LAST_BALANCE = "history_last_balance";
     static final String KEY_EXCLUDED = "excluded_banks";
     static final String KEY_SORT = "sort_mode";
+    static final String KEY_STALE_DAYS = "stale_days";
+    static final int DEFAULT_STALE_DAYS = 7;
 
     /** Sort modes for the bank list. Each pair (balance / update date) has a reverse variant so
      *  re-selecting the same sort flips its direction. The list is always sorted; fresh installs
@@ -490,6 +492,36 @@ final class BalanceData {
 
     static void setSort(Context context, int mode) {
         context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit().putInt(KEY_SORT, mode).apply();
+    }
+
+    /** How many days without a balance SMS mark a bank's balance stale. Zero or negative means never
+     *  (the freshness warning is off). Shared with the widget, so both call this one source. */
+    static int getStaleDays(Context context) {
+        int n = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+            .getInt(KEY_STALE_DAYS, DEFAULT_STALE_DAYS);
+        return n > 0 ? n : 0;
+    }
+
+    /** Sets the staleness threshold in days; 0 (or any non-positive value) disables the warning. */
+    static void setStaleDays(Context context, int days) {
+        context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+            .edit().putInt(KEY_STALE_DAYS, Math.max(0, days)).apply();
+    }
+
+    /** How many whole days a balance has gone without a refresh, or 0 when its SMS date is unknown
+     *  (or the freshness warning is off). A date of 0 (a restored or hand-entered balance) is never
+     *  flagged: there is nothing to measure freshness against. */
+    static int staleDays(Context context, long date) {
+        if (date <= 0 || getStaleDays(context) <= 0) return 0;
+        int days = (int) ((System.currentTimeMillis() - date) / 86400000L);
+        return days > 0 ? days : 0;
+    }
+
+    /** Whether a balance is stale: its last SMS is older than the configured freshness window. */
+    static boolean isStale(Context context, long date) {
+        int threshold = getStaleDays(context);
+        if (threshold <= 0 || date <= 0) return false;
+        return (System.currentTimeMillis() - date) > threshold * 86400000L;
     }
 
     /** Scans the inbox for balance messages and merges them into the saved store, then persists the

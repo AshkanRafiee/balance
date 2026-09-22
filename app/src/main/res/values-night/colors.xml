@@ -19,6 +19,8 @@
     <color name="widget_bg">#0B1220</color>
     <color name="bank_logo_ink">#E2E8F0</color>
     <color name="negative">#F87171</color>
+    <color name="warn">#FBBF24</color>
+    <color name="warn_bg">#2B2110</color>
     <color name="history_year">#FBBF24</color>
     <color name="history_hero_top">#1A2740</color>
     <color name="history_hero_bottom">#111B2B</color>
