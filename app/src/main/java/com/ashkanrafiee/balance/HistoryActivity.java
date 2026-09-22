@@ -3,6 +3,7 @@ package com.ashkanrafiee.balance;
 import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.database.ContentObserver;
@@ -26,6 +27,10 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.Toast;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
@@ -51,6 +56,13 @@ public final class HistoryActivity extends Activity {
     private static final String MONTH_TAG = "history_month";
     private static final String DAY_TAG = "history_day";
     private static final String YEAR_TAG = "history_year";
+
+    /** Result code for the system file picker, and the export scopes it remembers until the picker
+     *  returns which file to write. */
+    private static final int REQ_EXPORT = 31;
+    private static final int SCOPE_ALL = 0;
+    private static final int SCOPE_FILTERED = 1;
+    private int exportScope = SCOPE_ALL;
 
     /** Intent extra: when set, the screen shows the history of this canonical bank name only. */
     static final String EXTRA_BANK = "bank_filter";
@@ -461,7 +473,93 @@ public final class HistoryActivity extends Activity {
 
         LinearLayout.LayoutParams barSpacer = new LinearLayout.LayoutParams(0, 0, 1);
         bar.addView(new View(this), barSpacer);
+
+        TextView export = text("\u2193", 17, muted, MEDIUM);
+        export.setGravity(Gravity.CENTER);
+        export.setContentDescription(getString(R.string.history_export));
+        export.setBackground(ripple(rounded(chipBg, 20)));
+        export.setOnClickListener(v -> startExport());
+        LinearLayout.LayoutParams exportParams = new LinearLayout.LayoutParams(dp(40), dp(40));
+        exportParams.setMarginStart(dp(6));
+        bar.addView(export, exportParams);
         return bar;
+    }
+
+    // ====================================================================
+    // CSV export
+    // ====================================================================
+
+    /** Lets the user pick between the full history and exactly what the current filters show, then
+     *  asks the system file picker (SAF) for a location to write the CSV into. */
+    private void startExport() {
+        android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.history_export_title))
+            .setItems(new String[]{
+                getString(R.string.history_export_all),
+                getString(R.string.history_export_filtered)
+            }, (d, which) -> {
+                exportScope = which == 0 ? SCOPE_ALL : SCOPE_FILTERED;
+                LockManager.holdUnlock();
+                Intent create = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                create.addCategory(Intent.CATEGORY_OPENABLE);
+                create.setType("text/csv");
+                create.putExtra(Intent.EXTRA_TITLE, exportFileName());
+                startActivityForResult(create, REQ_EXPORT);
+            })
+            .setNegativeButton(getString(R.string.lock_cancel), null)
+            .create();
+        dlg.show();
+    }
+
+    private String exportFileName() {
+        String stamp = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
+            .format(new java.util.Date());
+        return "balance-transactions-" + stamp + ".csv";
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_EXPORT && resultCode == RESULT_OK
+                && data != null && data.getData() != null) {
+            writeExport(data.getData());
+        }
+    }
+
+    /** Builds the CSV for the picked scope and writes it to the SAF uri on a worker thread. Reads
+     *  the store under the {@link BalanceData} lock so the snapshot never races a background scan
+     *  mid-write. */
+    private void writeExport(Uri uri) {
+        new Thread(() -> {
+            final int[] error = {0};
+            try {
+                final List<Transaction> txs;
+                synchronized (BalanceData.class) {
+                    txs = BalanceData.readTransactions(getApplicationContext());
+                }
+                List<Transaction> scope = txs;
+                if (exportScope == SCOPE_FILTERED) {
+                    if (bankFilter != null) scope = filterByBank(txs, bankFilter);
+                    if (accountFilter != null) scope = filterByAccount(scope, accountFilter);
+                    scope = applyFilters(scope, filter, iranCalendar);
+                }
+                String csv = CsvExport.csv(getApplicationContext(), scope);
+                OutputStream out = getContentResolver().openOutputStream(uri, "w");
+                if (out == null) throw new IOException("no output stream");
+                try {
+                    out.write(csv.getBytes(StandardCharsets.UTF_8));
+                } finally {
+                    out.close();
+                }
+            } catch (Exception e) {
+                error[0] = 1;
+                android.util.Log.w("BalanceHistory", "csv export failed", e);
+            }
+            runOnUiThread(() -> Toast.makeText(this,
+                getString(error[0] == 0
+                    ? R.string.history_export_saved : R.string.history_export_failed),
+                Toast.LENGTH_SHORT).show());
+        }).start();
     }
 
     // ====================================================================

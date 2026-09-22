@@ -178,6 +178,12 @@
         <item quantity="one">%1$d transaction</item>
         <item quantity="other">%1$d transactions</item>
     </plurals>
+    <string name="history_export">Export transactions</string>
+    <string name="history_export_title">Export transactions</string>
+    <string name="history_export_all">All transactions</string>
+    <string name="history_export_filtered">What\'s on screen (filters)</string>
+    <string name="history_export_saved">CSV saved</string>
+    <string name="history_export_failed">CSV export failed</string>
 
     <string name="bank_pasargad">Pasargad</string>
     <string name="bank_eghtesad_novin">Eghtesad Novin</string>

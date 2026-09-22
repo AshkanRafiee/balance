@@ -178,6 +178,12 @@
         <item quantity="one">%1$d تراکنش</item>
         <item quantity="other">%1$d تراکنش</item>
     </plurals>
+    <string name="history_export">خروجی تراکنش‌ها</string>
+    <string name="history_export_title">خروجی تراکنش‌ها</string>
+    <string name="history_export_all">همهٔ تراکنش‌ها</string>
+    <string name="history_export_filtered">آنچه روی صفحه است (فیلترها)</string>
+    <string name="history_export_saved">فایل CSV ذخیره شد</string>
+    <string name="history_export_failed">خروجی CSV ناموفق بود</string>
 
     <string name="bank_pasargad">پاسارگاد</string>
     <string name="bank_eghtesad_novin">اقتصاد نوین</string>
