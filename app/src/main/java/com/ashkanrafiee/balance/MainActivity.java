@@ -1598,25 +1598,30 @@ public class MainActivity extends Activity {
             p.setAlpha(alpha);
             c.drawCircle(cx, cy, 17, p);
             p.setColor(accent);
-            p.setAlpha(alpha);
             c.save();
             c.translate(cx, cy);
             c.rotate(spinAngle);
-            float g = 9.5f;
+            float g = 8.5f;
             p.setStyle(Paint.Style.STROKE);
-            p.setStrokeWidth(2.4f);
+            p.setStrokeWidth(2.2f);
             p.setStrokeCap(Paint.Cap.ROUND);
             Path ring = new Path();
-            ring.addArc(new RectF(-g, -g, g, g), -90, 290);
+            ring.addArc(new RectF(-g, -g, g, g), -90, 300);
             c.drawPath(ring, p);
-            float tipX = (float) (g * Math.cos(Math.toRadians(200)));
-            float tipY = (float) (g * Math.sin(Math.toRadians(200)));
+            // Arrowhead at the open end of the ring: a filled triangle whose base straddles the ring
+            // end and whose apex points along the direction of travel, big enough to cover the round
+            // stroke cap so the head reads as a crisp arrow instead of a lumpy dot.
+            float endAng = 210f;                             // the ring's open end
+            float ta = (float) Math.toRadians(endAng);
+            float dir = (float) Math.toRadians(endAng + 90f);
+            float perp = (float) Math.toRadians(endAng + 180f);
+            float bx = g * (float) Math.cos(ta), by = g * (float) Math.sin(ta);
+            float px = bx * 0.86f, py = by * 0.86f;
+            float len = 5.2f, halfW = 3.4f;
             Path head = new Path();
-            head.moveTo(tipX, tipY);
-            head.lineTo((float) (tipX + 3.2 * Math.cos(Math.toRadians(170))),
-                (float) (tipY + 3.2 * Math.sin(Math.toRadians(170))));
-            head.lineTo((float) (tipX + 3.2 * Math.cos(Math.toRadians(230))),
-                (float) (tipY + 3.2 * Math.sin(Math.toRadians(230))));
+            head.moveTo((float) (px + len * Math.cos(dir)), (float) (py + len * Math.sin(dir)));
+            head.lineTo((float) (bx + halfW * Math.cos(perp)), (float) (by + halfW * Math.sin(perp)));
+            head.lineTo((float) (bx - halfW * Math.cos(perp)), (float) (by - halfW * Math.sin(perp)));
             head.close();
             p.setStyle(Paint.Style.FILL);
             p.setStrokeWidth(0);
