@@ -46,6 +46,16 @@ public final class OnboardingActivity extends Activity {
         return v;
     }
 
+    /** Paragraph text. Forces the base direction to the interface direction so a paragraph that
+     *  happens to start with a Latin word (like a brand name) still flows right-to-left on RTL
+     *  locales instead of hijacking the whole block to left-to-right. */
+    TextView paragraph(String s, float size, int color) {
+        TextView v = text(s, size, color);
+        v.setTextDirection(getResources().getConfiguration().getLayoutDirection()
+            == View.LAYOUT_DIRECTION_RTL ? View.TEXT_DIRECTION_RTL : View.TEXT_DIRECTION_LTR);
+        return v;
+    }
+
     GradientDrawable rounded(int color, float radius) {
         GradientDrawable g = new GradientDrawable();
         g.setColor(color);
@@ -172,8 +182,9 @@ public final class OnboardingActivity extends Activity {
         });
     }
 
-    /** A horizontal swipe on the content area steps between the pages: left goes forward to the
-     *  next page, right goes back — while a vertical drag keeps scrolling the content. */
+    /** A horizontal swipe on the content area steps between the pages in the reading direction:
+     *  forward is left in LTR and right in RTL, with the backward swipe the opposite way. A vertical
+     *  drag keeps scrolling the content. */
     private void attachSwipe() {
         scroll.setOnTouchListener((v, e) -> {
             switch (e.getActionMasked()) {
@@ -186,8 +197,10 @@ public final class OnboardingActivity extends Activity {
                     float dy = e.getY() - downY;
                     int slop = ViewConfiguration.get(this).getScaledTouchSlop();
                     if (Math.abs(dx) > Math.abs(dy) * 2 && Math.abs(dx) >= slop * 2) {
-                        if (dx < 0) showStep(step + 1);
-                        else showStep(step - 1);
+                        boolean rtl = getResources().getConfiguration().getLayoutDirection()
+                            == View.LAYOUT_DIRECTION_RTL;
+                        int forward = rtl ? -1 : 1;
+                        showStep(step + (dx < 0 ? forward : -forward));
                         return true;
                     }
                     break;
@@ -229,7 +242,7 @@ public final class OnboardingActivity extends Activity {
         TextView heading = text(getString(R.string.onboarding_welcome_title), 19, fg);
         heading.setTypeface(null, Typeface.BOLD);
         content.addView(heading, margin(0, 0, 0, dp(8)));
-        TextView body = text(getString(R.string.onboarding_welcome_body), 14, muted);
+        TextView body = paragraph(getString(R.string.onboarding_welcome_body), 14, muted);
         body.setLineSpacing(2, 1.05f);
         content.addView(body, margin(0, 0, 0, dp(10)));
         addBullet(getString(R.string.onboarding_feature_local), 0);
@@ -246,7 +259,7 @@ public final class OnboardingActivity extends Activity {
         row.addView(dot, new LinearLayout.LayoutParams(dp(8), dp(8)));
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, -2);
         tp.setMarginStart(dp(8));
-        TextView t = text(s, 14, fg);
+        TextView t = paragraph(s, 14, fg);
         t.setLineSpacing(2, 1.05f);
         row.addView(t, tp);
         content.addView(row, margin(0, topMargin, 0, 0));
@@ -256,7 +269,7 @@ public final class OnboardingActivity extends Activity {
         TextView heading = text(getString(R.string.onboarding_privacy_title), 19, fg);
         heading.setTypeface(null, Typeface.BOLD);
         content.addView(heading, margin(0, dp(10), 0, dp(8)));
-        TextView body = text(getString(R.string.onboarding_privacy_body), 14, muted);
+        TextView body = paragraph(getString(R.string.onboarding_privacy_body), 14, muted);
         body.setLineSpacing(2, 1.05f);
         content.addView(body, margin(0, 0, 0, dp(10)));
         addPrivacyCard(getString(R.string.onboarding_p_offline), 0);
@@ -270,7 +283,7 @@ public final class OnboardingActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(16), dp(13), dp(16), dp(13));
         box.setBackground(rounded(panel, 15));
-        TextView t = text(s, 14, fg);
+        TextView t = paragraph(s, 14, fg);
         t.setLineSpacing(2, 1.05f);
         box.addView(t);
         content.addView(box, margin(0, topMargin, 0, 0));
@@ -280,7 +293,7 @@ public final class OnboardingActivity extends Activity {
         TextView heading = text(getString(R.string.onboarding_sms_title), 19, fg);
         heading.setTypeface(null, Typeface.BOLD);
         content.addView(heading, margin(0, dp(10), 0, dp(8)));
-        TextView body = text(getString(R.string.onboarding_sms_body), 14, muted);
+        TextView body = paragraph(getString(R.string.onboarding_sms_body), 14, muted);
         body.setLineSpacing(2, 1.05f);
         content.addView(body, margin(0, 0, 0, dp(12)));
         if (step == PAGE_SMS && android.os.Build.VERSION.SDK_INT >= 23
@@ -289,7 +302,7 @@ public final class OnboardingActivity extends Activity {
             box.setOrientation(LinearLayout.VERTICAL);
             box.setPadding(dp(16), dp(13), dp(16), dp(13));
             box.setBackground(rounded(panel, 15));
-            TextView t = text(getString(R.string.onboarding_sms_granted), 14, fg);
+            TextView t = paragraph(getString(R.string.onboarding_sms_granted), 14, fg);
             t.setLineSpacing(2, 1.05f);
             box.addView(t);
             content.addView(box);
