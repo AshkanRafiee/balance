@@ -49,6 +49,7 @@ final class BalanceData {
     static final String KEY_SORT = "sort_mode";
     static final String KEY_STALE_DAYS = "stale_days";
     static final int DEFAULT_STALE_DAYS = 7;
+    static final String KEY_ONBOARDING_SEEN = "onboarding_seen";
 
     /** Sort modes for the bank list. Each pair (balance / update date) has a reverse variant so
      *  re-selecting the same sort flips its direction. The list is always sorted; fresh installs
@@ -522,6 +523,19 @@ final class BalanceData {
         int threshold = getStaleDays(context);
         if (threshold <= 0 || date <= 0) return false;
         return (System.currentTimeMillis() - date) > threshold * 86400000L;
+    }
+
+    /** Whether the first-run introduction has already been shown. Lives in the preferences file (not
+     *  the data file) so it survives the in-app "Reset & rescan" — the store is wiped, the intro is not. */
+    static boolean isOnboardingSeen(Context context) {
+        return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+            .getBoolean(KEY_ONBOARDING_SEEN, false);
+    }
+
+    /** Marks the first-run introduction as seen, so it is not shown again. */
+    static void setOnboardingSeen(Context context, boolean seen) {
+        context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_ONBOARDING_SEEN, seen).apply();
     }
 
     /** Scans the inbox for balance messages and merges them into the saved store, then persists the
