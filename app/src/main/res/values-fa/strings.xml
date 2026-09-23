@@ -58,13 +58,13 @@
     <string name="onboarding_continue">ورود به Balance</string>
     <string name="onboarding_allow_sms">اجازهٔ دسترسی به پیامک</string>
     <string name="onboarding_welcome_title">به Balance خوش آمدید</string>
-    <string name="onboarding_welcome_body">Balance پیامک‌های بانکی پشتیبانی‌شده را به‌صورت محلی می‌خواند و آخرین موجودی هر بانک را به‌همراه مجموع کل نشان می‌دهد — همه بدون حساب کاربری یا اینترنت.</string>
+    <string name="onboarding_welcome_body">پیامک‌های بانکیِ پشتیبانی‌شده را به‌صورت محلی می‌خواند و آخرین موجودی هر بانک را به‌همراه مجموع کل نشان می‌دهد — همه بدون حساب کاربری یا اینترنت.</string>
     <string name="onboarding_feature_local">فقط پیامک‌های بانکیِ همین دستگاه خوانده می‌شوند</string>
     <string name="onboarding_feature_balance">آخرین موجودی هر بانک، تفکیک‌شده بر اساس شمارهٔ حساب</string>
     <string name="onboarding_feature_history">تاریخچهٔ واریز و برداشت با فیلترها</string>
     <string name="onboarding_feature_widget">ویجت صفحهٔ اصلی با همان اعداد و پوشاندنِ حریم خصوصی</string>
     <string name="onboarding_privacy_title">طراحی‌شده برای حفظ حریم خصوصی موجودی شما</string>
-    <string name="onboarding_privacy_body">Balance ذاتاً آفلاین است — اعدادی که می‌بینید هرگز از دستگاه شما خارج نمی‌شوند.</string>
+    <string name="onboarding_privacy_body">این برنامه ذاتاً آفلاین است — اعدادی که می‌بینید هرگز از دستگاه شما خارج نمی‌شوند.</string>
     <string name="onboarding_p_offline">آفلاین از پایه — بدون مجوز اینترنت</string>
     <string name="onboarding_p_local">پیامک‌ها همان‌جا خوانده می‌شوند، هرگز آپلود نمی‌شوند</string>
     <string name="onboarding_p_bottom">بدون حساب، بدون ابر، بدون آمارگیری</string>
