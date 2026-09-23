@@ -51,6 +51,7 @@ public class MainActivity extends Activity {
      *  can grind at, so a very short code would nullify the 600k-iteration KDF. */
     private static final int MIN_BACKUP_PASSWORD_LENGTH = 8;
     private BalanceView view;
+    private boolean smsRequested;
     private String pendingBackupPassword;
     private LockOverlay lockOverlay;
     private Runnable pendingLockAction;
@@ -111,12 +112,14 @@ public class MainActivity extends Activity {
     /** On a fresh install, open the first-run introduction before asking for anything: it explains
      *  what the app reads and its privacy model, then requests the SMS permission in context. On every
      *  later launch the normal flow runs — the permission request or the scan. When the introduction
-     *  finishes, this activity resumes and {@link #onResume()} picks up the scan automatically. */
+     *  finishes — completed or skipped — this activity resumes and {@link #onResume()} picks up the
+     *  scan and, unless the introduction already asked, the SMS permission request. */
     private void startOnboardingIfFirstRun() {
         if (!BalanceData.isOnboardingSeen(this)) {
             startActivity(new Intent(this, OnboardingActivity.class));
         } else {
             requestSms();
+            smsRequested = true;
         }
     }
 
@@ -188,6 +191,12 @@ public class MainActivity extends Activity {
             view.refresh();
         }
         registerSmsObserver();
+        // A fresh install that skipped or finished the introduction returns here without ever
+        // asking for SMS access; ask now, once, on top of the dashboard.
+        if (!smsRequested && BalanceData.isOnboardingSeen(this)) {
+            smsRequested = true;
+            requestSms();
+        }
         // The delayed lock may have engaged while we were paused on a ROM that skipped onStop;
         // reflect it now that we are back in the foreground.
         if (LockManager.isEnabled(this) && LockManager.isSessionLocked()
