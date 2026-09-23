@@ -494,11 +494,16 @@ public class MainActivity extends Activity {
     }
 
     void hardRefreshDialog() {
+        android.widget.CheckBox deleteNotes = new android.widget.CheckBox(this);
+        deleteNotes.setText(getString(R.string.dialog_hard_refresh_notes_label));
+        deleteNotes.setPadding(dp(24), 0, dp(24), 0);
         showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.dialog_hard_refresh_title))
             .setMessage(getString(R.string.dialog_hard_refresh_message))
+            .setView(deleteNotes)
             .setNegativeButton(getString(R.string.dialog_hard_refresh_cancel), null)
-            .setPositiveButton(getString(R.string.dialog_hard_refresh_confirm), (d, w) -> view.refresh(true))
+            .setPositiveButton(getString(R.string.dialog_hard_refresh_confirm),
+                (d, w) -> view.refresh(true, deleteNotes.isChecked()))
             .create());
     }
 
@@ -1339,8 +1344,8 @@ public class MainActivity extends Activity {
             return getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
         }
 
-        void refresh() { refresh(false, false); }
-        void refreshSilent() { refresh(false, true); }
+        void refresh() { refresh(false, false, false); }
+        void refreshSilent() { refresh(false, false, true); }
 
         /** When auto-mask is on, the balances must start (and stay) masked; call this from the
          *  lifecycle so every app open or return from the background re-hides them. */
@@ -1390,14 +1395,15 @@ public class MainActivity extends Activity {
             BalanceWidgetProvider.push(MainActivity.this);
         }
 
-        void refresh(boolean hard) { refresh(hard, false); }
+        void refresh(boolean hard, boolean alsoNotes) { refresh(hard, alsoNotes, false); }
 
         /** Refreshes from the SMS inbox. With {@code hard} set, saved balances are discarded first and
          *  only the messages currently in the inbox are re-read, so banks whose SMS are no longer
-         *  available disappear. Callers must already have shown the consequence dialog. When
-         *  {@code silent} is true the "Refreshing…" status is suppressed — used by the background
-         *  ContentObserver so incoming-SMS updates don't flash status on screen. */
-        void refresh(boolean hard, boolean silent) {
+         *  available disappear; {@code alsoNotes} additionally deletes the saved transaction notes,
+         *  the only step the reset dialog offers separately. Callers must already have shown the
+         *  consequence dialog. When {@code silent} is true the "Refreshing…" status is suppressed —
+         *  used by the background ContentObserver so incoming-SMS updates don't flash status. */
+        void refresh(boolean hard, boolean alsoNotes, boolean silent) {
             if (refreshing) {
                 // A scan is already running: remember the request so the moment it completes we
                 // scan again and pick up whatever arrived while the first pass was in flight.
@@ -1420,7 +1426,7 @@ public class MainActivity extends Activity {
             new Thread(() -> {
                 final Context app = MainActivity.this.getApplicationContext();
                 try {
-                    if (hard) BalanceData.reset(app);
+                    if (hard) BalanceData.reset(app, alsoNotes);
                     LinkedHashMap<String, Bank> saved = BalanceData.read(app);
                     int count = BalanceData.scanSms(app, saved);
                     post(() -> {
@@ -1433,7 +1439,7 @@ public class MainActivity extends Activity {
                         refreshing = false;
                         invalidate();
                         BalanceWidgetProvider.push(app);
-                        if (refreshAgain) { refreshAgain = false; refresh(false, silent); }
+                        if (refreshAgain) { refreshAgain = false; refresh(false, false, silent); }
                     });
                 } catch (Exception e) {
                     post(() -> {
@@ -1447,7 +1453,7 @@ public class MainActivity extends Activity {
                         refreshing = false;
                         invalidate();
                         BalanceWidgetProvider.push(app);
-                        if (refreshAgain) { refreshAgain = false; refresh(false, silent); }
+                        if (refreshAgain) { refreshAgain = false; refresh(false, false, silent); }
                     });
                 }
                 BalanceData.scanHistory(app);

@@ -42,6 +42,12 @@
     <string name="dialog_hard_refresh_message">با انجام این کار همهٔ موجودی‌های ذخیره‌شده حذف و فقط پیامک‌هایی که هم‌اکنون در صندوق پیامک این دستگاه هستند دوباره خوانده می‌شوند. بانکی که پیامک موجودی آن دیگر در دسترس نباشد از فهرست حذف می‌شود. این کار قابل بازگشت نیست.</string>
     <string name="dialog_hard_refresh_confirm">بازنشانی و خواندن</string>
     <string name="dialog_hard_refresh_cancel">انصراف</string>
+    <string name="dialog_hard_refresh_notes_label">یادداشت‌های تراکنش‌ها هم حذف شوند</string>
+    <string name="note_edit_title">یادداشت تراکنش</string>
+    <string name="note_edit_hint">یک یادداشت خصوصی برای این تراکنش</string>
+    <string name="note_save">ذخیره</string>
+    <string name="note_clear">پاک کردن یادداشت</string>
+    <string name="note_row_hint">برای افزودن یا ویرایش یادداشت این تراکنش، روی آن بزنید</string>
     <string name="widget_description">نمایش موجودی بانک‌ها در صفحهٔ اصلی</string>
     <string name="widget_empty">هنوز موجودی‌ای نیست — برای خواندن پیامک‌ها روی دکمهٔ به‌روزرسانی بزنید</string>
     <string name="widget_action_refresh">به‌روزرسانی</string>

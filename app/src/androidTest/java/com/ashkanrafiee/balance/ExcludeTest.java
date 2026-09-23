@@ -139,7 +139,7 @@ public class ExcludeTest {
         s.add("Saman");
         BalanceData.setExcluded(ctx, s);
         assertEquals(2, BalanceData.getExcluded(ctx).size());
-        BalanceData.reset(ctx);
+        BalanceData.reset(ctx, false);
         assertTrue(BalanceData.getExcluded(ctx).isEmpty());
     }
 

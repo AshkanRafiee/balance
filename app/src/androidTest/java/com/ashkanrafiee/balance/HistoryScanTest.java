@@ -959,7 +959,7 @@ public class HistoryScanTest {
         BalanceData.scanHistory(ctx);
         assertEquals(1, BalanceData.readTransactions(ctx).size());
 
-        BalanceData.reset(ctx);
+        BalanceData.reset(ctx, false);
 
         assertEquals(0, BalanceData.readTransactions(ctx).size());
         int rebuilt = BalanceData.scanHistory(ctx);

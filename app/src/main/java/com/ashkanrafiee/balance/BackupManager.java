@@ -50,8 +50,9 @@ final class BackupManager {
     private static final String TAG = "BackupManager";
     private static final byte[] MAGIC = {'B', 'A', 'L', 'N', 'C', 'E', 'B', 'K'};
     private static final int FORMAT_VERSION = 1;
-    /** Payload shape: 1 = balances only, 2 = balances + transactions. Older backups (1) are still read. */
-    private static final int PAYLOAD_FORMAT = 2;
+    /** Payload shape: 1 = balances only, 2 = balances + transactions, 3 = balances + transactions +
+     *  notes. Older backups (1 and 2) are still read; those carry no notes, which a restore preserves. */
+    private static final int PAYLOAD_FORMAT = 3;
     private static final String KDF_ALGORITHM = "PBKDF2WithHmacSHA256";
     private static final String CIPHER_ALGORITHM = "AES/GCM/NoPadding";
     private static final int ITERATIONS = 600_000;
@@ -105,6 +106,7 @@ final class BackupManager {
                 .put("balances", new JSONObject(BalanceData.serialize(BalanceData.read(context))))
                 .put("transactions", new JSONObject(
                     BalanceData.serializeTransactions(BalanceData.readTransactions(context))))
+                .put("txNotes", new JSONObject(BalanceData.serializeNotes(BalanceData.readNotes(context))))
                 .toString();
         }
 
@@ -230,6 +232,7 @@ final class BackupManager {
 
         LinkedHashMap<String, Bank> backup;
         List<Transaction> backupTxs = new ArrayList<>();
+        Map<String, String> backupNotes = new LinkedHashMap<>();
         try {
             JSONObject payload = new JSONObject(plain);
             if (payload.has("balances"))
@@ -239,6 +242,8 @@ final class BackupManager {
             if (payload.has("transactions"))
                 backupTxs = BalanceData.deserializeTransactions(
                     payload.getJSONObject("transactions").toString());
+            if (payload.has("txNotes"))
+                backupNotes = BalanceData.deserializeNotes(payload.getJSONObject("txNotes").toString());
         } catch (Throwable e) {
             // A validly-decrypted but hostile payload can nest its JSON so deeply that parsing
             // exhausts the stack; that must land on the same "wrong password or corrupted backup"
@@ -283,6 +288,22 @@ final class BackupManager {
             currentTxs.add(t);
         }
         BalanceData.writeTransactions(context, currentTxs);
+
+        // Notes are merged as a union with the local text winning, mirroring the transaction union:
+        // a restore must never clobber the note the user typed since the backup was made, and notes
+        // that only exist in the backup (for movements brought in by this restore) land here too. An
+        // older backup without a notes section leaves the current notes completely untouched.
+        if (!backupNotes.isEmpty()) {
+            Map<String, String> currentNotes = BalanceData.readNotes(context);
+            boolean changed = false;
+            for (Map.Entry<String, String> e : backupNotes.entrySet()) {
+                if (!currentNotes.containsKey(e.getKey())) {
+                    currentNotes.put(e.getKey(), e.getValue());
+                    changed = true;
+                }
+            }
+            if (changed) BalanceData.writeNotes(context, currentNotes);
+        }
         return result;
     }
 

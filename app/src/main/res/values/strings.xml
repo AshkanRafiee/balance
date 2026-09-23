@@ -42,6 +42,12 @@
     <string name="dialog_hard_refresh_message">This deletes every saved balance and rescans only the bank SMS currently in this device\'s inbox. Any bank whose SMS is no longer available will be removed from the list. This cannot be undone.</string>
     <string name="dialog_hard_refresh_confirm">Reset and rescan</string>
     <string name="dialog_hard_refresh_cancel">Cancel</string>
+    <string name="dialog_hard_refresh_notes_label">Also delete the notes on transactions</string>
+    <string name="note_edit_title">Transaction note</string>
+    <string name="note_edit_hint">A private note for this transaction</string>
+    <string name="note_save">Save</string>
+    <string name="note_clear">Clear note</string>
+    <string name="note_row_hint">Tap to add or edit a note for this transaction</string>
     <string name="widget_description">Bank balances on your home screen</string>
     <string name="widget_empty">No balances yet — tap refresh to scan your bank SMS</string>
     <string name="widget_action_refresh">Refresh</string>

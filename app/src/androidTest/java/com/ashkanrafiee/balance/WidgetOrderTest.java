@@ -32,7 +32,7 @@ public class WidgetOrderTest {
     }
 
     @After public void tearDown() throws Exception {
-        BalanceData.reset(ctx);
+        BalanceData.reset(ctx, false);
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
     }
 
@@ -100,7 +100,7 @@ public class WidgetOrderTest {
         BalanceData.write(ctx, banks());
         assertEquals(0, BalanceWidgetService.widgetBanks(ctx).size());
 
-        BalanceData.reset(ctx);
+        BalanceData.reset(ctx, false);
         assertEquals(0, BalanceWidgetService.widgetBanks(ctx).size());
     }
 

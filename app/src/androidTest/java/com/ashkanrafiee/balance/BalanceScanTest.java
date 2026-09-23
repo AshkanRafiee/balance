@@ -524,7 +524,7 @@ public class BalanceScanTest {
         BalanceData.scanSms(ctx, saved);
         assertEquals(1, saved.size());
 
-        BalanceData.reset(ctx);
+        BalanceData.reset(ctx, false);
 
         assertEquals(0, BalanceData.read(ctx).size());
         assertEquals(0, watermark());
@@ -540,7 +540,7 @@ public class BalanceScanTest {
         clearInbox();
         seed("b.pasargad", "available balance 5,000,000", T + 500);
 
-        BalanceData.reset(ctx);
+        BalanceData.reset(ctx, false);
         saved = new LinkedHashMap<>();
         int matched = BalanceData.scanSms(ctx, saved);
 
@@ -559,7 +559,7 @@ public class BalanceScanTest {
         assertEquals(1, saved.size());
 
         clearInbox();
-        BalanceData.reset(ctx);
+        BalanceData.reset(ctx, false);
         saved = new LinkedHashMap<>();
         int matched = BalanceData.scanSms(ctx, saved);
 

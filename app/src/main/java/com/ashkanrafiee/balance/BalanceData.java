@@ -36,6 +36,9 @@ final class BalanceData {
     static final String PREFS_DATA = "balance_data";
     static final String KEY_BALANCES = "balances";
     static final String KEY_TRANSACTIONS = "transactions";
+    static final String KEY_TX_NOTES = "transaction_notes";
+    /** Upper bound on one transaction note, so a huge paste cannot bloat the encrypted store. */
+    static final int MAX_NOTE_LENGTH = 500;
     static final String PREFS_PREF = "balance_preferences";
     static final String KEY_HIDDEN = "balances_hidden";
     static final String KEY_WIDGET_HIDDEN = "widget_balances_hidden";
@@ -331,6 +334,113 @@ final class BalanceData {
         return list;
     }
 
+    // ====================================================================
+    // Transaction notes
+    // ====================================================================
+
+    /** The identity a note is stored under: the parse-independent content digest when the entry has one
+     *  (so the note follows the same physical SMS however parsing rules evolve), else the dedup
+     *  identity of legacy entries written before content digests existed. Never derived from the
+     *  amount or the resulting balance, so changing a note cannot alter any dedup fingerprint. */
+    static String noteKey(Transaction t) {
+        return t.content != null ? "c:" + t.content : txIdentityKey(t);
+    }
+
+    /** Reads every saved note ({@code noteKey → text}), newest-first irrelevant since it is a plain
+     *  lookup map. A missing or corrupt store reads as empty, never null. */
+    static Map<String, String> readNotes(Context context) {
+        try {
+            String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
+                .getString(KEY_TX_NOTES, null);
+            if (stored == null) return new LinkedHashMap<>();
+            String json = stored.indexOf('{') == 0 ? stored : decrypt(stored);
+            return new LinkedHashMap<>(deserializeNotes(json));
+        } catch (Exception e) {
+            Log.w(TAG, "readNotes failed", e);
+            return new LinkedHashMap<>();
+        }
+    }
+
+    /** Persists the supplied notes encrypted under {@link #KEY_TX_NOTES}. An empty map removes the
+     *  key so a notes-free device stores nothing at all. */
+    static void writeNotes(Context context, Map<String, String> notes) {
+        try {
+            android.content.SharedPreferences.Editor e =
+                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit();
+            if (notes == null || notes.isEmpty()) {
+                e.remove(KEY_TX_NOTES).apply();
+                return;
+            }
+            e.putString(KEY_TX_NOTES, encrypt(serializeNotes(notes))).apply();
+        } catch (Exception ex) {
+            Log.w(TAG, "writeNotes failed", ex);
+        }
+    }
+
+    /** Serializes the note map to the JSON shape used for the local store and the backup payload.
+     *  Empty or null values are dropped, so a cleared note vanishes from the map. */
+    static String serializeNotes(Map<String, String> notes) throws Exception {
+        JSONObject o = new JSONObject();
+        if (notes != null) {
+            for (Map.Entry<String, String> e : notes.entrySet()) {
+                String v = e.getValue();
+                if (v != null && !v.isEmpty()) o.put(e.getKey(), v);
+            }
+        }
+        return o.toString();
+    }
+
+    /** Parses a note-map JSON (as produced by {@link #serializeNotes}) into a fresh map. */
+    static Map<String, String> deserializeNotes(String json) {
+        Map<String, String> out = new LinkedHashMap<>();
+        try {
+            JSONObject o = new JSONObject(json);
+            java.util.Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String key = it.next();
+                String v = o.optString(key, null);
+                if (v != null && !v.isEmpty()) out.put(key, v);
+            }
+        } catch (Exception ex) {
+            Log.w(TAG, "deserializeNotes failed");
+        }
+        return out;
+    }
+
+    /** The transaction's note, or null when none is saved. */
+    static String getNote(Context context, Transaction t) {
+        return readNotes(context).get(noteKey(t));
+    }
+
+    /** Saves (or with a blank input, clears) the note for a transaction. The text is trimmed and
+     *  capped at {@link #MAX_NOTE_LENGTH}, so hostile or accidental multi-megabyte pastes are cut
+     *  down to a bounded size before they are written encrypted. */
+    static void setNote(Context context, Transaction t, String text) {
+        Map<String, String> notes = readNotes(context);
+        String key = noteKey(t);
+        if (text == null) {
+            notes.remove(key);
+            writeNotes(context, notes);
+            return;
+        }
+        String trimmed = text.trim();
+        if (trimmed.isEmpty()) {
+            notes.remove(key);
+            writeNotes(context, notes);
+            return;
+        }
+        notes.put(key, capNoteLength(trimmed));
+        writeNotes(context, notes);
+    }
+
+    /** Trims a text to {@link #MAX_NOTE_LENGTH} characters without splitting a surrogate pair. */
+    private static String capNoteLength(String s) {
+        if (s.length() <= MAX_NOTE_LENGTH) return s;
+        int end = MAX_NOTE_LENGTH;
+        while (end > 0 && Character.isLowSurrogate(s.charAt(end))) end--;
+        return s.substring(0, end);
+    }
+
     static void write(Context context, LinkedHashMap<String, Bank> map) {
         try {
             String existing = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
@@ -351,11 +461,15 @@ final class BalanceData {
      *  behave like a fresh install and rebuild from the messages currently in the inbox. Display
      *  preferences are deliberately untouched — the hide/unmask toggle, the language and the sort mode
      *  are choices, not data (a data reset must not dump the user back to defaults); the excluded
-     *  entries are forgotten too, because a fresh install has no exclusions. */
-    static void reset(Context context) {
-        context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-            .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).remove(KEY_HISTORY_LAST_BALANCE)
-            .remove(KEY_RECENT_MOVEMENTS).apply();
+     *  entries are forgotten too, because a fresh install has no exclusions. Transaction notes are a
+     *  hard-won recollection, so they are kept unless the user explicitly opts into deleting them. */
+    static void reset(Context context, boolean alsoNotes) {
+        android.content.SharedPreferences.Editor data =
+            context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
+                .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).remove(KEY_HISTORY_LAST_BALANCE)
+                .remove(KEY_RECENT_MOVEMENTS);
+        if (alsoNotes) data.remove(KEY_TX_NOTES);
+        data.apply();
         context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
             .remove(KEY_SCANNED_THROUGH)
             .remove(KEY_RULES_VERSION)
