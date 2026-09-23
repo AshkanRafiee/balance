@@ -42,6 +42,7 @@ import java.util.Set;
 
 public class MainActivity extends Activity {
     private static final int SMS_REQUEST = 10;
+    private static final int ONBOARDING_REQUEST = 12;
     private static final int REQ_CREATE_BACKUP = 20;
     private static final int REQ_PICK_RESTORE = 21;
     /** How long a copied balance stays in the system clipboard before it is cleared (see
@@ -116,7 +117,7 @@ public class MainActivity extends Activity {
      *  scan and, unless the introduction already asked, the SMS permission request. */
     private void startOnboardingIfFirstRun() {
         if (!BalanceData.isOnboardingSeen(this)) {
-            startActivity(new Intent(this, OnboardingActivity.class));
+            startActivityForResult(new Intent(this, OnboardingActivity.class), ONBOARDING_REQUEST);
         } else {
             requestSms();
             smsRequested = true;
@@ -886,6 +887,12 @@ public class MainActivity extends Activity {
         } else if (requestCode == REQ_PICK_RESTORE) {
             if (resultCode == RESULT_OK && data != null && data.getData() != null)
                 askPassword(false, data.getData());
+        } else if (requestCode == ONBOARDING_REQUEST && data != null
+                && data.getBooleanExtra(OnboardingActivity.EXTRA_ASKED_SMS, false)) {
+            // The introduction already asked for SMS access (whatever the answer): don't re-ask the
+            // moment we land back on the dashboard. This resumes before onResume, so the gate there
+            // sees smsRequested set and stays quiet.
+            smsRequested = true;
         }
     }
 

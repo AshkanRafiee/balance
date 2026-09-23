@@ -3,6 +3,7 @@ package com.ashkanrafiee.balance;
 import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -24,6 +25,9 @@ import android.widget.TextView;
  *  be opened anytime from the About screen. */
 public final class OnboardingActivity extends Activity {
     private static final int SMS_REQUEST = 11;
+    /** Result extra set when the introduction actually asked for SMS access (granted or denied), so
+     *  the dashboard does not immediately ask again on top of a just-answered prompt. */
+    public static final String EXTRA_ASKED_SMS = "asked_sms";
     private static final int PAGE_WELCOME = 0, PAGE_PRIVACY = 1, PAGE_SMS = 2;
 
     int bg, panel, fg, muted, subtitle, accent, active, divider;
@@ -170,8 +174,8 @@ public final class OnboardingActivity extends Activity {
         else buildSms();
         updateDots();
         boolean last = page == PAGE_SMS;
-        boolean granted = android.os.Build.VERSION.SDK_INT < 23
-            || checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED;
+        boolean granted = checkSelfPermission(Manifest.permission.READ_SMS)
+            == PackageManager.PERMISSION_GRANTED;
         primary.setText(getString(last
             ? (granted ? R.string.onboarding_continue : R.string.onboarding_allow_sms)
             : R.string.onboarding_next));
@@ -299,7 +303,7 @@ public final class OnboardingActivity extends Activity {
         TextView body = paragraph(getString(R.string.onboarding_sms_body), 14, muted);
         body.setLineSpacing(2, 1.05f);
         content.addView(body, margin(0, 0, 0, dp(12)));
-        if (step == PAGE_SMS && android.os.Build.VERSION.SDK_INT >= 23
+        if (step == PAGE_SMS
                 && checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED) {
             LinearLayout box = new LinearLayout(this);
             box.setOrientation(LinearLayout.VERTICAL);
@@ -322,7 +326,10 @@ public final class OnboardingActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int r, String[] p, int[] g) {
         super.onRequestPermissionsResult(r, p, g);
-        if (r == SMS_REQUEST) finishAsSeen();
+        if (r == SMS_REQUEST) {
+            setResult(RESULT_OK, new Intent().putExtra(EXTRA_ASKED_SMS, true));
+            finishAsSeen();
+        }
     }
 
     @Override
