@@ -122,6 +122,9 @@ public final class OnboardingActivity extends Activity {
         bar.setGravity(Gravity.CENTER_VERTICAL);
         TextView name = text(getString(R.string.app_name), 18, fg);
         name.setTypeface(null, Typeface.BOLD);
+        name.setGravity(Gravity.CENTER_VERTICAL
+            | (getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL
+                ? Gravity.RIGHT : Gravity.LEFT));
         bar.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
         skip = text(getString(R.string.onboarding_skip), 14, muted);
         skip.setGravity(Gravity.CENTER);

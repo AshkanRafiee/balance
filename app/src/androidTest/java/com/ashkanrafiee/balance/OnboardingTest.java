@@ -159,6 +159,51 @@ public class OnboardingTest {
         assertOnScreenLiteral(OnboardingActivity.class, R.string.onboarding_welcome_title);
     }
 
+    @Test public void topBarPlacesBrandOnTheReadingSide() throws Exception {
+        int[] faRtl = topBarCenters("fa");
+        assertTrue("brand must sit on the right of Skip in Persian",
+                faRtl[0] > faRtl[1]);
+        finishAll();
+        LocaleHelper.setLanguage(ctx, "");
+        int[] enLtr = topBarCenters("");
+        assertTrue("brand must sit on the left of Skip in English",
+                enLtr[0] < enLtr[1]);
+    }
+
+    /** Center-screen X of the top-bar brand text and the Skip button for the given language. */
+    private int[] topBarCenters(String tag) throws Exception {
+        LocaleHelper.setLanguage(ctx, tag);
+        launch(OnboardingActivity.class);
+        assertOnScreenLiteral(OnboardingActivity.class, R.string.onboarding_skip);
+        assertOnScreenLiteral(OnboardingActivity.class, R.string.onboarding_welcome_title);
+        AtomicBoolean found = new AtomicBoolean();
+        int[] result = new int[2];
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            for (Activity a : ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(Stage.RESUMED)) {
+                if (!(a instanceof OnboardingActivity)) continue;
+                View brand = null;
+                int brandTop = Integer.MAX_VALUE;
+                for (View v : allTexts(a.getWindow().getDecorView(),
+                        a.getString(R.string.app_name)))
+                    if (v.getTop() < brandTop) { brand = v; brandTop = v.getTop(); }
+                View skip = findText(a.getWindow().getDecorView(),
+                        a.getString(R.string.onboarding_skip));
+                if (brand != null && skip != null) {
+                    found.set(true);
+                    int[] b = new int[2], s = new int[2];
+                    brand.getLocationOnScreen(b);
+                    skip.getLocationOnScreen(s);
+                    result[0] = b[0] + brand.getWidth() / 2;
+                    result[1] = s[0] + skip.getWidth() / 2;
+                    return;
+                }
+            }
+        });
+        assertTrue("top-bar brand or Skip not found for language '" + tag + "'", found.get());
+        return result;
+    }
+
     @Test public void aboutScreen_offersReopenLink() throws Exception {
         launch(AboutActivity.class);
         assertOnScreen(AboutActivity.class, ctx.getString(R.string.about_show_intro_value));
@@ -334,6 +379,24 @@ public class OnboardingTest {
             }
         }
         return null;
+    }
+
+    /** All visible TextViews whose text equals the given string, in tree order. */
+    private java.util.List<TextView> allTexts(View root, String text) {
+        java.util.List<TextView> out = new java.util.ArrayList<>();
+        collectTexts(root, text, out);
+        return out;
+    }
+
+    private void collectTexts(View root, String text, java.util.List<TextView> out) {
+        if (root instanceof TextView) {
+            TextView tv = (TextView) root;
+            if (tv.getVisibility() == View.VISIBLE && text.equals(tv.getText().toString())) out.add(tv);
+        }
+        if (root instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) root;
+            for (int i = 0; i < g.getChildCount(); i++) collectTexts(g.getChildAt(i), text, out);
+        }
     }
 
     private void finishAll() throws Exception {
