@@ -494,13 +494,30 @@ public class MainActivity extends Activity {
     }
 
     void hardRefreshDialog() {
-        android.widget.CheckBox deleteNotes = new android.widget.CheckBox(this);
+        // The message and the checkbox live in ONE padded container instead of the builder's two
+        // separate slots (setMessage + setView), so the checkbox's text starts at exactly the same
+        // column as the message above it — no mismatched indentation.
+        TextView message = new TextView(this);
+        message.setTextSize(14);
+        message.setLineSpacing(0, 1.15f);
+        message.setTextColor(resColor(R.color.subtitle));
+        message.setText(getString(R.string.dialog_hard_refresh_message));
+        LinearLayout.LayoutParams msglp = new LinearLayout.LayoutParams(-1, -2);
+        msglp.bottomMargin = dp(12);
+        message.setLayoutParams(msglp);
+
+        final android.widget.CheckBox deleteNotes = new android.widget.CheckBox(this);
         deleteNotes.setText(getString(R.string.dialog_hard_refresh_notes_label));
-        deleteNotes.setPadding(dp(24), 0, dp(24), 0);
+        deleteNotes.setPadding(dp(2), 0, 0, 0);
+
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.addView(message);
+        body.addView(deleteNotes);
+
         showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.dialog_hard_refresh_title))
-            .setMessage(getString(R.string.dialog_hard_refresh_message))
-            .setView(deleteNotes)
+            .setView(body)
             .setNegativeButton(getString(R.string.dialog_hard_refresh_cancel), null)
             .setPositiveButton(getString(R.string.dialog_hard_refresh_confirm),
                 (d, w) -> view.refresh(true, deleteNotes.isChecked()))
@@ -1439,6 +1456,7 @@ public class MainActivity extends Activity {
                         refreshing = false;
                         invalidate();
                         BalanceWidgetProvider.push(app);
+                        if (hard) toast(R.string.toast_reset_done);
                         if (refreshAgain) { refreshAgain = false; refresh(false, false, silent); }
                     });
                 } catch (Exception e) {
@@ -1453,6 +1471,7 @@ public class MainActivity extends Activity {
                         refreshing = false;
                         invalidate();
                         BalanceWidgetProvider.push(app);
+                        if (hard) toast(R.string.toast_reset_failed);
                         if (refreshAgain) { refreshAgain = false; refresh(false, false, silent); }
                     });
                 }

@@ -30,6 +30,8 @@
     </plurals>
 
     <string name="status_updated_now">Updated just now</string>
+    <string name="toast_reset_done">Reset and rescan complete</string>
+    <string name="toast_reset_failed">Reset and rescan failed — SMS could not be read</string>
 
     <string name="toast_unmask_to_copy">Unmask the balance to copy it</string>
     <string name="toast_copied_balance">Copied %1$s balance</string>
