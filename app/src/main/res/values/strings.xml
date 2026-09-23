@@ -57,7 +57,6 @@
     <string name="onboarding_next">Next</string>
     <string name="onboarding_continue">Continue to Balance</string>
     <string name="onboarding_allow_sms">Allow SMS access</string>
-    <string name="onboarding_maybe_later">Maybe later</string>
     <string name="onboarding_welcome_title">Welcome to Balance</string>
     <string name="onboarding_welcome_body">Balance reads your supported bank SMS messages locally and shows the latest balance for each bank, plus the combined total — all without an account or internet.</string>
     <string name="onboarding_feature_local">Reads bank SMS on this device only</string>

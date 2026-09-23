@@ -57,7 +57,6 @@
     <string name="onboarding_next">بعدی</string>
     <string name="onboarding_continue">ورود به Balance</string>
     <string name="onboarding_allow_sms">اجازهٔ دسترسی به پیامک</string>
-    <string name="onboarding_maybe_later">بعداً</string>
     <string name="onboarding_welcome_title">به Balance خوش آمدید</string>
     <string name="onboarding_welcome_body">Balance پیامک‌های بانکی پشتیبانی‌شده را به‌صورت محلی می‌خواند و آخرین موجودی هر بانک را به‌همراه مجموع کل نشان می‌دهد — همه بدون حساب کاربری یا اینترنت.</string>
     <string name="onboarding_feature_local">فقط پیامک‌های بانکیِ همین دستگاه خوانده می‌شوند</string>

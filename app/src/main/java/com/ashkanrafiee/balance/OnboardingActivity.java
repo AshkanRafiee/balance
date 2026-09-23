@@ -8,7 +8,9 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -27,7 +29,9 @@ public final class OnboardingActivity extends Activity {
     int bg, panel, fg, muted, subtitle, accent, active, divider;
     private LockOverlay lockOverlay;
     private LinearLayout content, dotsRow;
-    private TextView primary, secondary, skip;
+    private TextView primary, skip;
+    private ScrollView scroll;
+    private float downX, downY;
     private int step;
 
     int color(int res) { return getResources().getColor(res, getTheme()); }
@@ -122,6 +126,8 @@ public final class OnboardingActivity extends Activity {
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(content, new ScrollView.LayoutParams(-1, -1));
+        this.scroll = scroll;
+        attachSwipe();
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
         dotsRow = new LinearLayout(this);
@@ -138,42 +144,57 @@ public final class OnboardingActivity extends Activity {
         primary.setBackground(rounded(accent, 14));
         root.addView(primary);
 
-        secondary = new TextView(this);
-        secondary.setTextSize(14);
-        secondary.setTextColor(muted);
-        secondary.setGravity(Gravity.CENTER);
-        secondary.setPadding(0, dp(10), 0, 0);
-        root.addView(secondary);
-
         showStep(PAGE_WELCOME);
     }
 
     private void showStep(int s) {
-        step = s;
+        s = Math.max(PAGE_WELCOME, Math.min(s, PAGE_SMS));
+        final int page = s;
+        step = page;
         content.removeAllViews();
-        if (s == PAGE_WELCOME) buildWelcome();
-        else if (s == PAGE_PRIVACY) buildPrivacy();
+        if (page == PAGE_WELCOME) buildWelcome();
+        else if (page == PAGE_PRIVACY) buildPrivacy();
         else buildSms();
         updateDots();
-        boolean last = s == PAGE_SMS;
+        boolean last = page == PAGE_SMS;
         boolean granted = android.os.Build.VERSION.SDK_INT < 23
             || checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED;
-        skip.setVisibility(last ? View.GONE : View.VISIBLE);
-        if (last) {
-            primary.setText(getString(granted
-                ? R.string.onboarding_continue : R.string.onboarding_allow_sms));
-            primary.setOnClickListener(v -> {
+        primary.setText(getString(last
+            ? (granted ? R.string.onboarding_continue : R.string.onboarding_allow_sms)
+            : R.string.onboarding_next));
+        primary.setOnClickListener(v -> {
+            if (last) {
                 if (granted) finishAsSeen();
                 else requestPermissions(new String[]{Manifest.permission.READ_SMS}, SMS_REQUEST);
-            });
-            secondary.setText(getString(R.string.onboarding_maybe_later));
-            secondary.setVisibility(View.VISIBLE);
-            secondary.setOnClickListener(v -> finishAsSeen());
-        } else {
-            primary.setText(getString(R.string.onboarding_next));
-            primary.setOnClickListener(v -> showStep(s + 1));
-            secondary.setVisibility(View.GONE);
-        }
+            } else {
+                showStep(page + 1);
+            }
+        });
+    }
+
+    /** A horizontal swipe on the content area steps between the pages: left goes forward to the
+     *  next page, right goes back — while a vertical drag keeps scrolling the content. */
+    private void attachSwipe() {
+        scroll.setOnTouchListener((v, e) -> {
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downX = e.getX();
+                    downY = e.getY();
+                    break;
+                case MotionEvent.ACTION_UP: {
+                    float dx = e.getX() - downX;
+                    float dy = e.getY() - downY;
+                    int slop = ViewConfiguration.get(this).getScaledTouchSlop();
+                    if (Math.abs(dx) > Math.abs(dy) * 2 && Math.abs(dx) >= slop * 2) {
+                        if (dx < 0) showStep(step + 1);
+                        else showStep(step - 1);
+                        return true;
+                    }
+                    break;
+                }
+            }
+            return false;
+        });
     }
 
     private void updateDots() {
