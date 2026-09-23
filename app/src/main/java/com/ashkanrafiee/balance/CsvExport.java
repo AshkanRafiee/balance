@@ -9,6 +9,7 @@ import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.TimeZone;
 
 /**
@@ -23,14 +24,17 @@ final class CsvExport {
     /** The fixed, unlocalized column set: spreadsheet tools and scripts must agree on the shape of
      *  the file regardless of the app's language. */
     static final String[] HEADER = {
-        "bank", "account", "date", "date_local", "time", "amount_rial", "amount_display", "currency"
+        "bank", "account", "date", "date_local", "time", "amount_rial", "amount_display", "currency",
+        "note"
     };
 
     private CsvExport() {}
 
     /** The CSV text: the header row, then one row per transaction in chronological order (oldest
-     *  first). The caller's list is never mutated. */
-    static String csv(Context context, List<Transaction> txs) {
+     *  first). The caller's list is never mutated. {@code notes} carries the per-transaction note map
+     *  from {@link BalanceData#readNotes}, joined by the transaction identity, so the note column
+     *  stays empty when the caller has no notes loaded. */
+    static String csv(Context context, List<Transaction> txs, Map<String, String> notes) {
         boolean iran = RegionHelper.isIran(context);
         Calendar calendar = Calendar.getInstance(Locale.getDefault());
         SimpleDateFormat time = new SimpleDateFormat("HH:mm", Locale.US);
@@ -44,17 +48,18 @@ final class CsvExport {
         appendRow(out, HEADER);
         for (Transaction t : sorted) {
             out.append('\n');
-            appendRow(out, cells(context, t, iran, calendar, time, iso));
+            appendRow(out, cells(context, t, notes, iran, calendar, time, iso));
         }
         return out.toString();
     }
 
-    private static String[] cells(Context context, Transaction t, boolean iran,
-            Calendar calendar, SimpleDateFormat time, SimpleDateFormat iso) {
+    private static String[] cells(Context context, Transaction t, Map<String, String> notes,
+            boolean iran, Calendar calendar, SimpleDateFormat time, SimpleDateFormat iso) {
         calendar.setTimeInMillis(t.date);
         CalDate local = CalDate.fromGregorian(
             calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH) + 1,
             calendar.get(Calendar.DAY_OF_MONTH), iran);
+        String note = notes == null ? null : notes.get(BalanceData.noteKey(t));
         return new String[]{
             BankRules.displayName(context, t.bank),
             t.account == null ? "" : t.account,
@@ -63,7 +68,8 @@ final class CsvExport {
             time.format(new Date(t.date)),
             String.valueOf(t.amount),
             CurrencyHelper.amount(context, t.amount),
-            CurrencyHelper.label(context)
+            CurrencyHelper.label(context),
+            note == null ? "" : note
         };
     }
 

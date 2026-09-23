@@ -646,4 +646,72 @@ public class BackupRestoreTest {
         List<Transaction> out = BalanceData.readTransactions(ctx);
         assertEquals(2, out.size());
     }
+
+    // ============================================================
+    // Transaction notes in backups (payload format 3)
+    // ============================================================
+
+    private Transaction txByContent(List<Transaction> txs, String content) {
+        for (Transaction t : txs)
+            if (t.content != null && t.content.equals(content)) return t;
+        throw new AssertionError("no transaction with content " + content);
+    }
+
+    @Test public void roundTrip_notes_restoredWithTheirTransactions() throws Exception {
+        Transaction t = new Transaction("Tejarat", null, T + 100, 200_000L, "sig-A", "content-A");
+        BalanceData.writeTransactions(ctx, Arrays.asList(t));
+        BalanceData.setNote(ctx, t, "birthday gift from father");
+        Uri u = uri("notes-roundtrip.balance");
+        BackupManager.create(ctx, u, PASSWORD);
+
+        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+
+        BackupManager.restore(ctx, u, PASSWORD);
+        List<Transaction> out = BalanceData.readTransactions(ctx);
+        assertEquals(1, out.size());
+        assertEquals("birthday gift from father", BalanceData.getNote(ctx, out.get(0)));
+    }
+
+    @Test public void restore_backupWithoutNotes_preservesLocalNotes() throws Exception {
+        // Backups written before notes existed (payload formats 1 and 2) carry no "txNotes" section.
+        // Restoring one must leave the notes the user typed since then completely untouched.
+        Transaction t = new Transaction("Tejarat", null, T + 100, 200_000L, "sig-A", "content-A");
+        BalanceData.writeTransactions(ctx, Arrays.asList(t));
+        BalanceData.setNote(ctx, t, "my private note");
+
+        String legacyPayload = "{\"payloadFormat\":2,\"balances\":{},"
+            + "\"transactions\":{\"transactions\":[{\"bank\":\"Tejarat\",\"date\":" + (T + 100)
+            + ",\"amount\":200000,\"sig\":\"sig-A\",\"content\":\"content-A\"}]}}";
+        File f = file("notes-legacy.balance");
+        writeLegacyBackup(f, legacyPayload, PASSWORD);
+
+        BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
+        assertEquals("my private note",
+            BalanceData.getNote(ctx, txByContent(BalanceData.readTransactions(ctx), "content-A")));
+    }
+
+    @Test public void restore_notes_mergeUnionWithLocalWins() throws Exception {
+        // Restore unions the notes exactly like it unions the transactions: a note the current device
+        // already has stays, and a note that only exists in the backup (for a movement brought in by
+        // the restore) is filled in. Local edits are never clobbered by the backup.
+        Transaction backupA = new Transaction("Tejarat", null, T + 100, 200_000L, "sig-A", "content-A");
+        Transaction backupC = new Transaction("Pasargad", null, T + 400, 300_000L, "sig-C", "content-C");
+        BalanceData.writeTransactions(ctx, Arrays.asList(backupA, backupC));
+        BalanceData.setNote(ctx, backupA, "backup-A");
+        BalanceData.setNote(ctx, backupC, "backup-C");
+        Uri u = uri("notes-merge.balance");
+        BackupManager.create(ctx, u, PASSWORD);
+
+        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        Transaction localA = new Transaction("Tejarat", null, T + 100, 200_000L, "sig-A", "content-A");
+        Transaction localB = new Transaction("Melat", null, T + 200, -50_000L, "sig-B", "content-B");
+        BalanceData.writeTransactions(ctx, Arrays.asList(localA, localB));
+        BalanceData.setNote(ctx, localA, "local-A");
+
+        BackupManager.restore(ctx, u, PASSWORD);
+        List<Transaction> out = BalanceData.readTransactions(ctx);
+        assertEquals("local-A", BalanceData.getNote(ctx, txByContent(out, "content-A")));
+        assertEquals("backup-C", BalanceData.getNote(ctx, txByContent(out, "content-C")));
+        assertNull(BalanceData.getNote(ctx, txByContent(out, "content-B")));
+    }
 }

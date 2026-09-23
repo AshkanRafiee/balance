@@ -520,14 +520,16 @@ public final class HistoryActivity extends Activity {
             final int[] error = {0};
             try {
                 final List<Transaction> txs;
+                final java.util.Map<String, String> notes;
                 synchronized (BalanceData.class) {
                     txs = BalanceData.readTransactions(getApplicationContext());
+                    notes = BalanceData.readNotes(getApplicationContext());
                 }
                 List<Transaction> scope = txs;
                 if (bankFilter != null) scope = filterByBank(txs, bankFilter);
                 if (accountFilter != null) scope = filterByAccount(scope, accountFilter);
                 scope = applyFilters(scope, filter, iranCalendar);
-                String csv = CsvExport.csv(getApplicationContext(), scope);
+                String csv = CsvExport.csv(getApplicationContext(), scope, notes);
                 OutputStream out = getContentResolver().openOutputStream(uri, "w");
                 if (out == null) throw new IOException("no output stream");
                 try {
@@ -1533,8 +1535,17 @@ public final class HistoryActivity extends Activity {
     /** One movement: bank badge, bank name with time, the account number it hit, and the signed
      *  amount. In a per-bank view every row is the same bank, so the time alone identifies it and
      *  the badge/name are dropped — but the account number stays in both scopes, because a movement's
-     *  account is meaningful even in the combined view. */
-    private LinearLayout txRow(Transaction t) {
+     *  account is meaningful even in the combined view. The whole row is tappable to add or edit the
+     *  transaction's private note, which then renders underneath; the same note follows the movement
+     *  everywhere it appears, whatever the filters. */
+    private LinearLayout txRow(final Transaction t) {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setPaddingRelative(dp(4), dp(3), dp(4), dp(3));
+        cell.setClickable(true);
+        cell.setFocusable(true);
+        cell.setOnClickListener(v -> noteDialog(t));
+
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPaddingRelative(dp(4), dp(3), dp(4), dp(3));
@@ -1569,7 +1580,67 @@ public final class HistoryActivity extends Activity {
         TextView amt = bold(signedAmount(t.amount), 13, valueColor(t.amount));
         fitToWidth(amt, 13, 10, 0);
         row.addView(amt, new LinearLayout.LayoutParams(-2, -2));
-        return row;
+        cell.addView(row, new LinearLayout.LayoutParams(-1, -2));
+
+        String note = BalanceData.getNote(this, t);
+        if (note != null) {
+            TextView noteView = text(note, 12, muted);
+            noteView.setTypeface(null, Typeface.ITALIC);
+            noteView.setLineSpacing(0, 1.05f);
+            LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(-1, -2);
+            np.setMarginStart(dp(perBank ? 4 : 43));
+            np.setMarginEnd(dp(4));
+            cell.addView(noteView, np);
+        }
+        cell.setContentDescription(getString(R.string.note_row_hint));
+        return cell;
+    }
+
+    /** The note editor for one transaction: a free-text field seeded with the current note, with
+     *  Save (persists and re-renders), Clear (removes the note) and Cancel. Editing from any filter
+     *  or view updates the same shared note, because notes are keyed to the transaction itself. */
+    private void noteDialog(final Transaction t) {
+        final EditText input = new EditText(this);
+        input.setSingleLine(false);
+        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+            | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        input.setHorizontallyScrolling(false);
+        input.setGravity(Gravity.TOP | Gravity.START);
+        input.setHint(getString(R.string.note_edit_hint));
+        input.setTextColor(fg);
+        input.setHintTextColor(muted);
+        String existing = BalanceData.getNote(this, t);
+        input.setText(existing == null ? "" : existing);
+        input.setSelection(input.getText().length());
+
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(dp(20), dp(10), dp(20), 0);
+        wrap.addView(input);
+
+        android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.note_edit_title))
+            .setView(wrap)
+            .setPositiveButton(getString(R.string.note_save), null)
+            .setNegativeButton(getString(R.string.lock_cancel), null)
+            .setNeutralButton(getString(R.string.note_clear), null)
+            .create();
+        dlg.setOnShowListener(d -> {
+            dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(v -> {
+                    BalanceData.setNote(this, t, input.getText().toString());
+                    dlg.dismiss();
+                    render();
+                });
+            dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL)
+                .setOnClickListener(v -> {
+                    BalanceData.setNote(this, t, null);
+                    dlg.dismiss();
+                    render();
+                });
+        });
+        dlg.show();
     }
 
     /** A small neutral chip with a count, for transaction-count density. */
