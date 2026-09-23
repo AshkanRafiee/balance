@@ -1584,13 +1584,28 @@ public final class HistoryActivity extends Activity {
 
         String note = BalanceData.getNote(this, t);
         if (note != null) {
-            TextView noteView = text(note, 12, muted);
-            noteView.setTypeface(null, Typeface.ITALIC);
+            LinearLayout noteChip = new LinearLayout(this);
+            noteChip.setOrientation(LinearLayout.HORIZONTAL);
+            noteChip.setGravity(Gravity.CENTER_VERTICAL);
+            noteChip.setPadding(dp(8), dp(3), dp(8), dp(3));
+            noteChip.setBackground(rounded(badgeBg, 9));
+            noteChip.setLayoutDirection(isRtl() ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
+
+            TextView pencil = text("\u270e", 11, badgeFg, MEDIUM);
+            LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(-2, -2);
+            plp.setMarginEnd(dp(5));
+            if (isRtl()) plp.setMarginStart(dp(5));
+            noteChip.addView(pencil, plp);
+
+            TextView noteView = text(note, 12, badgeFg);
             noteView.setLineSpacing(0, 1.05f);
+            noteChip.addView(noteView, new LinearLayout.LayoutParams(0, -2, 1));
+
             LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(-1, -2);
-            np.setMarginStart(dp(perBank ? 4 : 43));
+            np.setMarginStart(dp(perBank ? 0 : 39));
             np.setMarginEnd(dp(4));
-            cell.addView(noteView, np);
+            np.topMargin = dp(2);
+            cell.addView(noteChip, np);
         }
         cell.setContentDescription(getString(R.string.note_row_hint));
         return cell;
