@@ -12,11 +12,12 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Transaction history with deposits and withdrawals, broken down by day, month and year
 - History filters by movement type (all, deposits or withdrawals) and by date — today, this month, this year or a custom date range in the active calendar (Persian for Iran, Gregorian for International) — applied to every figure on the screen
 - CSV export of the transaction history — exactly what the current view shows (bank, account, movement type and date range filters; the full history when no filter is active) — saved through the system file picker as a UTF-8 CSV with ISO-8601 UTC timestamps, the date in the active calendar, raw rial amounts and the amounts as displayed
+- Per-transaction notes: tap any history row to attach a private note to that movement; it follows the transaction in every filter and view and is included in CSV exports and encrypted backups
 - Full history from the total card, per-bank history from any bank card, and single-account history by tapping an account row in the list
 - Long-press the total card to copy the combined total, or long-press a bank or account card to copy that balance; long-press the eye to switch auto-mask on or off (balances start hidden on every open), and long-press the lock icon for the lock settings
 - Bank sorting by balance or update time, mirrored in the list and the home-screen widget
 - Home-screen widget with the same bank order, totals, and privacy mask as the app
-- Password-encrypted backup and restore
+- Password-encrypted backup and restore (balances, transaction history and notes)
 - Auto light/dark theme, persistent masked-balance and currency display preference
 - Automatic refresh as bank SMS arrive, plus pull-to-refresh from anywhere at the top of the list
 - Data-freshness warning: a bank whose last balance SMS is older than a configurable number of days is highlighted with an amber ring, an amber amount and an "N days" badge on its card, and an amber amount in the home-screen widget, so you see how fresh today's totals are before trusting them
