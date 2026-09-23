@@ -73,7 +73,7 @@
     <string name="onboarding_sms_body">برای دیدن پیامک‌های موجودی بانکیِ ذخیره‌شده روی همین گوشی، Balance به دسترسیِ خواندنِ پیامک نیاز دارد. پیامک‌ها همان‌جا روی دستگاه شما خوانده می‌شوند و هرگز به هیچ‌جا منتقل نمی‌شوند.</string>
     <string name="onboarding_sms_granted">دسترسی به پیامک قبلاً داده شده — چیز دیگری لازم نیست.</string>
     <string name="settings_stale_label">هشدار ماندهٔ قدیمی</string>
-    <string name="settings_history_expand_all_label">باز کردن همهٔ ماه‌ها، سال‌ها و روزها</string>
+    <string name="settings_history_expand_all_label">تاریخچه: باز کردن همهٔ ماه‌ها، سال‌ها و روزها</string>
     <string name="stale_option_off">خاموش</string>
     <plurals name="stale_days">
         <item quantity="one">%1$d روز</item>
