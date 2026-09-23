@@ -146,7 +146,9 @@ public final class AboutActivity extends Activity {
         body.addView(info(getString(R.string.about_website_label), "balance.ashkanrafiee.com", APP_WEBSITE), margin(0, 0, 0, 8));
         body.addView(info(getString(R.string.about_suggestions_label), "github.com/ashkanrafiee/balance/issues", ISSUES_URL), margin(0, 0, 0, 8));
         body.addView(info(getString(R.string.about_donate_label), "balance.ashkanrafiee.com/#donate", DONATION_URL), margin(0, 0, 0, 8));
-        body.addView(info(getString(R.string.about_privacy_label), getString(R.string.about_privacy_value)), margin(0, 0, 0, 20));
+        body.addView(info(getString(R.string.about_privacy_label), getString(R.string.about_privacy_value), (View.OnClickListener) null), margin(0, 0, 0, 8));
+        body.addView(info(getString(R.string.about_show_intro_label), getString(R.string.about_show_intro_value),
+            v -> startActivity(new Intent(this, OnboardingActivity.class))), margin(0, 0, 0, 20));
 
         TextView footerView = text(getString(R.string.about_footer, appVersion()), 11, footerColor);
         footerView.setGravity(Gravity.CENTER);
@@ -226,28 +228,31 @@ public final class AboutActivity extends Activity {
     }
 
     LinearLayout info(String h, String value) {
-        return info(h, value, null);
+        return info(h, value, (View.OnClickListener) null);
     }
 
     LinearLayout info(String h, String value, String url) {
+        return info(h, value, url != null ? view -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (Exception e) {
+                Log.w(TAG, "no app can open " + url);
+            }
+        } : null);
+    }
+
+    LinearLayout info(String h, String value, View.OnClickListener onClick) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(16), dp(13), dp(16), dp(13));
         box.setBackground(rounded(card, 15));
         box.addView(text(h, 12, muted));
-        TextView v = text(value, 14, url != null ? link : fg);
+        TextView v = text(value, 14, onClick != null ? link : fg);
         v.setPadding(0, dp(5), 0, 0);
         v.setMaxLines(2);
         v.setEllipsize(TextUtils.TruncateAt.END);
-        if (url != null) {
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-            v.setOnClickListener(view -> {
-                try {
-                    startActivity(intent);
-                } catch (Exception e) {
-                    Log.w(TAG, "no app can open " + url);
-                }
-            });
+        if (onClick != null) {
+            v.setOnClickListener(onClick);
         }
         box.addView(v);
         return box;

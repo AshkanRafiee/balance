@@ -105,7 +105,19 @@ public class MainActivity extends Activity {
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         lockOverlay.setVisibility(View.GONE);
         updateSecureFlag();
-        requestSms();
+        startOnboardingIfFirstRun();
+    }
+
+    /** On a fresh install, open the first-run introduction before asking for anything: it explains
+     *  what the app reads and its privacy model, then requests the SMS permission in context. On every
+     *  later launch the normal flow runs — the permission request or the scan. When the introduction
+     *  finishes, this activity resumes and {@link #onResume()} picks up the scan automatically. */
+    private void startOnboardingIfFirstRun() {
+        if (!BalanceData.isOnboardingSeen(this)) {
+            startActivity(new Intent(this, OnboardingActivity.class));
+        } else {
+            requestSms();
+        }
     }
 
     @Override
