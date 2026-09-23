@@ -13,6 +13,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -80,8 +81,11 @@ public class CsvExportTest {
 
     @Test public void csv_emptyList_containsOnlyTheHeader() {
         String csv = CsvExport.csv(ctx, new ArrayList<>(), java.util.Collections.<String, String>emptyMap());
+        // A UTF-8 BOM leads the file so spreadsheets (Excel first) read Persian text as UTF-8 instead
+        // of mis-decoding it; the header itself follows right after it.
+        assertTrue(csv.startsWith("\uFEFF"));
         assertEquals("bank,account,date,date_local,time,amount_rial,amount_display,currency,note",
-            line(csv, 0));
+            line(csv, 0).substring(1));
         assertEquals(1, csv.split("\n").length);
     }
 
@@ -155,5 +159,24 @@ public class CsvExportTest {
         List<String> cells = parse(row);
         assertEquals(9, cells.size());
         assertEquals("picked up from the cashier, watch out, \"late\"", cells.get(8));
+    }
+
+    @Test public void csv_persianNote_survivesUtf8RoundTripAfterTheBom() {
+        // The export is written as UTF-8; this pins down that the Persian note bytes are encoded as
+        // real UTF-8 (never transliterated or stripped) and land after the BOM that tells a
+        // spreadsheet how to read them.
+        Transaction t = new Transaction("bank_melli", null, DATE_2026, 1_250_000L, "sig",
+            "content-fa");
+        java.util.Map<String, String> notes = new java.util.HashMap<>();
+        notes.put(BalanceData.noteKey(t), "مبلغ را نگه داشتم برای روز مبادا");
+        String csv = CsvExport.csv(ctx, Arrays.asList(t), notes);
+
+        byte[] utf8 = csv.getBytes(StandardCharsets.UTF_8);
+        assertEquals((byte) 0xEF, utf8[0]);
+        assertEquals((byte) 0xBB, utf8[1]);
+        assertEquals((byte) 0xBF, utf8[2]);
+
+        String decoded = new String(utf8, StandardCharsets.UTF_8);
+        assertTrue(decoded.contains("مبلغ را نگه داشتم برای روز مبادا"));
     }
 }

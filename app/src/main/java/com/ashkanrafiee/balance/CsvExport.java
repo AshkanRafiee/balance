@@ -16,9 +16,14 @@ import java.util.TimeZone;
  * Builds the UTF-8 CSV export of the transaction history. The columns stay machine-readable — an
  * ISO-8601 UTC timestamp and the raw signed rial figure — while extra human-friendly columns carry
  * the date in the active calendar, the time of day and the amount exactly as the app displays it
- * (including the chosen currency's unit label). Only RFC-4180 quoting is applied; the caller writes
- * the text through the Storage Access Framework, so nothing leaves the device until the user picks
- * a location.
+ * (including the chosen currency's unit label), plus the user's per-transaction note. Only RFC-4180
+ * quoting is applied; the caller writes the text through the Storage Access Framework, so nothing
+ * leaves the device until the user picks a location.
+ *
+ * <p>The text starts with a UTF-8 byte-order mark. Persian (and generally non-ASCII) text — the
+ * notes above all — is written as real UTF-8, and without a BOM most spreadsheet tools (Excel first
+ * among them) assume their system's old single-byte encoding and render those bytes as garbage. The
+ * BOM makes every UTF-8-aware consumer read the file correctly.
  */
 final class CsvExport {
     /** The fixed, unlocalized column set: spreadsheet tools and scripts must agree on the shape of
@@ -30,10 +35,10 @@ final class CsvExport {
 
     private CsvExport() {}
 
-    /** The CSV text: the header row, then one row per transaction in chronological order (oldest
-     *  first). The caller's list is never mutated. {@code notes} carries the per-transaction note map
-     *  from {@link BalanceData#readNotes}, joined by the transaction identity, so the note column
-     *  stays empty when the caller has no notes loaded. */
+    /** The CSV text: a UTF-8 BOM, the header row, then one row per transaction in chronological order
+     *  (oldest first). The caller's list is never mutated. {@code notes} carries the per-transaction
+     *  note map from {@link BalanceData#readNotes}, joined by the transaction identity, so the note
+     *  column stays empty when the caller has no notes loaded. */
     static String csv(Context context, List<Transaction> txs, Map<String, String> notes) {
         boolean iran = RegionHelper.isIran(context);
         Calendar calendar = Calendar.getInstance(Locale.getDefault());
@@ -44,7 +49,7 @@ final class CsvExport {
         List<Transaction> sorted = new ArrayList<>(txs);
         sorted.sort(Comparator.comparingLong(t -> t.date));
 
-        StringBuilder out = new StringBuilder();
+        StringBuilder out = new StringBuilder("\uFEFF");
         appendRow(out, HEADER);
         for (Transaction t : sorted) {
             out.append('\n');
