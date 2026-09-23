@@ -2,6 +2,7 @@ package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import android.app.Activity;
@@ -22,6 +23,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Tests for the first-run introduction: it gates a fresh install, walks Welcome → Privacy → SMS
  *  access, lets the user skip, marks itself seen so it never returns, and adapts its last button to
@@ -34,11 +36,13 @@ public class OnboardingTest {
     @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
+        LocaleHelper.setLanguage(ctx, "");
     }
 
     @After public void tearDown() throws Exception {
         exec("input keyevent 4");
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
+        LocaleHelper.setLanguage(ctx, "");
         finishAll();
     }
 
@@ -119,6 +123,40 @@ public class OnboardingTest {
         clickText(ctx.getString(R.string.onboarding_continue));
         assertTrue(waitUntil(() -> BalanceData.isOnboardingSeen(ctx), 5_000));
         assertTrue(waitUntil(() -> finished(OnboardingActivity.class), 5_000));
+    }
+
+    @Test public void rtlParagraphFlowsRightToLeft() throws Exception {
+        LocaleHelper.setLanguage(ctx, "fa");
+        launch(OnboardingActivity.class);
+        assertOnScreenLiteral(OnboardingActivity.class, R.string.onboarding_welcome_body);
+        AtomicBoolean rtl = new AtomicBoolean();
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            for (Activity a : ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(Stage.RESUMED)) {
+                if (!(a instanceof OnboardingActivity)) continue;
+                TextView tv = (TextView) findText(a.getWindow().getDecorView(),
+                        a.getString(R.string.onboarding_welcome_body));
+                if (tv != null && tv.getLayout() != null) {
+                    rtl.set(tv.getLayout().getParagraphDirection(0)
+                            == android.text.Layout.DIR_RIGHT_TO_LEFT);
+                    return;
+                }
+            }
+        });
+        assertTrue("a Persian paragraph must flow right-to-left even when it starts with an "
+                + "English word", rtl.get());
+    }
+
+    @Test public void rtlSwipeForwardIsToTheRight() throws Exception {
+        LocaleHelper.setLanguage(ctx, "fa");
+        launch(OnboardingActivity.class);
+        assertOnScreenLiteral(OnboardingActivity.class, R.string.onboarding_welcome_title);
+
+        swipeRight();
+        assertOnScreenLiteral(OnboardingActivity.class, R.string.onboarding_privacy_title);
+
+        swipeLeft();
+        assertOnScreenLiteral(OnboardingActivity.class, R.string.onboarding_welcome_title);
     }
 
     @Test public void aboutScreen_offersReopenLink() throws Exception {
@@ -227,6 +265,20 @@ public class OnboardingTest {
             });
             return found.get();
         }, 15_000));
+    }
+
+    /** Resolves a string through the live activity (whose wrapped context honours the app's
+     *  language override) and asserts it is on screen. */
+    private void assertOnScreenLiteral(Class<?> activityType, int res) throws Exception {
+        AtomicReference<String> resolved = new AtomicReference<>();
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            for (Activity a : ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(Stage.RESUMED))
+                if (activityType.isInstance(a)) { resolved.set(a.getString(res)); return; }
+        });
+        String text = resolved.get();
+        assertNotNull("activity " + activityType.getSimpleName() + " not resumed for string lookup", text);
+        assertOnScreen(activityType, text);
     }
 
     private void clickText(String text) throws Exception {
