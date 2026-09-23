@@ -962,12 +962,23 @@ public final class HistoryActivity extends Activity {
     private int pendingScroll;
 
     /** Expands the current year, current month and its days by default once per screen, so the
-     *  freshest history is visible without any interaction without undoing later collapses. */
+     *  freshest history is visible without any interaction without undoing later collapses. When
+     *  the Display menu's "expand all history" option is on, every year, month and day opens instead. */
     private boolean expandedSeeded;
 
     private void seedExpanded() {
         if (expandedSeeded) return;
         expandedSeeded = true;
+        if (BalanceData.getExpandAllHistory(this)) {
+            for (YearGroup y : allYears) {
+                expandedYears.add(y.key());
+                for (MonthGroup m : y.months) {
+                    expandedMonths.add(m.key());
+                    for (DayGroup d : m.days) expandedDays.add(d.key());
+                }
+            }
+            return;
+        }
         CalDate now = now();
         expandedYears.add(String.valueOf(now.year));
         expandedMonths.add(now.year + "/" + now.month);

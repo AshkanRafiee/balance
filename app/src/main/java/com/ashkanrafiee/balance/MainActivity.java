@@ -28,6 +28,7 @@ import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.widget.ArrayAdapter;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -290,8 +291,9 @@ public class MainActivity extends Activity {
 
     /** The combined Display dialog behind the footer item: the dropdowns in a single menu, so the
      *  calendar system (see {@link RegionHelper}), the interface language, the currency unit (see
-     *  {@link CurrencyHelper}) and the color theme (see {@link ThemeHelper}) are all chosen in one
-     *  place. Every picker applies its choice as soon as it is selected — a changed region applies
+     *  {@link CurrencyHelper}), the color theme (see {@link ThemeHelper}), the balance-freshness
+     *  threshold and the "expand all history" toggle are all chosen in one place. Every picker
+     *  applies its choice as soon as it is selected — a changed region or the history toggle apply
      *  on the next history open, a changed theme or language recreates the screen, a changed
      *  currency re-renders the dashboard and the widget — so only a typed custom currency name
      *  waits for the OK button. */
@@ -459,6 +461,17 @@ public class MainActivity extends Activity {
         staleLp.topMargin = dp(18);
         box.addView(staleLabel, staleLp);
         box.addView(staleSpin);
+
+        // A single on/off choice (not a dropdown): with it on, the history breakdown opens every
+        // year, month and day by default instead of only the current year, month and its days.
+        CheckBox expandAll = new CheckBox(this);
+        expandAll.setText(getString(R.string.settings_history_expand_all_label));
+        expandAll.setChecked(BalanceData.getExpandAllHistory(MainActivity.this));
+        expandAll.setOnCheckedChangeListener((b, on) ->
+            BalanceData.setExpandAllHistory(MainActivity.this, on));
+        LinearLayout.LayoutParams expandLp = new LinearLayout.LayoutParams(-1, -2);
+        expandLp.topMargin = dp(18);
+        box.addView(expandAll, expandLp);
 
         showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.footer_display))
