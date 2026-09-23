@@ -1174,9 +1174,9 @@ public class MainActivity extends Activity {
                     invalidate();
                     handler.postDelayed(this, 16);
                 } else if (retracting || pullFade > 0.02f) {
-                    pullShift = Math.max(0, pullShift - 10f);
-                    pullFrac = Math.max(0, pullFrac - 0.12f);
-                    pullFade = Math.max(0, pullFade - 0.12f);
+                    pullShift = Math.max(0, pullShift - 14f);
+                    pullFrac = Math.max(0, pullFrac - 0.17f);
+                    pullFade = Math.max(0, pullFade - 0.17f);
                     if (pullFade <= 0.02f) {
                         pullFade = 0;
                         indicatorVisible = false;
