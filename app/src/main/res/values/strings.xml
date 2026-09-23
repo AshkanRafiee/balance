@@ -53,6 +53,26 @@
     <string name="settings_language_label">Language</string>
     <string name="settings_currency_label">Currency</string>
     <string name="settings_theme_label">Theme</string>
+    <string name="onboarding_skip">Skip</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_continue">Continue to Balance</string>
+    <string name="onboarding_allow_sms">Allow SMS access</string>
+    <string name="onboarding_maybe_later">Maybe later</string>
+    <string name="onboarding_welcome_title">Welcome to Balance</string>
+    <string name="onboarding_welcome_body">Balance reads your supported bank SMS messages locally and shows the latest balance for each bank, plus the combined total — all without an account or internet.</string>
+    <string name="onboarding_feature_local">Reads bank SMS on this device only</string>
+    <string name="onboarding_feature_balance">Latest balance per bank, split by account number</string>
+    <string name="onboarding_feature_history">Deposit and withdrawal history with filters</string>
+    <string name="onboarding_feature_widget">Home-screen widget with the same figures and privacy mask</string>
+    <string name="onboarding_privacy_title">Built to keep your balances private</string>
+    <string name="onboarding_privacy_body">Balance is offline by design — the numbers you see never leave your device.</string>
+    <string name="onboarding_p_offline">Offline by design — no internet permission</string>
+    <string name="onboarding_p_local">SMS are read in place, never uploaded</string>
+    <string name="onboarding_p_bottom">No account, no cloud, no analytics</string>
+    <string name="onboarding_p_lock">Encrypted storage and an optional in-app lock</string>
+    <string name="onboarding_sms_title">One permission, that\'s all</string>
+    <string name="onboarding_sms_body">Balance needs SMS read access to see the bank balance messages stored on this phone. The messages are read in place on your device and never transmitted anywhere.</string>
+    <string name="onboarding_sms_granted">SMS access is already granted — nothing else is needed.</string>
     <string name="settings_stale_label">Stale balance warning</string>
     <string name="stale_option_off">Off</string>
     <plurals name="stale_days">
@@ -101,6 +121,8 @@
 
     <string name="about_title">About</string>
     <string name="about_back">Back</string>
+    <string name="about_show_intro_label">Introduction</string>
+    <string name="about_show_intro_value">Show the first-run introduction again</string>
     <string name="tagline_offline_bank_balance">Offline bank balance</string>
     <string name="about_section_heading">ABOUT THIS APP</string>
     <string name="about_section_body">Balance is a private, offline dashboard for the latest balances reported by supported banks. It reads supported bank SMS messages locally, keeps one current balance per bank, and never sends SMS or financial data anywhere.</string>
