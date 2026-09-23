@@ -23,7 +23,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - English and Persian (فارسی) interface, with automatic system-language detection and localized bank names; the footer's single "Display" menu holds its selectors — the Calendar (Persian Jalali / Gregorian) chooses the calendar system, the Currency (Toman / Rial / custom) chooses the value and unit shown next to amounts (Toman divides by ten, others show the raw figure), the Language overrides the interface language, the Theme (system / dark / light) forces the color scheme, and the Stale balance warning (off / 3 / 7 / 14 / 30 days) sets how long a balance can go without an SMS before it is flagged
 - Optional in-app lock with a PIN, password or fingerprint, covering the app, the home-screen widget and screenshots/recents, with progressive cooldown delays against wrong-entry guessing
 - About screen with direct links to the website, issue tracker, and a link to show the first-run introduction again
-- First-run introduction on a fresh install: three short pages explain what Balance reads, how it stays offline and private, and ask for SMS access only there, in context — skippable at any point, never shown again afterwards, and re-openable anytime from the About screen
+- First-run introduction on a fresh install: three short pages explain what Balance reads, how it stays offline and private, and ask for SMS access in context during the introduction rather than with a bare dialog over an empty dashboard — skippable at any point, never shown again afterwards, and re-openable anytime from the About screen
 - Report (the Scan diagnostics screen): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout, and senders not recognized yet. Tap any flagged sender to open its messages and pick exactly which ones to send or copy — and mark what is wrong (account, balance or sender-number detection) so the prefilled email tells the maintainer which stage failed. The email is only sent after you approve — feeding straight into the contribution flow »Contributing« below
 
 ## Download
@@ -57,7 +57,7 @@ Keep the keystore and passwords outside version control (`signing.properties` an
 
 ### Version numbers
 
-`versionName` follows `1.<minor>.<patch>`. `versionCode` is derived from it as `(10 + minor) * 1000 + patch` (so 1.14.0 → 24000); a fixed release line must keep the same `versionCode` as the tag and the store changelog file name `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`.
+`versionName` follows `1.<minor>.<patch>`. `versionCode` is derived from it as `(10 + minor) * 1000 + patch` (so 1.15.0 → 25000); a fixed release line must keep the same `versionCode` as the tag and the store changelog file name `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`.
 
 ## Privacy
 
