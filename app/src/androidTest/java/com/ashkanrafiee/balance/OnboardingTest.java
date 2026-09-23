@@ -11,6 +11,7 @@ import android.view.View;
 import android.widget.TextView;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import android.view.MotionEvent;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry;
 import androidx.test.runner.lifecycle.Stage;
@@ -69,7 +70,7 @@ public class OnboardingTest {
             () -> finished(OnboardingActivity.class), 5_000));
     }
 
-    @Test public void nextWalksAllPages_thenMaybeLaterFinishes() throws Exception {
+    @Test public void nextWalksAllPages_thenSkipFinishes() throws Exception {
         launch(OnboardingActivity.class);
         assertOnScreen(OnboardingActivity.class, ctx.getString(R.string.onboarding_welcome_title));
 
@@ -82,11 +83,31 @@ public class OnboardingTest {
         boolean cont = ctx.getString(R.string.onboarding_continue).equals(primaryLabel());
         assertTrue("the SMS page must offer to request access or continue (permission state "
                 + (allow ? "ungranted" : cont ? "granted" : "unknown") + ")", allow || cont);
-        assertOnScreen(OnboardingActivity.class, ctx.getString(R.string.onboarding_maybe_later));
+        assertOnScreen(OnboardingActivity.class, ctx.getString(R.string.onboarding_skip));
 
-        clickText(ctx.getString(R.string.onboarding_maybe_later));
+        clickText(ctx.getString(R.string.onboarding_skip));
         assertTrue(waitUntil(() -> BalanceData.isOnboardingSeen(ctx), 5_000));
         assertTrue(waitUntil(() -> finished(OnboardingActivity.class), 5_000));
+    }
+
+    @Test public void swipeLeft_advancesThroughPages() throws Exception {
+        launch(OnboardingActivity.class);
+        assertOnScreen(OnboardingActivity.class, ctx.getString(R.string.onboarding_welcome_title));
+
+        swipeLeft();
+        assertOnScreen(OnboardingActivity.class, ctx.getString(R.string.onboarding_privacy_title));
+
+        swipeLeft();
+        assertOnScreen(OnboardingActivity.class, ctx.getString(R.string.onboarding_sms_title));
+    }
+
+    @Test public void swipeRight_goesBackAPage() throws Exception {
+        launch(OnboardingActivity.class);
+        clickText(ctx.getString(R.string.onboarding_next));
+        assertOnScreen(OnboardingActivity.class, ctx.getString(R.string.onboarding_privacy_title));
+
+        swipeRight();
+        assertOnScreen(OnboardingActivity.class, ctx.getString(R.string.onboarding_welcome_title));
     }
 
     @Test public void permissionGranted_showsContinueButton() throws Exception {
@@ -115,6 +136,39 @@ public class OnboardingTest {
 
     private void grantReadSms() throws Exception {
         exec("pm grant " + ctx.getPackageName() + " android.permission.READ_SMS");
+    }
+
+    private void swipeLeft() throws Exception {
+        swipe(0.8f, 0.2f);
+    }
+
+    private void swipeRight() throws Exception {
+        swipe(0.2f, 0.8f);
+    }
+
+    /** Injects a horizontal drag across the screen's vertical centre via the instrumentation. */
+    private void swipe(float fromFrac, float toFrac) {
+        android.app.Instrumentation inst = InstrumentationRegistry.getInstrumentation();
+        android.content.res.Resources res = inst.getTargetContext().getResources();
+        int from = (int) (res.getDisplayMetrics().widthPixels * fromFrac);
+        int to = (int) (res.getDisplayMetrics().widthPixels * toFrac);
+        int y = res.getDisplayMetrics().heightPixels / 2;
+        long t = android.os.SystemClock.uptimeMillis();
+        MotionEvent down = MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, from, y, 0);
+        inst.sendPointerSync(down);
+        down.recycle();
+        final int steps = 12;
+        for (int i = 1; i <= steps; i++) {
+            t += 16;
+            MotionEvent m = MotionEvent.obtain(t, t, MotionEvent.ACTION_MOVE,
+                from + (to - from) * i / steps, y, 0);
+            inst.sendPointerSync(m);
+            m.recycle();
+        }
+        t += 16;
+        MotionEvent up = MotionEvent.obtain(t, t, MotionEvent.ACTION_UP, to, y, 0);
+        inst.sendPointerSync(up);
+        up.recycle();
     }
 
     private void exec(String cmd) throws Exception {
