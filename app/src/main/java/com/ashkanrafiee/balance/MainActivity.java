@@ -494,30 +494,16 @@ public class MainActivity extends Activity {
     }
 
     void hardRefreshDialog() {
-        // The message and the checkbox live in ONE padded container instead of the builder's two
-        // separate slots (setMessage + setView), so the checkbox's text starts at exactly the same
-        // column as the message above it — no mismatched indentation.
-        TextView message = new TextView(this);
-        message.setTextSize(14);
-        message.setLineSpacing(0, 1.15f);
-        message.setTextColor(resColor(R.color.subtitle));
-        message.setText(getString(R.string.dialog_hard_refresh_message));
-        LinearLayout.LayoutParams msglp = new LinearLayout.LayoutParams(-1, -2);
-        msglp.bottomMargin = dp(12);
-        message.setLayoutParams(msglp);
-
+        // Standard message + custom view: setMessage renders the description with the platform's own
+        // alert-dialog text appearance (light and dark themes, system font scaling, native spacing
+        // below the title), and the notes-deletion checkbox sits on the same content margin right
+        // under it. Both start at the same column as the app's other dialogs.
         final android.widget.CheckBox deleteNotes = new android.widget.CheckBox(this);
         deleteNotes.setText(getString(R.string.dialog_hard_refresh_notes_label));
-        deleteNotes.setPadding(dp(2), 0, 0, 0);
-
-        LinearLayout body = new LinearLayout(this);
-        body.setOrientation(LinearLayout.VERTICAL);
-        body.addView(message);
-        body.addView(deleteNotes);
-
         showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.dialog_hard_refresh_title))
-            .setView(body)
+            .setMessage(getString(R.string.dialog_hard_refresh_message))
+            .setView(deleteNotes)
             .setNegativeButton(getString(R.string.dialog_hard_refresh_cancel), null)
             .setPositiveButton(getString(R.string.dialog_hard_refresh_confirm),
                 (d, w) -> view.refresh(true, deleteNotes.isChecked()))
