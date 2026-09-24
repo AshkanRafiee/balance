@@ -89,24 +89,24 @@ public class HistoryTest {
 
     // ---- real-world bank formats (from Tejarat / Blu / Parsian SMS) --------------------
     @Test public void txn_tejarat_bardashtLabel() {
-        assertEquals(-70014000L, (long) BalanceData.extractTransaction(
+        assertEquals(-490098000L, (long) BalanceData.extractTransaction(
             "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n"
             + "\u062D\u0633\u0627\u0628: 01351234567890 \n"
-            + "\u0628\u0631\u062F\u0627\u0634\u062A: 70,014,000 \u0631\u06CC\u0627\u0644 \n"
+            + "\u0628\u0631\u062F\u0627\u0634\u062A: 490,098,000 \u0631\u06CC\u0627\u0644 \n"
             + "\u0627\u0632 \u0637\u0631\u06CC\u0642: \u0633\u0627\u0645\u0627\u0646\u0647 \u067E\u0644 (\u067E\u0631\u062F\u0627\u062E\u062A \u0644\u062D\u0638\u0647 \u0627\u06CC)  \n"
-            + "\u0645\u0627\u0646\u062F\u0647: 1,209,288 \u0631\u06CC\u0627\u0644 \n"
+            + "\u0645\u0627\u0646\u062F\u0647: 8,465,016 \u0631\u06CC\u0627\u0644 \n"
             + "1405/06/07\n20:16"));
     }
 
     @Test public void txn_tejarat_varizLabel_pardakhtWord_isDeposit() {
         // "پرداخت لحظه ای" is a payment-method name, not a withdrawal keyword; the amount written
         // right after "واریز:" must decide the direction instead of the keyword sets.
-        assertEquals(115000000L, (long) BalanceData.extractTransaction(
+        assertEquals(805000000L, (long) BalanceData.extractTransaction(
             "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n"
             + "\u062D\u0633\u0627\u0628: 01351234567890 \n"
-            + "\u0648\u0627\u0631\u06CC\u0632: 115,000,000 \u0631\u06CC\u0627\u0644 \n"
+            + "\u0648\u0627\u0631\u06CC\u0632: 805,000,000 \u0631\u06CC\u0627\u0644 \n"
             + "\u0627\u0632 \u0637\u0631\u06CC\u0642: \u0633\u0627\u0645\u0627\u0646\u0647 \u067E\u0644 (\u067E\u0631\u062F\u0627\u062E\u062A \u0644\u062D\u0638\u0647 \u0627\u06CC)  \n"
-            + "\u0645\u0627\u0646\u062F\u0647: 361,919,288 \u0631\u06CC\u0627\u0644 \n"
+            + "\u0645\u0627\u0646\u062F\u0647: 2,533,435,016 \u0631\u06CC\u0627\u0644 \n"
             + "1405/06/06\n00:08"));
     }
 
@@ -115,7 +115,7 @@ public class HistoryTest {
             "\u0628\u0644\u0648\n"
             + "\u0628\u0631\u062F\u0627\u0634\u062A \u067E\u0648\u0644\n"
             + "\u0627\u0634\u06A9\u0627\u0646 \u0639\u0632\u06CC\u0632\u060C 400,000 \u0631\u06CC\u0627\u0644 \u0627\u0632 \u062D\u0633\u0627\u0628 \u0634\u0645\u0627 \u067E\u0631\u06CC\u062F.\n"
-            + "\u0645\u0648\u062C\u0648\u062F\u06CC: 57,086,241 \u0631\u06CC\u0627\u0644\n"
+            + "\u0645\u0648\u062C\u0648\u062F\u06CC: 12,345,683 \u0631\u06CC\u0627\u0644\n"
             + "\u06F2\u06F3:\u06F2\u06F8\n"
             + "\u06F1\u06F4\u06F0\u06F5.\u06F0\u06F6.\u06F1\u06F5"));
     }
@@ -124,7 +124,7 @@ public class HistoryTest {
         assertEquals(-500000L, (long) BalanceData.extractTransaction(
             "30101234567890\n"
             + "\u0645\u0628\u0644\u063A:500,000-\n"
-            + "\u0645\u0627\u0646\u062F\u0647:1,076,220\n"
+            + "\u0645\u0627\u0646\u062F\u0647:7,533,540\n"
             + "05/26\n08:22"));
     }
 
@@ -174,7 +174,7 @@ public class HistoryTest {
         assertEquals(-1000000L, (long) BalanceData.extractTransaction(
             "\u0627\u0646\u062A\u0642\u0627\u0644\u06CC:1,000,000-\n"
             + "\u062D\u0633\u0627\u0628:10001\n"
-            + "\u0645\u0627\u0646\u062F\u0647:208,405\n"
+            + "\u0645\u0627\u0646\u062F\u0647:1,458,835\n"
             + "0629-17:23"));
     }
 
@@ -182,7 +182,7 @@ public class HistoryTest {
         assertEquals(1000000L, (long) BalanceData.extractTransaction(
             "\u0627\u0646\u062A\u0642\u0627\u0644\u06CC:1,000,000+\n"
             + "\u062D\u0633\u0627\u0628:10002\n"
-            + "\u0645\u0627\u0646\u062F\u0647:1,070,622\n"
+            + "\u0645\u0627\u0646\u062F\u0647:7,494,354\n"
             + "0629-17:23"));
     }
 
@@ -190,7 +190,7 @@ public class HistoryTest {
         assertEquals(-7600000L, (long) BalanceData.extractTransaction(
             "\u062E\u0631\u06CC\u062F\u0627\u06CC\u0646\u062A\u0631\u0646\u062A\u06CC:7,600,000-\n"
             + "\u062D\u0633\u0627\u0628:10002\n"
-            + "\u0645\u0627\u0646\u062F\u0647:220,112\n"
+            + "\u0645\u0627\u0646\u062F\u0647:1,540,784\n"
             + "0620-23:13"));
     }
 
@@ -199,7 +199,7 @@ public class HistoryTest {
         assertEquals(7700000L, (long) BalanceData.extractTransaction(
             "\u062D\u0648\u0627\u0644\u0647 \u067E\u0644:7,700,000+\n"
             + "\u062D\u0633\u0627\u0628:10002\n"
-            + "\u0645\u0627\u0646\u062F\u0647:7,820,112\n"
+            + "\u0645\u0627\u0646\u062F\u0647:54,740,784\n"
             + "0620-23:12"));
     }
 
@@ -215,7 +215,7 @@ public class HistoryTest {
         Transaction t = BalanceData.parseMovement("Melli", "9830009417",
             "\u0627\u0646\u062A\u0642\u0627\u0644\u06CC:1,000,000-\n"
             + "\u062D\u0633\u0627\u0628:10001\n"
-            + "\u0645\u0627\u0646\u062F\u0647:208,405", 1L, false, 0);
+            + "\u0645\u0627\u0646\u062F\u0647:1,458,835", 1L, false, 0);
         assertNotNull(t);
         assertEquals(-1000000L, t.amount);
         assertEquals("10001", t.account);
@@ -250,7 +250,7 @@ public class HistoryTest {
     @Test public void delta_otp_isNull() {
         assertNull(BalanceData.parseMovement("Blu", "+989999987641",
             "\u062E\u0631\u06CC\u062F\n\u0645\u0628\u0644\u063A: 400,000\n\u0631\u0645\u0632: 826129\n"
-            + "\u0645\u0648\u062C\u0648\u062F\u06CC: 57,086,241", 1L, true, 56_086_241L));
+            + "\u0645\u0648\u062C\u0648\u062F\u06CC: 12,345,683", 1L, true, 11_345_683L));
     }
 
     @Test public void delta_noPreviousBalance_isNull() {

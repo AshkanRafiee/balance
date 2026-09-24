@@ -35,28 +35,28 @@ public class HistoryScanTest {
     private static final String TEJARAT_WITHDRAWAL =
         "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n"
         + "\u062D\u0633\u0627\u0628: 01351234567890 \n"
-        + "\u0628\u0631\u062F\u0627\u0634\u062A: 70,014,000 \u0631\u06CC\u0627\u0644 \n"
+        + "\u0628\u0631\u062F\u0627\u0634\u062A: 490,098,000 \u0631\u06CC\u0627\u0644 \n"
         + "\u0627\u0632 \u0637\u0631\u06CC\u0642: \u0633\u0627\u0645\u0627\u0646\u0647 \u067E\u0644 (\u067E\u0631\u062F\u0627\u062E\u062A \u0644\u062D\u0638\u0647 \u0627\u06CC)  \n"
-        + "\u0645\u0627\u0646\u062F\u0647: 1,209,288 \u0631\u06CC\u0627\u0644 \n"
+        + "\u0645\u0627\u0646\u062F\u0647: 8,465,016 \u0631\u06CC\u0627\u0644 \n"
         + "1405/06/07\n20:16";
     private static final String TEJARAT_DEPOSIT =
         "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n"
         + "\u062D\u0633\u0627\u0628: 01351234567890 \n"
-        + "\u0648\u0627\u0631\u06CC\u0632: 115,000,000 \u0631\u06CC\u0627\u0644 \n"
+        + "\u0648\u0627\u0631\u06CC\u0632: 805,000,000 \u0631\u06CC\u0627\u0644 \n"
         + "\u0627\u0632 \u0637\u0631\u06CC\u0642: \u0633\u0627\u0645\u0627\u0646\u0647 \u067E\u0644 (\u067E\u0631\u062F\u0627\u062E\u062A \u0644\u062D\u0638\u0647 \u0627\u06CC)  \n"
-        + "\u0645\u0627\u0646\u062F\u0647: 361,919,288 \u0631\u06CC\u0627\u0644 \n"
+        + "\u0645\u0627\u0646\u062F\u0647: 2,533,435,016 \u0631\u06CC\u0627\u0644 \n"
         + "1405/06/06\n00:08";
     private static final String BLU_WITHDRAWAL =
         "\u0628\u0644\u0648\n"
         + "\u0628\u0631\u062F\u0627\u0634\u062A \u067E\u0648\u0644\n"
         + "\u0627\u0634\u06A9\u0627\u0646 \u0639\u0632\u06CC\u0632\u060C 400,000 \u0631\u06CC\u0627\u0644 \u0627\u0632 \u062D\u0633\u0627\u0628 \u0634\u0645\u0627 \u067E\u0631\u06CC\u062F.\n"
-        + "\u0645\u0648\u062C\u0648\u062F\u06CC: 57,086,241 \u0631\u06CC\u0627\u0644\n"
+        + "\u0645\u0648\u062C\u0648\u062F\u06CC: 12,345,683 \u0631\u06CC\u0627\u0644\n"
         + "\u06F2\u06F3:\u06F2\u06F8\n"
         + "\u06F1\u06F4\u06F0\u06F5.\u06F0\u06F6.\u06F1\u06F5";
     private static final String PARSIAN_WITHDRAWAL =
         "30101234567890\n"
         + "\u0645\u0628\u0644\u063A:500,000-\n"
-        + "\u0645\u0627\u0646\u062F\u0647:1,076,220\n"
+        + "\u0645\u0627\u0646\u062F\u0647:7,533,540\n"
         + "05/26\n08:22";
     private static final String RESALAT_WITHDRAWAL_1 =
         "-200,000,000  \n"
@@ -267,7 +267,7 @@ public class HistoryScanTest {
         // account and with its account-free fingerprint.
         String freeSig = BalanceData.messageSig(sender, TEJARAT_DEPOSIT);
         List<Transaction> oldRules = new java.util.ArrayList<>();
-        oldRules.add(new Transaction("Tejarat", null, date, 115000000L, freeSig));
+        oldRules.add(new Transaction("Tejarat", null, date, 805000000L, freeSig));
         BalanceData.writeTransactions(ctx, oldRules);
 
         int added = BalanceData.scanHistory(ctx);
@@ -275,7 +275,7 @@ public class HistoryScanTest {
         assertEquals(1, added);
         List<Transaction> txs = BalanceData.readTransactions(ctx);
         assertEquals(1, txs.size());
-        assertEquals(115000000L, txs.get(0).amount);
+        assertEquals(805000000L, txs.get(0).amount);
         assertEquals("01351234567890", txs.get(0).account);
     }
 
@@ -299,7 +299,7 @@ public class HistoryScanTest {
         assertEquals(1, added);
         List<Transaction> txs = BalanceData.readTransactions(ctx);
         assertEquals(1, txs.size());
-        assertEquals(115000000L, txs.get(0).amount);
+        assertEquals(805000000L, txs.get(0).amount);
         assertEquals("01351234567890", txs.get(0).account);
     }
 
@@ -315,7 +315,7 @@ public class HistoryScanTest {
         // recorded amount and the movement's moment are the same event.
         String wrongParseSig = BalanceData.messageSig(sender, TEJARAT_DEPOSIT) + "x";
         List<Transaction> oldRules = new java.util.ArrayList<>();
-        oldRules.add(new Transaction("Tejarat", null, date, 115000000L, wrongParseSig));
+        oldRules.add(new Transaction("Tejarat", null, date, 805000000L, wrongParseSig));
         BalanceData.writeTransactions(ctx, oldRules);
 
         int added = BalanceData.scanHistory(ctx);
@@ -323,7 +323,7 @@ public class HistoryScanTest {
         assertEquals(1, added);
         List<Transaction> txs = BalanceData.readTransactions(ctx);
         assertEquals(1, txs.size());
-        assertEquals(115000000L, txs.get(0).amount);
+        assertEquals(805000000L, txs.get(0).amount);
         assertEquals("01351234567890", txs.get(0).account);
     }
 
@@ -397,10 +397,10 @@ public class HistoryScanTest {
         assertEquals(4, added);
         List<Transaction> txs = BalanceData.readTransactions(ctx);
         assertEquals(4, txs.size());
-        assertEquals(115000000L, txs.get(0).amount);   // Tejarat deposit (newest)
+        assertEquals(805000000L, txs.get(0).amount);   // Tejarat deposit (newest)
         assertEquals(-500000L, txs.get(1).amount);     // Parsian
         assertEquals(-400000L, txs.get(2).amount);     // Blu
-        assertEquals(-70014000L, txs.get(3).amount);   // Tejarat withdrawal (oldest)
+        assertEquals(-490098000L, txs.get(3).amount);   // Tejarat withdrawal (oldest)
     }
 
     @Test public void realBankFormat_resalat_bareSignedAmounts_areRecorded() throws Exception {
@@ -561,19 +561,19 @@ public class HistoryScanTest {
         String sender = "9830009417";
         seed(sender, "\u0627\u0646\u062A\u0642\u0627\u0644\u06CC:1,000,000-\n"
             + "\u062D\u0633\u0627\u0628:10001\n"
-            + "\u0645\u0627\u0646\u062F\u0647:1,058,405\n"
+            + "\u0645\u0627\u0646\u062F\u0647:7,408,835\n"
             + "0629-17:09", T);
         seed(sender, "\u0627\u0646\u062A\u0642\u0627\u0644\u06CC:1,000,000-\n"
             + "\u062D\u0633\u0627\u0628:10001\n"
-            + "\u0645\u0627\u0646\u062F\u0647:208,405\n"
+            + "\u0645\u0627\u0646\u062F\u0647:1,458,835\n"
             + "0629-17:23", T + 1000);
         seed(sender, "\u062F\u0631\u06CC\u0627\u0641\u062A \u06CC\u0627\u0631\u0627\u0646\u0647:7,700,000+\n"
             + "\u062D\u0633\u0627\u0628:10002\n"
-            + "\u0645\u0627\u0646\u062F\u0647:7,820,112\n"
+            + "\u0645\u0627\u0646\u062F\u0647:54,740,784\n"
             + "0620-23:12", T + 2000);
         seed(sender, "\u062E\u0631\u06CC\u062F\u0627\u06CC\u0646\u062A\u0631\u0646\u062A\u06CC:7,600,000-\n"
             + "\u062D\u0633\u0627\u0628:10002\n"
-            + "\u0645\u0627\u0646\u062F\u0647:220,112\n"
+            + "\u0645\u0627\u0646\u062F\u0647:1,540,784\n"
             + "0620-23:13", T + 3000);
 
         int added = BalanceData.scanHistory(ctx);
@@ -599,9 +599,9 @@ public class HistoryScanTest {
         seed("PARSIANBANK", PARSIAN_WITHDRAWAL, T + 1000);
         seed("TejaratBank", "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n"
             + "\u062D\u0633\u0627\u0628: 01351234567891 \n"
-            + "\u0648\u0627\u0631\u06CC\u0632: 115,000,000 \u0631\u06CC\u0627\u0644 \n"
+            + "\u0648\u0627\u0631\u06CC\u0632: 805,000,000 \u0631\u06CC\u0627\u0644 \n"
             + "\u0627\u0632 \u0637\u0631\u06CC\u0642: \u0633\u0627\u0645\u0627\u0646\u0647 \u067E\u0644 (\u067E\u0631\u062F\u0627\u062E\u062A \u0644\u062D\u0638\u0647 \u0627\u06CC)  \n"
-            + "\u0645\u0627\u0646\u062F\u0647: 361,919,288 \u0631\u06CC\u0627\u0644 \n"
+            + "\u0645\u0627\u0646\u062F\u0647: 2,533,435,016 \u0631\u06CC\u0627\u0644 \n"
             + "1405/06/06\n00:08", T + 2000);
 
         int added = BalanceData.scanHistory(ctx);
@@ -624,8 +624,8 @@ public class HistoryScanTest {
                 default: fail("unexpected bank " + t.bank);
             }
         }
-        assertEquals(-70014000L, tejaratA);
-        assertEquals(115000000L, tejaratB);
+        assertEquals(-490098000L, tejaratA);
+        assertEquals(805000000L, tejaratB);
         assertEquals(-500000L, parsian);
     }
 

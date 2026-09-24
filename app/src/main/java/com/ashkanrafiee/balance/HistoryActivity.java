@@ -483,6 +483,8 @@ public final class HistoryActivity extends Activity {
             badgeLp.setMarginStart(dp(4));
             bar.addView(badge, badgeLp);
             TextView title = text(BankRules.displayName(this, bankFilter), 22, fg, MEDIUM);
+            title.setMaxLines(1);
+            title.setEllipsize(android.text.TextUtils.TruncateAt.END);
             bar.addView(title, titleParams);
             String chipText = accountFilter != null
                 ? getString(R.string.account_label) + " " + digits(accountFilter)
@@ -490,18 +492,23 @@ public final class HistoryActivity extends Activity {
             TextView chip = text(chipText, 11, badgeFg, MEDIUM);
             chip.setMaxLines(1);
             chip.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            chip.setMinWidth(0);
             chip.setPadding(dp(8), dp(3), dp(8), dp(3));
             chip.setBackground(rounded(badgeBg, 9));
-            LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(-2, -2);
+            // The chip is the bar's flexible element: a very long account number makes the chip
+            // shrink and ellipsize instead of pushing the export button out past the screen edge,
+            // so the action stays visible no matter how long the account number is.
+            LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(0, -2, 1);
             chipParams.setMarginStart(dp(8));
             bar.addView(chip, chipParams);
         } else {
             TextView title = text(getString(R.string.history_title), 22, fg, MEDIUM);
             bar.addView(title, titleParams);
+            // With nothing else before the action, keep the title apart from the export button with
+            // a flex spacer so the button still sits at the far end of the bar.
+            LinearLayout.LayoutParams barSpacer = new LinearLayout.LayoutParams(0, 0, 1);
+            bar.addView(new View(this), barSpacer);
         }
-
-        LinearLayout.LayoutParams barSpacer = new LinearLayout.LayoutParams(0, 0, 1);
-        bar.addView(new View(this), barSpacer);
 
         TextView export = text(getString(R.string.history_export_label), 14, muted, MEDIUM);
         export.setGravity(Gravity.CENTER);

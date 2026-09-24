@@ -42,9 +42,9 @@ public class HistoryPullRefreshTest {
     private static final String TEJARAT_DEPOSIT =
         "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n"
         + "\u062D\u0633\u0627\u0628: 01351234567890 \n"
-        + "\u0648\u0627\u0631\u06CC\u0632: 115,000,000 \u0631\u06CC\u0627\u0644 \n"
+        + "\u0648\u0627\u0631\u06CC\u0632: 805,000,000 \u0631\u06CC\u0627\u0644 \n"
         + "\u0627\u0632 \u0637\u0631\u06CC\u0642: \u0633\u0627\u0645\u0627\u0646\u0647 \u067E\u0644 (\u067E\u0631\u062F\u0627\u062E\u062A \u0644\u062D\u0638\u0647 \u0627\u06CC)  \n"
-        + "\u0645\u0627\u0646\u062F\u0647: 361,919,288 \u0631\u06CC\u0627\u0644 \n"
+        + "\u0645\u0627\u0646\u062F\u0647: 2,533,435,016 \u0631\u06CC\u0627\u0644 \n"
         + "1405/06/06\n00:08";
 
     private Context ctx;
@@ -107,7 +107,7 @@ public class HistoryPullRefreshTest {
         waitUntil(() -> readBalances().size() == 1, 45_000);
         Bank tejarat = findBank("Tejarat", "01351234567890");
         assertNotNull("pull must scan the SMS inbox and surface the seeded bank", tejarat);
-        assertEquals(361_919_288L, tejarat.amount);
+        assertEquals(2_533_435_016L, tejarat.amount);
     }
 
     /** Pulls the finger down across the history list from the given local y, releasing well past the

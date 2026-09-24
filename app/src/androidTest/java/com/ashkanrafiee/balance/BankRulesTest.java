@@ -205,8 +205,8 @@ public class BankRulesTest {
         assertEquals("01351234567890", BankRules.extractAccount("Tejarat",
             "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A*\n"
             + "\u062D\u0633\u0627\u0628: 01351234567890\n"
-            + "\u0628\u0631\u062F\u0627\u0634\u062A: 70,014,000 \u0631\u06CC\u0627\u0644\n"
-            + "\u0645\u0627\u0646\u062F\u0647: 1,209,288 \u0631\u06CC\u0627\u0644"));
+            + "\u0628\u0631\u062F\u0627\u0634\u062A: 490,098,000 \u0631\u06CC\u0627\u0644\n"
+            + "\u0645\u0627\u0646\u062F\u0647: 8,465,016 \u0631\u06CC\u0627\u0644"));
         assertEquals("01351234567890", BankRules.extractAccount("Tejarat",
             "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A*\n"
             + "\u062D\u0633\u0627\u0628: \u06F0\u06F1\u06F3\u06F5\u06F1\u06F2\u06F3\u06F4\u06F5\u06F6\u06F7\u06F8\u06F9\u06F0\n"
@@ -220,14 +220,14 @@ public class BankRulesTest {
         assertNull(BankRules.extractAccount("Tejarat",
             "\u0645\u0648\u062C\u0648\u062F\u06CC \u062D\u0633\u0627\u0628 \u0634\u0645\u0627: 5,000,000 \u0631\u06CC\u0627\u0644"));
         assertNull(BankRules.extractAccount("Tejarat",
-            "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A*\n\u0645\u0627\u0646\u062F\u0647: 1,209,288 \u0631\u06CC\u0627\u0644"));
+            "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A*\n\u0645\u0627\u0646\u062F\u0647: 8,465,016 \u0631\u06CC\u0627\u0644"));
     }
 
     @Test public void extractAccount_parsianAccountLine_returnsAccount() {
         // Real Parsian movements open with the account on its own line, the "مبلغ:" amount line
         // right below it.
         assertEquals("30101234567890", BankRules.extractAccount("Parsian",
-            "30101234567890\n\u0645\u0628\u0644\u063A:500,000-\n\u0645\u0627\u0646\u062F\u0647:1,076,220"));
+            "30101234567890\n\u0645\u0628\u0644\u063A:500,000-\n\u0645\u0627\u0646\u062F\u0647:7,533,540"));
         assertEquals("30101234567890", BankRules.extractAccount("Parsian",
             "\u06F3\u06F0\u06F1\u06F0\u06F1\u06F2\u06F3\u06F4\u06F5\u06F6\u06F7\u06F8\u06F9\u06F0\n"
             + "\u0645\u0628\u0644\u063A:3,000,000+\n\u0645\u0627\u0646\u062F\u0647:97,450,279"));

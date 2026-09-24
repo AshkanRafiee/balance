@@ -103,7 +103,7 @@ final class BalanceData {
     private static final Pattern amountLabel = Pattern.compile(
         "(?:\u0645\u0628\u0644\u063A)[^\\d]{0,12}?([+-]?\\s*[0-9][0-9,]*\\s*[+-]?)");
     /** The amount written directly after a deposit/withdrawal label, as Tejarat does with
-     *  "برداشت: 70,014,000 ریال". Matching one of these also resolves the direction: a label that
+     *  "برداشت: 490,098,000 ریال". Matching one of these also resolves the direction: a label that
      *  feeds the amount is authoritative, so a payment-method word like "پرداخت" in the same message
      *  does not make a deposit look ambiguous. */
     private static final Pattern depositLabel = Pattern.compile(
