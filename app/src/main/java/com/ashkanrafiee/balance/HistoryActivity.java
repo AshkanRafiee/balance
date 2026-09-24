@@ -2,6 +2,8 @@ package com.ashkanrafiee.balance;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -13,6 +15,7 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
@@ -135,6 +138,14 @@ public final class HistoryActivity extends Activity {
      *  by the UI pass that rebuilds the tree. Replenished on every render, which any note edit
      *  triggers, so it never serves a stale snapshot. */
     private Map<String, String> notes;
+
+    /** An account number is sensitive: it is copied to the clipboard only for the paste window,
+     *  then cleared again unless the user copied something else in the meantime; the clear is keyed
+     *  to the exact clip we placed, so the user's own later copy is never destroyed. Runs on its
+     *  own static handler so it survives leaving the screen. */
+    private static final long CLIP_CLEAR_MS = 15_000L;
+    private static final Handler clipHandler = new Handler(Looper.getMainLooper());
+    private Runnable clearClipRunnable;
 
     // ====================================================================
     // Shared drawing helpers
@@ -493,11 +504,17 @@ public final class HistoryActivity extends Activity {
             chip.setMaxLines(1);
             chip.setEllipsize(android.text.TextUtils.TruncateAt.END);
             chip.setMinWidth(0);
-            chip.setPadding(dp(8), dp(3), dp(8), dp(3));
-            chip.setBackground(rounded(badgeBg, 9));
+            chip.setPadding(dp(9), dp(5), dp(9), dp(5));
             // The chip is the bar's flexible element: a very long account number makes the chip
             // shrink and ellipsize instead of pushing the export button out past the screen edge,
             // so the action stays visible no matter how long the account number is.
+            if (accountFilter != null) {
+                // An account chip carries the account number itself, so tapping it copies that
+                // number — the one value here its user cannot easily type by hand.
+                makeAccountChipCopyable(chip, digits(accountFilter));
+            } else {
+                chip.setBackground(rounded(badgeBg, 9));
+            }
             LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(0, -2, 1);
             chipParams.setMarginStart(dp(8));
             bar.addView(chip, chipParams);
@@ -520,6 +537,53 @@ public final class HistoryActivity extends Activity {
         exportParams.setMarginStart(dp(6));
         bar.addView(export, exportParams);
         return bar;
+    }
+
+    // ====================================================================
+    // Account-copy (account chip in the resolved-account header)
+    // ====================================================================
+
+    /** Turns the account chip into a copy target: tappable with a ripple, a small copy glyph, an
+     *  accessibility description and a toast on use, so a plain tap lands the account number on the
+     *  clipboard instead of leaving it to the user to type or re-read. */
+    private void makeAccountChipCopyable(TextView chip, String account) {
+        chip.setClickable(true);
+        chip.setFocusable(true);
+        chip.setContentDescription(getString(R.string.account_copy_cd));
+        chip.setBackground(ripple(rounded(badgeBg, 9)));
+        Drawable copy = getDrawable(R.drawable.ic_copy);
+        if (copy != null) copy.mutate().setTint(badgeFg);
+        chip.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, copy, null);
+        chip.setOnClickListener(v -> copyAccount(account));
+    }
+
+    /** Copies the bare account number and schedules its guarded clear from the system clipboard. */
+    private void copyAccount(String account) {
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        clipboard.setPrimaryClip(ClipData.newPlainText(account, account));
+        // Do not leave an account number readably in the system clipboard for any longer than the
+        // paste window; clear it again once that has passed, unless the user copied something else
+        // in the meantime (then that newer clip is left alone).
+        if (clearClipRunnable != null) clipHandler.removeCallbacks(clearClipRunnable);
+        clearClipRunnable = () -> {
+            clearClipRunnable = null;
+            try {
+                CharSequence current = clipboard.hasPrimaryClip()
+                    && clipboard.getPrimaryClip() != null
+                    && clipboard.getPrimaryClip().getItemCount() > 0
+                    ? clipboard.getPrimaryClip().getItemAt(0).getText() : null;
+                if (account.equals(String.valueOf(current))) {
+                    if (android.os.Build.VERSION.SDK_INT >= 28) clipboard.clearPrimaryClip();
+                    else clipboard.setPrimaryClip(ClipData.newPlainText("", ""));
+                }
+            } catch (Exception e) {
+                // On Android 10+ a background process may be denied reading a clip another app has
+                // taken; fail as cleared and keep the activity alive.
+                android.util.Log.w("BalanceHistory", "clipboard read failed", e);
+            }
+        };
+        clipHandler.postDelayed(clearClipRunnable, CLIP_CLEAR_MS);
+        Toast.makeText(this, getString(R.string.toast_copied_account), Toast.LENGTH_SHORT).show();
     }
 
     // ====================================================================
