@@ -86,6 +86,48 @@ public class TransactionNoteTest {
         assertEquals(BalanceData.txIdentityKey(legacy), BalanceData.noteKey(legacy));
     }
 
+    @Test public void note_followsLegacyReplacementThroughFullRebuild() {
+        // A note written on a pre-content-digest entry lives under its legacy identity triple; when a
+        // full re-scan re-parses the same SMS into a content-bearing entry, migrateNoteKeys must move
+        // the note to the new key instead of letting it silently vanish from the rows and the export.
+        Transaction legacy = new Transaction("Tejarat", null, T, 500_000L, null, null);
+        Transaction fresh = new Transaction("Tejarat", null, T, 500_000L, "sig-1", "content-A");
+        assertFalse(BalanceData.noteKey(legacy).equals(BalanceData.noteKey(fresh)));
+
+        BalanceData.setNote(ctx, legacy, "carried over");
+        Map<Transaction, Transaction> replaced = new java.util.HashMap<>();
+        replaced.put(legacy, fresh);
+        BalanceData.migrateNoteKeys(ctx, replaced);
+
+        assertNull(BalanceData.getNote(ctx, legacy));
+        assertEquals("carried over", BalanceData.getNote(ctx, fresh));
+    }
+
+    @Test public void note_migrationNeverOverwritesTheLaterNote() {
+        Transaction legacy = new Transaction("Tejarat", null, T, 500_000L, null, null);
+        Transaction fresh = new Transaction("Tejarat", null, T, 500_000L, "sig-1", "content-A");
+        BalanceData.setNote(ctx, legacy, "old on the legacy entry");
+        BalanceData.setNote(ctx, fresh, "new on the fresh entry");
+        Map<Transaction, Transaction> replaced = new java.util.HashMap<>();
+        replaced.put(legacy, fresh);
+        BalanceData.migrateNoteKeys(ctx, replaced);
+
+        assertEquals("new on the fresh entry", BalanceData.getNote(ctx, fresh));
+    }
+
+    @Test public void note_migrationIsANoopWhenTheKeysAlreadyAgree() {
+        Transaction a = tx("Tejarat", null, "sig-A", "content-A");
+        Transaction b = tx("Tejarat", "9102", "sig-B", "content-A");
+        assertEquals(BalanceData.noteKey(a), BalanceData.noteKey(b));
+        Map<Transaction, Transaction> replaced = new java.util.HashMap<>();
+        replaced.put(a, b);
+        BalanceData.setNote(ctx, a, "stable");
+        BalanceData.migrateNoteKeys(ctx, replaced);
+
+        assertEquals("stable", BalanceData.getNote(ctx, b));
+        assertEquals("stable", BalanceData.getNote(ctx, a));
+    }
+
     @Test public void note_blankOrNull_removes() {
         Transaction t = tx("Tejarat", null, "sig-A", "content-A");
         BalanceData.setNote(ctx, t, "keep");

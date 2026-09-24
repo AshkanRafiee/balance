@@ -441,6 +441,27 @@ final class BalanceData {
         return s.substring(0, end);
     }
 
+    /** Moves notes that a full-history rebuild would orphan: when a stored entry {@code from} is
+     *  replaced by a freshly parsed {@code to}, any note written under the former's key follows the
+     *  movement to the latter's. Keyed by the legacy identity triple before content digests existed,
+     *  so the handover happens exactly when a newer rules version re-parses the same SMS into a
+     *  content-bearing entry — the one case where {@link #noteKey} changes between the same physical
+     *  message. A destination that already carries a note keeps its own text. */
+    static void migrateNoteKeys(Context context, Map<Transaction, Transaction> replaced) {
+        Map<String, String> notes = readNotes(context);
+        boolean changed = false;
+        for (Map.Entry<Transaction, Transaction> e : replaced.entrySet()) {
+            String from = noteKey(e.getKey());
+            String to = noteKey(e.getValue());
+            if (from.equals(to)) continue;
+            String text = notes.remove(from);
+            if (text == null || notes.containsKey(to)) continue;
+            notes.put(to, text);
+            changed = true;
+        }
+        if (changed) writeNotes(context, notes);
+    }
+
     static void write(Context context, LinkedHashMap<String, Bank> map) {
         try {
             String existing = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
@@ -1018,8 +1039,13 @@ final class BalanceData {
                 if (full) {
                     Set<String> freshSigs = new HashSet<>();
                     Map<String, Integer> freshAtKey = new HashMap<>();
+                    Map<String, Transaction> freshBySig = new HashMap<>();
+                    Map<Transaction, Transaction> replaced = new HashMap<>();
                     for (Transaction t : fresh) {
-                        if (t.sig != null) freshSigs.add(t.sig);
+                        if (t.sig != null) {
+                            freshSigs.add(t.sig);
+                            freshBySig.putIfAbsent(t.sig, t);
+                        }
                         String key = transactionCompositeKey(t) + "|" + t.date;
                         freshAtKey.put(key, freshAtKey.getOrDefault(key, 0) + 1);
                     }
@@ -1032,6 +1058,8 @@ final class BalanceData {
                     for (Transaction t : stored) {
                         if (t.sig != null && freshSigs.contains(t.sig)) {
                             identityClaimed.add(t);
+                            Transaction f = freshBySig.get(t.sig);
+                            if (f != null) replaced.put(t, f);
                             String key = transactionCompositeKey(t) + "|" + t.date;
                             identityClaimsPerKey.put(key,
                                 identityClaimsPerKey.getOrDefault(key, 0) + 1);
@@ -1052,6 +1080,7 @@ final class BalanceData {
                     // then the account-free fingerprint, then the amount, which is all the account-less
                     // era could distinguish (this also covers stored legacy sig-less entries).
                     Set<Transaction> accountTwins = new HashSet<>();
+                    Map<Transaction, Transaction> twinOf = new HashMap<>();
                     if (!freeByFresh.isEmpty()) {
                         Map<String, Transaction> byContent = new HashMap<>();
                         Map<String, Transaction> byDigest = new HashMap<>();
@@ -1074,8 +1103,23 @@ final class BalanceData {
                                 f = byContent.remove(s.bank + "|" + s.date + "|" + s.sig);
                             if (f == null)
                                 f = byAmount.remove(s.bank + "|" + s.date + "|" + s.amount);
-                            if (f != null) accountTwins.add(s);
+                            if (f != null) {
+                                accountTwins.add(s);
+                                twinOf.put(s, f);
+                            }
                         }
+                    }
+                    // Fresh parses already claimed by identity or a twin are excluded from the
+                    // budget pool, so the same replacement is never handed to two entries; a budget
+                    // claim takes the same-moment sibling whose amount matches first — the strongest
+                    // thing a legacy sig-less entry could distinguish.
+                    Set<Transaction> pairedFresh = new HashSet<>(replaced.values());
+                    pairedFresh.addAll(twinOf.values());
+                    Map<String, java.util.ArrayDeque<Transaction>> budgetPool = new HashMap<>();
+                    for (Transaction f : fresh) {
+                        if (pairedFresh.contains(f)) continue;
+                        budgetPool.computeIfAbsent(transactionCompositeKey(f) + "|" + f.date,
+                            k -> new java.util.ArrayDeque<>()).addLast(f);
                     }
                     for (Transaction t : stored) {
                         if (identityClaimed.contains(t) || accountTwins.contains(t)) continue;
@@ -1083,12 +1127,25 @@ final class BalanceData {
                         Integer left = budget.get(key);
                         if (left != null && left > 0) {
                             budget.put(key, left - 1);
+                            java.util.ArrayDeque<Transaction> pool = budgetPool.get(key);
+                            if (pool != null && !pool.isEmpty()) {
+                                Transaction claim = null;
+                                for (Transaction cand : pool)
+                                    if (cand.amount == t.amount) { claim = cand; break; }
+                                if (claim == null) claim = pool.peekFirst();
+                                pool.remove(claim);
+                                replaced.put(t, claim);
+                            }
                             continue;
                         }
                         rebuilt.add(t);
                     }
                     reorderStoredByChains(rebuilt, chainPosByBank);
                     stored = rebuilt;
+                    if (!replaced.isEmpty() || !twinOf.isEmpty()) {
+                        replaced.putAll(twinOf);
+                        migrateNoteKeys(context, replaced);
+                    }
                 } else {
                     for (int i = fresh.size() - 1; i >= 0; i--) {
                         if (placed.contains(fresh.get(i))) continue;
