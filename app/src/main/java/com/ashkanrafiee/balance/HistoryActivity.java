@@ -7,7 +7,11 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.database.ContentObserver;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
@@ -18,7 +22,9 @@ import android.os.Looper;
 import android.provider.Telephony;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -368,7 +374,7 @@ public final class HistoryActivity extends Activity {
         root.addView(filterBar, margin(0, 0, 0, 12));
         body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
-        scrollView = new ScrollView(this);
+        scrollView = new PullRefreshScrollView(this);
         scrollView.addView(body, new ScrollView.LayoutParams(-1, -1));
         root.addView(scrollView, new LinearLayout.LayoutParams(-1, 0, 1));
 
@@ -958,7 +964,7 @@ public final class HistoryActivity extends Activity {
     private List<YearGroup> allYears;
 
     /** Scroll container, kept so the list position survives rotation. */
-    private ScrollView scrollView;
+    private PullRefreshScrollView scrollView;
 
     /** Scroll offset pending restore until the rebuilt list is laid out. */
     private int pendingScroll;
@@ -2087,5 +2093,256 @@ public final class HistoryActivity extends Activity {
         String sign = (n < 0 ? "\u2212" : "+");
         if (!LocaleHelper.isPersian(this)) return sign + mag;
         return "\u2066" + sign + mag + "\u2069";
+    }
+
+    // ====================================================================
+    // Pull-to-refresh
+    // ====================================================================
+
+    /** The scrollable history list, extended with the same pull-to-refresh gesture the dashboard
+     *  has: with the list at its very top, pulling the finger down reveals a circular arrow chip
+     *  that follows the pull; releasing past a threshold spins the arrow while the SMS inbox and
+     *  history are re-scanned, then the arrow glides back up once the scans settle. The chip is
+     *  drawn after the children, pinned to the top of the viewport so the content it floats over
+     *  stays readable and can never carry it away. Pulling here refreshes the whole app —
+     *  balances, widget and history — exactly like a pull on the main screen. */
+    private final class PullRefreshScrollView extends ScrollView {
+        /** dp of downward drag past which the release arms a refresh. Matches the dashboard. */
+        static final float PULL_TRIGGER = 55f;
+        /** dp the chip may descend while following the finger. Matches the dashboard. */
+        static final float PULL_CAP = 44f;
+        final Paint p = new Paint(3);
+        final float d = getResources().getDisplayMetrics().density;
+        final Handler handler = new Handler(Looper.getMainLooper());
+        float downY;
+        float pullShift, pullFrac, pullFade, spinAngle;
+        boolean pulling, refreshing, refreshAgain;
+        boolean indicatorVisible, spinnerRunning, retracting;
+        long spinDeadline;
+
+        PullRefreshScrollView(Context c) {
+            super(c);
+        }
+
+        /** Spins the arrow while the refresh runs, then glides it back up. A short minimum beat (a
+         *  fraction of a turn) is kept so an almost-instant scan still reads as a completed spin,
+         *  not a flicker; {@link MainActivity.BalanceView} paces its spinner the same way. */
+        final Runnable refreshTicker = new Runnable() {
+            @Override public void run() {
+                if (isFinishing() || isDestroyed()) return;
+                if (spinnerRunning) {
+                    spinAngle += 6f;                       // about one turn per second
+                    pullShift = Math.min(PULL_CAP, pullShift + 5f);
+                    if (System.currentTimeMillis() >= spinDeadline && !refreshing) {
+                        spinnerRunning = false;
+                        retracting = true;
+                    }
+                    invalidate();
+                    handler.postDelayed(this, 16);
+                } else if (retracting || pullFade > 0.02f) {
+                    pullShift = Math.max(0, pullShift - 14f);
+                    pullFrac = Math.max(0, pullFrac - 0.17f);
+                    pullFade = Math.max(0, pullFade - 0.17f);
+                    if (pullFade <= 0.02f) {
+                        pullFade = 0;
+                        indicatorVisible = false;
+                        retracting = false;
+                    }
+                    invalidate();
+                    if (indicatorVisible) handler.postDelayed(this, 16);
+                }
+            }
+        };
+
+        @Override
+        public boolean onInterceptTouchEvent(MotionEvent e) {
+            if (e.getAction() == MotionEvent.ACTION_DOWN) {
+                downY = e.getY();
+                pulling = false;
+                hideIndicator();
+            } else if (e.getAction() == MotionEvent.ACTION_MOVE
+                    && getScrollY() == 0
+                    && e.getY() - downY > ViewConfiguration.get(getContext()).getScaledTouchSlop()) {
+                // The list is at its top and the drag heads down, where the ScrollView can never
+                // scroll to: take the gesture over so the pull indicator follows the finger even
+                // when the touch started on a tap-able row.
+                pulling = true;
+            }
+            if (pulling) return true;
+            return super.onInterceptTouchEvent(e);
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent e) {
+            int action = e.getAction();
+            if (action == MotionEvent.ACTION_DOWN) {
+                downY = e.getY();
+                pulling = false;
+                hideIndicator();
+                return super.onTouchEvent(e);
+            }
+            if (pulling) {
+                if (action == MotionEvent.ACTION_MOVE) {
+                    startPull((e.getY() - downY) / d);
+                } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    pulling = false;
+                    if (action == MotionEvent.ACTION_UP && (e.getY() - downY) / d > PULL_TRIGGER) {
+                        beginSpin();
+                        refreshAll();
+                    } else {
+                        retractIndicator();
+                    }
+                }
+                return true;
+            }
+            if (action == MotionEvent.ACTION_MOVE && getScrollY() == 0
+                    && e.getY() - downY > ViewConfiguration.get(getContext()).getScaledTouchSlop()) {
+                // With no child under the finger (an empty list, or a drag that started on the bare
+                // backing) the ScrollView receives the moves directly and onInterceptTouchEvent is
+                // never consulted, so the pull is armed here as well.
+                pulling = true;
+                startPull((e.getY() - downY) / d);
+                return true;
+            }
+            return super.onTouchEvent(e);
+        }
+
+        /** Starts (or resumes) the finger-following phase of the indicator for a downward pull. */
+        void startPull(float delta) {
+            indicatorVisible = true;
+            spinnerRunning = false;
+            retracting = false;
+            pullShift = Math.max(0, Math.min(PULL_CAP, delta));
+            pullFrac = Math.max(0, Math.min(1, delta / PULL_TRIGGER));
+            pullFade = Math.min(1, pullFrac * 1.7f);
+            spinAngle = pullFrac * 180f;
+            invalidate();
+        }
+
+        /** Release past the trigger: the arrow goes fully down and spins while the scans run. */
+        void beginSpin() {
+            spinnerRunning = true;
+            retracting = false;
+            indicatorVisible = true;
+            pullFade = 1;
+            pullShift = PULL_CAP;
+            pullFrac = 1;
+            spinDeadline = System.currentTimeMillis() + 400;
+            handler.removeCallbacks(refreshTicker);
+            handler.postDelayed(refreshTicker, 16);
+            invalidate();
+        }
+
+        /** Lift short of the trigger (or a cancelled gesture): glide the arrow back up. */
+        void retractIndicator() {
+            if (!indicatorVisible) {
+                pullShift = pullFrac = pullFade = 0;
+                return;
+            }
+            spinnerRunning = false;
+            retracting = true;
+            handler.removeCallbacks(refreshTicker);
+            handler.postDelayed(refreshTicker, 16);
+        }
+
+        /** A new finger put down: drop whatever indicator state is current so the next pull restarts. */
+        void hideIndicator() {
+            handler.removeCallbacks(refreshTicker);
+            indicatorVisible = false;
+            spinnerRunning = false;
+            retracting = false;
+            pullShift = pullFrac = pullFade = 0;
+            invalidate();
+        }
+
+        /** Re-scans the SMS inbox (balances and widget) and then the history in the background,
+         *  mirroring the dashboard's refresh so a pull here updates the whole app. A missing SMS
+         *  permission skips straight to a render of the saved store; an in-flight refresh folds a
+         *  second pull into {@link #refreshAgain} instead of stacking another scan. */
+        void refreshAll() {
+            if (checkSelfPermission(Manifest.permission.READ_SMS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                render();
+                return;
+            }
+            if (refreshing) {
+                refreshAgain = true;
+                return;
+            }
+            refreshing = true;
+            new Thread(() -> {
+                try {
+                    final Context app = getContext().getApplicationContext();
+                    BalanceData.scanSms(app, BalanceData.read(app));
+                    BalanceWidgetProvider.push(app);
+                    BalanceData.scanHistory(HistoryActivity.this);
+                } catch (Exception e) {
+                    android.util.Log.w("BalanceHistory", "pull-to-refresh scan failed", e);
+                }
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    refreshing = false;
+                    if (refreshAgain) {
+                        refreshAgain = false;
+                        refreshAll();
+                    }
+                });
+            }).start();
+        }
+
+        @Override
+        protected void dispatchDraw(Canvas c) {
+            super.dispatchDraw(c);
+            if (!indicatorVisible || pullFade <= 0.02f) return;
+            c.save();
+            c.scale(d, d);
+            drawPullIndicator(c);
+            c.restore();
+        }
+
+        /** The pull-to-refresh arrow: a small chip with a circular arrow that follows the finger down
+         *  while rotated by how far the pull has gone, then spins on release. Drawn last, on top,
+         *  pinned to the top of the viewport so it never scrolls with the content.
+         *  {@link MainActivity.BalanceView#drawPullIndicator} draws the same chip. */
+        void drawPullIndicator(Canvas c) {
+            float cx = getWidth() / d / 2f, cy = dp(26) + pullShift;
+            int alpha = (int) (255 * Math.min(1, pullFade));
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(bg);
+            p.setAlpha(alpha);
+            c.drawCircle(cx, cy, 17, p);
+            p.setColor(accent);
+            c.save();
+            c.translate(cx, cy);
+            c.rotate(spinAngle);
+            float g = 8.5f;
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(2.2f);
+            p.setStrokeCap(Paint.Cap.ROUND);
+            Path ring = new Path();
+            ring.addArc(new RectF(-g, -g, g, g), -90, 300);
+            c.drawPath(ring, p);
+            // Arrowhead at the open end of the ring: a filled triangle whose base straddles the ring
+            // end and whose apex points along the direction of travel, big enough to cover the round
+            // stroke cap so the head reads as a crisp arrow instead of a lumpy dot.
+            float endAng = 210f;                             // the ring's open end
+            float ta = (float) Math.toRadians(endAng);
+            float dir = (float) Math.toRadians(endAng + 90f);
+            float perp = (float) Math.toRadians(endAng + 180f);
+            float bx = g * (float) Math.cos(ta), by = g * (float) Math.sin(ta);
+            float px = bx * 0.86f, py = by * 0.86f;
+            float len = 5.2f, halfW = 3.4f;
+            Path head = new Path();
+            head.moveTo((float) (px + len * Math.cos(dir)), (float) (py + len * Math.sin(dir)));
+            head.lineTo((float) (bx + halfW * Math.cos(perp)), (float) (by + halfW * Math.sin(perp)));
+            head.lineTo((float) (bx - halfW * Math.cos(perp)), (float) (by - halfW * Math.sin(perp)));
+            head.close();
+            p.setStyle(Paint.Style.FILL);
+            p.setStrokeWidth(0);
+            c.drawPath(head, p);
+            c.restore();
+            p.setAlpha(255);
+            p.setStrokeCap(Paint.Cap.BUTT);
+        }
     }
 }
