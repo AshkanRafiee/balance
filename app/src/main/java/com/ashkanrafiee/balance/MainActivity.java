@@ -494,17 +494,18 @@ public class MainActivity extends Activity {
     }
 
     void hardRefreshDialog() {
-        // Custom content so the one destructive option gets the layout and emphasis it deserves: the
-        // notes-deletion checkbox is indented under the description and tinted with the theme's
-        // warning colour, so users who reset while it is checked understand they are losing data,
-        // and a little breathing room sits between the title and the text. The description uses the
-        // theme's subtitle colour in light and dark, matching the app's other dialog text.
+        // One custom body: the notes-deletion checkbox is the destructive option. The description and
+        // the checkbox share the same indented column, and both lines get the identical symmetric
+        // padding on the right and left, so the whole block sits centred under its title — exactly
+        // like the checkbox, the text runs in one shared column indented from both sides. The
+        // checkbox keeps its warning amber tint and its notes label with the description's subtitle
+        // colour above it.
         TextView message = new TextView(this);
         message.setTextSize(14);
         message.setTextColor(resColor(R.color.subtitle));
         message.setText(getString(R.string.dialog_hard_refresh_message));
         LinearLayout.LayoutParams messageLp = new LinearLayout.LayoutParams(-1, -2);
-        messageLp.bottomMargin = dp(14);
+        messageLp.bottomMargin = dp(12);
         message.setLayoutParams(messageLp);
 
         final android.widget.CheckBox deleteNotes = new android.widget.CheckBox(this);
@@ -512,15 +513,14 @@ public class MainActivity extends Activity {
         deleteNotes.setTextColor(resColor(R.color.warn));
         LinearLayout notesRow = new LinearLayout(this);
         notesRow.setOrientation(LinearLayout.HORIZONTAL);
-        notesRow.setPadding(dp(18), 0, 0, 0);
         notesRow.addView(deleteNotes);
 
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
-        // A small gap below the title (kept distinct from the content strip's own inset), plus an
-        // equal margin on BOTH sides, so the words and their warning checkbox read as a block that
-        // sits centred under the title instead of hugging the edges of the content panel.
-        body.setPadding(dp(8), dp(8), dp(8), 0);
+        // A tiny gap below the title plus an equal margin on BOTH sides, so the description and its
+        // checkbox run as one block in a single indented column, centred under the title instead of
+        // running flush against the dialog's right and left edges.
+        body.setPadding(dp(18), dp(8), dp(18), 0);
         body.addView(message);
         body.addView(notesRow);
 
