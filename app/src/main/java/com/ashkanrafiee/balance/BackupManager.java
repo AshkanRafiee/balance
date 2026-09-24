@@ -160,7 +160,7 @@ final class BackupManager {
         for (int i = 0; i < MAGIC.length; i++)
             if (file[i] != MAGIC[i]) throw new BackupException(R.string.backup_error_not_backup);
         int version = file[MAGIC.length] & 0xFF;
-        if (version > FORMAT_VERSION) throw new BackupException(R.string.backup_error_unsupported);
+        if (version < 1 || version > FORMAT_VERSION) throw new BackupException(R.string.backup_error_unsupported);
         int headerLen = fromIntBytes(file, MAGIC.length + 1);
         if (headerLen <= 0 || MAGIC.length + 1 + 4 + headerLen > file.length)
             throw new BackupException(R.string.backup_error_not_backup);
