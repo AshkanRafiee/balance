@@ -1153,7 +1153,7 @@ public class MainActivity extends Activity {
          *  works in normal view hierarchies. */
         final float fs = getResources().getConfiguration().fontScale;
         Drawable lockIcon;
-        boolean hidden, refreshing, refreshAgain;
+        boolean hidden, refreshing, refreshAgain, pendingHard, pendingNotes;
         boolean autoHide;
         int insetsTop, insetsBottom;
         int sortMode;
@@ -1432,10 +1432,15 @@ public class MainActivity extends Activity {
         void refresh(boolean hard, boolean alsoNotes, boolean silent) {
             if (refreshing) {
                 // A scan is already running: remember the request so the moment it completes we
-                // scan again and pick up whatever arrived while the first pass was in flight.
+                // scan again and pick up whatever arrived while the first pass was in flight. A
+                // queued hard reset — and the notes deletion it offers — must not fold into a
+                // soft pass, so its own flags are kept and replayed together.
                 refreshAgain = true;
+                pendingHard |= hard;
+                pendingNotes |= alsoNotes;
                 return;
             }
+            pendingHard = pendingNotes = false;
             if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
                 status = getString(R.string.status_permission_needed);
                 invalidate();
@@ -1466,7 +1471,7 @@ public class MainActivity extends Activity {
                         invalidate();
                         BalanceWidgetProvider.push(app);
                         if (hard) toast(R.string.toast_reset_done);
-                        if (refreshAgain) { refreshAgain = false; refresh(false, false, silent); }
+                        if (refreshAgain) { refreshAgain = false; refresh(pendingHard, pendingNotes, silent); }
                     });
                 } catch (Exception e) {
                     post(() -> {
@@ -1481,7 +1486,7 @@ public class MainActivity extends Activity {
                         invalidate();
                         BalanceWidgetProvider.push(app);
                         if (hard) toast(R.string.toast_reset_failed);
-                        if (refreshAgain) { refreshAgain = false; refresh(false, false, silent); }
+                        if (refreshAgain) { refreshAgain = false; refresh(pendingHard, pendingNotes, silent); }
                     });
                 }
                 BalanceData.scanHistory(app);
