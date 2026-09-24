@@ -273,6 +273,8 @@
     <string name="action_exclude">Exclude from total</string>
     <string name="action_include">Include in total</string>
     <string name="action_copy_balance">Copy balance</string>
+    <string name="account_copy_cd">Copy the account number</string>
+    <string name="toast_copied_account">Account number copied</string>
     <string name="excluded_label">Excluded from total</string>
     <string name="account_label">Account</string>
     <string name="toast_excluded">Excluded from total</string>
