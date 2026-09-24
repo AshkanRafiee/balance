@@ -370,10 +370,10 @@ public final class SenderShareActivity extends Activity {
     /** Prefills a mail to the maintainer with the chosen messages. The system chooser is the user's
      *  final approval: nothing is sent until they pick an app and press send there. */
     private void sendMail(String report) {
+        final String subject = ScanDiagnostics.senderSubject(sender);
         try {
-            Intent mail = new Intent(Intent.ACTION_SENDTO);
-            mail.setData(Uri.parse("mailto:" + MAILTO));
-            mail.putExtra(Intent.EXTRA_SUBJECT, ScanDiagnostics.senderSubject(sender));
+            Intent mail = new Intent(Intent.ACTION_SENDTO, Uri.parse(mailToUri(subject, report)));
+            mail.putExtra(Intent.EXTRA_SUBJECT, subject);
             mail.putExtra(Intent.EXTRA_TEXT, report);
             startActivity(Intent.createChooser(mail, getString(R.string.sender_share_send_via)));
         } catch (Exception e) {
@@ -381,13 +381,22 @@ public final class SenderShareActivity extends Activity {
             try {
                 Intent share = new Intent(Intent.ACTION_SEND);
                 share.setType("text/plain");
-                share.putExtra(Intent.EXTRA_SUBJECT, ScanDiagnostics.senderSubject(sender));
+                share.putExtra(Intent.EXTRA_SUBJECT, subject);
                 share.putExtra(Intent.EXTRA_TEXT, report);
                 startActivity(Intent.createChooser(share, getString(R.string.sender_share_send_via)));
             } catch (Exception e2) {
                 Log.w(TAG, "no share target at all");
             }
         }
+    }
+
+    /** mailto: URI that also carries the subject and body as query parameters. The recipient always
+     *  reaches the compose draft because it lives in the URI's path, but Android mail clients
+     *  disagree on where to read the rest: AOSP-style apps honour the Intent extras, while Gmail and
+     *  ProtonMail rebuild the compose screen from the URI itself and ignore them. Carrying the
+     *  fields in both places — the URI here, the extras in {@link #sendMail} — fills every client. */
+    static String mailToUri(String subject, String report) {
+        return "mailto:" + MAILTO + "?subject=" + Uri.encode(subject) + "&body=" + Uri.encode(report);
     }
 
     TextView section(String s) {

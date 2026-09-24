@@ -318,6 +318,26 @@ public class ScanDiagnosticsTest {
         assertTrue(ScanDiagnostics.senderSubject("+98x").contains("+98x"));
     }
 
+    @Test public void mailToUri_carriesRecipientSubjectAndBodyForAnyClient() {
+        // Some mail apps (Gmail, ProtonMail) only read a mailto URI, ignoring the Intent extras the
+        // activity also sets; the URI must hold the recipient, subject and body, un-mangled.
+        String uri = SenderShareActivity.mailToUri("Balance: unrecognized bank SMS sender +98x",
+            "snippet\nwith a second line & more");
+        String prefix = "mailto:" + SenderShareActivity.MAILTO + "?subject=";
+        assertTrue(uri, uri.startsWith(prefix));
+        assertTrue(uri, uri.contains("&body="));
+        int bodyAt = uri.indexOf("&body=");
+        assertEquals("Balance: unrecognized bank SMS sender +98x",
+            android.net.Uri.decode(uri.substring(prefix.length(), bodyAt)));
+        assertEquals("snippet\nwith a second line & more",
+            android.net.Uri.decode(uri.substring(bodyAt + "&body=".length())));
+        // The URI the mail app actually receives through the intent must still carry the query
+        // (the subject/body), not just the recipient.
+        android.content.Intent mail = new android.content.Intent(
+            android.content.Intent.ACTION_SENDTO, android.net.Uri.parse(uri));
+        assertEquals(uri, mail.getData().toString());;
+    }
+
     @Test public void senderCheck_requiresAtLeastOneIssueAndOneMessage() {
         assertEquals(R.string.sender_share_pick_issue, SenderShareActivity.missingSelection(false, 2));
         assertEquals(R.string.sender_share_pick_issue, SenderShareActivity.missingSelection(false, 0));
