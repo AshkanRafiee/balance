@@ -494,16 +494,36 @@ public class MainActivity extends Activity {
     }
 
     void hardRefreshDialog() {
-        // Standard message + custom view: setMessage renders the description with the platform's own
-        // alert-dialog text appearance (light and dark themes, system font scaling, native spacing
-        // below the title), and the notes-deletion checkbox sits on the same content margin right
-        // under it. Both start at the same column as the app's other dialogs.
+        // Custom content so the one destructive option gets the layout and emphasis it deserves: the
+        // notes-deletion checkbox is indented under the description and tinted with the theme's
+        // warning colour, so users who reset while it is checked understand they are losing data,
+        // and a little breathing room sits between the title and the text. The description uses the
+        // theme's subtitle colour in light and dark, matching the app's other dialog text.
+        TextView message = new TextView(this);
+        message.setTextSize(14);
+        message.setTextColor(resColor(R.color.subtitle));
+        message.setText(getString(R.string.dialog_hard_refresh_message));
+        LinearLayout.LayoutParams messageLp = new LinearLayout.LayoutParams(-1, -2);
+        messageLp.bottomMargin = dp(14);
+        message.setLayoutParams(messageLp);
+
         final android.widget.CheckBox deleteNotes = new android.widget.CheckBox(this);
         deleteNotes.setText(getString(R.string.dialog_hard_refresh_notes_label));
+        deleteNotes.setTextColor(resColor(R.color.warn));
+        LinearLayout notesRow = new LinearLayout(this);
+        notesRow.setOrientation(LinearLayout.HORIZONTAL);
+        notesRow.setPadding(dp(18), 0, 0, 0);
+        notesRow.addView(deleteNotes);
+
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(0, dp(8), 0, 0);
+        body.addView(message);
+        body.addView(notesRow);
+
         showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.dialog_hard_refresh_title))
-            .setMessage(getString(R.string.dialog_hard_refresh_message))
-            .setView(deleteNotes)
+            .setView(body)
             .setNegativeButton(getString(R.string.dialog_hard_refresh_cancel), null)
             .setPositiveButton(getString(R.string.dialog_hard_refresh_confirm),
                 (d, w) -> view.refresh(true, deleteNotes.isChecked()))
