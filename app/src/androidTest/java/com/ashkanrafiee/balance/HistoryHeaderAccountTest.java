@@ -1,9 +1,11 @@
 package com.ashkanrafiee.balance;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import android.app.Activity;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.view.View;
@@ -80,6 +82,37 @@ public class HistoryHeaderAccountTest {
         TextView c = chip;
         assertTrue("a short account number must not be ellipsized",
             c.getLayout() == null || c.getLayout().getEllipsisCount(0) == 0);
+    }
+
+    @Test public void tappingTheAccountChip_copiesTheAccountNumber() throws Exception {
+        launch(BANK, LONG_ACCOUNT);
+        TextView chip = accountChip(LONG_ACCOUNT);
+        assertNotNull(chip);
+        AtomicReference<Boolean> handled = new AtomicReference<>(Boolean.FALSE);
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> handled.set(chip.performClick()));
+        assertTrue("the account chip must accept a tap", handled.get());
+        assertEquals("tapping the chip copies the bare account number", LONG_ACCOUNT, clipboardText());
+    }
+
+    @Test public void copiedAccountNumber_isClearedAfterThePasteWindow() throws Exception {
+        launch(BANK, LONG_ACCOUNT);
+        TextView chip = accountChip(LONG_ACCOUNT);
+        assertNotNull(chip);
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(chip::performClick);
+        assertEquals("copy before waiting out the paste window", LONG_ACCOUNT, clipboardText());
+        // The framework clears our clip but may leave a platform-owned empty rec: the guarantee to
+        // assert is that the account number itself no longer sits on the clipboard (whatever else
+        // the OS may post in its place).
+        assertTrue("the account number must not linger on the system clipboard past the paste window",
+            waitUntil(() -> !LONG_ACCOUNT.equals(clipboardText()), 25_000));
+    }
+
+    private String clipboardText() {
+        ClipboardManager cm = (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
+        if (!cm.hasPrimaryClip() || cm.getPrimaryClip() == null
+                || cm.getPrimaryClip().getItemCount() == 0) return null;
+        CharSequence t = cm.getPrimaryClip().getItemAt(0).getText();
+        return t == null ? null : t.toString();
     }
 
     private void launch(String bank, String account) throws Exception {
