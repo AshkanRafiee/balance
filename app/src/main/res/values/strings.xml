@@ -45,6 +45,9 @@
     <string name="dialog_hard_refresh_confirm">Reset and rescan</string>
     <string name="dialog_hard_refresh_cancel">Cancel</string>
     <string name="dialog_hard_refresh_notes_label">Also delete the notes on transactions</string>
+    <string name="dialog_hard_refresh_confirm2_title">Are you sure?</string>
+    <string name="dialog_hard_refresh_confirm2_message">This cannot be undone. Every saved balance and transaction is deleted, then rebuilt from the bank SMS currently in this device\'s inbox.</string>
+    <string name="dialog_hard_refresh_confirm2_notes">Your transaction notes will also be deleted.</string>
     <string name="note_edit_title">Transaction note</string>
     <string name="note_edit_hint">A private note for this transaction</string>
     <string name="note_save">Save</string>

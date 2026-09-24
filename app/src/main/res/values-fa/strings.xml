@@ -45,6 +45,9 @@
     <string name="dialog_hard_refresh_confirm">بازنشانی و خواندن</string>
     <string name="dialog_hard_refresh_cancel">انصراف</string>
     <string name="dialog_hard_refresh_notes_label">یادداشت‌های تراکنش‌ها هم حذف شوند</string>
+    <string name="dialog_hard_refresh_confirm2_title">مطمئن هستید؟</string>
+    <string name="dialog_hard_refresh_confirm2_message">این کار قابل بازگشت نیست. همهٔ موجودی‌ها و تراکنش‌های ذخیره‌شده حذف می‌شوند و سپس فقط از پیامک‌های بانکی که هم‌اکنون در صندوق پیامک این دستگاه هستند دوباره ساخته می‌شوند.</string>
+    <string name="dialog_hard_refresh_confirm2_notes">یادداشت‌های تراکنش‌های شما هم حذف خواهند شد.</string>
     <string name="note_edit_title">یادداشت تراکنش</string>
     <string name="note_edit_hint">یک یادداشت خصوصی برای این تراکنش</string>
     <string name="note_save">ذخیره</string>

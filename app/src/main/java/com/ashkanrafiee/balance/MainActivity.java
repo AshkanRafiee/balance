@@ -529,7 +529,32 @@ public class MainActivity extends Activity {
             .setView(body)
             .setNegativeButton(getString(R.string.dialog_hard_refresh_cancel), null)
             .setPositiveButton(getString(R.string.dialog_hard_refresh_confirm),
-                (d, w) -> view.refresh(true, deleteNotes.isChecked()))
+                (d, w) -> confirmHardRefresh(deleteNotes.isChecked()))
+            .create());
+    }
+
+    /** The last gate before the irreversible reset runs: the first dialog already explained the
+     *  consequences and offered the opt-in notes deletion, so this one only restates what is about
+     *  to be destroyed and that it cannot be undone — a single accidental tap can still be stopped.
+     *  Confirming here runs the real reset ({@code alsoNotes} deleting the notes it carries). */
+    private void confirmHardRefresh(final boolean alsoNotes) {
+        String message = getString(R.string.dialog_hard_refresh_confirm2_message);
+        if (alsoNotes) message += "\n\n" + getString(R.string.dialog_hard_refresh_confirm2_notes);
+        TextView body = new TextView(this);
+        body.setTextSize(14);
+        body.setTextColor(resColor(R.color.subtitle));
+        body.setText(message);
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(dp(18), dp(8), dp(18), 0);
+        wrap.addView(body);
+
+        showDialog(new android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_hard_refresh_confirm2_title))
+            .setView(wrap)
+            .setNegativeButton(getString(R.string.dialog_hard_refresh_cancel), null)
+            .setPositiveButton(getString(R.string.dialog_hard_refresh_confirm),
+                (d, w) -> view.refresh(true, alsoNotes))
             .create());
     }
 
