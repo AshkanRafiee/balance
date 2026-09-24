@@ -1193,6 +1193,9 @@ public class MainActivity extends Activity {
          *  at the top; once released past {@link #PULL_TRIGGER} the arrow spins (ticker) until the
          *  SMS scan settles, then glides back up. All values are dp in the canvas' scaled space. */
         static final float PULL_TRIGGER = 55f, PULL_CAP = 44f;
+        /** Full revolutions per second while the arrow spins, so the motion reads the same on any
+         *  device and frame rate; the old fixed per-frame step turned jittery when frames spread. */
+        static final float SPIN_PER_SEC = 360f;
         float pullShift, pullFrac, pullFade, spinAngle;
         boolean indicatorVisible, spinnerRunning, retracting;
         long spinDeadline;
@@ -1236,11 +1239,20 @@ public class MainActivity extends Activity {
             copyBalance(label, row.amount);
         };
         final Runnable refreshTicker = new Runnable() {
+            long lastTick;
             @Override public void run() {
                 if (MainActivity.this.isFinishing() || MainActivity.this.isDestroyed()) return;
+                // Frame-time-based motion: every step is scaled by the real elapsed time, so the
+                // spin and the glides stay perfectly smooth — and identical — whatever the frame
+                // rate, instead of stepping by a fixed amount per tick and then jerking when a
+                // frame arrives late (which the old fixed-per-frame decrements did).
+                long now = android.os.SystemClock.uptimeMillis();
+                float dt = lastTick == 0 ? 0.016f : Math.min(0.05f, (now - lastTick) / 1000f);
+                lastTick = now;
                 if (spinnerRunning) {
-                    spinAngle += 6f;                       // about one turn per second
-                    pullShift = Math.min(PULL_CAP, pullShift + 5f);
+                    spinAngle += SPIN_PER_SEC * dt;
+                    // Settle the chip down onto its cap with an eased glide instead of snapping it.
+                    pullShift += (PULL_CAP - pullShift) * (1f - (float) Math.exp(-dt / 0.08f));
                     // Stop the moment the scan settles; only a short beat (a fraction of a turn) is kept
                     // so an almost-instant refresh still reads as a completed spin, not a flicker.
                     if (System.currentTimeMillis() >= spinDeadline && !refreshing) {
@@ -1250,16 +1262,21 @@ public class MainActivity extends Activity {
                     invalidate();
                     handler.postDelayed(this, 16);
                 } else if (retracting || pullFade > 0.02f) {
-                    pullShift = Math.max(0, pullShift - 14f);
-                    pullFrac = Math.max(0, pullFrac - 0.17f);
-                    pullFade = Math.max(0, pullFade - 0.17f);
+                    // Glide home with exponential ease-out: fast at first, gently decelerating, so the
+                    // chip melts away instead of being yanked up by a constant per-frame step.
+                    float glide = (float) Math.exp(-dt / 0.16f);
+                    pullShift *= glide;
+                    pullFrac *= glide;
+                    pullFade *= (float) Math.exp(-dt / 0.14f);
                     if (pullFade <= 0.02f) {
                         pullFade = 0;
                         indicatorVisible = false;
                         retracting = false;
+                        invalidate();
+                    } else {
+                        invalidate();
+                        handler.postDelayed(this, 16);
                     }
-                    invalidate();
-                    if (indicatorVisible) handler.postDelayed(this, 16);
                 }
             }
         };
@@ -1348,9 +1365,13 @@ public class MainActivity extends Activity {
             indicatorVisible = true;
             spinnerRunning = false;
             retracting = false;
-            pullShift = Math.max(0, Math.min(PULL_CAP, delta));
-            pullFrac = Math.max(0, Math.min(1, delta / trigger));
-            pullFade = Math.min(1, pullFrac * 1.7f);
+            // The chip follows the finger one to one up to its cap, then keeps travelling with a
+            // growing resistance instead of stopping dead against a hard ceiling while the finger
+            // keeps pulling — the drag always stays "alive" feeling.
+            float pull = Math.max(0, delta);
+            pullShift = pull <= PULL_CAP ? pull : PULL_CAP + (pull - PULL_CAP) * 0.35f;
+            pullFrac = Math.min(1, pull / trigger);
+            pullFade = Math.min(1, pull / 14f);
             spinAngle = pullFrac * 180f;
             invalidate();
         }
@@ -1361,7 +1382,6 @@ public class MainActivity extends Activity {
             retracting = false;
             indicatorVisible = true;
             pullFade = 1;
-            pullShift = PULL_CAP;
             pullFrac = 1;
             spinDeadline = System.currentTimeMillis() + 400;
             handler.removeCallbacks(refreshTicker);
@@ -1790,18 +1810,22 @@ public class MainActivity extends Activity {
         }
 
         /** The pull-to-refresh arrow: a small chip with a circular arrow that follows the finger down
-         *  while rotated by how far the pull has gone, then spins on release. Drawn last, on top. */
+         *  while rotated by how far the pull has gone, then spins on release. Drawn last, on top.
+         *  It scales in softly with the fade so it swells out of the background instead of popping in
+         *  at full size the instant the finger first moves. */
         void drawPullIndicator(Canvas c, int w) {
             if (pullFade <= 0.02f) return;
             float cx = w / 2f, cy = 58f + pullShift;
+            float pop = 0.62f + 0.38f * Math.min(1, pullFade);
             int alpha = (int) (255 * Math.min(1, pullFade));
             p.setStyle(Paint.Style.FILL);
             p.setColor(bg);
             p.setAlpha(alpha);
-            c.drawCircle(cx, cy, 17, p);
+            c.drawCircle(cx, cy, 17 * pop, p);
             p.setColor(accent);
             c.save();
             c.translate(cx, cy);
+            c.scale(pop, pop);
             c.rotate(spinAngle);
             float g = 8.5f;
             p.setStyle(Paint.Style.STROKE);
