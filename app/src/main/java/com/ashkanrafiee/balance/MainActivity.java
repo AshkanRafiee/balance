@@ -517,7 +517,10 @@ public class MainActivity extends Activity {
 
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(0, dp(8), 0, 0);
+        // A small gap below the title (kept distinct from the content strip's own inset), plus an
+        // equal margin on BOTH sides, so the words and their warning checkbox read as a block that
+        // sits centred under the title instead of hugging the edges of the content panel.
+        body.setPadding(dp(8), dp(8), dp(8), 0);
         body.addView(message);
         body.addView(notesRow);
 
