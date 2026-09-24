@@ -124,6 +124,12 @@ public final class HistoryActivity extends Activity {
      *  the newest, so a quick filter change never gets overwritten by a stale slower build. */
     private int renderGen;
 
+    /** The note map for the screen's current data, read once per render on the worker thread
+     *  (decrypting and parsing the store once instead of once per visible row) and consumed only
+     *  by the UI pass that rebuilds the tree. Replenished on every render, which any note edit
+     *  triggers, so it never serves a stale snapshot. */
+    private Map<String, String> notes;
+
     // ====================================================================
     // Shared drawing helpers
     // ====================================================================
@@ -1131,8 +1137,11 @@ public final class HistoryActivity extends Activity {
                 if (acct != null) txs = filterByAccount(txs, acct);
                 final List<Transaction> filtered = applyFilters(txs, f, iran);
                 final Lists lists = buildLists(filtered, iran);
+                final Map<String, String> notesNow =
+                    BalanceData.readNotes(getApplicationContext());
                 runOnUiThread(() -> {
                     if (gen != renderGen || isDestroyed() || isFinishing()) return;
+                    notes = notesNow;
                     refreshDates();
                     rebuildFilterBar();
                     body.removeAllViews();
@@ -1588,7 +1597,7 @@ public final class HistoryActivity extends Activity {
         row.addView(amt, new LinearLayout.LayoutParams(-2, -2));
         cell.addView(row, new LinearLayout.LayoutParams(-1, -2));
 
-        String note = BalanceData.getNote(this, t);
+        String note = notes == null ? null : notes.get(BalanceData.noteKey(t));
         if (note != null) {
             LinearLayout noteChip = new LinearLayout(this);
             noteChip.setOrientation(LinearLayout.HORIZONTAL);
