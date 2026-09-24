@@ -17,7 +17,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Long-press the total card to copy the combined total, or long-press a bank or account card to copy that balance; long-press the eye to switch auto-mask on or off (balances start hidden on every open), and long-press the lock icon for the lock settings
 - Bank sorting by balance or update time, mirrored in the list and the home-screen widget
 - Home-screen widget with the same bank order, totals, and privacy mask as the app
-- Password-encrypted backup and restore (balances, transaction history and notes)
+- Password-encrypted backup and restore (balances, transaction history and notes); the same Data menu holds a full reset — deleting every balance and transaction (and optionally every note) needs a second confirmation so it can never be triggered by a stray tap
 - Auto light/dark theme, persistent masked-balance and currency display preference
 - Automatic refresh as bank SMS arrive, plus pull-to-refresh from the top of the bank list or the history screen (full, per-bank or per-account) — a pull there scans the SMS inbox, the balances and the history together
 - Data-freshness warning: a bank whose last balance SMS is older than a configurable number of days is highlighted with an amber ring, an amber amount and an "N days" badge on its card, and an amber amount in the home-screen widget, so you see how fresh today's totals are before trusting them
