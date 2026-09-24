@@ -1,0 +1,8 @@
+Per-transaction notes, a pull-to-refresh that also works on the history screen, and a reset that now confirms twice before anything is deleted.
+
+• Tap any transaction in the history to attach a private note to that movement. The note follows the transaction through every filter and view, is included in CSV exports and encrypted backups, is never touched by rules-driven re-scans, survives resets unless you opt in to deleting it, and stays when an older backup without notes is restored.
+• The CSV export now also carries your notes, one per transaction, and the file is written with a UTF-8 byte-order mark so spreadsheet apps open it correctly.
+• Pull-to-refresh now works from the top of the history screen too — full, per-bank or per-account history — and re-scans the balances, the widget and the history together in one pass.
+• The history breakdown can now be opened as a whole: the Display menu's "History: expand all" option opens every year, month and day by default instead of only the current year, month and its days.
+• The reset and rescan is now confirmed a second time before anything is deleted. When you also chose to delete transaction notes, the final warning says so; a reset requested while a scan is already running is no longer dropped in favour of a plain refresh — the reset, its notes deletion and the completion notification all still run.
+• The report email from the Scan diagnostics screen now arrives with the subject and the issue details prefilled in every mail app (older versions of some apps only received the recipient line).
