@@ -17,7 +17,7 @@ Features:
 - Export exactly what the transaction history currently shows to a CSV file via the system file picker — the active bank, account, movement type and date range (the full history when no filter is active) — with ISO-8601 UTC timestamps, the date in the active calendar, raw signed rial amounts, the amounts as displayed with their currency unit, and your transaction notes
 - Per-transaction notes: tap any history row to add or edit a private note to that movement; the note follows the transaction in every filter and view, and is included in CSV exports and encrypted backups — it is never touched by rules-driven re-scans, survives resets (unless you opt in to deleting it), and stays when an older backup without notes is restored
 - Bank rule updates rebuild history from your SMS and match it to what is already stored, so nothing is ever counted twice
-- Full history from the total card; tap a bank for just that bank's transactions, or tap one of its accounts for a single account's history
+- Full history from the total card; tap a bank for just that bank's transactions, or tap one of its accounts for a single account's history: the account's header shows the account number as a chip, and tapping that chip copies just the number
 - Long-press the total card, a bank card or an account row to copy that balance; long-press the eye for auto-mask (balances start hidden on every open), and long-press the lock icon for the lock settings
 - Bank sorting by balance or update time, applied to the list and the widget
 - Exclude individual accounts from the combined total
