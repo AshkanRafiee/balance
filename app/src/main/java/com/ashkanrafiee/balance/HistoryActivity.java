@@ -435,6 +435,16 @@ public final class HistoryActivity extends Activity {
         super.onStop();
     }
 
+    @Override
+    protected void onDestroy() {
+        // Drop a pull-refresh ticker that may still be mid-animation (its own guards keep it from
+        // touching a destroyed screen, but nothing should keep posting into a finished activity).
+        if (scrollView != null) {
+            scrollView.handler.removeCallbacks(scrollView.refreshTicker);
+        }
+        super.onDestroy();
+    }
+
     /** For as long as the lock is enabled the screen content stays hidden from recents and
      *  screenshots, regardless of the current unlock state — see {@link MainActivity}. */
     private void updateSecureFlag() {
