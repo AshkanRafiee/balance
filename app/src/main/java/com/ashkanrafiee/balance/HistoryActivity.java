@@ -92,6 +92,12 @@ public final class HistoryActivity extends Activity {
     private int depBg, depFg, witBg, witFg, badgeFg, badgeBg;
     private LinearLayout body;
     private LockOverlay lockOverlay;
+    /** Draws the pull-to-refresh chip pinned to the true top of the screen — clear of the hero card
+     *  and the rows — while the gesture and its state stay in the list's scroll view. */
+    private PullIndicatorOverlay indicatorOverlay;
+    /** Height of the status bar (px), captured by the insets listener so the overlay can place the
+     *  chip just below it, mirroring the dashboard's anchored refresh circle. */
+    private int statusInsetTop;
     /** The user's calendar system: true for the Persian (Jalali) calendar, false for Gregorian.
      *  Read once per screen, since the region can only change from the main screen. */
     private boolean iranCalendar = true;
@@ -368,6 +374,7 @@ public final class HistoryActivity extends Activity {
                 bottom = i.getSystemWindowInsetBottom();
             }
             v.setPadding(dp(20), top + dp(14), dp(20), bottom + dp(14));
+            statusInsetTop = top;
             return i;
         });
         FrameLayout host = new FrameLayout(this);
@@ -383,6 +390,10 @@ public final class HistoryActivity extends Activity {
         scrollView = new PullRefreshScrollView(this);
         scrollView.addView(body, new ScrollView.LayoutParams(-1, -1));
         root.addView(scrollView, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        indicatorOverlay = new PullIndicatorOverlay();
+        scrollView.setIndicatorOverlay(indicatorOverlay);
+        host.addView(indicatorOverlay, new FrameLayout.LayoutParams(-1, -1));
 
         lockOverlay = new LockOverlay(this);
         lockOverlay.setUnlockListener(this::updateSecureFlag);
@@ -2108,18 +2119,46 @@ public final class HistoryActivity extends Activity {
     // Pull-to-refresh
     // ====================================================================
 
+    /** The true top-of-page canvas for the pull-to-refresh chip: a full-screen view above the list
+     *  that reads the scroll view's pull state and repaints every time the ticker advances. It
+     *  never consumes touches, so the list below receives every gesture; it only paints. */
+    private final class PullIndicatorOverlay extends View {
+        PullIndicatorOverlay() {
+            super(HistoryActivity.this);
+            setWillNotDraw(false);
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            PullRefreshScrollView v = scrollView;
+            if (v == null || !v.indicatorVisible || v.pullFade <= 0.02f) return;
+            c.save();
+            c.scale(v.d, v.d);
+            c.translate(0, statusInsetTop / v.d);
+            v.drawPullIndicator(c, getWidth() / v.d, PullRefreshScrollView.PULL_TOP);
+            c.restore();
+        }
+    }
+
     /** The scrollable history list, extended with the same pull-to-refresh gesture the dashboard
      *  has: with the list at its very top, pulling the finger down reveals a circular arrow chip
-     *  that follows the pull; releasing past a threshold spins the arrow while the SMS inbox and
-     *  history are re-scanned, then the arrow glides back up once the scans settle. The chip is
-     *  drawn after the children, pinned to the top of the viewport so the content it floats over
-     *  stays readable and can never carry it away. Pulling here refreshes the whole app —
-     *  balances, widget and history — exactly like a pull on the main screen. */
+     *  pinned to the top of the page that follows the pull; releasing past a threshold spins the
+     *  arrow while the SMS inbox and history are re-scanned, then the arrow glides back up once the
+     *  scans settle. The chip is actually painted by {@link PullIndicatorOverlay}, so it floats
+     *  above the header at the very top of the screen, clear of the hero card and the rows, and
+     *  never scrolls with the content. Pulling here refreshes the whole app — balances, widget and
+     *  history — exactly like a pull on the main screen. */
     private final class PullRefreshScrollView extends ScrollView {
         /** dp of downward drag past which the release arms a refresh. Matches the dashboard. */
         static final float PULL_TRIGGER = 55f;
         /** dp the chip may descend while following the finger. Matches the dashboard. */
         static final float PULL_CAP = 44f;
+        /** Full revolutions per second while the arrow spins, so the motion reads the same on any
+         *  device and frame rate; the old fixed per-frame step turned jittery when frames spread. */
+        static final float SPIN_PER_SEC = 360f;
+        /** The chip's anchor just under the status bar (dp from the content top), mirroring the
+         *  dashboard's refresh circle so both screens show the same shape in the same place. */
+        static final float PULL_TOP = 58f;
         final Paint p = new Paint(3);
         final float d = getResources().getDisplayMetrics().density;
         final Handler handler = new Handler(Looper.getMainLooper());
@@ -2128,37 +2167,62 @@ public final class HistoryActivity extends Activity {
         boolean pulling, refreshing, refreshAgain;
         boolean indicatorVisible, spinnerRunning, retracting;
         long spinDeadline;
+        View indicatorOverlay;
 
         PullRefreshScrollView(Context c) {
             super(c);
         }
 
+        /** Tells the covering chip overlay — the thing that actually paints the indicator now — to
+         *  repaint alongside this view, so the pull state and its image always agree. */
+        void setIndicatorOverlay(View v) {
+            indicatorOverlay = v;
+        }
+
+        void refreshIndicator() {
+            invalidate();
+            if (indicatorOverlay != null) indicatorOverlay.invalidate();
+        }
+
         /** Spins the arrow while the refresh runs, then glides it back up. A short minimum beat (a
          *  fraction of a turn) is kept so an almost-instant scan still reads as a completed spin,
-         *  not a flicker; {@link MainActivity.BalanceView} paces its spinner the same way. */
+         *  not a flicker; {@link MainActivity.BalanceView} paces its spinner the same way.
+         *  Every step is scaled by the real elapsed time (frame-time-based), so the spin and the
+         *  glides stay smooth and identical whatever the frame rate, instead of stepping by a fixed
+         *  amount per tick and jerking when a frame arrives late. */
         final Runnable refreshTicker = new Runnable() {
+            long lastTick;
             @Override public void run() {
                 if (isFinishing() || isDestroyed()) return;
+                long now = android.os.SystemClock.uptimeMillis();
+                float dt = lastTick == 0 ? 0.016f : Math.min(0.05f, (now - lastTick) / 1000f);
+                lastTick = now;
                 if (spinnerRunning) {
-                    spinAngle += 6f;                       // about one turn per second
-                    pullShift = Math.min(PULL_CAP, pullShift + 5f);
+                    spinAngle += SPIN_PER_SEC * dt;
+                    // Settle the chip down onto its cap with an eased glide instead of snapping it.
+                    pullShift += (PULL_CAP - pullShift) * (1f - (float) Math.exp(-dt / 0.08f));
                     if (System.currentTimeMillis() >= spinDeadline && !refreshing) {
                         spinnerRunning = false;
                         retracting = true;
                     }
-                    invalidate();
+                    refreshIndicator();
                     handler.postDelayed(this, 16);
                 } else if (retracting || pullFade > 0.02f) {
-                    pullShift = Math.max(0, pullShift - 14f);
-                    pullFrac = Math.max(0, pullFrac - 0.17f);
-                    pullFade = Math.max(0, pullFade - 0.17f);
+                    // Glide home with exponential ease-out: fast at first, gently decelerating, so
+                    // the chip melts away instead of being yanked up by a constant per-frame step.
+                    float glide = (float) Math.exp(-dt / 0.16f);
+                    pullShift *= glide;
+                    pullFrac *= glide;
+                    pullFade *= (float) Math.exp(-dt / 0.14f);
                     if (pullFade <= 0.02f) {
                         pullFade = 0;
                         indicatorVisible = false;
                         retracting = false;
+                        refreshIndicator();
+                    } else {
+                        refreshIndicator();
+                        handler.postDelayed(this, 16);
                     }
-                    invalidate();
-                    if (indicatorVisible) handler.postDelayed(this, 16);
                 }
             }
         };
@@ -2221,11 +2285,15 @@ public final class HistoryActivity extends Activity {
             indicatorVisible = true;
             spinnerRunning = false;
             retracting = false;
-            pullShift = Math.max(0, Math.min(PULL_CAP, delta));
-            pullFrac = Math.max(0, Math.min(1, delta / PULL_TRIGGER));
-            pullFade = Math.min(1, pullFrac * 1.7f);
+            // The chip follows the finger one to one up to its cap, then keeps travelling with a
+            // growing resistance instead of stopping dead against a hard ceiling while the finger
+            // keeps pulling — the drag always stays "alive" feeling.
+            float pull = Math.max(0, delta);
+            pullShift = pull <= PULL_CAP ? pull : PULL_CAP + (pull - PULL_CAP) * 0.35f;
+            pullFrac = Math.min(1, pull / PULL_TRIGGER);
+            pullFade = Math.min(1, pull / 14f);
             spinAngle = pullFrac * 180f;
-            invalidate();
+            refreshIndicator();
         }
 
         /** Release past the trigger: the arrow goes fully down and spins while the scans run. */
@@ -2234,12 +2302,11 @@ public final class HistoryActivity extends Activity {
             retracting = false;
             indicatorVisible = true;
             pullFade = 1;
-            pullShift = PULL_CAP;
             pullFrac = 1;
             spinDeadline = System.currentTimeMillis() + 400;
             handler.removeCallbacks(refreshTicker);
             handler.postDelayed(refreshTicker, 16);
-            invalidate();
+            refreshIndicator();
         }
 
         /** Lift short of the trigger (or a cancelled gesture): glide the arrow back up. */
@@ -2261,7 +2328,7 @@ public final class HistoryActivity extends Activity {
             spinnerRunning = false;
             retracting = false;
             pullShift = pullFrac = pullFade = 0;
-            invalidate();
+            refreshIndicator();
         }
 
         /** Re-scans the SMS inbox (balances and widget) and then the history in the background,
@@ -2299,30 +2366,26 @@ public final class HistoryActivity extends Activity {
             }).start();
         }
 
-        @Override
-        protected void dispatchDraw(Canvas c) {
-            super.dispatchDraw(c);
-            if (!indicatorVisible || pullFade <= 0.02f) return;
-            c.save();
-            c.scale(d, d);
-            drawPullIndicator(c);
-            c.restore();
-        }
-
         /** The pull-to-refresh arrow: a small chip with a circular arrow that follows the finger down
-         *  while rotated by how far the pull has gone, then spins on release. Drawn last, on top,
-         *  pinned to the top of the viewport so it never scrolls with the content.
+         *  while rotated by how far the pull has gone, then spins on release. Painted by the covering
+         *  overlay at {@link #PULL_TOP} below the status bar — squarely pinned to the top of the page,
+         *  clear of the hero card and the rows beneath it, visible the moment the drag starts — and
+         *  scaled in softly with the fade so it swells out of the background instead of popping in at
+         *  full size. Its canvas arrives pre-scaled and pre-translated over the status bar.
          *  {@link MainActivity.BalanceView#drawPullIndicator} draws the same chip. */
-        void drawPullIndicator(Canvas c) {
-            float cx = getWidth() / d / 2f, cy = dp(26) + pullShift;
+        void drawPullIndicator(Canvas c, float w, float topDp) {
+            if (pullFade <= 0.02f) return;
+            float cx = w / 2f, cy = topDp + pullShift;
+            float pop = 0.62f + 0.38f * Math.min(1, pullFade);
             int alpha = (int) (255 * Math.min(1, pullFade));
             p.setStyle(Paint.Style.FILL);
             p.setColor(bg);
             p.setAlpha(alpha);
-            c.drawCircle(cx, cy, 17, p);
+            c.drawCircle(cx, cy, 17 * pop, p);
             p.setColor(accent);
             c.save();
             c.translate(cx, cy);
+            c.scale(pop, pop);
             c.rotate(spinAngle);
             float g = 8.5f;
             p.setStyle(Paint.Style.STROKE);
