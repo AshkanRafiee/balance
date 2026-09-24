@@ -173,6 +173,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        // Drop a tracked dialog so a finishing activity does not leave one floating on the task.
+        dismissDialogs();
         // Drop pending canvas callbacks so a finishing activity is not held (or an auto-field refired)
         // after destruction; the copy-clear in particular would otherwise linger a minute on a finished
         // screen while still holding the clipboard target.
@@ -954,8 +956,18 @@ public class MainActivity extends Activity {
             if (resultCode != RESULT_OK || data == null || data.getData() == null || password == null) return;
             createBackup(data.getData(), password);
         } else if (requestCode == REQ_PICK_RESTORE) {
-            if (resultCode == RESULT_OK && data != null && data.getData() != null)
-                askPassword(false, data.getData());
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) {
+                    // The SAF picker can outlive the temporary unlock hold (LockManager.holdUnlock
+                    // lasts only while the app is in the foreground), so the session may be locked
+                    // again by the time the pick returns. Never raise a password dialog over the
+                    // lock; re-cover the screen and let the user restart the restore after unlocking.
+                    pendingLockAction = null;
+                    if (lockOverlay != null) lockOverlay.showLock();
+                } else {
+                    askPassword(false, data.getData());
+                }
+            }
         } else if (requestCode == ONBOARDING_REQUEST && data != null
                 && data.getBooleanExtra(OnboardingActivity.EXTRA_ASKED_SMS, false)) {
             // The introduction already asked for SMS access (whatever the answer): don't re-ask the
