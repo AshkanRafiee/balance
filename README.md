@@ -19,7 +19,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Home-screen widget with the same bank order, totals, and privacy mask as the app
 - Password-encrypted backup and restore (balances, transaction history and notes)
 - Auto light/dark theme, persistent masked-balance and currency display preference
-- Automatic refresh as bank SMS arrive, plus pull-to-refresh from anywhere at the top of the list
+- Automatic refresh as bank SMS arrive, plus pull-to-refresh from the top of the bank list or the history screen (full, per-bank or per-account) — a pull there scans the SMS inbox, the balances and the history together
 - Data-freshness warning: a bank whose last balance SMS is older than a configurable number of days is highlighted with an amber ring, an amber amount and an "N days" badge on its card, and an amber amount in the home-screen widget, so you see how fresh today's totals are before trusting them
 - English and Persian (فارسی) interface, with automatic system-language detection and localized bank names; the footer's single "Display" menu holds its selectors — the Calendar (Persian Jalali / Gregorian) chooses the calendar system, the Currency (Toman / Rial / custom) chooses the value and unit shown next to amounts (Toman divides by ten, others show the raw figure), the Language overrides the interface language, the Theme (system / dark / light) forces the color scheme, and the Stale balance warning (off / 3 / 7 / 14 / 30 days) sets how long a balance can go without an SMS before it is flagged
 - Optional in-app lock with a PIN, password or fingerprint, covering the app, the home-screen widget and screenshots/recents, with progressive cooldown delays against wrong-entry guessing
