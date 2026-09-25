@@ -64,6 +64,8 @@ Keep the keystore and passwords outside version control (`signing.properties` an
 
 Balance requests `READ_SMS` to read existing messages, and declares `RECEIVE_BOOT_COMPLETED` plus the fingerprint/BIOMETRIC permissions required for its optional in-app lock. It declares no `INTERNET` permission and performs no network requests. SMS and balances remain on the device.
 
+Revoking `READ_SMS` deletes nothing. Every balance, transaction and note already parsed stays in the encrypted store, and the dashboard, history screen and home-screen widget keep showing it. Because the app can no longer read new bank SMS, the dashboard adds an amber strip under the total card saying the balances may be out of date; tapping it re-requests SMS access (falling back to the app's settings page when the denial is permanent) and refreshes on the spot.
+
 ## Reporting a problem or requesting a bank
 
 Is your bank's SMS not recognized, the per-account split wrong, or a balance or
