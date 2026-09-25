@@ -14,6 +14,9 @@
 
     <string name="status_reading_sms">Reading bank SMS on this device…</string>
     <string name="status_permission_needed">SMS permission is needed to read balances</string>
+    <string name="status_stale_no_permission">Showing your saved balances. They were last updated when SMS access was allowed, so newer bank SMS is not included yet</string>
+    <string name="banner_stale_title">Balances may be out of date</string>
+    <string name="banner_stale_action">Tap to allow SMS access and refresh</string>
     <string name="permission_title">SMS permission</string>
     <string name="permission_settings_message">SMS access is blocked by this device\'s system, and the normal dialog cannot grant it. On Android 13 and newer, apps installed from outside the Play Store usually need \'Allow restricted settings\' switched on first.\n\nTo allow it:\n1. App settings → Permissions → SMS → Allow\n2. If SMS is greyed out: More (⋮) → Allow restricted settings → then grant it from Permissions again.</string>
     <string name="permission_open_settings">Open settings</string>

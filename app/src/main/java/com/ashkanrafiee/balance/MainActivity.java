@@ -1192,6 +1192,10 @@ public class MainActivity extends Activity {
         Drawable lockIcon;
         boolean hidden, refreshing, refreshAgain, pendingHard, pendingNotes;
         boolean autoHide;
+        /** Whether the "balances may be out of date" strip is up. It exists only while saved data is
+         *  on screen and SMS access is gone, and it shifts the banks section down by its height, so
+         *  every geometry question is asked of {@link DashboardLayout} against this flag. */
+        boolean smsBanner;
         int insetsTop, insetsBottom;
         int sortMode;
         float scrollY = 0, lastY, downY;
@@ -1329,7 +1333,7 @@ public class MainActivity extends Activity {
         /** The farthest the list can be scrolled (dp), i.e. its content height minus the viewport
          *  minus the fixed non-list chrome; never below zero. */
         float maxScroll() {
-            return Math.max(0, bankListHeight - (listViewH() - 440));
+            return Math.max(0, bankListHeight - (listViewH() - DashboardLayout.chromeH(smsBanner)));
         }
 
         /** Advances the inertia of a finished drag, redrawing each frame until it settles at a
@@ -1464,18 +1468,39 @@ public class MainActivity extends Activity {
             return getString(R.string.accessibility_total_balance, totalText) + " " + status + "." + note;
         }
 
-        /** Reloads the saved balances (e.g. after a restore) without re-scanning SMS. */
-        void loadSaved() {
-            LinkedHashMap<String, Bank> saved = BalanceData.read(MainActivity.this);
+        /** Publishes a set of balances into the view and redraws. Every path that ends up showing
+         *  saved data goes through here — a scan, a failed scan, a restore, and the dashboard's
+         *  SMS-denied path — so the store, the total, the strip and the widget never drift apart. */
+        private void applySaved(LinkedHashMap<String, Bank> saved, Context app, String statusText) {
             banks.clear();
             banks.putAll(saved);
             excluded.clear();
-            excluded.addAll(BalanceData.getExcluded(MainActivity.this));
+            excluded.addAll(BalanceData.getExcluded(app));
             recalcTotal();
-            status = getString(R.string.status_loaded_from_saved);
+            status = statusText;
             refreshing = false;
+            updateSmsBanner();
             invalidate();
-            BalanceWidgetProvider.push(MainActivity.this);
+            BalanceWidgetProvider.push(app);
+        }
+
+        /** Recomputes whether the stale-data strip belongs on screen and keeps the scroll position
+         *  inside the list's new extent. Both depend on how much room the banks section has, so they
+         *  are re-derived only when the strip actually appears or goes away. */
+        void updateSmsBanner() {
+            boolean visible = DashboardLayout.smsBannerVisible(!banks.isEmpty(),
+                checkSelfPermission(Manifest.permission.READ_SMS));
+            if (visible == smsBanner) return;
+            smsBanner = visible;
+            rows();
+            scrollY = Math.max(0, Math.min(scrollY, maxScroll()));
+            invalidate();
+        }
+
+        /** Reloads the saved balances (e.g. after a restore) without re-scanning SMS. */
+        void loadSaved() {
+            applySaved(BalanceData.read(MainActivity.this), MainActivity.this,
+                getString(R.string.status_loaded_from_saved));
         }
 
         void refresh(boolean hard, boolean alsoNotes) { refresh(hard, alsoNotes, false); }
@@ -1499,8 +1524,20 @@ public class MainActivity extends Activity {
             }
             pendingHard = pendingNotes = false;
             if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
-                status = getString(R.string.status_permission_needed);
-                invalidate();
+                // Without SMS access the saved store is all that is left, and it is the app's only
+                // remaining record of the user's balances — so show it rather than an empty
+                // dashboard, and let the strip say the numbers are as of their last scan. Read off
+                // the main thread like every other load: it decrypts and parses the whole store.
+                refreshing = true;
+                new Thread(() -> {
+                    final Context app = MainActivity.this.getApplicationContext();
+                    final LinkedHashMap<String, Bank> saved = BalanceData.read(app);
+                    // Nothing stored yet (a fresh install, or a reset): the empty card wants the
+                    // plain "permission is needed" wording, and there is no strip to explain it.
+                    post(() -> applySaved(saved, app, saved.isEmpty()
+                        ? getString(R.string.status_permission_needed)
+                        : getString(R.string.status_stale_no_permission)));
+                }).start();
                 return;
             }
             refreshing = true;
@@ -1518,30 +1555,15 @@ public class MainActivity extends Activity {
                     LinkedHashMap<String, Bank> saved = BalanceData.read(app);
                     int count = BalanceData.scanSms(app, saved);
                     post(() -> {
-                        banks.clear();
-                        banks.putAll(saved);
-                        excluded.clear();
-                        excluded.addAll(BalanceData.getExcluded(app));
-                        recalcTotal();
-                        status = buildStatus(count, saved.isEmpty(), statusNoSms, updatedNow);
-                        refreshing = false;
-                        invalidate();
-                        BalanceWidgetProvider.push(app);
+                        applySaved(saved, app, buildStatus(count, saved.isEmpty(), statusNoSms, updatedNow));
                         if (hard) toast(R.string.toast_reset_done);
                         if (refreshAgain) { refreshAgain = false; refresh(pendingHard, pendingNotes, silent); }
                     });
                 } catch (Exception e) {
                     post(() -> {
                         LinkedHashMap<String, Bank> saved2 = BalanceData.read(app);
-                        banks.clear();
-                        banks.putAll(saved2);
-                        excluded.clear();
-                        excluded.addAll(BalanceData.getExcluded(app));
-                        recalcTotal();
-                        status = banks.isEmpty() ? getString(R.string.status_sms_unreadable) : statusLoaded;
-                        refreshing = false;
-                        invalidate();
-                        BalanceWidgetProvider.push(app);
+                        applySaved(saved2, app,
+                            saved2.isEmpty() ? getString(R.string.status_sms_unreadable) : statusLoaded);
                         if (hard) toast(R.string.toast_reset_failed);
                         if (refreshAgain) { refreshAgain = false; refresh(pendingHard, pendingNotes, silent); }
                     });
@@ -1696,7 +1718,7 @@ public class MainActivity extends Activity {
 
             drawLockIcon(c, LockManager.isEnabled(MainActivity.this) ? active : accent);
 
-            round(c, 24, 120, w - 24, 270, 28, panel);
+            round(c, 24, DashboardLayout.TOTAL_TOP, w - 24, DashboardLayout.TOTAL_BOTTOM, 28, panel);
             float totalLabelX = rtl ? w - 48 : 48;
             text(c, getString(R.string.total_balance_label), totalLabelX, 156, 13, muted, edgeAlign);
             if (banks.isEmpty() || excluded.containsAll(banks.keySet())) {
@@ -1724,16 +1746,20 @@ public class MainActivity extends Activity {
                 else c.drawLine(w - 77, 142, w - 43, 170, p);
             }
 
+            if (smsBanner) drawSmsBanner(c, w, rtl);
+
+            float sectionHeaderY = DashboardLayout.sectionHeaderY(smsBanner);
             float banksHeaderX = rtl ? w - 28 : 28;
-            text(c, getString(R.string.section_banks), banksHeaderX, 320, 22, fg, edgeAlign);
+            text(c, getString(R.string.section_banks), banksHeaderX, sectionHeaderY, 22, fg, edgeAlign);
             float sortX = rtl ? 28 : w - 28;
             Paint.Align sortAlign = rtl ? Paint.Align.LEFT : Paint.Align.RIGHT;
-            text(c, sortLabel(), sortX, 320, 14, accent, sortAlign);
+            text(c, sortLabel(), sortX, sectionHeaderY, 14, accent, sortAlign);
 
             float by = (getHeight() - top - bottom) / d - 32;
+            float listTop = DashboardLayout.listTop(smsBanner);
             c.save();
-            c.clipRect(0, 352, w, by - 42);
-            float y = 352 - scrollY;
+            c.clipRect(0, listTop, w, by - 42);
+            float y = listTop - scrollY;
             if (banks.isEmpty()) {
                 round(c, 24, y, w - 24, y + 96, 22, panel);
                 float statusX = rtl ? w - 48 : 48;
@@ -1821,6 +1847,21 @@ public class MainActivity extends Activity {
             c.restore();
         }
 
+        /** The strip that explains why the balances on screen may be old. It is drawn in the gap
+         *  between the total card and the banks section, in the same warning colours as the per-row
+         *  stale badge, and the text carries the action because the whole strip is the tap target. */
+        void drawSmsBanner(Canvas c, int w, boolean rtl) {
+            float top = DashboardLayout.BANNER_TOP;
+            float bottom = top + DashboardLayout.BANNER_H;
+            round(c, 24, top, w - 24, bottom, 16, warn_bg);
+            roundStroke(c, 24, top, w - 24, bottom, 16, 1.2f, warn);
+            float textX = rtl ? w - 40 : 40;
+            Paint.Align align = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
+            float max = w - 80;
+            text(c, fit(getString(R.string.banner_stale_title), 13, max), textX, top + 22, 13, warn, align);
+            text(c, fit(getString(R.string.banner_stale_action), 12, max), textX, top + 40, 12, warn, align);
+        }
+
         /** The pull-to-refresh arrow: a small chip with a circular arrow that follows the finger down
          *  while rotated by how far the pull has gone, then spins on release. Drawn last, on top.
          *  It scales in softly with the fade so it swells out of the background instead of popping in
@@ -1893,8 +1934,8 @@ public class MainActivity extends Activity {
 
         /** One card row in the bank list. Every bank entry — whether a one-account bank or a single
          *  account of a multi-account bank — is its own flat card, so accounts read exactly like
-         *  separate banks. Geometry is in dp relative to the bank section's top edge (352), so a
-         *  row's screen position is {@code row.top - scrollY}. */
+         *  separate banks. Geometry is in dp measured from the top of the dashboard, offset by the
+         *  scroll, so a row's screen position is {@code row.top - scrollY}. */
         private static final class BankRow {
             static final int SINGLE = 0;
             final int kind;
@@ -1923,7 +1964,8 @@ public class MainActivity extends Activity {
          *  Re-derived on every call (the lists are tiny) so drawing and touch always agree. */
         java.util.List<BankRow> rows() {
             java.util.List<BankRow> out = new java.util.ArrayList<>();
-            float cursor = 352;
+            float top = DashboardLayout.listTop(smsBanner);
+            float cursor = top;
             for (java.util.List<Bank> block : BalanceData.groupedForDisplay(banks, excluded, sortMode)) {
                 for (Bank b : block) {
                     String key = BalanceData.storageKey(b.name, b.account);
@@ -1932,7 +1974,7 @@ public class MainActivity extends Activity {
                     cursor += 96;
                 }
             }
-            bankListHeight = cursor - 352;
+            bankListHeight = cursor - top;
             return out;
         }
 
@@ -2118,7 +2160,8 @@ public class MainActivity extends Activity {
                 downIcon = iconId(x, y);
                 lockArmed = downIcon == ICON_LOCK;
                 eyeArmed = downIcon == ICON_EYE;
-                totalArmed = downIcon == ICON_NONE && y >= 120 && y <= 270;
+                totalArmed = downIcon == ICON_NONE
+                    && y >= DashboardLayout.TOTAL_TOP && y <= DashboardLayout.TOTAL_BOTTOM;
                 lockProbeFired = false;
                 eyeProbeFired = false;
                 totalProbeFired = false;
@@ -2132,7 +2175,7 @@ public class MainActivity extends Activity {
                 if (lockArmed) handler.postDelayed(lockLongProbe, 480);
                 else if (eyeArmed) handler.postDelayed(eyeLongProbe, 500);
                 else if (totalArmed) handler.postDelayed(totalLongProbe, 500);
-                else if (y >= 352 && y < byForTouch(h)
+                else if (y >= DashboardLayout.listTop(smsBanner) && y < byForTouch(h)
                         && (rtl ? x >= 56 : x <= getWidth() / d - 56)) {
                     // On a bank or account row, off the 3-dot menu: a long-press copies that row's
                     // balance, mirroring the total card.
@@ -2163,7 +2206,7 @@ public class MainActivity extends Activity {
                     downIcon = ICON_NONE;
                     rows();
                     scrollY = Math.max(0, Math.min(
-                        Math.max(0, bankListHeight - (h - 440)),
+                        maxScroll(),
                         scrollY + lastY - y));
                     lastY = y;
                     invalidate();
@@ -2227,11 +2270,17 @@ public class MainActivity extends Activity {
                 MainActivity.this.getSharedPreferences(BalanceData.PREFS_PREF, MODE_PRIVATE)
                     .edit().putBoolean(BalanceData.KEY_HIDDEN, hidden).apply();
                 invalidate();
-            } else if (y >= 120 && y <= 270) {
+            } else if (DashboardLayout.inBanner(y, smsBanner)) {
+                // Re-ask rather than jumping straight to settings: a first-time denial can still be
+                // granted by the system dialog in one tap, and onRequestPermissionsResult already
+                // falls back to the settings deep link when the denial is permanent.
+                requestSms();
+            } else if (y >= DashboardLayout.TOTAL_TOP && y <= DashboardLayout.TOTAL_BOTTOM) {
                 startActivity(new Intent(MainActivity.this, HistoryActivity.class));
-            } else if (y > 290 && y < 350 && (rtl ? x < 150 : x > getWidth() / d - 150)) {
+            } else if (DashboardLayout.inSortBand(y, smsBanner)
+                    && (rtl ? x < 150 : x > getWidth() / d - 150)) {
                 showSortDialog();
-            } else if (y >= 352 && y < byForTouch(h)) {
+            } else if (y >= DashboardLayout.listTop(smsBanner) && y < byForTouch(h)) {
                 if (banks.isEmpty()) {
                     // No balances at all: the empty card is the app's main entry point again. Without
                     // SMS permission (e.g. after a permanent denial, which no runtime re-request can
