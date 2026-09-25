@@ -292,29 +292,24 @@ public class MainActivity extends Activity {
     }
 
     /** The combined Display dialog behind the footer item: the dropdowns in a single menu, so the
-     *  calendar system (see {@link RegionHelper}), the interface language, the currency unit (see
-     *  {@link CurrencyHelper}), the color theme (see {@link ThemeHelper}), the balance-freshness
-     *  threshold and the "expand all history" toggle are all chosen in one place. Every picker
-     *  applies its choice as soon as it is selected — a changed region or the history toggle apply
-     *  on the next history open, a changed theme or language recreates the screen, a changed
-     *  currency re-renders the dashboard and the widget — so only a typed custom currency name
-     *  waits for the OK button. */
+     *  color theme (see {@link ThemeHelper}), the widget's own theme, the interface language, the
+     *  calendar system (see {@link RegionHelper}), the currency unit (see {@link CurrencyHelper}),
+     *  the balance-freshness threshold and the "expand all history" toggle are all chosen in one
+     *  place. They are ordered by how often they are changed, and then grouped by kind, so related
+     *  options sit together instead of having to be hunted for: the two color themes are what a
+     *  user reaches for most — mostly to turn dark mode on for the evening — and read as a pair,
+     *  the language, calendar and currency are all set once and together decide how text, dates and
+     *  amounts are formatted, the freshness threshold is the odd one out, and the lone on/off
+     *  toggle closes the menu. Every picker applies its choice as soon as it is selected — a
+     *  changed region or the history toggle apply on the next history open, a changed theme or
+     *  language recreates the screen, a changed currency re-renders the dashboard and the widget —
+     *  so only a typed custom currency name waits for the OK button. */
     private void displayDialog() {
         int pad = dp(14);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(pad + dp(12), dp(4), pad, 0);
 
-        String[] calendarLabels = {getString(R.string.calendar_persian), getString(R.string.calendar_gregorian)};
-        String[] langTags = LocaleHelper.SUPPORTED;
-        String[] langLabels = new String[langTags.length];
-        for (int i = 0; i < langTags.length; i++)
-            langLabels[i] = langTags[i].isEmpty()
-                ? getString(R.string.language_system_default) : LocaleHelper.displayName(langTags[i]);
-        String[] currencyLabels = {
-            getString(R.string.currency_toman), getString(R.string.currency_rial),
-            getString(R.string.currency_custom)
-        };
         String[] themeLabels = {
             getString(R.string.theme_system), getString(R.string.theme_dark), getString(R.string.theme_light)
         };
@@ -322,21 +317,64 @@ public class MainActivity extends Activity {
             getString(R.string.theme_follow_app), getString(R.string.theme_system),
             getString(R.string.theme_dark), getString(R.string.theme_light)
         };
+        String[] langTags = LocaleHelper.SUPPORTED;
+        String[] langLabels = new String[langTags.length];
+        for (int i = 0; i < langTags.length; i++)
+            langLabels[i] = langTags[i].isEmpty()
+                ? getString(R.string.language_system_default) : LocaleHelper.displayName(langTags[i]);
+        String[] calendarLabels = {getString(R.string.calendar_persian), getString(R.string.calendar_gregorian)};
+        String[] currencyLabels = {
+            getString(R.string.currency_toman), getString(R.string.currency_rial),
+            getString(R.string.currency_custom)
+        };
 
-        Spinner calendarSpin = new Spinner(this);
-        ArrayAdapter<String> calendarAdapter = new ArrayAdapter<>(this,
-            android.R.layout.simple_spinner_item, calendarLabels);
-        calendarAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        calendarSpin.setAdapter(calendarAdapter);
-        calendarSpin.setSelection(RegionHelper.region(this) == RegionHelper.REGION_INTERNATIONAL ? 1 : 0);
-        calendarSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+        Spinner themeSpin = new Spinner(this);
+        ArrayAdapter<String> themeAdapter = new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item, themeLabels);
+        themeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        themeSpin.setAdapter(themeAdapter);
+        String storedTheme = ThemeHelper.theme(this);
+        for (int i = 0; i < ThemeHelper.CHOICES.length; i++)
+            if (ThemeHelper.CHOICES[i].equals(storedTheme)) { themeSpin.setSelection(i); break; }
+        themeSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
-                int chosen = pos == 1 ? RegionHelper.REGION_INTERNATIONAL : RegionHelper.REGION_IRAN;
-                if (chosen != RegionHelper.region(MainActivity.this)) RegionHelper.setRegion(MainActivity.this, chosen);
+                String chosen = ThemeHelper.CHOICES[Math.min(pos, ThemeHelper.CHOICES.length - 1)];
+                if (!chosen.equals(ThemeHelper.theme(MainActivity.this))) {
+                    ThemeHelper.setTheme(MainActivity.this, chosen);
+                    // The widget picks the theme up when it is rebuilt, so a placed widget would
+                    // otherwise keep the old palette until its next ten-minute refresh.
+                    BalanceWidgetProvider.push(MainActivity.this);
+                    recreate();
+                }
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
-        });
 
+        });
+        // The widget's own theme, for the times the app and the home screen want to disagree — a dark
+        // app with a light widget on a light wallpaper. It changes nothing inside the app, so unlike
+        // the theme above it does not recreate the screen, it just repaints the widget.
+        Spinner widgetThemeSpin = new Spinner(this);
+        ArrayAdapter<String> widgetThemeAdapter = new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item, widgetThemeLabels);
+        widgetThemeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        widgetThemeSpin.setAdapter(widgetThemeAdapter);
+        String storedWidgetTheme = ThemeHelper.widgetTheme(this);
+        for (int i = 0; i < ThemeHelper.WIDGET_CHOICES.length; i++)
+            if (ThemeHelper.WIDGET_CHOICES[i].equals(storedWidgetTheme)) {
+                widgetThemeSpin.setSelection(i); break;
+            }
+        widgetThemeSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
+                String chosen = ThemeHelper.WIDGET_CHOICES[
+                    Math.min(pos, ThemeHelper.WIDGET_CHOICES.length - 1)];
+                if (!chosen.equals(ThemeHelper.widgetTheme(MainActivity.this))) {
+                    ThemeHelper.setWidgetTheme(MainActivity.this, chosen);
+                    BalanceWidgetProvider.push(MainActivity.this);
+                }
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
+
+        });
         Spinner langSpin = new Spinner(this);
         ArrayAdapter<String> langAdapter = new ArrayAdapter<>(this,
             android.R.layout.simple_spinner_item, langLabels);
@@ -354,8 +392,22 @@ public class MainActivity extends Activity {
                 }
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
-        });
 
+        });
+        Spinner calendarSpin = new Spinner(this);
+        ArrayAdapter<String> calendarAdapter = new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item, calendarLabels);
+        calendarAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        calendarSpin.setAdapter(calendarAdapter);
+        calendarSpin.setSelection(RegionHelper.region(this) == RegionHelper.REGION_INTERNATIONAL ? 1 : 0);
+        calendarSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
+                int chosen = pos == 1 ? RegionHelper.REGION_INTERNATIONAL : RegionHelper.REGION_IRAN;
+                if (chosen != RegionHelper.region(MainActivity.this)) RegionHelper.setRegion(MainActivity.this, chosen);
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
+
+        });
         String storedCurrency = CurrencyHelper.currency(this);
         final EditText customInput = new EditText(this);
         customInput.setSingleLine(true);
@@ -383,55 +435,8 @@ public class MainActivity extends Activity {
                 }
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
-        });
 
-        Spinner themeSpin = new Spinner(this);
-        ArrayAdapter<String> themeAdapter = new ArrayAdapter<>(this,
-            android.R.layout.simple_spinner_item, themeLabels);
-        themeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        themeSpin.setAdapter(themeAdapter);
-        String storedTheme = ThemeHelper.theme(this);
-        for (int i = 0; i < ThemeHelper.CHOICES.length; i++)
-            if (ThemeHelper.CHOICES[i].equals(storedTheme)) { themeSpin.setSelection(i); break; }
-        themeSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
-                String chosen = ThemeHelper.CHOICES[Math.min(pos, ThemeHelper.CHOICES.length - 1)];
-                if (!chosen.equals(ThemeHelper.theme(MainActivity.this))) {
-                    ThemeHelper.setTheme(MainActivity.this, chosen);
-                    // The widget picks the theme up when it is rebuilt, so a placed widget would
-                    // otherwise keep the old palette until its next ten-minute refresh.
-                    BalanceWidgetProvider.push(MainActivity.this);
-                    recreate();
-                }
-            }
-            @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
         });
-
-        // The widget's own theme, for the times the app and the home screen want to disagree — a dark
-        // app with a light widget on a light wallpaper. It changes nothing inside the app, so unlike
-        // the theme above it does not recreate the screen, it just repaints the widget.
-        Spinner widgetThemeSpin = new Spinner(this);
-        ArrayAdapter<String> widgetThemeAdapter = new ArrayAdapter<>(this,
-            android.R.layout.simple_spinner_item, widgetThemeLabels);
-        widgetThemeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        widgetThemeSpin.setAdapter(widgetThemeAdapter);
-        String storedWidgetTheme = ThemeHelper.widgetTheme(this);
-        for (int i = 0; i < ThemeHelper.WIDGET_CHOICES.length; i++)
-            if (ThemeHelper.WIDGET_CHOICES[i].equals(storedWidgetTheme)) {
-                widgetThemeSpin.setSelection(i); break;
-            }
-        widgetThemeSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
-                String chosen = ThemeHelper.WIDGET_CHOICES[
-                    Math.min(pos, ThemeHelper.WIDGET_CHOICES.length - 1)];
-                if (!chosen.equals(ThemeHelper.widgetTheme(MainActivity.this))) {
-                    ThemeHelper.setWidgetTheme(MainActivity.this, chosen);
-                    BalanceWidgetProvider.push(MainActivity.this);
-                }
-            }
-            @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
-        });
-
         Spinner staleSpin = new Spinner(this);
         final int[] staleChoices = {0, 3, 7, 14, 30};
         String[] staleLabels = new String[staleChoices.length];
@@ -458,31 +463,39 @@ public class MainActivity extends Activity {
             @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
         });
 
-        TextView calendarLabel = new TextView(this);
-        calendarLabel.setText(getString(R.string.settings_calendar_label));
-        calendarLabel.setTextSize(14);
-        TextView langLabel = new TextView(this);
-        langLabel.setText(getString(R.string.settings_language_label));
-        langLabel.setTextSize(14);
-        TextView currencyLabel = new TextView(this);
-        currencyLabel.setText(getString(R.string.settings_currency_label));
-        currencyLabel.setTextSize(14);
         TextView themeLabel = new TextView(this);
         themeLabel.setText(getString(R.string.settings_theme_label));
         themeLabel.setTextSize(14);
         TextView widgetThemeLabel = new TextView(this);
         widgetThemeLabel.setText(getString(R.string.settings_widget_theme_label));
         widgetThemeLabel.setTextSize(14);
+        TextView langLabel = new TextView(this);
+        langLabel.setText(getString(R.string.settings_language_label));
+        langLabel.setTextSize(14);
+        TextView calendarLabel = new TextView(this);
+        calendarLabel.setText(getString(R.string.settings_calendar_label));
+        calendarLabel.setTextSize(14);
+        TextView currencyLabel = new TextView(this);
+        currencyLabel.setText(getString(R.string.settings_currency_label));
+        currencyLabel.setTextSize(14);
         TextView staleLabel = new TextView(this);
         staleLabel.setText(getString(R.string.settings_stale_label));
         staleLabel.setTextSize(14);
 
-        box.addView(calendarLabel);
-        box.addView(calendarSpin);
+        box.addView(themeLabel);
+        box.addView(themeSpin);
+        LinearLayout.LayoutParams widgetThemeLp = new LinearLayout.LayoutParams(-1, -2);
+        widgetThemeLp.topMargin = dp(18);
+        box.addView(widgetThemeLabel, widgetThemeLp);
+        box.addView(widgetThemeSpin);
         LinearLayout.LayoutParams langLp = new LinearLayout.LayoutParams(-1, -2);
         langLp.topMargin = dp(18);
         box.addView(langLabel, langLp);
         box.addView(langSpin);
+        LinearLayout.LayoutParams calendarLp = new LinearLayout.LayoutParams(-1, -2);
+        calendarLp.topMargin = dp(18);
+        box.addView(calendarLabel, calendarLp);
+        box.addView(calendarSpin);
         LinearLayout.LayoutParams curLp = new LinearLayout.LayoutParams(-1, -2);
         curLp.topMargin = dp(18);
         box.addView(currencyLabel, curLp);
@@ -490,14 +503,6 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams curInLp = new LinearLayout.LayoutParams(-1, -2);
         curInLp.topMargin = dp(8);
         box.addView(customInput, curInLp);
-        LinearLayout.LayoutParams themeLp = new LinearLayout.LayoutParams(-1, -2);
-        themeLp.topMargin = dp(18);
-        box.addView(themeLabel, themeLp);
-        box.addView(themeSpin);
-        LinearLayout.LayoutParams widgetThemeLp = new LinearLayout.LayoutParams(-1, -2);
-        widgetThemeLp.topMargin = dp(18);
-        box.addView(widgetThemeLabel, widgetThemeLp);
-        box.addView(widgetThemeSpin);
         LinearLayout.LayoutParams staleLp = new LinearLayout.LayoutParams(-1, -2);
         staleLp.topMargin = dp(18);
         box.addView(staleLabel, staleLp);
