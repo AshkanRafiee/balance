@@ -13,7 +13,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-/** The Display-menu "expand all history" preference: an off-by-default boolean that opens every
+/** The Display-menu "expand all history" preference: a boolean (on by default) that opens every
  *  year, month and day of the history breakdown instead of only the current year, month and its days. */
 @RunWith(AndroidJUnit4.class)
 public class HistoryExpandPreferenceTest {
@@ -29,8 +29,8 @@ public class HistoryExpandPreferenceTest {
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
     }
 
-    @Test public void expandAllHistory_freshInstall_defaultsToOff() {
-        assertFalse(BalanceData.getExpandAllHistory(ctx));
+    @Test public void expandAllHistory_freshInstall_defaultsToOn() {
+        assertTrue(BalanceData.getExpandAllHistory(ctx));
     }
 
     @Test public void expandAllHistory_persistsOnAndOff() {

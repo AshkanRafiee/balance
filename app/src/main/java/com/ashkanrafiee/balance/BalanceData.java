@@ -646,10 +646,10 @@ final class BalanceData {
     }
 
     /** Whether the history breakdown opens every year, month and day by default instead of only the
-     *  current year, month and its days. A display choice (off by default), picked in the Display menu. */
+     *  current year, month and its days. A display choice (on by default), picked in the Display menu. */
     static boolean getExpandAllHistory(Context context) {
         return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
-            .getBoolean(KEY_EXPAND_ALL_HISTORY, false);
+            .getBoolean(KEY_EXPAND_ALL_HISTORY, true);
     }
 
     static void setExpandAllHistory(Context context, boolean on) {
