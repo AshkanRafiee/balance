@@ -14,6 +14,9 @@
 
     <string name="status_reading_sms">در حال خواندن پیامک‌های بانکی این دستگاه…</string>
     <string name="status_permission_needed">برای خواندن موجودی به اجازهٔ دسترسی به پیامک نیاز است</string>
+    <string name="status_stale_no_permission">موجودی‌های ذخیره‌شدهٔ شما نمایش داده می‌شود. آخرین به‌روزرسانی آن‌ها زمانی بود که دسترسی به پیامک اجازه داده شده بود، بنابراین پیامک‌های جدید بانک‌ها هنوز در آن‌ها نیست</string>
+    <string name="banner_stale_title">ممکن است موجودی‌ها به‌روز نباشند</string>
+    <string name="banner_stale_action">برای به‌روزرسانی، دسترسی به پیامک را اجازه دهید</string>
     <string name="permission_title">اجازهٔ دسترسی به پیامک</string>
     <string name="permission_settings_message">دسترسی به پیامک توسط سیستم این دستگاه مسدود شده است و پنجرهٔ معمولی نمی‌تواند آن را بدهد. در اندروید ۱۳ و جدیدتر، برنامه‌هایی که از بیرون فروشگاه پلی نصب می‌شوند معمولاً باید اول گزینهٔ «Allow restricted settings» (اجازهٔ تنظیمات محدود) را روشن کنند.\n\nبرای اجازه دادن:\n۱. تنظیمات برنامه ← Permissions ← SMS ← Allow\n۲. اگر SMS خاکستری بود: More (⋮) ← Allow restricted settings ← و بعد دوباره از Permissions اجازه دهید.</string>
     <string name="permission_open_settings">باز کردن تنظیمات</string>
