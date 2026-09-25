@@ -318,6 +318,10 @@ public class MainActivity extends Activity {
         String[] themeLabels = {
             getString(R.string.theme_system), getString(R.string.theme_dark), getString(R.string.theme_light)
         };
+        String[] widgetThemeLabels = {
+            getString(R.string.theme_follow_app), getString(R.string.theme_system),
+            getString(R.string.theme_dark), getString(R.string.theme_light)
+        };
 
         Spinner calendarSpin = new Spinner(this);
         ArrayAdapter<String> calendarAdapter = new ArrayAdapter<>(this,
@@ -394,7 +398,35 @@ public class MainActivity extends Activity {
                 String chosen = ThemeHelper.CHOICES[Math.min(pos, ThemeHelper.CHOICES.length - 1)];
                 if (!chosen.equals(ThemeHelper.theme(MainActivity.this))) {
                     ThemeHelper.setTheme(MainActivity.this, chosen);
+                    // The widget picks the theme up when it is rebuilt, so a placed widget would
+                    // otherwise keep the old palette until its next ten-minute refresh.
+                    BalanceWidgetProvider.push(MainActivity.this);
                     recreate();
+                }
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
+        });
+
+        // The widget's own theme, for the times the app and the home screen want to disagree — a dark
+        // app with a light widget on a light wallpaper. It changes nothing inside the app, so unlike
+        // the theme above it does not recreate the screen, it just repaints the widget.
+        Spinner widgetThemeSpin = new Spinner(this);
+        ArrayAdapter<String> widgetThemeAdapter = new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item, widgetThemeLabels);
+        widgetThemeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        widgetThemeSpin.setAdapter(widgetThemeAdapter);
+        String storedWidgetTheme = ThemeHelper.widgetTheme(this);
+        for (int i = 0; i < ThemeHelper.WIDGET_CHOICES.length; i++)
+            if (ThemeHelper.WIDGET_CHOICES[i].equals(storedWidgetTheme)) {
+                widgetThemeSpin.setSelection(i); break;
+            }
+        widgetThemeSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
+                String chosen = ThemeHelper.WIDGET_CHOICES[
+                    Math.min(pos, ThemeHelper.WIDGET_CHOICES.length - 1)];
+                if (!chosen.equals(ThemeHelper.widgetTheme(MainActivity.this))) {
+                    ThemeHelper.setWidgetTheme(MainActivity.this, chosen);
+                    BalanceWidgetProvider.push(MainActivity.this);
                 }
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
@@ -438,6 +470,9 @@ public class MainActivity extends Activity {
         TextView themeLabel = new TextView(this);
         themeLabel.setText(getString(R.string.settings_theme_label));
         themeLabel.setTextSize(14);
+        TextView widgetThemeLabel = new TextView(this);
+        widgetThemeLabel.setText(getString(R.string.settings_widget_theme_label));
+        widgetThemeLabel.setTextSize(14);
         TextView staleLabel = new TextView(this);
         staleLabel.setText(getString(R.string.settings_stale_label));
         staleLabel.setTextSize(14);
@@ -459,6 +494,10 @@ public class MainActivity extends Activity {
         themeLp.topMargin = dp(18);
         box.addView(themeLabel, themeLp);
         box.addView(themeSpin);
+        LinearLayout.LayoutParams widgetThemeLp = new LinearLayout.LayoutParams(-1, -2);
+        widgetThemeLp.topMargin = dp(18);
+        box.addView(widgetThemeLabel, widgetThemeLp);
+        box.addView(widgetThemeSpin);
         LinearLayout.LayoutParams staleLp = new LinearLayout.LayoutParams(-1, -2);
         staleLp.topMargin = dp(18);
         box.addView(staleLabel, staleLp);

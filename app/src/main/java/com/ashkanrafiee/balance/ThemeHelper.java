@@ -8,6 +8,9 @@ import android.content.res.Configuration;
  * forced dark, or forced light. The app is styled entirely through day/night color resources, so a
  * forced theme only needs the activity's configuration to report the matching {@code uiMode} —
  * {@link #wrap} does that without any dependency, just like {@link LocaleHelper} does for language.
+ *
+ * <p>The home-screen widget can be pointed somewhere else entirely; see {@link WidgetTheme}, which
+ * resolves the widget's own choice and falls back to this one.
  */
 public final class ThemeHelper {
     public static final String THEME_SYSTEM = "system";
@@ -17,8 +20,15 @@ public final class ThemeHelper {
     /** Order of the picker entries in the Display menu: system, dark, light. */
     public static final String[] CHOICES = {THEME_SYSTEM, THEME_DARK, THEME_LIGHT};
 
+    /** The widget's own default: whatever the app is showing, so the two never disagree. */
+    public static final String WIDGET_FOLLOW_APP = "app";
+    /** Order of the widget's picker entries: follow the app, then the same three as the app's. */
+    public static final String[] WIDGET_CHOICES =
+        {WIDGET_FOLLOW_APP, THEME_SYSTEM, THEME_DARK, THEME_LIGHT};
+
     private static final String PREFS = "balance_theme";
     private static final String KEY_THEME = "theme";
+    private static final String KEY_WIDGET_THEME = "widget_theme";
 
     private ThemeHelper() {}
 
@@ -31,6 +41,20 @@ public final class ThemeHelper {
     public static void setTheme(Context context, String value) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY_THEME, value).apply();
+    }
+
+    /**
+     * The stored widget theme (one of the {@code WIDGET_CHOICES} constants). Defaults to following
+     * the app, so an existing install that never heard of this setting keeps matching the app.
+     */
+    public static String widgetTheme(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_WIDGET_THEME, WIDGET_FOLLOW_APP);
+    }
+
+    public static void setWidgetTheme(Context context, String value) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY_WIDGET_THEME, value).apply();
     }
 
     /** Whether the effective theme renders dark: the explicit dark choice, or, when following the

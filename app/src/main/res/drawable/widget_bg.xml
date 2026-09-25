@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Only the card the launcher inflates before BalanceWidgetProvider has pushed a themed one, so it
+  follows the device's own day/night setting for that single frame. Every widget update replaces it
+  with widget_bg_light or widget_bg_dark, which carry literal colors the launcher cannot re-theme.
+-->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
     <solid android:color="@color/widget_bg" />
     <corners android:radius="20dp" />

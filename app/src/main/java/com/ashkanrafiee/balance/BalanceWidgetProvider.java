@@ -112,7 +112,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     }
 
     static RemoteViews buildViews(Context context) {
-        Context c = LocaleHelper.wrap(context);
+        Context c = WidgetTheme.context(context);
         if (LockManager.isEnabled(c)) return lockedViews(c);
         boolean hidden = BalanceData.isWidgetHidden(c);
         long total = 0;
@@ -122,6 +122,12 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         views.setRemoteAdapter(R.id.widget_list, new Intent(c, BalanceWidgetService.class));
         views.setInt(R.id.widget_root, "setLayoutDirection",
             c.getResources().getConfiguration().getLayoutDirection());
+        views.setInt(R.id.widget_root, "setBackgroundResource", WidgetTheme.background(c));
+        // Colors go over as values, not resource ids, or the launcher resolves them against its own
+        // day/night setting and the theme picked in the app is lost. See WidgetTheme.
+        views.setTextColor(R.id.widget_total, c.getColor(R.color.accent));
+        views.setTextColor(R.id.widget_unit, c.getColor(R.color.muted));
+        views.setTextColor(R.id.widget_hint, c.getColor(R.color.muted));
         boolean smsAllowed = c.checkSelfPermission(Manifest.permission.READ_SMS)
             == PackageManager.PERMISSION_GRANTED;
         views.setViewVisibility(R.id.widget_hint, smsAllowed ? View.GONE : View.VISIBLE);
@@ -143,10 +149,12 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
 
     /** The locked widget: a lock glyph and a short message, still tappable to open the app. */
     static RemoteViews lockedViews(Context context) {
-        Context c = LocaleHelper.wrap(context);
+        Context c = WidgetTheme.context(context);
         RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance_locked);
         views.setInt(R.id.widget_root, "setLayoutDirection",
             c.getResources().getConfiguration().getLayoutDirection());
+        views.setInt(R.id.widget_root, "setBackgroundResource", WidgetTheme.background(c));
+        views.setTextColor(R.id.widget_locked_msg, c.getColor(R.color.muted));
         views.setOnClickPendingIntent(R.id.widget_root, openApp(c));
         return views;
     }
