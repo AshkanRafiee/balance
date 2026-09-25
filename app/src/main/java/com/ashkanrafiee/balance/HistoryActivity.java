@@ -399,6 +399,7 @@ public final class HistoryActivity extends Activity {
         body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         scrollView = new PullRefreshScrollView(this);
+        scrollView.setVerticalScrollBarEnabled(false);
         scrollView.addView(body, new ScrollView.LayoutParams(-1, -1));
         root.addView(scrollView, new LinearLayout.LayoutParams(-1, 0, 1));
 
