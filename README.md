@@ -9,7 +9,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Local SMS parsing only — no account, cloud service, analytics, or internet permission
 - Latest balance per supported bank — split per account number when the bank SMS state one — without accumulating repeated messages
 - Combined total balance, with the option to exclude individual accounts from the total
-- Transaction history with deposits and withdrawals, broken down by day, month and year — the current year, month and its days start open, and the Display menu's "History: expand all" option opens every year, month and day instead
+- Transaction history with deposits and withdrawals, broken down by day, month and year — the Display menu's "History: expand all" option is on by default, so every year, month and day start open; turn it off to show only the current year, month and its days
 - History filters by movement type (all, deposits or withdrawals) and by date — today, this month, this year or a custom date range in the active calendar (Persian for Iran, Gregorian for International) — applied to every figure on the screen
 - CSV export of the transaction history — exactly what the current view shows (bank, account, movement type and date range filters; the full history when no filter is active) — saved through the system file picker as a UTF-8 CSV with ISO-8601 UTC timestamps, the date in the active calendar, raw rial amounts and the amounts as displayed
 - Per-transaction notes: tap any history row to attach a private note to that movement; it follows the transaction in every filter and view and is included in CSV exports and encrypted backups
