@@ -67,6 +67,7 @@
     <string name="settings_language_label">زبان</string>
     <string name="settings_currency_label">واحد پول</string>
     <string name="settings_theme_label">پوسته</string>
+    <string name="settings_widget_theme_label">پوستهٔ ویجت</string>
     <string name="onboarding_skip">رد شدن</string>
     <string name="onboarding_next">بعدی</string>
     <string name="onboarding_continue">ورود به Balance</string>
@@ -99,6 +100,7 @@
     </plurals>
     <string name="calendar_persian">شمسی (جلالی)</string>
     <string name="calendar_gregorian">میلادی</string>
+    <string name="theme_follow_app">همانند برنامه</string>
     <string name="theme_system">پیش‌فرض سیستم</string>
     <string name="theme_dark">تیره</string>
     <string name="theme_light">روشن</string>

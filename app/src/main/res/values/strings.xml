@@ -67,6 +67,7 @@
     <string name="settings_language_label">Language</string>
     <string name="settings_currency_label">Currency</string>
     <string name="settings_theme_label">Theme</string>
+    <string name="settings_widget_theme_label">Widget theme</string>
     <string name="onboarding_skip">Skip</string>
     <string name="onboarding_next">Next</string>
     <string name="onboarding_continue">Continue to Balance</string>
@@ -99,6 +100,7 @@
     </plurals>
     <string name="calendar_persian">Persian (Jalali)</string>
     <string name="calendar_gregorian">Gregorian</string>
+    <string name="theme_follow_app">Same as app</string>
     <string name="theme_system">System default</string>
     <string name="theme_dark">Dark</string>
     <string name="theme_light">Light</string>

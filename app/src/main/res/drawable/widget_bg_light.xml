@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The widget card background for a light widget, as literal colors.
+
+  The launcher inflates the widget, not this app, so any @color reference inside this drawable is
+  resolved against the *launcher's* day/night setting, which knows nothing about the theme picked
+  inside Balance. Keeping the colors literal means the launcher can only get them right, and
+  BalanceWidgetProvider picks this drawable or widget_bg_dark to match the app's own theme.
+  Must stay in step with @color/widget_bg and @color/divider in res/values/colors.xml.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="#FFFFFF" />
+    <corners android:radius="20dp" />
+    <stroke
+        android:width="1dp"
+        android:color="#CBD5E1" />
+</shape>
