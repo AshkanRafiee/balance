@@ -2,7 +2,6 @@ package com.ashkanrafiee.balance;
 
 import android.content.Context;
 import android.content.res.Configuration;
-import android.os.Build;
 import android.os.LocaleList;
 
 import java.util.Locale;
@@ -46,20 +45,27 @@ public final class LocaleHelper {
         return false;
     }
 
-    /** Wraps a base Context so its resources resolve using the saved language override, if any. */
+    /** Wraps a base Context so its resources resolve using the saved language override, if any.
+     *
+     *  The process default locale is kept in step with the choice in *both* directions, because it
+     *  is the fallback for everything a context does not answer for itself: a view that resolves
+     *  its text direction from the locale, and every {@code Calendar.getInstance(Locale.getDefault())}
+     *  that prints a month name. It is also a process-lifetime static, so an explicit choice that
+     *  was never undone would go on deciding the direction and the month names of every screen
+     *  until the process died — which is what "fixed after I force-stopped the app" looks like.
+     *  Coming back to "follow the system" therefore puts the device's own locale back, rather than
+     *  leaving the previous language's behind. */
     public static Context wrap(Context base) {
         String tag = currentTag(base);
-        if (tag == null || tag.isEmpty()) return base;
-        Locale locale = new Locale(tag);
-        Configuration config = new Configuration(base.getResources().getConfiguration());
-        if (Build.VERSION.SDK_INT >= 24) {
-            LocaleList localeList = new LocaleList(locale);
-            LocaleList.setDefault(localeList);
-            config.setLocales(localeList);
-        } else {
-            Locale.setDefault(locale);
-            config.locale = locale;
+        LocaleList system = base.getResources().getConfiguration().getLocales();
+        if (tag == null || tag.isEmpty()) {
+            if (!LocaleList.getDefault().equals(system)) LocaleList.setDefault(system);
+            return base;
         }
+        LocaleList localeList = new LocaleList(new Locale(tag));
+        LocaleList.setDefault(localeList);
+        Configuration config = new Configuration(base.getResources().getConfiguration());
+        config.setLocales(localeList);
         return base.createConfigurationContext(config);
     }
 

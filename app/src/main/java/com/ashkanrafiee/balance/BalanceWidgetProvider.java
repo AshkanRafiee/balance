@@ -91,13 +91,19 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         AppWidgetManager manager = AppWidgetManager.getInstance(context);
         int[] ids = manager.getAppWidgetIds(new ComponentName(context, BalanceWidgetProvider.class));
         if (ids.length == 0) return;
+        RemoteViews views = buildViews(context);
+        // While a scan is spinning, applySpin re-pushes spinBase every tick, so a frame cached
+        // before a language, theme or currency change would overwrite the one just rendered and
+        // hold the old direction and the old strings until the scan ended. Handing the animation
+        // the fresh frame keeps it spinning and keeps the change.
+        if (spinBase != null) spinBase = views;
         if (LockManager.isEnabled(context)) {
             // The lock hides the balances: no list data is bound and no refresh is kicked off.
-            for (int id : ids) manager.updateAppWidget(id, buildViews(context));
+            for (int id : ids) manager.updateAppWidget(id, views);
             return;
         }
         manager.notifyAppWidgetViewDataChanged(ids, R.id.widget_list);
-        for (int id : ids) manager.updateAppWidget(id, buildViews(context));
+        for (int id : ids) manager.updateAppWidget(id, views);
     }
 
     /** Rotates the refresh icon on the fully rendered widget, so no other element is ever dropped. */
