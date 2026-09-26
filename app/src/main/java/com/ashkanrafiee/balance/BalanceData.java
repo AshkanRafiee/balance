@@ -35,6 +35,9 @@ final class BalanceData {
     static final String KEY_BALANCES = "balances";
     static final String KEY_TRANSACTIONS = "transactions";
     static final String KEY_TX_NOTES = "transaction_notes";
+    /** The reasons the bank itself stated, keyed exactly like the notes. Kept in a store of its own so
+     *  a detected reason can never overwrite what the user wrote — and never touches it at all. */
+    static final String KEY_TX_REASONS = "transaction_reasons";
     /** Upper bound on one transaction note, so a huge paste cannot bloat the encrypted store. */
     static final int MAX_NOTE_LENGTH = 500;
     static final String PREFS_PREF = "balance_preferences";
@@ -355,40 +358,81 @@ final class BalanceData {
     /** Reads every saved note ({@code noteKey → text}), newest-first irrelevant since it is a plain
      *  lookup map. A missing or corrupt store reads as empty, never null. */
     static Map<String, String> readNotes(Context context) {
-        try {
-            String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
-                .getString(KEY_TX_NOTES, null);
-            if (stored == null) return new LinkedHashMap<>();
-            String json = stored.indexOf('{') == 0 ? stored : decrypt(stored);
-            return new LinkedHashMap<>(deserializeNotes(json));
-        } catch (Exception e) {
-            Log.w(TAG, "readNotes failed", e);
-            return new LinkedHashMap<>();
-        }
+        return readTextStore(context, KEY_TX_NOTES);
     }
 
     /** Persists the supplied notes encrypted under {@link #KEY_TX_NOTES}. An empty map removes the
      *  key so a notes-free device stores nothing at all. */
     static void writeNotes(Context context, Map<String, String> notes) {
+        writeTextStore(context, KEY_TX_NOTES, notes);
+    }
+
+    /** Every reason the bank stated ({@code noteKey → title}), the same plain lookup map the notes are
+     *  read as. Never null, and entirely separate from them. */
+    static Map<String, String> readReasons(Context context) {
+        return readTextStore(context, KEY_TX_REASONS);
+    }
+
+    /** Persists the supplied reasons encrypted under {@link #KEY_TX_REASONS}. */
+    static void writeReasons(Context context, Map<String, String> reasons) {
+        writeTextStore(context, KEY_TX_REASONS, reasons);
+    }
+
+    /** Reads one encrypted {@code key → text} store, or an empty map when it holds nothing or cannot
+     *  be read. A value left in plaintext by an older build is still accepted. */
+    private static Map<String, String> readTextStore(Context context, String key) {
         try {
-            android.content.SharedPreferences.Editor e =
-                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit();
-            if (notes == null || notes.isEmpty()) {
-                e.remove(KEY_TX_NOTES).apply();
-                return;
-            }
-            e.putString(KEY_TX_NOTES, encrypt(serializeNotes(notes))).apply();
-        } catch (Exception ex) {
-            Log.w(TAG, "writeNotes failed", ex);
+            String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
+                .getString(key, null);
+            if (stored == null) return new LinkedHashMap<>();
+            String json = stored.indexOf('{') == 0 ? stored : decrypt(stored);
+            return new LinkedHashMap<>(deserializeTextMap(json));
+        } catch (Exception e) {
+            Log.w(TAG, "text store read failed", e);
+            return new LinkedHashMap<>();
         }
     }
 
-    /** Serializes the note map to the JSON shape used for the local store and the backup payload.
-     *  Empty or null values are dropped, so a cleared note vanishes from the map. */
-    static String serializeNotes(Map<String, String> notes) throws Exception {
+    /** Writes one {@code key → text} store encrypted under {@code key}. An empty map removes the key,
+     *  so a device with nothing to say about this store keeps nothing at all. */
+    private static void writeTextStore(Context context, String key, Map<String, String> map) {
+        try {
+            android.content.SharedPreferences.Editor e =
+                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit();
+            if (map == null || map.isEmpty()) {
+                e.remove(key).apply();
+                return;
+            }
+            e.putString(key, encrypt(serializeTextMap(map))).apply();
+        } catch (Exception ex) {
+            Log.w(TAG, "text store write failed", ex);
+        }
+    }
+
+    /** Folds the reasons one scan detected into the stored ones. Detection only ever adds: a reason
+     *  already stored for a movement is kept as it is, nothing is removed, and the user's own notes are
+     *  not touched at all — they live in a store of their own, so a detected reason can never
+     *  overwrite a note, and clearing a note can never lose what the bank said. Nothing is written when
+     *  every detected reason was already stored, so an unchanged inbox costs no write. */
+    static void mergeReasons(Context context, Map<String, String> detected) {
+        if (detected == null || detected.isEmpty()) return;
+        Map<String, String> reasons = readReasons(context);
+        boolean changed = false;
+        for (Map.Entry<String, String> e : detected.entrySet()) {
+            if (reasons.containsKey(e.getKey())) continue;
+            reasons.put(e.getKey(), e.getValue());
+            changed = true;
+        }
+        if (changed) writeReasons(context, reasons);
+    }
+
+    /** Serializes a per-transaction text map (the notes, or the reasons) to the JSON shape used for
+     *  the local stores and the backup payload. Empty or null values are dropped, so a cleared entry
+     *  vanishes from the map. */
+    static String serializeTextMap(Map<String, String> text) throws Exception {
         JSONObject o = new JSONObject();
-        if (notes != null) {
-            for (Map.Entry<String, String> e : notes.entrySet()) {
+        if (text != null) {
+            for (Map.Entry<String, String> e : text.entrySet()) {
                 String v = e.getValue();
                 if (v != null && !v.isEmpty()) o.put(e.getKey(), v);
             }
@@ -396,8 +440,8 @@ final class BalanceData {
         return o.toString();
     }
 
-    /** Parses a note-map JSON (as produced by {@link #serializeNotes}) into a fresh map. */
-    static Map<String, String> deserializeNotes(String json) {
+    /** Parses a per-transaction text map (as produced by {@link #serializeTextMap}) into a fresh map. */
+    static Map<String, String> deserializeTextMap(String json) {
         Map<String, String> out = new LinkedHashMap<>();
         try {
             JSONObject o = new JSONObject(json);
@@ -408,7 +452,7 @@ final class BalanceData {
                 if (v != null && !v.isEmpty()) out.put(key, v);
             }
         } catch (Exception ex) {
-            Log.w(TAG, "deserializeNotes failed");
+            Log.w(TAG, "deserializeTextMap failed");
         }
         return out;
     }
@@ -447,25 +491,35 @@ final class BalanceData {
         return s.substring(0, end);
     }
 
-    /** Moves notes that a full-history rebuild would orphan: when a stored entry {@code from} is
-     *  replaced by a freshly parsed {@code to}, any note written under the former's key follows the
-     *  movement to the latter's. Keyed by the legacy identity triple before content digests existed,
-     *  so the handover happens exactly when a newer rules version re-parses the same SMS into a
-     *  content-bearing entry — the one case where {@link #noteKey} changes between the same physical
-     *  message. A destination that already carries a note keeps its own text. */
-    static void migrateNoteKeys(Context context, Map<Transaction, Transaction> replaced) {
+    /** Moves the text attached to a movement that a full-history rebuild would orphan: when a stored
+     *  entry {@code from} is replaced by a freshly parsed {@code to}, both the note the user wrote and
+     *  the reason the bank stated follow the movement to the latter's key. Keyed by the legacy identity
+     *  triple before content digests existed, so the handover happens exactly when a newer rules
+     *  version re-parses the same SMS into a content-bearing entry — the one case where
+     *  {@link #noteKey} changes between the same physical message. A destination that already carries
+     *  text keeps its own. */
+    static void migrateTransactionText(Context context, Map<Transaction, Transaction> replaced) {
         Map<String, String> notes = readNotes(context);
+        if (migrateTextKeys(notes, replaced)) writeNotes(context, notes);
+        Map<String, String> reasons = readReasons(context);
+        if (migrateTextKeys(reasons, replaced)) writeReasons(context, reasons);
+    }
+
+    /** Moves the text of every replaced entry to its replacement's key, in place. Returns whether
+     *  anything moved, so the caller writes the store only when it changed. */
+    private static boolean migrateTextKeys(Map<String, String> text,
+            Map<Transaction, Transaction> replaced) {
         boolean changed = false;
         for (Map.Entry<Transaction, Transaction> e : replaced.entrySet()) {
             String from = noteKey(e.getKey());
             String to = noteKey(e.getValue());
             if (from.equals(to)) continue;
-            String text = notes.remove(from);
-            if (text == null || notes.containsKey(to)) continue;
-            notes.put(to, text);
+            String value = text.remove(from);
+            if (value == null || text.containsKey(to)) continue;
+            text.put(to, value);
             changed = true;
         }
-        if (changed) writeNotes(context, notes);
+        return changed;
     }
 
     static void write(Context context, LinkedHashMap<String, Bank> map) {
@@ -489,12 +543,15 @@ final class BalanceData {
      *  preferences are deliberately untouched — the hide/unmask toggle, the language and the sort mode
      *  are choices, not data (a data reset must not dump the user back to defaults); the excluded
      *  entries are forgotten too, because a fresh install has no exclusions. Transaction notes are a
-     *  hard-won recollection, so they are kept unless the user explicitly opts into deleting them. */
+     *  hard-won recollection, so they are kept unless the user explicitly opts into deleting them. The
+     *  detected reasons go either way: they are the bank's own words, re-read from the messages the
+     *  rebuild below reprocesses, and the transactions they describe are deleted here with everything
+     *  else — keeping them would only leave entries nothing points at. */
     static void reset(Context context, boolean alsoNotes) {
         android.content.SharedPreferences.Editor data =
             context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
                 .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).remove(KEY_HISTORY_LAST_BALANCE)
-                .remove(KEY_RECENT_MOVEMENTS);
+                .remove(KEY_RECENT_MOVEMENTS).remove(KEY_TX_REASONS);
         if (alsoNotes) data.remove(KEY_TX_NOTES);
         data.apply();
         context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
@@ -875,6 +932,9 @@ final class BalanceData {
             }
             int added = 0;
             long newest = 0;
+            // The reasons this scan reads out of the bank messages, folded into the store once the
+            // movements they belong to are written. Declared out here so it survives the cursor block.
+            Map<String, String> detectedReasons = new LinkedHashMap<>();
             String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
             String[] args = selection != null ? new String[]{Long.toString(hwm)} : null;
             try (Cursor cursor = context.getContentResolver().query(
@@ -954,6 +1014,13 @@ final class BalanceData {
                     Transaction t = parseMovement(bank, sender, body, date,
                         last != null, last != null ? last : 0);
                     if (t != null) {
+                        // The reason the bank stated, read from the very message that proves the
+                        // movement — so only a settled movement is ever given one, and a promotion or
+                        // an OTP prompt (which parse to no movement at all) can never attach a reason
+                        // to anything. It is collected under the note key and stored beside the notes
+                        // after the transactions, so a user note is never what gets written here.
+                        String reason = BankRules.extractReason(bank, body);
+                        if (reason != null) detectedReasons.put(noteKey(t), reason);
                         // The message fingerprint is the primary identity: it folds sender + movement
                         // amount + resulting balance (falling back to the normalized body), so it is
                         // independent of time. A bank sending the same SMS twice is one transaction even
@@ -1150,7 +1217,7 @@ final class BalanceData {
                     stored = rebuilt;
                     if (!replaced.isEmpty() || !twinOf.isEmpty()) {
                         replaced.putAll(twinOf);
-                        migrateNoteKeys(context, replaced);
+                        migrateTransactionText(context, replaced);
                     }
                 } else {
                     for (int i = fresh.size() - 1; i >= 0; i--) {
@@ -1164,6 +1231,9 @@ final class BalanceData {
                 Log.w(TAG, "history scan failed", e);
             }
             writeTransactions(context, stored);
+            // The reasons land after the transactions they belong to, so the store never holds a
+            // reason for a movement that was not written.
+            mergeReasons(context, detectedReasons);
             SharedPreferences.Editor editor = prefs.edit();
             // Only commit the rules version and watermark when the scan finished cleanly: marking a
             // full rebuild as done (or advancing past rows that failed) would skip the correction

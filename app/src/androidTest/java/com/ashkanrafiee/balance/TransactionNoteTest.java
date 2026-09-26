@@ -88,7 +88,7 @@ public class TransactionNoteTest {
 
     @Test public void note_followsLegacyReplacementThroughFullRebuild() {
         // A note written on a pre-content-digest entry lives under its legacy identity triple; when a
-        // full re-scan re-parses the same SMS into a content-bearing entry, migrateNoteKeys must move
+        // full re-scan re-parses the same SMS into a content-bearing entry, migrateTransactionText must move
         // the note to the new key instead of letting it silently vanish from the rows and the export.
         Transaction legacy = new Transaction("Tejarat", null, T, 500_000L, null, null);
         Transaction fresh = new Transaction("Tejarat", null, T, 500_000L, "sig-1", "content-A");
@@ -97,7 +97,7 @@ public class TransactionNoteTest {
         BalanceData.setNote(ctx, legacy, "carried over");
         Map<Transaction, Transaction> replaced = new java.util.HashMap<>();
         replaced.put(legacy, fresh);
-        BalanceData.migrateNoteKeys(ctx, replaced);
+        BalanceData.migrateTransactionText(ctx, replaced);
 
         assertNull(BalanceData.getNote(ctx, legacy));
         assertEquals("carried over", BalanceData.getNote(ctx, fresh));
@@ -110,7 +110,7 @@ public class TransactionNoteTest {
         BalanceData.setNote(ctx, fresh, "new on the fresh entry");
         Map<Transaction, Transaction> replaced = new java.util.HashMap<>();
         replaced.put(legacy, fresh);
-        BalanceData.migrateNoteKeys(ctx, replaced);
+        BalanceData.migrateTransactionText(ctx, replaced);
 
         assertEquals("new on the fresh entry", BalanceData.getNote(ctx, fresh));
     }
@@ -122,7 +122,7 @@ public class TransactionNoteTest {
         Map<Transaction, Transaction> replaced = new java.util.HashMap<>();
         replaced.put(a, b);
         BalanceData.setNote(ctx, a, "stable");
-        BalanceData.migrateNoteKeys(ctx, replaced);
+        BalanceData.migrateTransactionText(ctx, replaced);
 
         assertEquals("stable", BalanceData.getNote(ctx, b));
         assertEquals("stable", BalanceData.getNote(ctx, a));
@@ -157,11 +157,11 @@ public class TransactionNoteTest {
 
         String serialized;
         try {
-            serialized = BalanceData.serializeNotes(notes);
+            serialized = BalanceData.serializeTextMap(notes);
         } catch (Exception e) {
             throw new AssertionError(e);
         }
-        Map<String, String> round = BalanceData.deserializeNotes(serialized);
+        Map<String, String> round = BalanceData.deserializeTextMap(serialized);
         assertEquals("stored off-device safe", round.get(BalanceData.noteKey(t)));
     }
 
