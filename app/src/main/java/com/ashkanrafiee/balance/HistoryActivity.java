@@ -510,7 +510,10 @@ public final class HistoryActivity extends Activity {
             chip.setMaxLines(1);
             chip.setEllipsize(android.text.TextUtils.TruncateAt.END);
             chip.setMinWidth(0);
-            chip.setPadding(dp(9), dp(5), dp(9), dp(5));
+            // Tighter sides than the plain chips: the copy glyph eats this chip's width too, and a
+            // ten-digit number plus a long label has to fit beside it before the bar starts
+            // ellipsizing the number itself.
+            chip.setPadding(dp(6), dp(5), dp(6), dp(5));
             // The chip is the bar's flexible element: a very long account number makes the chip
             // shrink and ellipsize instead of pushing the export button out past the screen edge,
             // so the action stays visible no matter how long the account number is.
