@@ -51,9 +51,35 @@ public final class CurrencyHelper {
      *  rules: Toman divides by ten, every other currency shows the raw figure. */
     public static String amount(Context context, long n) {
         if (CURRENCY_TOMAN.equals(currency(context))) return BalanceData.toman(context, n);
-        Locale locale = LocaleHelper.isPersian(context) ? new Locale("fa") : Locale.US;
-        return NumberFormat.getNumberInstance(locale).format(n);
+        return display(context, n);
     }
+
+    /** A number written the way this app writes numbers, in the chosen language. */
+    static String display(Context context, long n) {
+        Locale locale = LocaleHelper.isPersian(context) ? FA : Locale.US;
+        Numbers c = NUMBERS.get();
+        if (!locale.equals(c.locale)) {
+            c.format = NumberFormat.getNumberInstance(locale);
+            c.locale = locale;
+        }
+        return c.format.format(n);
+    }
+
+    /** One formatter, belonging to the thread that asked for it and rebuilt when the language
+     *  changes. {@link NumberFormat#getNumberInstance} builds a new DecimalFormat on every call, and
+     *  the history screen asks for one per movement row, so a long account spent most of its time
+     *  building formatters. DecimalFormat is not thread safe, so a single shared one would be a data
+     *  race as soon as any of this ran off the main thread; a per-thread one avoids both. */
+    private static final class Numbers {
+        Locale locale = Locale.US;
+        NumberFormat format = NumberFormat.getNumberInstance(Locale.US);
+    }
+
+    private static final ThreadLocal<Numbers> NUMBERS = new ThreadLocal<Numbers>() {
+        @Override protected Numbers initialValue() { return new Numbers(); }
+    };
+
+    private static final Locale FA = new Locale("fa");
 
     public static void setCurrency(Context context, String value) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

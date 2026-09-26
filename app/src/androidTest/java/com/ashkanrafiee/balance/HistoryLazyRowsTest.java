@@ -173,6 +173,21 @@ public class HistoryLazyRowsTest {
         await(() -> clockTimes() > before, 10_000, "the next batch to start on the way down");
     }
 
+    @Test public void aCrowdedMonthStillFinishesFillingOut() {
+        // Scrolling down through a crowded month must eventually show the whole of it. A fill that
+        // quietly stopped would leave the account short, with nothing on screen to say so.
+        int rows = storeTheWholePreviousMonth(3);
+        int days = rows / 3;
+        launch();
+        openOlderYearIfClosed();
+        assertTrue("the month must open part-built to be worth testing", dayCards() < days);
+        await(() -> {
+            scrollToBottom();
+            return dayCards() >= days;
+        }, 60_000, "the month to fill out as the user scrolls through it");
+        assertEquals("every day of the month must end up on screen", days, dayCards());
+    }
+
     @Test public void aSmallMonthIsUnaffectedByTheBudget() {
         // The budget must not cost anything on an ordinary month, which is nearly every month of
         // nearly every account. A month that fits is built whole, with nothing left to reveal.
@@ -252,6 +267,27 @@ public class HistoryLazyRowsTest {
     /** How many movement rows are on screen, told apart by the clock time only a row carries. */
     private static int clockTimes() {
         return clockRows().size();
+    }
+
+    /** How many day cards are on screen, which is how much of the month has been built. Counted by
+     *  the tag the screen puts on each one, since recognising a day header by its text would tie the
+     *  test to the wording of the date. */
+    private static int dayCards() {
+        final int[] n = {0};
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            for (Activity a : resumed()) {
+                countDayCards(a.getWindow().getDecorView(), n);
+            }
+        });
+        return n[0];
+    }
+
+    private static void countDayCards(View v, int[] n) {
+        if (HistoryActivity.DAY_TAG.equals(v.getTag())) n[0]++;
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) countDayCards(g.getChildAt(i), n);
+        }
     }
 
     /** The topmost movement row on screen, as a view, so a test can tell a kept row from a new one. */

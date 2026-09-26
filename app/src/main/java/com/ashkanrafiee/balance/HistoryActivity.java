@@ -64,7 +64,9 @@ import java.util.Set;
  */
 public final class HistoryActivity extends Activity {
     private static final String MONTH_TAG = "history_month";
-    private static final String DAY_TAG = "history_day";
+    /** Visible to the instrumented tests so a test can count how much of a month is built
+     *  without having to recognise a day header by its text. */
+    static final String DAY_TAG = "history_day";
     private static final String YEAR_TAG = "history_year";
 
     /** Result code for the system file picker that picks where the CSV is saved. */
@@ -246,12 +248,29 @@ public final class HistoryActivity extends Activity {
     private void fitToWidth(TextView v, int maxSp, int minSp, int capDp) {
         v.setSingleLine(true);
         v.setAutoSizeTextTypeWithDefaults(TextView.AUTO_SIZE_TEXT_TYPE_NONE);
-        v.addOnLayoutChangeListener(
-            (view, l, t, r, b, ol, ot, or, ob) -> applyFit(v, maxSp, minSp, capDp));
-        v.post(() -> applyFit(v, maxSp, minSp, capDp));
+        // The listener below runs on every layout pass, and a pass used to cost a fresh Paint and a
+        // sixteen-step search over text sizes. Appending rows lays out every fitted row in the month
+        // again, so repeating that search was most of the work behind a stutter while scrolling.
+        // The width and the text are the only two things that can change the answer, so remembering
+        // them is enough to make a pass that changes neither cost nothing.
+        final int[] fittedWidth = {-1};
+        final String[] fittedText = {null};
+        Runnable refit = () -> {
+            int avail = availableWidth(v, capDp);
+            if (avail <= 0) return;
+            String s = v.getText().toString();
+            if (s.isEmpty()) return;
+            if (avail == fittedWidth[0] && s.equals(fittedText[0])) return;
+            fittedWidth[0] = avail;
+            fittedText[0] = s;
+            applyFit(v, maxSp, minSp, avail, s);
+        };
+        v.addOnLayoutChangeListener((view, l, t, r, b, ol, ot, or, ob) -> refit.run());
+        v.post(refit);
     }
 
-    private void applyFit(TextView v, int maxSp, int minSp, int capDp) {
+    /** The width a fitted view has to fit in, or zero when it cannot be known yet. */
+    private int availableWidth(TextView v, int capDp) {
         int avail;
         View p = v.getParent() instanceof View ? (View) v.getParent() : null;
         boolean fills = v.getLayoutParams() instanceof LinearLayout.LayoutParams
@@ -283,38 +302,43 @@ public final class HistoryActivity extends Activity {
         } else {
             avail = v.getWidth() - v.getCompoundPaddingLeft() - v.getCompoundPaddingRight();
         }
-        if (avail <= 0) return;
-        String s = v.getText().toString();
-        if (s.isEmpty()) return;
-        android.graphics.Paint paint = new android.graphics.Paint(v.getPaint());
+        return avail;
+    }
+
+    private void applyFit(TextView v, int maxSp, int minSp, int avail, String s) {
+        fitPaint.set(v.getPaint());
         float maxPx = sp(maxSp);
         float minPx = sp(minSp);
-        paint.setTextSize(maxPx);
-        if (paint.measureText(s) <= avail) {
+        fitPaint.setTextSize(maxPx);
+        if (fitPaint.measureText(s) <= avail) {
             fitPx(v, maxPx);
             return;
         }
-        paint.setTextSize(minPx);
-        if (paint.measureText(s) <= avail) {
+        fitPaint.setTextSize(minPx);
+        if (fitPaint.measureText(s) <= avail) {
             // Binary search the largest size (in px) that still fits.
             float lo = minPx, hi = maxPx;
             for (int i = 0; i < 16; i++) {
                 float mid = (lo + hi) / 2f;
-                paint.setTextSize(mid);
-                if (paint.measureText(s) <= avail) lo = mid; else hi = mid;
+                fitPaint.setTextSize(mid);
+                if (fitPaint.measureText(s) <= avail) lo = mid; else hi = mid;
             }
             fitPx(v, lo);
             return;
         }
         // Even the floor is too wide: shrink below it until the digits fit completely.
         float size = minPx;
-        paint.setTextSize(size);
-        while (size > 1f && paint.measureText(s) > avail) {
+        fitPaint.setTextSize(size);
+        while (size > 1f && fitPaint.measureText(s) > avail) {
             size *= 0.95f;
-            paint.setTextSize(size);
+            fitPaint.setTextSize(size);
         }
         fitPx(v, size);
     }
+
+    /** Reused for every fit, so that sizing a row allocates nothing. Main thread only, which is
+     *  where fitting happens. */
+    private final android.graphics.Paint fitPaint = new android.graphics.Paint();
 
     /** Applies a final pixel text size that actually differs from the current one, so repeated
      *  layout passes converge instead of re-queueing changes forever. */
@@ -1131,6 +1155,11 @@ public final class HistoryActivity extends Activity {
      *  that is never going to reach the end has not had the whole history built underneath it. */
     private static final float PREFETCH_SCREENS = 1.5f;
     private static final int PREFETCH_MIN_PX = 700;
+    /** Day cards a single frame adds. A day card is a handful of views, and a view is not cheap to
+     *  make, so a whole batch in one frame is a visible pause however far ahead of the user it was
+     *  started. Spreading the batch over a few frames keeps any one of them short, and since the
+     *  work begins a screen and a half early, the rows are there before they are needed. */
+    private static final int CARDS_PER_FRAME = 3;
     /** A reveal asked for by a scroll and still waiting to be appended. */
     private boolean revealQueued;
 
@@ -1858,7 +1887,7 @@ public final class HistoryActivity extends Activity {
             View v = daysHost.getChildAt(i);
             if (DAY_TAG.equals(v.getTag())) daysHost.removeViewAt(i);
         }
-        appendDays(daysHost, days, monthKey, 0);
+        appendDays(daysHost, days, monthKey, 0, Integer.MAX_VALUE);
     }
 
     /**
@@ -1871,16 +1900,20 @@ public final class HistoryActivity extends Activity {
      * that had just asked for it. Appending cannot move what is above, so the content the user is
      * reading does not shift either.
      */
-    private void appendDays(LinearLayout daysHost, List<DayGroup> days, String monthKey, int from) {
+    private int appendDays(LinearLayout daysHost, List<DayGroup> days, String monthKey, int from,
+                           int max) {
         int want = dayCardsFor(days, revealedFor(monthKey));
-        for (int i = Math.max(0, from); i < want; i++) {
+        int added = 0;
+        for (int i = Math.max(0, from); i < want && added < max; i++) {
             LinearLayout card = dayCard(days.get(i), daysHost, days, monthKey);
             card.setTag(DAY_TAG);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
             lp.topMargin = dp(i > 0 ? 2 : 0);
             daysHost.addView(card, lp);
+            added++;
         }
-        builtCards.put(monthKey, want);
+        builtCards.put(monthKey, Math.max(0, from) + added);
+        return added;
     }
 
     private int prefetchPx(int viewport) {
@@ -1928,9 +1961,41 @@ public final class HistoryActivity extends Activity {
         }
         if (target == null) return;
         String key = target.key();
-        revealedRows.put(key, revealedFor(key) + BATCH);
         LinearLayout host = monthDaysHosts.get(key);
-        if (host != null) appendDays(host, target.days, key, builtCardsFor(key));
+        if (host == null) return;
+        // The budget only grows once the rows it allowed are on screen, so a batch that needs more
+        // than one frame is not quietly allowed to be a larger batch as well.
+        if (builtCardsFor(key) >= dayCardsFor(target.days, revealedFor(key))) {
+            revealedRows.put(key, revealedFor(key) + BATCH);
+        }
+        int from = builtCardsFor(key);
+        int limit = dayCardsFor(target.days, revealedFor(key));
+        int added = appendDays(host, target.days, key, from, Math.min(CARDS_PER_FRAME, limit - from));
+        if (added > 0 && hasMoreToReveal(target) && expectingMore()) queueReveal();
+    }
+
+    /**
+     * Whether the user is close enough to the end of what is built to be expecting more of it.
+     *
+     * <p>Answered in pixels of content below their screen rather than in batches, so it comes out the
+     * same however the month divides into days. It is what stops the fill from running away: a batch
+     * is spread over several frames, and each of those asks again, so without this a single scroll
+     * would build the whole history. The list keeps about a screen and a half of content below the
+     * user and no more.
+     *
+     * <p>A user who has not moved is asking for nothing, so a freshly opened month still builds only
+     * its first batch. That is deliberate: opening a crowded month should not do a second screen of
+     * work before the user has looked at the first.
+     */
+    private boolean expectingMore() {
+        if (scrollView == null) return false;
+        ViewGroup list = (ViewGroup) scrollView.getChildAt(0);
+        if (list == null) return false;
+        if (scrollView.getScrollY() <= 0) return false;
+        int content = list.getHeight();
+        int viewport = scrollView.getHeight();
+        if (content <= viewport) return true;
+        return scrollView.getScrollY() + viewport >= content - prefetchPx(viewport);
     }
 
     /** Whether an open month still has day cards the budget has not built.
@@ -2789,10 +2854,18 @@ public final class HistoryActivity extends Activity {
 
     /** The movement's time of day as a compact "HH:mm" string in the app digits. */
     private String timeText(long date) {
-        String s = new java.text.SimpleDateFormat("HH:mm", Locale.US)
-            .format(new java.util.Date(date));
+        String s = CLOCK.get().format(new java.util.Date(date));
         return LocaleHelper.isPersian(this) ? faDigitsString(s) : s;
     }
+
+    /** The clock a movement row shows, kept per thread. SimpleDateFormat is not thread safe, and
+     *  building one per row was a large part of the cost of filling a screen with movements. */
+    private static final ThreadLocal<java.text.SimpleDateFormat> CLOCK =
+        new ThreadLocal<java.text.SimpleDateFormat>() {
+            @Override protected java.text.SimpleDateFormat initialValue() {
+                return new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US);
+            }
+        };
 
     /** Converts a calendar number (year, day) to Persian digits without any thousands grouping —
      *  grouping separators belong to prices, not calendar numerals like "۱۴۰۳". */
