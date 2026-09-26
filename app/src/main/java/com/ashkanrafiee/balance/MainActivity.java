@@ -508,17 +508,6 @@ public class MainActivity extends Activity {
         box.addView(staleLabel, staleLp);
         box.addView(staleSpin);
 
-        // A single on/off choice (not a dropdown): with it on, the history breakdown opens every
-        // year, month and day by default instead of only the current year, month and its days.
-        CheckBox expandAll = new CheckBox(this);
-        expandAll.setText(getString(R.string.settings_history_expand_all_label));
-        expandAll.setChecked(BalanceData.getExpandAllHistory(MainActivity.this));
-        expandAll.setOnCheckedChangeListener((b, on) ->
-            BalanceData.setExpandAllHistory(MainActivity.this, on));
-        LinearLayout.LayoutParams expandLp = new LinearLayout.LayoutParams(-1, -2);
-        expandLp.topMargin = dp(18);
-        box.addView(expandAll, expandLp);
-
         showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.footer_display))
             .setView(box)

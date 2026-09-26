@@ -28,6 +28,7 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -410,6 +411,22 @@ public final class HistoryActivity extends Activity {
 
         indicatorOverlay = new PullIndicatorOverlay();
         scrollView.setIndicatorOverlay(indicatorOverlay);
+        // Reaching the bottom of the list is the user asking for more of it, so the next batch of
+        // movements is built there and then, rather than all at once when the month opened.
+        scrollView.setOnScrollChangeListener((v, sx, sy, ox, oy) -> {
+            if (sy <= oy) return;
+            android.widget.ScrollView sv = (android.widget.ScrollView) v;
+            ViewGroup list = (ViewGroup) sv.getChildAt(0);
+            if (list == null) return;
+            int content = list.getHeight();
+            int viewport = sv.getHeight();
+            // Only a real scroll, and only with something below to reach. Without these two the
+            // listener also fires on the first layout pass, when the list has no height yet, and
+            // would build the whole history before the user had scrolled anywhere.
+            if (content <= viewport) return;
+            if (sy + viewport < content - REVEAL_NEAR_PX) return;
+            revealMore();
+        });
         host.addView(indicatorOverlay, new FrameLayout.LayoutParams(-1, -1));
 
         lockOverlay = new LockOverlay(this);
@@ -1082,6 +1099,20 @@ public final class HistoryActivity extends Activity {
     /** Cached reference to the year list so year-header taps can re-render the whole section. */
     private List<YearGroup> allYears;
 
+    /** How many movement rows a month has built so far, by month key. A month is not read in one
+     *  go: its first batch of days is built, and the rest arrive as the user reaches the bottom of
+     *  the screen. Kept as a field rather than read off the views, so it survives the rebuilds that
+     *  every tap triggers and the months already opened stay opened. */
+    private final Map<String, Integer> revealedRows = new HashMap<>();
+    /** Each open month's days container, so revealing more can rebuild that month alone. */
+    private final Map<String, LinearLayout> monthDaysHosts = new HashMap<>();
+
+    /** Rows built for a month before the user asks for more, and how many more each request adds. */
+    private static final int FIRST_BATCH = 25;
+    private static final int BATCH = 30;
+    /** How close to the bottom of the list counts as reaching it. */
+    private static final int REVEAL_NEAR_PX = 700;
+
     /** The unaccounted money on screen for the current data, newest first. Drives the explainer
      *  affordance next to the breakdown heading; empty whenever the history fully adds up. */
     private List<Residual> allResiduals = new ArrayList<>();
@@ -1092,24 +1123,15 @@ public final class HistoryActivity extends Activity {
     /** Scroll offset pending restore until the rebuilt list is laid out. */
     private int pendingScroll;
 
-    /** Expands the current year, current month and its days by default once per screen, so the
-     *  freshest history is visible without any interaction without undoing later collapses. When
-     *  the Display menu's "expand all history" option is on, every year, month and day opens instead. */
+    /** Expands the current year, current month and its days once per screen, so the freshest
+     *  history is visible without any interaction without undoing later collapses. Opening a year
+     *  brings its months with it, and opening a month brings its days, so every level stands on
+     *  its own and there is no longer a way to ask for the whole history at once. */
     private boolean expandedSeeded;
 
     private void seedExpanded() {
         if (expandedSeeded) return;
         expandedSeeded = true;
-        if (BalanceData.getExpandAllHistory(this)) {
-            for (YearGroup y : allYears) {
-                expandedYears.add(y.key());
-                for (MonthGroup m : y.months) {
-                    expandedMonths.add(m.key());
-                    for (DayGroup d : m.days) expandedDays.add(d.key());
-                }
-            }
-            return;
-        }
         CalDate now = now();
         expandedYears.add(String.valueOf(now.year));
         expandedMonths.add(now.year + "/" + now.month);
@@ -1267,6 +1289,7 @@ public final class HistoryActivity extends Activity {
                     refreshDates();
                     rebuildFilterBar();
                     body.removeAllViews();
+                    monthDaysHosts.clear();
                     if (lists.years.isEmpty()) {
                         emptyState();
                     } else {
@@ -1477,6 +1500,12 @@ public final class HistoryActivity extends Activity {
             }
         }
         for (YearGroup y : years) {
+            // An open year brings its months, and each open month brings its days, whether the user
+            // opened them or reached them through the year above. Doing this here rather than in the
+            // tap handlers is what keeps a month looking the same either way.
+            if (expandedYears.contains(y.key())) {
+                for (MonthGroup m : y.months) expandedMonths.add(m.key());
+            }
             LinearLayout card = yearCard(y);
             card.setTag(YEAR_TAG);
             host.addView(card, margin(0, 0, 0, 12));
@@ -1563,7 +1592,11 @@ public final class HistoryActivity extends Activity {
             if (MONTH_TAG.equals(v.getTag())) monthsHost.removeViewAt(i);
         }
         for (int i = 0; i < months.size(); i++) {
-            LinearLayout row = monthCard(months.get(i), monthsHost, months);
+            MonthGroup m = months.get(i);
+            if (expandedMonths.contains(m.key())) {
+                for (DayGroup d : m.days) expandedDays.add(d.key());
+            }
+            LinearLayout row = monthCard(m, monthsHost, months);
             row.setTag(MONTH_TAG);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
             lp.topMargin = dp(i > 0 ? 6 : 0);
@@ -1620,7 +1653,8 @@ public final class HistoryActivity extends Activity {
             LinearLayout inner = new LinearLayout(this);
             inner.setOrientation(LinearLayout.VERTICAL);
             inner.setPaddingRelative(dp(10), 0, 0, 0);
-            renderDays(inner, m.days);
+            monthDaysHosts.put(m.key(), inner);
+            renderDays(inner, m.days, m.key());
             LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(-1, -2);
             ip.topMargin = dp(4);
             box.addView(inner, ip);
@@ -1628,14 +1662,32 @@ public final class HistoryActivity extends Activity {
         return box;
     }
 
-    /** Renders a month's day rows into its days container, each day a distinct sub-item. */
-    private void renderDays(LinearLayout daysHost, List<DayGroup> days) {
+    /** Renders a month's day rows into its days container, each day a distinct sub-item.
+     *
+     *  <p>Only as many days as {@link #revealedFor} allows are built. Days are the unit because a
+     *  half-built day would read as a whole one, and because a day is a handful of movements. The
+     *  first day is always built, so a month can never be left showing nothing at all no matter how
+     *  the budget divides. */
+    private void renderDays(LinearLayout daysHost, List<DayGroup> days, String monthKey) {
         for (int i = daysHost.getChildCount() - 1; i >= 0; i--) {
             View v = daysHost.getChildAt(i);
             if (DAY_TAG.equals(v.getTag())) daysHost.removeViewAt(i);
         }
+        int left = revealedFor(monthKey);
+        boolean builtAny = false;
         for (int i = 0; i < days.size(); i++) {
-            LinearLayout card = dayCard(days.get(i), daysHost, days);
+            DayGroup g = days.get(i);
+            int rows = g.txs.size() + g.residuals.size();
+            if (expandedDays.contains(g.key()) && !builtAny && rows > left) {
+                // Always make progress, even when one day is larger than a whole batch.
+                left -= rows;
+                builtAny = true;
+            } else if (expandedDays.contains(g.key())) {
+                if (rows > left) break;
+                left -= rows;
+                builtAny = true;
+            }
+            LinearLayout card = dayCard(g, daysHost, days, monthKey);
             card.setTag(DAY_TAG);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
             lp.topMargin = dp(i > 0 ? 2 : 0);
@@ -1643,9 +1695,78 @@ public final class HistoryActivity extends Activity {
         }
     }
 
+    /**
+     * Builds one more batch of movements in the open month nearest the bottom of the list.
+     *
+     *  <p>Months are walked oldest first, because that is the order the user reaches them in, and
+     *  only the first month with movements left to build is touched, so a single scroll costs one
+     *  month's rebuild rather than a whole screen's. Appending inside a month never moves what is
+     *  already on screen, so the list does not jump under the user.
+     */
+    private void revealMore() {
+        if (allYears == null) return;
+        MonthGroup target = null;
+        for (YearGroup y : allYears) {
+            if (!expandedYears.contains(y.key())) continue;
+            for (int i = y.months.size() - 1; i >= 0; i--) {
+                MonthGroup m = y.months.get(i);
+                if (!expandedMonths.contains(m.key())) continue;
+                if (hasMoreToReveal(m)) { target = m; break; }
+            }
+            if (target != null) break;
+        }
+        if (target == null) return;
+        revealedRows.put(target.key(), revealedFor(target.key()) + BATCH);
+        LinearLayout host = monthDaysHosts.get(target.key());
+        if (host != null) renderDays(host, target.days, target.key());
+    }
+
+    /** Whether an open month still has movements the budget has not built. */
+    private boolean hasMoreToReveal(MonthGroup m) {
+        return openLines(m) > builtLines(m);
+    }
+
+    /** Every movement an open month holds, across the days that are open. */
+    private int openLines(MonthGroup m) {
+        int n = 0;
+        for (DayGroup d : m.days) {
+            if (expandedDays.contains(d.key())) n += d.txs.size() + d.residuals.size();
+        }
+        return n;
+    }
+
+    /**
+     * How many of a month's movements its budget actually builds.
+     *
+     * <p>This has to follow exactly the rule {@link #renderDays} follows, including the rule that the
+     * first day is always built. An earlier version of this counted differently, which meant the
+     * reveal believed a month was finished precisely when its budget had run out, and so never
+     * revealed anything at all.
+     */
+    private int builtLines(MonthGroup m) {
+        int left = revealedFor(m.key());
+        int built = 0;
+        boolean builtAny = false;
+        for (DayGroup d : m.days) {
+            if (!expandedDays.contains(d.key())) continue;
+            int rows = d.txs.size() + d.residuals.size();
+            if (builtAny && rows > left) break;
+            left -= rows;
+            built += rows;
+            builtAny = true;
+        }
+        return built;
+    }
+
+    private int revealedFor(String monthKey) {
+        Integer n = revealedRows.get(monthKey);
+        return n == null ? FIRST_BATCH : n;
+    }
+
     /** A collapsible day row: caret, a Today/Yesterday tag over the date, transaction count and
      *  the day's net; expanding it lists that day's transactions newest first. */
-    private LinearLayout dayCard(DayGroup g, LinearLayout daysHost, List<DayGroup> days) {
+    private LinearLayout dayCard(DayGroup g, LinearLayout daysHost, List<DayGroup> days,
+                                String monthKey) {
         boolean open = expandedDays.contains(g.key());
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -1659,7 +1780,7 @@ public final class HistoryActivity extends Activity {
         head.setPaddingRelative(dp(4), dp(6), dp(4), dp(6));
         head.setOnClickListener(v -> {
             if (open) expandedDays.remove(g.key()); else expandedDays.add(g.key());
-            renderDays(daysHost, days);
+            renderDays(daysHost, days, monthKey);
         });
         head.addView(caret(open, 13), new LinearLayout.LayoutParams(dp(22), -2));
 

@@ -88,7 +88,6 @@
     <string name="onboarding_sms_body">Balance needs SMS read access to see the bank balance messages stored on this phone. The messages are read in place on your device and never transmitted anywhere.</string>
     <string name="onboarding_sms_granted">SMS access is already granted — nothing else is needed.</string>
     <string name="settings_stale_label">Stale balance warning</string>
-    <string name="settings_history_expand_all_label">History: expand all months, years and days</string>
     <string name="stale_option_off">Off</string>
     <plurals name="stale_days">
         <item quantity="one">%1$d day</item>

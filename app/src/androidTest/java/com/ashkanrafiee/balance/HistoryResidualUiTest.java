@@ -40,11 +40,13 @@ public class HistoryResidualUiTest {
 
     private static final String MELLAT = "Mellat";
     private static final String ACCOUNT = "111";
-    private static final long DAY = 86400000L;
-
-    /** A fixed "now" the stored movements sit relative to, so the screen's today/month/year sums and
-     *  its day groups do not depend on the day the test happens to run. */
-    private static final long BASE = 1788000000000L;
+    /** The two statements sit in the last moments of the current day, because that is the day the
+     *  screen opens by itself: the unaccounted row lives inside an open day, and a stored day in some
+     *  other month would need expanding first. A second apart is enough for the balances to prove the
+     *  gap, and a statement per second keeps both inside today right up to midnight. */
+    private static long now() {
+        return System.currentTimeMillis();
+    }
 
     @Before public void setUp() {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
@@ -66,18 +68,16 @@ public class HistoryResidualUiTest {
 
     /** Two statements whose balances prove a 2,000,000 rial withdrawal that never arrived. */
     private void storeAGap() {
-        BalanceData.setExpandAllHistory(ctx, true);
         BalanceData.writeTransactions(ctx, new ArrayList<>(Arrays.asList(
-            new Transaction(MELLAT, ACCOUNT, BASE - 4 * DAY, -30_000_000L, 290_000_000L, "a", null),
-            new Transaction(MELLAT, ACCOUNT, BASE - 2 * DAY, -5_000_000L, 283_000_000L, "b", null))));
+            new Transaction(MELLAT, ACCOUNT, now() - 2_000L, -30_000_000L, 290_000_000L, "a", null),
+            new Transaction(MELLAT, ACCOUNT, now() - 1_000L, -5_000_000L, 283_000_000L, "b", null))));
     }
 
     /** Statements that agree with the movements we hold, so nothing should be flagged. */
     private void storeNoGap() {
-        BalanceData.setExpandAllHistory(ctx, true);
         BalanceData.writeTransactions(ctx, new ArrayList<>(Arrays.asList(
-            new Transaction(MELLAT, ACCOUNT, BASE - 4 * DAY, -30_000_000L, 290_000_000L, "a", null),
-            new Transaction(MELLAT, ACCOUNT, BASE - 2 * DAY, -7_000_000L, 283_000_000L, "b", null))));
+            new Transaction(MELLAT, ACCOUNT, now() - 2_000L, -30_000_000L, 290_000_000L, "a", null),
+            new Transaction(MELLAT, ACCOUNT, now() - 1_000L, -7_000_000L, 283_000_000L, "b", null))));
     }
 
     private void launch() {
