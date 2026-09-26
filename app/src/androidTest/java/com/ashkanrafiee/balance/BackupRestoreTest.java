@@ -732,7 +732,6 @@ public class BackupRestoreTest {
     // Transaction notes in backups (payload format 3)
     // ============================================================
 
-
     private Transaction txByContent(List<Transaction> txs, String content) {
         for (Transaction t : txs)
             if (t.content != null && t.content.equals(content)) return t;
