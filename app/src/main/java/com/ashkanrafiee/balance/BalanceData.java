@@ -496,8 +496,9 @@ final class BalanceData {
      *  the reason the bank stated follow the movement to the latter's key. Keyed by the legacy identity
      *  triple before content digests existed, so the handover happens exactly when a newer rules
      *  version re-parses the same SMS into a content-bearing entry — the one case where
-     *  {@link #noteKey} changes between the same physical message. A destination that already carries
-     *  text keeps its own. */
+     *  {@link #noteKey} changes between the same physical message. Where the destination already
+     *  carries text, the destination's text is kept and the text of the row the rebuild drops is
+     *  dropped with it, since that key can no longer be read. */
     static void migrateTransactionText(Context context, Map<Transaction, Transaction> replaced) {
         Map<String, String> notes = readNotes(context);
         if (migrateTextKeys(notes, replaced)) writeNotes(context, notes);
@@ -1019,8 +1020,6 @@ final class BalanceData {
                         // an OTP prompt (which parse to no movement at all) can never attach a reason
                         // to anything. It is collected under the note key and stored beside the notes
                         // after the transactions, so a user note is never what gets written here.
-                        String reason = BankRules.extractReason(bank, body);
-                        if (reason != null) detectedReasons.put(noteKey(t), reason);
                         // The message fingerprint is the primary identity: it folds sender + movement
                         // amount + resulting balance (falling back to the normalized body), so it is
                         // independent of time. A bank sending the same SMS twice is one transaction even
@@ -1050,6 +1049,15 @@ final class BalanceData {
                             String accountFree = messageSig(sender, body, null);
                             if (accountFree != null) freeByFresh.put(t, accountFree);
                         }
+                        // The reason the bank stated, read from the very message that proves the
+                        // movement — so a promotion or an OTP prompt (neither of which parses to a
+                        // movement at all) can never attach a reason to anything. It is recorded here,
+                        // after the duplicates above are dropped and where the movement is kept, so a
+                        // reason is only ever stored against a movement the history really holds; it
+                        // is collected under the note key and written beside the notes, so a user note
+                        // is never what lands in this map.
+                        String reason = BankRules.extractReason(bank, body);
+                        if (reason != null) detectedReasons.put(noteKey(t), reason);
                         fresh.add(t);
                         added++;
                     }
