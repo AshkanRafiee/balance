@@ -196,6 +196,7 @@
     <string name="history_back">Back</string>
     <string name="history_yesterday">Yesterday</string>
     <string name="history_expanded">Expanded</string>
+    <string name="history_loading">Loading history</string>
     <string name="history_collapsed">Collapsed</string>
     <string name="history_deposit">Deposit</string>
     <string name="history_withdrawal">Withdrawal</string>

@@ -196,6 +196,7 @@
     <string name="history_back">بازگشت</string>
     <string name="history_yesterday">دیروز</string>
     <string name="history_expanded">باز شده</string>
+    <string name="history_loading">در حال بارگذاری تاریخچه</string>
     <string name="history_collapsed">بسته شده</string>
     <string name="history_deposit">واریز</string>
     <string name="history_withdrawal">برداشت</string>

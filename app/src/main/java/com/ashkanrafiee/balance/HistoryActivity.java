@@ -137,6 +137,11 @@ public final class HistoryActivity extends Activity {
      *  the newest, so a quick filter change never gets overwritten by a stale slower build. */
     private int renderGen;
 
+    /** The placeholder blocks on screen while the history is being read, and the one animator that
+     *  sweeps a highlight across all of them. */
+    private final List<ShimmerDrawable> shimmers = new ArrayList<>();
+    private android.animation.ValueAnimator shimmer;
+
     /** The note map for the screen's current data, read once per render on the worker thread
      *  (decrypting and parsing the store once instead of once per visible row) and consumed only
      *  by the UI pass that rebuilds the tree. Replenished on every render, which any note edit
@@ -408,6 +413,10 @@ public final class HistoryActivity extends Activity {
         scrollView.setVerticalScrollBarEnabled(false);
         scrollView.addView(body, new ScrollView.LayoutParams(-1, -1));
         root.addView(scrollView, new LinearLayout.LayoutParams(-1, 0, 1));
+        // The screen reads and groups its history off the main thread. Showing the shape of what is
+        // coming keeps that from being a blank white page, and a sweep across it says the screen is
+        // working rather than empty.
+        showSkeleton();
 
         indicatorOverlay = new PullIndicatorOverlay();
         scrollView.setIndicatorOverlay(indicatorOverlay);
@@ -476,6 +485,8 @@ public final class HistoryActivity extends Activity {
         if (scrollView != null) {
             scrollView.handler.removeCallbacks(scrollView.refreshTicker);
         }
+        // Same reasoning for the skeleton sweep: it repeats forever and holds the activity with it.
+        stopShimmer();
         super.onDestroy();
     }
 
@@ -1288,6 +1299,8 @@ public final class HistoryActivity extends Activity {
                     notes = notesNow;
                     refreshDates();
                     rebuildFilterBar();
+                    stopShimmer();
+                    body.setContentDescription(null);
                     body.removeAllViews();
                     monthDaysHosts.clear();
                     if (lists.years.isEmpty()) {
@@ -1302,8 +1315,17 @@ public final class HistoryActivity extends Activity {
                 });
             } catch (Exception e) {
                 // A corrupt store or a scan race must never blank the screen; keep the previous
-                // render and flag the failure quietly.
+                // render and flag the failure quietly. On a first load there is no previous render,
+                // so the placeholder would be left sweeping over nothing, which reads as a screen
+                // that will never finish. Say so instead.
                 android.util.Log.w("BalanceHistory", "render failed", e);
+                runOnUiThread(() -> {
+                    if (gen != renderGen || isDestroyed() || isFinishing()) return;
+                    stopShimmer();
+                    body.setContentDescription(null);
+                    body.removeAllViews();
+                    emptyState();
+                });
             }
         }).start();
     }
@@ -1489,6 +1511,158 @@ public final class HistoryActivity extends Activity {
     // ====================================================================
     // Year-by-year breakdown
     // ====================================================================
+
+    // -----------------------------------------------------------------------
+    // Loading
+    // -----------------------------------------------------------------------
+
+    /**
+     * Fills the list with the shape of the history that is on its way.
+     *
+     * <p>The blocks are the same rounded bars the real cards are built from, in the same order and
+     * roughly the same proportions, so the screen settles into its contents instead of jumping. They
+     * carry no text: a placeholder that said anything would be a lie the moment the real figures
+     * arrive, so the whole group is announced as loading instead.
+     */
+    private void showSkeleton() {
+        stopShimmer();
+        body.removeAllViews();
+        body.setContentDescription(getString(R.string.history_loading));
+
+        LinearLayout hero = new LinearLayout(this);
+        hero.setOrientation(LinearLayout.VERTICAL);
+        hero.setBackground(rounded(card, 20));
+        hero.setPadding(dp(16), dp(18), dp(16), dp(18));
+        hero.addView(bar(), lp(132, 26));
+        hero.addView(bar(), lp(78, 12, 10));
+        hero.addView(bar(), lp(104, 12, 14));
+        body.addView(hero, margin(0, 0, 0, 6));
+
+        for (int i = 0; i < 3; i++) {
+            LinearLayout year = new LinearLayout(this);
+            year.setOrientation(LinearLayout.VERTICAL);
+            year.setBackground(rounded(card, 20));
+            year.setPadding(dp(14), dp(14), dp(14), dp(14));
+            year.addView(bar(), lp(52, 12));
+            for (int k = 0; k < 2 + i; k++) {
+                LinearLayout month = new LinearLayout(this);
+                month.setOrientation(LinearLayout.VERTICAL);
+                month.setBackground(rounded(openBg, 12));
+                month.setPadding(dp(12), dp(10), dp(12), dp(10));
+                month.addView(bar(), lp(64, 11));
+                month.addView(bar(), lp(148, 10, 8));
+                LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(-1, -2);
+                mlp.topMargin = dp(k == 0 ? 0 : 6);
+                year.addView(month, mlp);
+            }
+            body.addView(year, margin(0, i == 0 ? 12 : 10, 0, 0));
+        }
+        startShimmer();
+    }
+
+    /** A rounded placeholder bar, in the same neutral the real cards use. Its size comes from
+     *  the {@link #lp} it is added with. */
+    private View bar() {
+        View v = new View(this);
+        v.setBackground(shimmerDrawable());
+        return v;
+    }
+
+    private LinearLayout.LayoutParams lp(int widthDp, int heightDp) {
+        return lp(widthDp, heightDp, 0);
+    }
+
+    /** Layout params for a placeholder bar.
+     *
+     * <p>Both sizes are explicit. A bar is a bare View carrying a background, and such a View
+     *  has no intrinsic size: left to wrap its content it measures zero, and a skeleton built
+     *  from invisible bars is just a blank page wearing a card. */
+    private LinearLayout.LayoutParams lp(int widthDp, int heightDp, int topMarginDp) {
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(dp(widthDp), dp(heightDp));
+        p.topMargin = dp(topMarginDp);
+        return p;
+    }
+
+    /** A new placeholder surface that joins the sweep. */
+    private ShimmerDrawable shimmerDrawable() {
+        ShimmerDrawable d = new ShimmerDrawable(openBg, chipBg);
+        shimmers.add(d);
+        return d;
+    }
+
+    private void startShimmer() {
+        if (shimmer != null) return;
+        shimmer = android.animation.ValueAnimator.ofFloat(0f, 1f);
+        shimmer.setDuration(1400);
+        shimmer.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        shimmer.addUpdateListener(a -> {
+            float at = (Float) a.getAnimatedValue();
+            for (ShimmerDrawable d : shimmers) {
+                d.at = at;
+                d.invalidateSelf();
+            }
+        });
+        shimmer.start();
+    }
+
+    /** Stops the sweep and forgets the placeholders, which {@code body.removeAllViews} has just
+     *  removed anyway. Safe to call when nothing is showing. */
+    private void stopShimmer() {
+        if (shimmer != null) {
+            shimmer.cancel();
+            shimmer = null;
+        }
+        shimmers.clear();
+    }
+
+    /**
+     * A placeholder surface with a highlight travelling across it.
+     *
+     * <p>Every block on screen shares one animator, so the sweep costs a single invalidate per frame
+     * rather than one per block, and the whole skeleton is still one draw pass per block. The
+     * highlight runs past both edges so it enters and leaves rather than appearing at the border.
+     */
+    static final class ShimmerDrawable extends android.graphics.drawable.Drawable {
+        private final android.graphics.Paint paint =
+            new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Matrix matrix = new android.graphics.Matrix();
+        private final int base, shine;
+        private float at;
+
+        ShimmerDrawable(int base, int shine) {
+            this.base = base;
+            this.shine = shine;
+        }
+
+        @Override protected void onBoundsChange(android.graphics.Rect b) {
+            float w = Math.max(1f, b.width());
+            android.graphics.Shader s = new android.graphics.LinearGradient(
+                0, 0, w * 2, 0,
+                new int[]{base, shine, base}, new float[]{0f, 0.5f, 1f},
+                android.graphics.Shader.TileMode.CLAMP);
+            paint.setShader(s);
+        }
+
+        @Override public void draw(android.graphics.Canvas canvas) {
+            float w = getBounds().width();
+            android.graphics.Shader s = paint.getShader();
+            if (s instanceof android.graphics.LinearGradient) {
+                // at=0 puts the highlight off the left edge, at=1 off the right one.
+                matrix.setTranslate(w * (at * 2f - 1f), 0);
+                ((android.graphics.LinearGradient) s).setLocalMatrix(matrix);
+            }
+            android.graphics.RectF r = new android.graphics.RectF(getBounds());
+            canvas.drawRoundRect(r, r.height() / 2f, r.height() / 2f, paint);
+        }
+
+        @Override public void setAlpha(int alpha) { paint.setAlpha(alpha); }
+
+        @Override public void setColorFilter(android.graphics.ColorFilter c) { }
+
+        @Override public int getOpacity() {
+            return android.graphics.PixelFormat.TRANSLUCENT;
+        }
+    }
 
     /** Renders the year-by-year breakdown into the given host. Each year is a card whose header
      *  toggles that year's months on tap. */
