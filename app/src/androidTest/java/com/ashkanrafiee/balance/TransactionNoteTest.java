@@ -113,6 +113,10 @@ public class TransactionNoteTest {
         BalanceData.migrateTransactionText(ctx, replaced);
 
         assertEquals("new on the fresh entry", BalanceData.getNote(ctx, fresh));
+        // The text of the row the rebuild drops goes with it: that key belongs to an entry no scan
+        // can recreate, so keeping the string would only grow the store with nothing able to read it.
+        assertNull(BalanceData.getNote(ctx, legacy));
+        assertEquals("new on the fresh entry", BalanceData.getNote(ctx, fresh));
     }
 
     @Test public void note_migrationIsANoopWhenTheKeysAlreadyAgree() {

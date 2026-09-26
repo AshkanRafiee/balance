@@ -515,10 +515,17 @@ final class BalanceData {
             String from = noteKey(e.getKey());
             String to = noteKey(e.getValue());
             if (from.equals(to)) continue;
+            // The rebuild that produced this map drops the row the text was written on, and no later
+            // scan can recreate an entry under that key, so the text is unreachable either way: it
+            // goes with the row instead of lingering in the store where nothing can read it back. The
+            // destination's own text is the one the user can still see, so that is the one that stays.
+            // Taking the text out counts as a change of the store on its own, or the row would be
+            // dropped and the text kept — two entries where the history holds one.
             String value = text.remove(from);
-            if (value == null || text.containsKey(to)) continue;
-            text.put(to, value);
+            if (value == null) continue;
             changed = true;
+            if (text.containsKey(to)) continue;
+            text.put(to, value);
         }
         return changed;
     }
