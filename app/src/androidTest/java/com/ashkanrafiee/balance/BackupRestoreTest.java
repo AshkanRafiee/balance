@@ -732,6 +732,7 @@ public class BackupRestoreTest {
     // Transaction notes in backups (payload format 3)
     // ============================================================
 
+
     private Transaction txByContent(List<Transaction> txs, String content) {
         for (Transaction t : txs)
             if (t.content != null && t.content.equals(content)) return t;
@@ -794,5 +795,104 @@ public class BackupRestoreTest {
         assertEquals("local-A", BalanceData.getNote(ctx, txByContent(out, "content-A")));
         assertEquals("backup-C", BalanceData.getNote(ctx, txByContent(out, "content-C")));
         assertNull(BalanceData.getNote(ctx, txByContent(out, "content-B")));
+    }
+
+    // ============================================================
+    // Stated reasons in backups (payload format 4)
+    // ============================================================
+
+    private static final String TOPUP = "شارژ شدی";
+
+    private static java.util.Map<String, String> reasonsFor(Transaction t, String reason) {
+        java.util.Map<String, String> reasons = new java.util.HashMap<>();
+        reasons.put(BalanceData.noteKey(t), reason);
+        return reasons;
+    }
+
+    @Test public void roundTrip_reasons_restoredWithTheirTransactions() throws Exception {
+        // A movement the bank explained stays explained across a device change: the reason travels
+        // with the transaction it belongs to, so the restored history reads the same way.
+        Transaction t = new Transaction("Blu", null, T + 100, -220_000L, "sig-A", "content-A");
+        BalanceData.writeTransactions(ctx, Arrays.asList(t));
+        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        Uri u = uri("reasons-roundtrip.balance");
+        BackupManager.create(ctx, u, PASSWORD);
+
+        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+
+        BackupManager.restore(ctx, u, PASSWORD);
+        List<Transaction> out = BalanceData.readTransactions(ctx);
+        assertEquals(1, out.size());
+        assertEquals(TOPUP, BalanceData.readReasons(ctx).get(BalanceData.noteKey(out.get(0))));
+    }
+
+    @Test public void restore_backupWithoutReasons_preservesTheLocalOnes() throws Exception {
+        // Backups written before reasons existed (payload formats 1 to 3) carry no "txReasons"
+        // section. Restoring one must leave the reasons the local scans found completely untouched,
+        // and the notes with them.
+        Transaction t = new Transaction("Blu", null, T + 100, -220_000L, "sig-A", "content-A");
+        BalanceData.writeTransactions(ctx, Arrays.asList(t));
+        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        BalanceData.setNote(ctx, t, "my private note");
+
+        String legacyPayload = "{\"payloadFormat\":3,\"balances\":{},"
+            + "\"transactions\":{\"transactions\":[{\"bank\":\"Blu\",\"date\":" + (T + 100)
+            + ",\"amount\":-220000,\"sig\":\"sig-A\",\"content\":\"content-A\"}]}}";
+        File f = file("reasons-legacy.balance");
+        writeLegacyBackup(f, legacyPayload, PASSWORD);
+
+        BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
+        Transaction out = txByContent(BalanceData.readTransactions(ctx), "content-A");
+        assertEquals(TOPUP, BalanceData.readReasons(ctx).get(BalanceData.noteKey(out)));
+        assertEquals("my private note", BalanceData.getNote(ctx, out));
+    }
+
+    @Test public void restore_reasons_mergeUnionWithLocalWins() throws Exception {
+        // Restore unions the reasons exactly like the notes: the reason the current device already
+        // has stays, and one that only exists in the backup is filled in for the movement the
+        // restore brought with it.
+        Transaction backupA = new Transaction("Blu", null, T + 100, -220_000L, "sig-A", "content-A");
+        Transaction backupC = new Transaction("Blu", null, T + 400, 540_000L, "sig-C", "content-C");
+        BalanceData.writeTransactions(ctx, Arrays.asList(backupA, backupC));
+        BalanceData.mergeReasons(ctx, reasonsFor(backupA, TOPUP));
+        BalanceData.mergeReasons(ctx, reasonsFor(backupC, "پرداخت قبض"));
+        Uri u = uri("reasons-merge.balance");
+        BackupManager.create(ctx, u, PASSWORD);
+
+        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        Transaction localA = new Transaction("Blu", null, T + 100, -220_000L, "sig-A", "content-A");
+        Transaction localB = new Transaction("Blu", null, T + 200, 50_000L, "sig-B", "content-B");
+        BalanceData.writeTransactions(ctx, Arrays.asList(localA, localB));
+        BalanceData.mergeReasons(ctx, reasonsFor(localA, "برگشت پول"));
+        BalanceData.setNote(ctx, localB, "local note");
+
+        BackupManager.restore(ctx, u, PASSWORD);
+        List<Transaction> out = BalanceData.readTransactions(ctx);
+        java.util.Map<String, String> reasons = BalanceData.readReasons(ctx);
+        assertEquals("local reason wins", "برگشت پول",
+            reasons.get(BalanceData.noteKey(txByContent(out, "content-A"))));
+        assertEquals("پرداخت قبض", reasons.get(BalanceData.noteKey(txByContent(out, "content-C"))));
+        assertNull(reasons.get(BalanceData.noteKey(txByContent(out, "content-B"))));
+        // The union is per-store: restoring reasons must not disturb the notes either.
+        assertEquals("local note", BalanceData.getNote(ctx, txByContent(out, "content-B")));
+    }
+
+    @Test public void restore_ofABackupWithNoTransactions_leavesTheReasonsAlone() throws Exception {
+        Transaction t = new Transaction("Blu", null, T + 100, -220_000L, "sig-A", "content-A");
+        BalanceData.writeTransactions(ctx, Arrays.asList(t));
+        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        BalanceData.setNote(ctx, t, "my private note");
+
+        BalanceData.reset(ctx, false);            // keep the note, drop the transactions
+        assertTrue(BalanceData.readReasons(ctx).isEmpty());
+        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        String emptyPayload = "{\"payloadFormat\":4,\"balances\":{},\"transactions\":{}"
+            + ",\"txNotes\":{},\"txReasons\":{}}";
+        File f = file("reasons-empty.balance");
+        writeLegacyBackup(f, emptyPayload, PASSWORD);
+
+        BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
+        assertEquals("my private note", BalanceData.getNote(ctx, t));
+        assertEquals(TOPUP, BalanceData.readReasons(ctx).get(BalanceData.noteKey(t)));
     }
 }

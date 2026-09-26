@@ -51,8 +51,9 @@ final class BackupManager {
     private static final byte[] MAGIC = {'B', 'A', 'L', 'N', 'C', 'E', 'B', 'K'};
     private static final int FORMAT_VERSION = 1;
     /** Payload shape: 1 = balances only, 2 = balances + transactions, 3 = balances + transactions +
-     *  notes. Older backups (1 and 2) are still read; those carry no notes, which a restore preserves. */
-    private static final int PAYLOAD_FORMAT = 3;
+     *  notes, 4 = those plus the reasons the banks stated. Older backups (1 to 3) are still read; those
+     *  carry no reasons, which a restore leaves to the next scan to re-read from the inbox. */
+    private static final int PAYLOAD_FORMAT = 4;
     private static final String KDF_ALGORITHM = "PBKDF2WithHmacSHA256";
     private static final String CIPHER_ALGORITHM = "AES/GCM/NoPadding";
     private static final int ITERATIONS = 600_000;
@@ -106,7 +107,9 @@ final class BackupManager {
                 .put("balances", new JSONObject(BalanceData.serialize(BalanceData.read(context))))
                 .put("transactions", new JSONObject(
                     BalanceData.serializeTransactions(BalanceData.readTransactions(context))))
-                .put("txNotes", new JSONObject(BalanceData.serializeNotes(BalanceData.readNotes(context))))
+                .put("txNotes", new JSONObject(BalanceData.serializeTextMap(BalanceData.readNotes(context))))
+                .put("txReasons", new JSONObject(
+                    BalanceData.serializeTextMap(BalanceData.readReasons(context))))
                 .toString();
         }
 
@@ -233,6 +236,7 @@ final class BackupManager {
         LinkedHashMap<String, Bank> backup;
         List<Transaction> backupTxs = new ArrayList<>();
         Map<String, String> backupNotes = new LinkedHashMap<>();
+        Map<String, String> backupReasons = new LinkedHashMap<>();
         try {
             JSONObject payload = new JSONObject(plain);
             if (payload.has("balances"))
@@ -243,7 +247,10 @@ final class BackupManager {
                 backupTxs = BalanceData.deserializeTransactions(
                     payload.getJSONObject("transactions").toString());
             if (payload.has("txNotes"))
-                backupNotes = BalanceData.deserializeNotes(payload.getJSONObject("txNotes").toString());
+                backupNotes = BalanceData.deserializeTextMap(payload.getJSONObject("txNotes").toString());
+            if (payload.has("txReasons"))
+                backupReasons = BalanceData.deserializeTextMap(
+                    payload.getJSONObject("txReasons").toString());
         } catch (Throwable e) {
             // A validly-decrypted but hostile payload can nest its JSON so deeply that parsing
             // exhausts the stack; that must land on the same "wrong password or corrupted backup"
@@ -303,6 +310,22 @@ final class BackupManager {
                 }
             }
             if (changed) BalanceData.writeNotes(context, currentNotes);
+        }
+
+        // The reasons the banks stated travel with the movements they describe, merged exactly like the
+        // notes: the local text wins, and a reason that only exists in the backup lands here so a
+        // movement whose SMS was deleted before the backup still shows why it happened. A backup
+        // without a reasons section leaves the current reasons completely untouched.
+        if (!backupReasons.isEmpty()) {
+            Map<String, String> currentReasons = BalanceData.readReasons(context);
+            boolean changed = false;
+            for (Map.Entry<String, String> e : backupReasons.entrySet()) {
+                if (!currentReasons.containsKey(e.getKey())) {
+                    currentReasons.put(e.getKey(), e.getValue());
+                    changed = true;
+                }
+            }
+            if (changed) BalanceData.writeReasons(context, currentReasons);
         }
         return result;
     }
