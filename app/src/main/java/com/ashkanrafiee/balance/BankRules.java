@@ -210,7 +210,7 @@ final class BankRules {
 
     /** Every title {@link #REASON_CAPTION_RES} can caption, in the normalized form the lookup uses.
      *  Test-only oracle input. */
-    static java.util.Set<String> reasonCaptionKeys() {
+    static Set<String> reasonCaptionKeys() {
         return new HashSet<>(REASON_CAPTION_RES.keySet());
     }
 
@@ -286,8 +286,13 @@ final class BankRules {
         for (String[] row : REASON_RULES) reasons.add(row[0]);
         java.util.Collections.sort(reasons);
         for (String bank : reasons) v = v * 31 + bank.hashCode() * 31 + REASON_PATTERNS.get(bank).pattern().hashCode();
+        // What is stored is the title, and a caption is looked up from it when it is shown, so only
+        // which titles are now readable belongs in here: the caption's own wording and the resource
+        // id it resolves to are not read out of any message, and folding the id would make an
+        // unrelated string edit rebuild every history on every install.
         for (String title : new java.util.TreeSet<>(REASON_CAPTION_RES.keySet()))
-            v = v * 31 + title.hashCode() * 31 + REASON_CAPTION_RES.get(title);
+            v = v * 31 + title.hashCode() * 31;
+        v = v * 31 + REASON_INVISIBLE.hashCode() * 31 + REASON_SPACES.pattern().hashCode();
         return v;
     }
 
@@ -440,7 +445,14 @@ final class BankRules {
                 // while every other line in the message carries a figure — the sentence the amount is
                 // in, the "موجودی" balance, the time, the date — so the guards here and the
                 // allowlist in {@link #REASON_CAPTION_RES} agree on which line can be a title.
-                return Pattern.compile("\\A[ \\t]*[^\\r\\n]*\\r?\\n[ \\t]*([^\\d\\r\\n][^\\d\\r\\n]{0,"
+                //
+                // Each line is split by a run of spaces and a group that cannot begin or end with
+                // one, and the first line is matched as one whole class rather than as an indent plus
+                // a class it already contains. Both keep every split unique: a body with no newline
+                // at all would otherwise be divided between them in N ways, and each split re-walks
+                // what is left, which turns one unparsable message into seconds of stall on the
+                // scan that is holding the store's lock.
+                return Pattern.compile("\\A[^\\r\\n]*\\r?\\n[ \\t]*([^\\d\\s\\r\\n][^\\d\\r\\n]{0,"
                     + (MAX_REASON_LENGTH - 2) + "}[^\\d\\s\\r\\n])[ \\t]*\\r?\\n");
             default:
                 throw new IllegalArgumentException("unknown reason shape '" + row[1] + "' for " + row[0]);
@@ -476,17 +488,29 @@ final class BankRules {
         return resId == null ? null : context.getString(resId);
     }
 
+    /** The invisible marks a bank's text may carry and that carry no meaning of their own: the
+     *  zero-width joiner/non-joiner and the left-to-right/right-to-left marks, the bidi embedding and
+     *  override run, and the isolate run. Spelled out rather than written as ranges so the table that
+     *  decides what a title may contain is one readable line, and so {@link #rulesVersion} can fold
+     *  it: a title that became readable because this list grew has to be re-read from the inbox. */
+    private static final String REASON_INVISIBLE =
+        "\u200C\u200D\u200E\u200F\u202A\u202B\u202C\u202D\u202E"
+        + "\u2066\u2067\u2068\u2069";
+
+    /** Every run of whitespace in a stated title is one space, however the sender spaced it. Folded
+     *  into the fingerprint for the same reason as {@link #REASON_INVISIBLE}. */
+    private static final Pattern REASON_SPACES = Pattern.compile("\\s+");
+
     /** Normalizes a stated title so the caption table can be looked up: the invisible marks a bank's
-     *  text may carry (right-to-left overrides, zero-width joiners) dropped and the whitespace
-     *  collapsed, so a title matches however the sender happened to encode it. */
+     *  text may carry dropped, the edges trimmed and every inner run of whitespace collapsed, so a
+     *  title matches however the sender happened to encode it. */
     static String normalizeReason(String raw) {
         StringBuilder out = new StringBuilder(raw.length());
-        for (char c : raw.toCharArray()) {
-            if (c == '\u200C' || c == '\u200D' || c == '\u200E' || c == '\u200F'
-                    || (c >= '\u202A' && c <= '\u202E') || (c >= '\u2066' && c <= '\u2069')) continue;
-            out.append(c);
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (REASON_INVISIBLE.indexOf(c) < 0) out.append(c);
         }
-        return out.toString().trim().replaceAll("\\s+", " ");
+        return REASON_SPACES.matcher(out.toString().trim()).replaceAll(" ");
     }
 
     // Last, so every table the fingerprint folds has been built: static initializers run in the order

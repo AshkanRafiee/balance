@@ -455,4 +455,27 @@ public class BankRulesTest {
         String marked = "\u0628\u0644\u0648\n\u200F\u0634\u0627\u0631\u0698\u200C \u0634\u062F\u06CC\n\u0627\u0634\u06A9\u0627\u0646\ny\n";
         assertEquals("شارژ شدی", BankRules.extractReason("Blu", marked));
     }
+
+    @Test public void extractReason_indentOnTheTitleLine_matchesTheSameReason() {
+        // Indented on the title line rather than the amount line: the pattern is free to read that
+        // run as the indentation it is, and has to read the title with the leading spaces out of it.
+        String indented = "\u0628\u0644\u0648\n   \u0634\u0627\u0631\u0698 \u0634\u062F\u06CC\n\u0627\u0634\u0643\u0627\u0646\ny\n";
+        assertEquals("شارژ شدی", BankRules.extractReason("Blu", indented));
+    }
+
+    @Test public void extractReason_bodyWithoutASecondLine_isRefusedWithoutRereadingIt() {
+        // A message that parses to a movement but has no second line cannot state a reason, and the
+        // scan that reads it holds the store's lock the whole while. The line and its leading run of
+        // spaces are matched by classes that overlap, so a body with no newline at all could be
+        // divided between them in as many ways as it has characters, every split retrying what was
+        // left of it. A 100 KB one-line body costs microseconds when every split is unique and tens
+        // of seconds when it is not, so this fails rather than stalls if they are ever allowed to
+        // overlap again.
+        StringBuilder body = new StringBuilder(100_000);
+        for (int i = 0; i < 100_000; i++) body.append('7');
+        long started = System.nanoTime();
+        assertNull(BankRules.extractReason("Blu", body.toString()));
+        assertTrue("one unparsable message must not cost seconds",
+                System.nanoTime() - started < 5_000_000_000L);
+    }
 }
