@@ -47,6 +47,13 @@ final class BalanceData {
     static final String KEY_RULES_VERSION = "rules_version";
     static final String KEY_HISTORY_THROUGH = "history_through";
     static final String KEY_HISTORY_RULES_VERSION = "history_rules_version";
+    /** Which schema generation of the stored history this build writes. Bumped when existing
+     *  entries have to be rebuilt from the inbox to acquire a datum older entries lack — today the
+     *  balance each movement reported ({@link Transaction#balance}), without which {@link Residual}
+     *  cannot prove a missing message. Tracked beside {@link #KEY_HISTORY_RULES_VERSION} rather than
+     *  folded into it, so a schema change never masquerades as a change of parsing rules. */
+    static final String KEY_HISTORY_SCHEMA = "history_schema";
+    static final int HISTORY_SCHEMA = 1;
     static final String KEY_HISTORY_LAST_BALANCE = "history_last_balance";
     static final String KEY_EXCLUDED = "excluded_banks";
     static final String KEY_SORT = "sort_mode";
@@ -293,8 +300,8 @@ final class BalanceData {
     }
 
     /** Serializes transactions to the JSON shape used for the local store and the backup payload. The
-     *  message fingerprint, account number and content digest are optional and skipped when absent, so
-     *  backups stay readable both ways. */
+     *  message fingerprint, account number, reported balance and content digest are optional and
+     *  skipped when absent, so backups stay readable both ways. */
     static String serializeTransactions(List<Transaction> txs) throws Exception {
         JSONArray arr = new JSONArray();
         for (Transaction t : txs) {
@@ -303,6 +310,7 @@ final class BalanceData {
                 .put("date", t.date)
                 .put("amount", t.amount);
             if (t.account != null) e.put("account", t.account);
+            if (t.balance != null) e.put("bal", t.balance.longValue());
             if (t.sig != null) e.put("sig", t.sig);
             if (t.content != null) e.put("content", t.content);
             arr.put(e);
@@ -325,8 +333,9 @@ final class BalanceData {
                 String sig = e.has("sig") && !e.isNull("sig") ? e.getString("sig") : null;
                 String account = e.has("account") && !e.isNull("account") ? e.getString("account") : null;
                 String content = e.has("content") && !e.isNull("content") ? e.getString("content") : null;
+                Long balance = e.has("bal") && !e.isNull("bal") ? e.getLong("bal") : null;
                 list.add(new Transaction(e.getString("bank"), account, e.getLong("date"),
-                    e.getLong("amount"), sig, content));
+                    e.getLong("amount"), balance, sig, content));
             }
         } catch (Exception ex) {
             Log.w(TAG, "parseTransactions failed");
@@ -496,6 +505,7 @@ final class BalanceData {
             .remove(KEY_RULES_VERSION)
             .remove(KEY_HISTORY_THROUGH)
             .remove(KEY_HISTORY_RULES_VERSION)
+            .remove(KEY_HISTORY_SCHEMA)
             .remove(KEY_EXCLUDED)
             .apply();
     }
@@ -860,7 +870,8 @@ final class BalanceData {
             // the rollback are not skipped forever by the incremental "newer than watermark" read.
             long now = System.currentTimeMillis();
             boolean full = hwm == 0 || hwm > now
-                || prefs.getInt(KEY_HISTORY_RULES_VERSION, -1) != HISTORY_RULES_VERSION;
+                || prefs.getInt(KEY_HISTORY_RULES_VERSION, -1) != HISTORY_RULES_VERSION
+                || prefs.getInt(KEY_HISTORY_SCHEMA, -1) != HISTORY_SCHEMA;
             if (full) hwm = 0;
             // On an incremental scan the stored history doubles as the dedup set: a message already
             // recorded (by fingerprint, or by the legacy bank|date|amount triple) is left alone. On a
@@ -1163,6 +1174,7 @@ final class BalanceData {
             // full rebuild as done (or advancing past rows that failed) would skip the correction
             // forever until the next manual version bump.
             if (completed && full) editor.putInt(KEY_HISTORY_RULES_VERSION, HISTORY_RULES_VERSION);
+            if (completed && full) editor.putInt(KEY_HISTORY_SCHEMA, HISTORY_SCHEMA);
             if (completed && newest > 0) editor.putLong(KEY_HISTORY_THROUGH, newest);
             editor.apply();
             return added;
@@ -1427,19 +1439,21 @@ final class BalanceData {
     static Transaction parseMovement(String bank, String sender, String body, long date,
                                      boolean hasPrev, long prevBalance) {
         if (body == null) return null;
+        long stated = extract(body);
         Long txn = extractTransaction(body);
         if (txn == null) {
             String n = normalizeLetters(digits(body.replace("\u066C", ",").replace("\u060C", ",")));
             if (!containsAny(n, DEPOSIT_KEYWORDS) && !containsAny(n, WITHDRAWAL_KEYWORDS)) return null;
-            long bal = extract(body);
-            if (bal < 0 || !hasPrev) return null;
-            long delta = bal - prevBalance;
+            if (stated < 0 || !hasPrev) return null;
+            long delta = stated - prevBalance;
             if (delta == 0) return null;
             txn = delta;
         }
         String account = BankRules.extractAccount(bank, body);
+        // The balance the message reported travels with the movement, so the history can prove a
+        // missing message later without ever touching the inbox again (see Residual).
         return new Transaction(bank, account, date, txn,
-            messageSig(sender, body, account), contentHash(sender, body));
+            stated < 0 ? null : stated, messageSig(sender, body, account), contentHash(sender, body));
     }
 
     /** The last number captured by the given pattern in the string, or null if it matched nothing. */

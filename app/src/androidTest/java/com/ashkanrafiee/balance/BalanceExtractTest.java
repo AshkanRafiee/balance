@@ -1,6 +1,8 @@
 package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 
@@ -109,6 +111,51 @@ public class BalanceExtractTest {
 
     @Test public void digits_leavesOtherTextAlone() {
         assertEquals("", BalanceData.digits(""));
-        assertEquals("سلام", BalanceData.digits("\u0633\u0644\u0627\u0645"));
+        assertEquals("سلام", BalanceData.digits("سلام"));
+    }
+
+    // ---- The reported balance rides along with the parsed movement -----------------------
+
+    @Test public void parseMovement_capturesTheStatedBalance() {
+        // The stored balance is the only evidence a later scan can use to prove a message never
+        // arrived, so it has to come out of the parse rather than being re-read from the inbox.
+        Transaction t = BalanceData.parseMovement("Mellat", "10002533",
+            "مبلغ 500,000-\nموجودی حساب شما: 1,250,000 ریال", 1700000000000L, false, 0L);
+        assertNotNull(t);
+        assertEquals(-500_000L, t.amount);
+        assertEquals(Long.valueOf(1_250_000L), t.balance);
+    }
+
+    @Test public void parseMovement_noStatedBalance_isNotRecordedAtAll() {
+        // The app's standing rule: a movement is only added to history when the message also states
+        // the resulting balance. So a movement without one never becomes a stored row and can never
+        // be mistaken for a balance witness later — which is what keeps a gap from being invented
+        // between two messages that merely looked like statements.
+        assertNull(BalanceData.parseMovement("Mellat", "10002533",
+            "مبلغ 500,000-\nاز حساب شما برداشت شد", 1700000000000L, false, 0L));
+    }
+
+    @Test public void parseMovement_everyStoredMovementCarriesItsBalance() {
+        // The corollary that makes the detector's witnesses reliable: anything the parser does return
+        // has a balance, so the stored history is entirely made of potential statements.
+        Transaction t = BalanceData.parseMovement("Mellat", "10002533",
+            "مبلغ 500,000-\nموجودی حساب شما: 1,250,000 ریال", 1700000000000L, false, 0L);
+        assertNotNull(t.balance);
+    }
+
+    @Test public void parseMovement_zeroBalance_isKeptAsStated() {
+        // An emptied account is a real balance and often the moment a gap becomes visible, so zero
+        // has to survive as "the bank said zero" rather than "the bank said nothing".
+        Transaction t = BalanceData.parseMovement("Mellat", "10002533",
+            "مبلغ 500,000-\nموجودی حساب شما: 0 ریال", 1700000000000L, false, 0L);
+        assertNotNull(t);
+        assertEquals(Long.valueOf(0L), t.balance);
+    }
+
+    @Test public void parseMovement_otpMessageIsNotCapturedAsABalance() {
+        // A one-time code states no balance, and the OTP guards that already keep it from becoming
+        // a movement must keep it from becoming a witness either.
+        assertNull(BalanceData.parseMovement("Mellat", "10002533",
+            "رمز ورود شما: 123456", 1700000000000L, false, 0L));
     }
 }

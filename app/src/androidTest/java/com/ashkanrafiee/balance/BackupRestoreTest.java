@@ -169,6 +169,87 @@ public class BackupRestoreTest {
         assertEquals("1110000222", parsed.get(0).account);
     }
 
+    @Test public void roundTrip_reportedBalance_isStoredAndReadBack() throws Exception {
+        // The reported balance is what makes unaccounted money detectable at all, so it has to
+        // survive the store intact — including its exact value at the scale banks report.
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Mellat", "1110000222", T + 1000, -500_000L, 1_234_567_890L,
+            "sig", "content"));
+        txs.add(new Transaction("Mellat", "1110000222", T + 2000, 5_000_000L, 1_229_567_890L,
+            "sig2", "content2"));
+        BalanceData.writeTransactions(ctx, txs);
+
+        List<Transaction> out = BalanceData.readTransactions(ctx);
+        assertEquals(2, out.size());
+        assertEquals(Long.valueOf(1_234_567_890L), out.get(0).balance);
+        assertEquals(Long.valueOf(1_229_567_890L), out.get(1).balance);
+
+        List<Transaction> parsed = BalanceData.deserializeTransactions(
+            BalanceData.serializeTransactions(out));
+        assertEquals(Long.valueOf(1_234_567_890L), parsed.get(0).balance);
+        assertEquals(Long.valueOf(1_229_567_890L), parsed.get(1).balance);
+    }
+
+    @Test public void roundTrip_zeroAndNegativeBalances_areNotMistakenForAbsent() throws Exception {
+        // Zero and negative balances are ordinary states of an account, and a `!= 0` test anywhere
+        // would quietly drop the very statements that prove a gap.
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Mellat", "1", T + 1000, 0L, 0L, "a", null));
+        txs.add(new Transaction("Mellat", "1", T + 2000, -1L, -1L, "b", null));
+        BalanceData.writeTransactions(ctx, txs);
+        List<Transaction> out = BalanceData.readTransactions(ctx);
+        assertEquals(Long.valueOf(0L), out.get(0).balance);
+        assertEquals(Long.valueOf(-1L), out.get(1).balance);
+        assertEquals(Long.valueOf(0L), BalanceData.deserializeTransactions(
+            BalanceData.serializeTransactions(out)).get(0).balance);
+    }
+
+    @Test public void roundTrip_transactionWithoutBalance_staysAbsent() throws Exception {
+        // A message that stated no balance must keep stating none: inventing a zero here would
+        // make every such message look like a balance witness and fabricate gaps between them.
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Mellat", "1110000222", T + 1000, -500_000L, null));
+        BalanceData.writeTransactions(ctx, txs);
+        List<Transaction> out = BalanceData.readTransactions(ctx);
+        assertNull(out.get(0).balance);
+        assertNull(BalanceData.deserializeTransactions(
+            BalanceData.serializeTransactions(out)).get(0).balance);
+    }
+
+    @Test public void roundTrip_jsonWithoutTheBalanceField_stillParses() throws Exception {
+        // A backup written by an older build has no "bal" key at all. It has to load as before,
+        // which is what keeps existing backups restorable across this upgrade.
+        String legacy = "{\"transactions\":[{\"bank\":\"Mellat\",\"account\":\"1110000222\","
+            + "\"date\":" + (T + 1000) + ",\"amount\":-500000,\"sig\":\"abc\",\"content\":\"c\"}]}";
+        List<Transaction> out = BalanceData.deserializeTransactions(legacy);
+        assertEquals(1, out.size());
+        assertEquals("Mellat", out.get(0).bank);
+        assertEquals("1110000222", out.get(0).account);
+        assertEquals(-500_000L, out.get(0).amount);
+        assertNull(out.get(0).balance);
+    }
+
+    @Test public void roundTrip_reportedBalance_survivesAnEncryptedBackup() throws Exception {
+        // Backup and restore go through the same serializer, so a balance has to come back through
+        // the encrypted file too — otherwise a restored install would lose the ability to detect
+        // anything until the next full rescan.
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Mellat", "1110000222", T + 1000, -500_000L, 987_654_321L,
+            "sig", "content"));
+        BalanceData.writeTransactions(ctx, txs);
+        Uri u = uri("withbalance.balance");
+        BackupManager.create(ctx, u, PASSWORD);
+
+        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        assertTrue(BalanceData.readTransactions(ctx).isEmpty());
+
+        BackupManager.restore(ctx, u, PASSWORD);
+        List<Transaction> out = BalanceData.readTransactions(ctx);
+        assertEquals(1, out.size());
+        assertEquals(Long.valueOf(987_654_321L), out.get(0).balance);
+        assertEquals("sig", out.get(0).sig);
+    }
+
     @Test public void headerCarriesSelfDescribingEncryptionParameters() throws Exception {
         BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
         File f = file("header.balance");
