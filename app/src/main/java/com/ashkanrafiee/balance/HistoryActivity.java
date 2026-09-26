@@ -150,6 +150,12 @@ public final class HistoryActivity extends Activity {
      *  triggers, so it never serves a stale snapshot. */
     private Map<String, String> notes;
 
+    /** The reasons the bank stated, read alongside the notes on the same worker pass and looked up the
+     *  same way. A separate store from the notes, so what the bank said and what the user wrote are
+     *  never the same field: a note can be edited or cleared without touching a reason, and a reason
+     *  can never stand in for a note the user has not written. */
+    private Map<String, String> reasons;
+
     /** An account number is sensitive: it is copied to the clipboard only for the paste window,
      *  then cleared again unless the user copied something else in the meantime; the clear is keyed
      *  to the exact clip we placed, so the user's own later copy is never destroyed. Runs on its
@@ -687,10 +693,12 @@ public final class HistoryActivity extends Activity {
             try {
                 final List<Transaction> txs;
                 final java.util.Map<String, String> notes;
+                final java.util.Map<String, String> reasons;
                 final List<Residual> residuals;
                 synchronized (BalanceData.class) {
                     txs = BalanceData.readTransactions(getApplicationContext());
                     notes = BalanceData.readNotes(getApplicationContext());
+                    reasons = BalanceData.readReasons(getApplicationContext());
                     // Detected before narrowing, exactly as on screen, so the file reconciles with
                     // the totals the user just looked at.
                     residuals = Residual.between(txs);
@@ -707,7 +715,7 @@ public final class HistoryActivity extends Activity {
                 }
                 List<Residual> residualOut = applyResidualFilters(residualScope, filter, iranCalendar);
                 scope = applyFilters(scope, filter, iranCalendar);
-                String csv = CsvExport.csv(getApplicationContext(), scope, residualOut, notes);
+                String csv = CsvExport.csv(getApplicationContext(), scope, residualOut, notes, reasons);
                 OutputStream out = getContentResolver().openOutputStream(uri, "w");
                 if (out == null) throw new IOException("no output stream");
                 try {
@@ -1333,9 +1341,12 @@ public final class HistoryActivity extends Activity {
                 allResiduals = residuals;
                 final Map<String, String> notesNow =
                     BalanceData.readNotes(getApplicationContext());
+                final Map<String, String> reasonsNow =
+                    BalanceData.readReasons(getApplicationContext());
                 runOnUiThread(() -> {
                     if (gen != renderGen || isDestroyed() || isFinishing()) return;
                     notes = notesNow;
+                    reasons = reasonsNow;
                     refreshDates();
                     rebuildFilterBar();
                     stopShimmer();
@@ -2313,33 +2324,52 @@ public final class HistoryActivity extends Activity {
         row.addView(amt, new LinearLayout.LayoutParams(-2, -2));
         cell.addView(row, new LinearLayout.LayoutParams(-1, -2));
 
+        // What the bank said about this movement, above what the user wrote about it: two separate
+        // facts, so both are shown. The reason is quiet and uneditable — it is the bank's own
+        // statement, read out of the message, not a note anyone can change here.
+        int inset = perBank ? 0 : 39;
+        String reason = reasons == null ? null : reasons.get(BalanceData.noteKey(t));
+        String caption = BankRules.reasonCaption(this, reason);
+        if (caption != null) {
+            LinearLayout reasonChip = addChip(cell, caption, false, chipBg, muted, MEDIUM, inset);
+            reasonChip.setContentDescription(getString(R.string.reason_row_cd, caption));
+        }
         String note = notes == null ? null : notes.get(BalanceData.noteKey(t));
-        if (note != null) {
-            LinearLayout noteChip = new LinearLayout(this);
-            noteChip.setOrientation(LinearLayout.HORIZONTAL);
-            noteChip.setGravity(Gravity.CENTER_VERTICAL);
-            noteChip.setPadding(dp(8), dp(3), dp(8), dp(3));
-            noteChip.setBackground(rounded(badgeBg, 9));
-            noteChip.setLayoutDirection(isRtl() ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
+        if (note != null) addChip(cell, note, true, badgeBg, badgeFg, null, inset);
+        cell.setContentDescription(getString(R.string.note_row_hint));
+        return cell;
+    }
 
-            TextView pencil = text("\u270e", 11, badgeFg, MEDIUM);
+    /** Adds one chip on its own line under a movement row, inset under the amount exactly as the row
+     *  is so a row carrying both reads as one block, and returns it. A note carries the pencil that
+     *  says it can be edited here; a reason carries no affordance at all. */
+    private LinearLayout addChip(LinearLayout cell, String label, boolean editable, int bg, int fg,
+            Typeface style, int inset) {
+        LinearLayout chip = new LinearLayout(this);
+        chip.setOrientation(LinearLayout.HORIZONTAL);
+        chip.setGravity(Gravity.CENTER_VERTICAL);
+        chip.setPadding(dp(8), dp(3), dp(8), dp(3));
+        chip.setBackground(rounded(bg, 9));
+        chip.setLayoutDirection(isRtl() ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
+
+        if (editable) {
+            TextView pencil = text("\u270e", 11, fg, style);
             LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(-2, -2);
             plp.setMarginEnd(dp(5));
             if (isRtl()) plp.setMarginStart(dp(5));
-            noteChip.addView(pencil, plp);
-
-            TextView noteView = text(note, 12, badgeFg);
-            noteView.setLineSpacing(0, 1.05f);
-            noteChip.addView(noteView, new LinearLayout.LayoutParams(0, -2, 1));
-
-            LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(-1, -2);
-            np.setMarginStart(dp(perBank ? 0 : 39));
-            np.setMarginEnd(dp(4));
-            np.topMargin = dp(2);
-            cell.addView(noteChip, np);
+            chip.addView(pencil, plp);
         }
-        cell.setContentDescription(getString(R.string.note_row_hint));
-        return cell;
+
+        TextView labelView = text(label, 12, fg, style);
+        labelView.setLineSpacing(0, 1.05f);
+        chip.addView(labelView, new LinearLayout.LayoutParams(0, -2, 1));
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.setMarginStart(dp(inset));
+        lp.setMarginEnd(dp(4));
+        lp.topMargin = dp(2);
+        cell.addView(chip, lp);
+        return chip;
     }
 
     /** The note editor for one transaction: a free-text field seeded with the current note, with
