@@ -14,6 +14,13 @@ final class Transaction {
     final long date;
     /** Signed amount in rials: positive for a deposit, negative for a withdrawal. */
     final long amount;
+    /** The account balance the same message reported after this movement settled, in rials, or null
+     *  when the message stated none (or the entry predates balance capture). Two balance statements
+     *  of one account bracket the movements between them, so a movement whose message never arrived
+     *  shows up as the difference between the balance change and the movements we did parse — see
+     *  {@link Residual}. This is reported state, never an estimate: it is read straight off the
+     *  message by the same {@code extract} the balance screen itself trusts. */
+    final Long balance;
     /** Deterministic fingerprint of the source SMS, used to reject exact duplicate redeliveries. */
     final String sig;
     /** Parse-independent digest of the source message (sender + normalized body). Unlike {@link #sig}
@@ -35,10 +42,16 @@ final class Transaction {
     }
 
     Transaction(String bank, String account, long date, long amount, String sig, String content) {
+        this(bank, account, date, amount, null, sig, content);
+    }
+
+    Transaction(String bank, String account, long date, long amount, Long balance, String sig,
+            String content) {
         this.bank = bank;
         this.account = account;
         this.date = date;
         this.amount = amount;
+        this.balance = balance;
         this.sig = sig;
         this.content = content;
     }
