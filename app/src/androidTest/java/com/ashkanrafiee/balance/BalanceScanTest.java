@@ -141,6 +141,57 @@ public class BalanceScanTest {
         return map.get(bank);
     }
 
+    /** A movement announced on the 7th, delivered on the 31st, and a later movement from the 8th
+     *  that arrived on the 30th. The delayed one is the last to turn up, so anything that reads
+     *  delivery order alone shows yesterday's balance as today's. */
+    private static final String TEJARAT_OLDER_BUT_LATE =
+        "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n"
+        + "\u062D\u0633\u0627\u0628: 01351234567890 \n"
+        + "\u0628\u0631\u062F\u0627\u0634\u062A: 70,014,000 \u0631\u06CC\u0627\u0644 \n"
+        + "\u0645\u0627\u0646\u062F\u0647: 1,209,288 \u0631\u06CC\u0627\u0644 \n"
+        + "1405/06/07\n20:16";
+    private static final String TEJARAT_NEWER_BUT_EARLY =
+        "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n"
+        + "\u062D\u0633\u0627\u0628: 01351234567890 \n"
+        + "\u0648\u0627\u0631\u06CC\u0632: 115,000,000 \u0631\u06CC\u0627\u0644 \n"
+        + "\u0645\u0627\u0646\u062F\u0647: 361,919,288 \u0631\u06CC\u0627\u0644 \n"
+        + "1405/06/08\n10:00";
+
+    private static long at(int y, int mo, int d, int h, int mi) {
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        c.clear();
+        c.set(y, mo - 1, d, h, mi, 0);
+        return c.getTimeInMillis();
+    }
+
+    private static long persian(int jy, int jm, int jd, int h, int mi) {
+        int[] g = JalaliCalendar.of(jy, jm, jd).toGregorian();
+        return at(g[0], g[1], g[2], h, mi);
+    }
+
+    @Test public void aDelayedMessage_neverBecomesTheBalanceJustBecauseItArrivedLast() throws Exception {
+        // The balance card reads one message per account. Picked by delivery, the newest arrival
+        // wins, so a message about the 7th that turned up on the 31st would overwrite the balance
+        // from the 8th and the user would be told their account is a fortnight older than it is.
+        // Picked by the time the bank wrote, the 8th wins \u2014 which is also the only reading that
+        // keeps the stored balance moving forward, since a balance may never travel back in time.
+        seed("TejaratBank", TEJARAT_OLDER_BUT_LATE, at(2026, 8, 31, 9, 0));
+        seed("TejaratBank", TEJARAT_NEWER_BUT_EARLY, at(2026, 8, 30, 11, 0));
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+
+        Bank tejarat = saved.get("Tejarat|01351234567890");
+        assertNotNull("the account must be keyed by its number, not folded into the bank slot",
+            tejarat);
+        assertEquals("the balance from the later-stated movement, not the last delivery",
+            361919288L, amount(tejarat));
+        assertEquals("carrying the time the bank stated for it",
+            persian(1405, 6, 8, 10, 0), date(tejarat));
+        assertTrue("and it must not carry the delayed message's arrival",
+            date(tejarat) < at(2026, 8, 31, 9, 0));
+    }
+
     // ============================================================
     // Full-first-scan behaviour
     // ============================================================

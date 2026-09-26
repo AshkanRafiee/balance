@@ -735,10 +735,10 @@ final class BalanceData {
         String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
         String[] args = selection != null ? new String[]{Long.toString(watermark)} : null;
 
-        // Collect every matching message (sender, body, device date, stated balance). A bank that
-        // sends a fee and the transfer it belongs to in the wrong order surfaces here as two rows
-        // whose device dates disagree with their true chronology; the recent-movements window below
-        // reconciles that before the balance is chosen. A full scan reads the whole inbox (like the
+        // Collect every matching message (sender, body, the time it can be dated to, stated
+        // balance). A bank that sends a fee and the transfer it belongs to in the wrong order
+        // surfaces here as two rows whose times disagree with their true chronology; the
+        // recent-movements window below reconciles that before the balance is chosen. A full scan reads the whole inbox (like the
         // history scan), because with per-account composite keys the newest message of one account
         // never proves another account's balance is current.
         Map<String, List<Object[]>> rowsByKey = new LinkedHashMap<>();
@@ -1583,7 +1583,10 @@ final class BalanceData {
         return kept;
     }
 
-    /** The newest-arrived row of a bank (the one with the maximum device date). */
+    /** The most recent row of a bank: the one with the latest time we can believe for it, which is
+     *  the time the bank stated where it stated a usable one and the delivery time where it did not.
+     *  Read by delivery instead, a message that arrived last would always win, and a delayed
+     *  statement about a past day would overwrite the balance that came after it. */
     private static Object[] newestRow(List<Object[]> rows) {
         Object[] best = null;
         for (Object[] r : rows) {
