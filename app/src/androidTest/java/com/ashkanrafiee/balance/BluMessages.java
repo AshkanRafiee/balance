@@ -1,12 +1,16 @@
 package com.ashkanrafiee.balance;
 
 /**
- * Real Blu SMS as the phone actually delivers it, kept as shared fixtures: the brand on the first
- * line, the event title on the second, then the sentence carrying the amount, the balance, the time
- * and the date. Line 3 and line 4 arrive indented by a space in some messages and flush in others.
+ * Blu SMS in the shape the phone actually delivers it, kept as shared fixtures: the brand on the
+ * first line, the event title on the second, then the sentence carrying the amount, the balance, the
+ * time and the date. Line 3 and line 4 arrive indented by a space in some messages and flush in
+ * others.
  *
- * <p>Kept verbatim so a scan can be driven with exactly the bytes the SMS provider hands back, and so
- * a reader can check a rule against the message it was written for.
+ * <p><b>The figures here are made up.</b> The wording, the line order, the punctuation, the Persian
+ * digits, the spacing and the amount/balance shapes are the ones a scan has to survive, but every
+ * name, account figure, balance and code is invented — a fixture copied out of a real inbox would
+ * put the owner's finances and name in a public repository, and a test needs none of that to be
+ * convincing. Anyone extending these fixtures: keep them synthetic.
  */
 final class BluMessages {
 
