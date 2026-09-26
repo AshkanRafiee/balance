@@ -656,10 +656,15 @@ final class BalanceData {
     }
 
     /** Whether the history breakdown opens every year, month and day by default instead of only the
-     *  current year, month and its days. A display choice (on by default), picked in the Display menu. */
+     *  current year, month and its days. A display choice, picked in the Display menu.
+     *
+     *  <p>Off unless the user has turned it on. Expanding everything means building a view per
+     *  transaction and a header per year, month and day group, and the history is unbounded, so on a
+     *  long account the screen took seconds to open. The freshest history is still visible either
+     *  way: {@link HistoryActivity} seeds the current year, month and day open. */
     static boolean getExpandAllHistory(Context context) {
         return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
-            .getBoolean(KEY_EXPAND_ALL_HISTORY, true);
+            .getBoolean(KEY_EXPAND_ALL_HISTORY, false);
     }
 
     static void setExpandAllHistory(Context context, boolean on) {
