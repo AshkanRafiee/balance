@@ -13,14 +13,12 @@ import android.util.Log;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.MessageDigest;
-import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -1841,7 +1839,6 @@ final class BalanceData {
 
     /** Formats a rial amount as toman using the app language (Persian digits for Persian). */
     static String toman(Context context, long n) {
-        Locale locale = LocaleHelper.isPersian(context) ? new Locale("fa") : Locale.US;
-        return NumberFormat.getNumberInstance(locale).format(n / 10);
+        return CurrencyHelper.display(context, n / 10);
     }
 }
