@@ -1,37 +1,30 @@
-Balance reads supported bank balance SMS messages locally and shows the latest balance for each bank — split per account number when the bank SMS states one — plus the combined total.
+Balance reads your bank's balance SMS on the phone and shows the latest balance for every supported bank — split per account number when the bank states one — plus the combined total. No account, no cloud, no analytics and no internet permission: the parsing happens on your device, and your financial data stays there, encrypted.
 
-Currently designed for users in Iran, with support for Iranian banks and Persian bank SMS formats. A Display menu (footer) holds the theme, widget-theme, language, calendar, currency, stale-warning and history selectors, ordered by how often they get changed and then grouped by kind: the Theme setting switches between the system default, a forced dark and a forced light mode; the Widget theme setting follows the app's theme by default, or points the home-screen widget at the system default, a forced dark or a forced light mode on its own, for when you want the two to differ; the Language selector overrides the interface language; the Calendar setting switches the app's calendar system between the Persian (Jalali) calendar for Iran (the default) and the Gregorian calendar, with localized month and weekday names for both; the Currency setting picks the value and unit shown next to amounts — Toman (the default), which divides the rial figure by ten exactly as before, or Rial as stored, or any custom currency you type, which show the raw number under their own label; the Stale balance warning sets how long a balance can go without a bank SMS (off, or 3, 7, 14 or 30 days) before it is flagged; and the History expand-all (on / off) opens every year, month and day of the history breakdown instead of only the current one. No exchange rates are applied — everything works fully offline.
+Currently built for users in Iran, with Iranian banks and their Persian message formats.
 
 Features:
-- First-run introduction on a fresh install: three short pages explain what Balance reads and how it stays offline and private, then ask for SMS access in context during the introduction rather than with a bare dialog over an empty dashboard — skippable at any time, never shown again after that, and re-openable anytime from the About screen
-- Offline SMS parsing with no internet permission
-- Latest balance per supported bank, split per account number when stated, without duplicate accumulation
-- Combined balance total
-- Currency unit choice (Toman / Rial / custom name) shown next to amounts
-- Persistent privacy masking for balances
-- Balances update automatically as bank SMS arrive, plus pull-to-refresh from the top of the bank list or the history screen (full, per-bank or per-account) — a pull refreshes balances, the widget and history together
-- Data-freshness warning: a bank whose last balance SMS is older than the configured window (off / 3 / 7 / 14 / 30 days) is highlighted with an amber ring, an amber amount and an "N days" badge on its card, and an amber amount in the home-screen widget — so you always see how fresh today's totals are before trusting them
-- If you turn SMS access off, nothing is deleted: the dashboard, history and widget keep showing every balance and transaction already stored, and an amber strip under the total card says the balances may be out of date — tap it to grant SMS access again (falling back to the app's settings page when the denial is permanent) and refresh on the spot
-- Home-screen widget mirroring the same bank order, totals and privacy mask, in the color theme you picked in the app (or one of its own); it locks together with the app when the lock is enabled
-- Transaction history with deposit and withdrawal tracking per day, month and year, refreshing automatically as new bank SMS arrive or on demand by pulling down, with out-of-order messages (like a transfer and its fee) shown in their true order; with the Display menu's "History: expand all" on by default, every year, month and day open from the start, and turning it off narrows the view to only the current year, month and its days
-- Unaccounted money: when the balance a bank states has changed by more than the messages that reached the app account for, the difference appears as an amber "Unaccounted" row on the later statement's date and is counted in every total. The figure is arithmetic on two balance statements your bank itself sent, so it is proven — but the app never invents the missing movements: it does not claim how many there were, what they were for or when they happened, and it says so on the row. Anything before the first balance statement or after the last one cannot be detected at all, and a delayed SMS that arrives within a few weeks is read by the date the bank printed on it, so it lands in the right period and the row closes on itself
-- Filter history by movement type (all, deposits or withdrawals) and by date — today, this month, this year or a custom date range in the active calendar (Persian for Iran, Gregorian for International) — applied to the whole screen
-- Export exactly what the transaction history currently shows to a CSV file via the system file picker — the active bank, account, movement type and date range (the full history when no filter is active) — with ISO-8601 UTC timestamps, the date in the active calendar, raw signed rial amounts, the amounts as displayed with their currency unit, your transaction notes, and a kind column marking each row movement or unaccounted
-- Per-transaction notes: tap any history row to add or edit a private note to that movement; the note follows the transaction in every filter and view, and is included in CSV exports and encrypted backups — it is never touched by rules-driven re-scans, survives resets (unless you opt in to deleting it), and stays when an older backup without notes is restored
-- Bank rule updates rebuild history from your SMS and match it to what is already stored, so nothing is ever counted twice
-- Full history from the total card; tap a bank for just that bank's transactions, or tap one of its accounts for a single account's history: the account's header shows the account number as a chip, and tapping that chip copies just the number
-- Long-press the total card, a bank card or an account row to copy that balance; long-press the eye for auto-mask (balances start hidden on every open), and long-press the lock icon for the lock settings
-- Bank sorting by balance or update time, applied to the list and the widget
-- Exclude individual accounts from the combined total
-- Automatic light and dark theme that follows your device, or forced to either one
-- Reset and rescan balances from the data menu — confirmed a second time before anything is deleted — with the option to also delete transaction notes
-- Encrypted storage on device
-- Password-protected backup and restore (balances, transaction history and notes)
-- Optional in-app lock with PIN, password or fingerprint, protecting the app, the widget and screenshots/recents; after a few wrong attempts, code entry locks for a growing cooldown
-- Report (the Scan diagnostics screen): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout are flagged first, then senders not recognized yet. Tap any flagged sender to open its messages (the checkmarks live there — nothing is preselected) and send or copy exactly those, with a live count; you can also mark what is wrong — account, balance or sender-number detection — and the issue goes into the prefilled email so the maintainer knows which stage failed; the email is only sent after you approve
+- A first-run introduction explaining what is read and why, asking for SMS access in context; skippable, and re-openable from About
+- Offline SMS parsing, with no internet permission and no network requests
+- Latest balance per bank, split per account when stated, without counting the same message twice
+- A combined total, with any account you like left out of it
+- The currency shown next to every amount: Toman (default), Rial as stored, or a custom name
+- Balances masked by default for privacy, hidden again on every open
+- Automatic updates as bank SMS arrive, plus pull-to-refresh on the bank list or the history screen (all of it, one bank, or one account)
+- A freshness warning: a bank whose last message is older than the window you set (off / 3 / 7 / 14 / 30 days) is flagged on its card and in the widget, so you can see how current today's totals are
+- Turning SMS access off deletes nothing — everything already read stays on screen, and a strip under the total card offers to grant access again
+- Home-screen widget with the same bank order, totals and masking, in its own color theme, locking together with the app
+- Transaction history by day, month and year, showing out-of-order messages (a transfer and its fee) in their true order
+- Unaccounted money: when a balance statement changed by more than the messages explain, the difference appears as an amber "Unaccounted" row on the later statement's date and is counted in every total. It is arithmetic on two statements your bank sent itself, so the figure is sound — the app never invents the missing movements, and says so on the row
+- Filter the history by deposits or withdrawals and by date — today, this month, this year, or a custom range in the Persian or Gregorian calendar
+- Movement reasons read from the bank: when a message names the event behind a movement — a phone top-up, a bill payment, a refund, an instant transfer — the row says so in your own language. Where the bank states nothing, and for plain deposits and withdrawals, nothing is added, and a reason never mixes into your note
+- Private notes: tap any row to write your own words about that movement; they follow it through every filter, into CSV exports and into encrypted backups
+- CSV export of exactly what the history shows at that moment, through the system file picker, with UTC timestamps, the date in your calendar, raw and displayed amounts, your notes, the bank's reason, and a column marking each row a movement or unaccounted money
+- Password-encrypted backup and restore of balances, history, notes and reasons
+- Optional in-app lock with PIN, password or fingerprint, covering the app, the widget and screenshots/recents
+- English and Persian interface, Persian (Jalali) or Gregorian calendar, and a light or dark theme that follows the device
+- Report (Scan diagnostics): see which bank messages parse and which do not, and send or copy exactly the ones you pick
+- A full reset in the data menu, confirmed twice, with the option to delete your notes as well
 
-SMS and financial data stay on the device, encrypted. No account, cloud service, analytics, or network access is required.
+Free and open source. If your bank's messages are not recognized, or a balance or account looks wrong, telling us — through the issue tracker, the Report screen or email — is the fastest way to get it added.
 
-Your bank's SMS not recognized, the wrong account detected, or a history entry off? Report it — include the exact message text (real or scrubbed numbers, same length and format), its sender number, and your Android version and phone model — via the issue tracker or by email; see the project's contribution guide for details. The Scan diagnostics screen flags every unparsed message — naming the bank when it is one of ours — and opens the sender's messages for you to tick and send exactly those, marking which stage failed.
-
-Balance is free and open source. If you find it useful, you can support its development — see the donation options in the project README: https://github.com/AshkanRafiee/balance#donate
+If Balance is useful to you, you can support its development: donation options are in the project readme at https://github.com/AshkanRafiee/balance#donate
