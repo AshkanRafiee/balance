@@ -1271,7 +1271,7 @@ public final class HistoryActivity extends Activity {
                         emptyState();
                     } else {
                         body.addView(heroCard(lists), margin(0, 0, 0, 6));
-                        body.addView(breakdownHeading(), margin(0, 16, 0, 12));
+                        body.addView(breakdownHeading(filtered.size()), margin(0, 16, 0, 12));
                         allYears = lists.years;
                         seedExpanded();
                         renderYears(body, allYears);
@@ -1436,15 +1436,21 @@ public final class HistoryActivity extends Activity {
      * screen. The button is how the amber rows explain themselves without every row having to spell
      * it out, and its absence when the history adds up is itself the reassurance.
      */
-    private LinearLayout breakdownHeading() {
+    private LinearLayout breakdownHeading(int shown) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.addView(sectionLabel(getString(R.string.history_breakdown)));
-        if (allResiduals.isEmpty()) return row;
 
         LinearLayout.LayoutParams spacer = new LinearLayout.LayoutParams(0, 0, 1);
         row.addView(new View(this), spacer);
+
+        // How much history is on screen. Without it the size of an account is a guess, and the cost
+        // of the breakdown below grows with it.
+        row.addView(text(getResources().getQuantityString(
+            R.plurals.history_n_tx, shown, shown), 12, muted, MEDIUM));
+
+        if (allResiduals.isEmpty()) return row;
 
         TextView ask = text("?", 12, warnFg, MEDIUM);
         ask.setGravity(Gravity.CENTER);
