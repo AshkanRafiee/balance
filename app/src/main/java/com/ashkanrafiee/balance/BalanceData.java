@@ -748,8 +748,8 @@ final class BalanceData {
             selection, args, Telephony.Sms.DATE + " DESC")) {
             if (cursor == null) return 0;
             while (cursor.moveToNext()) {
-                long date = Math.min(cursor.getLong(2), now);
-                if (newest < date) newest = date;
+                long arrival = Math.min(cursor.getLong(2), now);
+                if (newest < arrival) newest = arrival;
                 String sender = cursor.getString(0);
                 String bank = BankRules.resolve(sender);
                 if (bank == null) continue;
@@ -757,7 +757,8 @@ final class BalanceData {
                 if (value < 0) continue;
                 String key = storageKey(bank, BankRules.extractAccount(bank, cursor.getString(1)));
                 rowsByKey.computeIfAbsent(key, k -> new ArrayList<>())
-                    .add(new Object[]{sender, cursor.getString(1), date});
+                    .add(new Object[]{sender, cursor.getString(1),
+                        MessageDate.eventTime(cursor.getString(1), arrival)});
             }
         } catch (Exception e) {
             Log.w(TAG, "scan failed", e);
@@ -898,12 +899,20 @@ final class BalanceData {
                 if (cursor == null) return 0;
                 List<Object[]> rows = new ArrayList<>();
                 while (cursor.moveToNext()) {
-                    long date = Math.min(cursor.getLong(2), now);
-                    if (date > newest) newest = date;
+                    // Two clocks, deliberately. `arrival` is when the phone received the message and
+                    // is the only one that can say whether this row is new to us, so it alone feeds
+                    // `newest` and therefore the incremental watermark. The date the movement carries
+                    // is when the money moved, and that is what orders rows, reconciles balance chains
+                    // and dates the stored transaction — otherwise a message that arrived three weeks
+                    // late is filed three weeks late, and the period it belongs to is left looking
+                    // short of money the app is already holding.
+                    long arrival = Math.min(cursor.getLong(2), now);
+                    if (arrival > newest) newest = arrival;
                     String sender = cursor.getString(0);
                     String bank = BankRules.resolve(sender);
                     if (bank == null) continue;
-                    rows.add(new Object[]{bank, sender, cursor.getString(1), date});
+                    String body = cursor.getString(1);
+                    rows.add(new Object[]{bank, sender, body, MessageDate.eventTime(body, arrival)});
                 }
                 // Oldest first, so the balance-delta fallback chain below follows time. On a full scan
                 // the chain starts from the oldest kept message; on an incremental scan it is seeded
