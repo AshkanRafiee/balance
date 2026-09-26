@@ -1093,4 +1093,125 @@ public class HistoryScanTest {
         assertEquals(1, rebuilt);
         assertEquals(1, BalanceData.readTransactions(ctx).size());
     }
+
+    // ============================================================
+    // Reasons the bank states (real Blu messages)
+    // ============================================================
+
+    @Test public void bluMovement_scanStoresTheStatedReason() throws Exception {
+        // The whole feature end to end: a real Blu message goes into the inbox, the scan reads the
+        // movement as it always did, and now also records the event the bank titled it with.
+        seed(BluMessages.SENDER, BluMessages.TOPUP, T + 1000);
+
+        assertEquals(1, BalanceData.scanHistory(ctx));
+
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(1, txs.size());
+        assertEquals(-220000L, txs.get(0).amount);
+        assertEquals("شارژ شدی", BalanceData.readReasons(ctx).get(BalanceData.noteKey(txs.get(0))));
+        assertTrue("the caption must be the app's own wording",
+            BankRules.reasonCaption(ctx, "شارژ شدی") != null);
+    }
+
+    @Test public void bluMovements_everyStatedReasonIsReadAndCaptioned() throws Exception {
+        // Each title the app claims to understand is read off a real message of its own.
+        seed(BluMessages.SENDER, BluMessages.TOPUP, T + 1000);
+        seed(BluMessages.SENDER, BluMessages.TRANSFER_IN, T + 2000);
+
+        BalanceData.scanHistory(ctx);
+
+        java.util.Set<String> found =
+            new java.util.HashSet<>(BalanceData.readReasons(ctx).values());
+        for (String title : found)
+            assertTrue("uncaptioned reason stored: " + title,
+                BankRules.reasonCaption(ctx, title) != null);
+        assertTrue("expected the top-up and the transfer to be read", found.contains("شارژ شدی"));
+    }
+
+    @Test public void bluPlainWithdrawal_scanStoresNoReason() throws Exception {
+        // "برداشت پول" only restates the direction the row already shows, so the movement is recorded
+        // and nothing is shown on top of it.
+        seed(BluMessages.SENDER, BluMessages.WITHDRAWAL, T + 1000);
+
+        assertEquals(1, BalanceData.scanHistory(ctx));
+
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
+        assertTrue(BalanceData.readReasons(ctx).isEmpty());
+    }
+
+    @Test public void bluTitledPromoAndOtp_areNotMovementsAndStateNoReason() throws Exception {
+        // Both are titled like a movement and neither is one. Neither may become a transaction, and
+        // neither may leave a reason behind that the app cannot caption.
+        seed(BluMessages.SENDER, BluMessages.PROMO, T + 1000);
+        seed(BluMessages.SENDER, BluMessages.OTP, T + 2000);
+
+        BalanceData.scanHistory(ctx);
+
+        assertTrue(BalanceData.readTransactions(ctx).isEmpty());
+        assertTrue(BalanceData.readReasons(ctx).isEmpty());
+    }
+
+    @Test public void banksWithoutReasonRules_scanExactlyAsBefore() throws Exception {
+        // A bank absent from the reason table keeps its old behaviour down to an empty reason map.
+        seed("500095", DEPOSIT, T + 1000);
+
+        assertEquals(1, BalanceData.scanHistory(ctx));
+
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
+        assertTrue(BalanceData.readReasons(ctx).isEmpty());
+    }
+
+    @Test public void scan_neverOverwritesAUsersOwnNote() throws Exception {
+        // The note belongs to the user and the reason to the bank; a rescan may refresh the reason and
+        // must leave the note exactly as it was written.
+        seed(BluMessages.SENDER, BluMessages.TOPUP, T + 1000);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        Transaction t = BalanceData.readTransactions(ctx).get(0);
+        BalanceData.setNote(ctx, t, "for my number, not my brother's");
+        String key = BalanceData.noteKey(t);
+
+        // A rules bump makes the next scan re-read the message already in the inbox.
+        prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
+            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+        assertEquals(1, BalanceData.scanHistory(ctx));
+
+        Transaction rescanned = BalanceData.readTransactions(ctx).get(0);
+        assertEquals("for my number, not my brother's", BalanceData.getNote(ctx, rescanned));
+        assertEquals("شارژ شدی", BalanceData.readReasons(ctx).get(BalanceData.noteKey(rescanned)));
+        assertEquals(1, BalanceData.readNotes(ctx).size());
+        assertEquals(key, BalanceData.noteKey(rescanned));
+    }
+
+    @Test public void incrementalScan_keepsTheReasonOnTheMovementItBelongsTo() throws Exception {
+        // A second message must not restate the first one's reason: each movement carries its own.
+        seed(BluMessages.SENDER, BluMessages.TOPUP, T + 1000);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+
+        seed(BluMessages.SENDER, BluMessages.BILL, T + 2000);
+        BalanceData.scanHistory(ctx);
+
+        java.util.Map<String, String> reasons = BalanceData.readReasons(ctx);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        int withReason = 0;
+        for (Transaction t : txs) if (reasons.containsKey(BalanceData.noteKey(t))) withReason++;
+        assertTrue("at least the two Blu movements must carry a reason", withReason >= 2);
+        for (String title : reasons.values())
+            assertTrue("uncaptioned reason stored: " + title, BankRules.reasonCaption(ctx, title) != null);
+    }
+
+    @Test public void hardReset_reReadsTheReasonFromTheInbox() throws Exception {
+        // A reset wipes the transactions so the next scan rebuilds from the inbox, and the reason
+        // comes back with the message it was read from.
+        seed(BluMessages.SENDER, BluMessages.TOPUP, T + 1000);
+        BalanceData.scanHistory(ctx);
+        String key = BalanceData.noteKey(BalanceData.readTransactions(ctx).get(0));
+        assertEquals("شارژ شدی", BalanceData.readReasons(ctx).get(key));
+
+        BalanceData.reset(ctx, false);
+
+        assertTrue(BalanceData.readReasons(ctx).isEmpty());
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        assertEquals("شارژ شدی", BalanceData.readReasons(ctx)
+            .get(BalanceData.noteKey(BalanceData.readTransactions(ctx).get(0))));
+    }
 }
