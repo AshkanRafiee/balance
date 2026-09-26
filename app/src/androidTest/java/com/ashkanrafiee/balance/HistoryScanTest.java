@@ -902,6 +902,38 @@ public class HistoryScanTest {
         assertEquals(1, amountsOf(txs, -120000L));
     }
 
+    @Test public void rulesBump_afterEveryMessageIsDeleted_leavesEveryResidualUntouched() throws Exception {
+        // The unaccounted-money detector reads the store and never the inbox, so tidying up the
+        // messaging app must not move a single figure. Two things could break it, and both would be
+        // silent lies: a deleted movement that stopped being subtracted would make the app invent a
+        // gap for money it used to hold, and a deleted statement that stopped anchoring would let a
+        // real gap vanish. The history-level orphan rule is covered above; this pins its effect on
+        // the detector, field by field.
+        seed("500095", DEPOSIT, T + 1000);
+        seed("500095", WITHDRAWAL, T + 2000);
+        assertEquals(2, BalanceData.scanHistory(ctx));
+
+        List<Residual> before = Residual.between(BalanceData.readTransactions(ctx));
+        assertEquals("the fixture must contain a gap, or this test proves nothing",
+            1, before.size());
+
+        // The user empties their inbox, then the app updates and rebuilds under the new rules.
+        clearInbox();
+        prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
+            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+        assertEquals("an empty inbox can add nothing", 0, BalanceData.scanHistory(ctx));
+
+        List<Residual> after = Residual.between(BalanceData.readTransactions(ctx));
+        assertEquals(before.size(), after.size());
+        assertEquals(before.get(0).bank, after.get(0).bank);
+        assertEquals(before.get(0).fromDate, after.get(0).fromDate);
+        assertEquals(before.get(0).toDate, after.get(0).toDate);
+        assertEquals("the amount must not drift by a single rial",
+            before.get(0).amount, after.get(0).amount);
+        assertEquals("the movements inside the window must still be counted",
+            before.get(0).movements, after.get(0).movements);
+    }
+
     @Test public void rulesBump_sameMomentSibling_neverDoubledOrDropped() throws Exception {
         // Two movements share the same (bank, date). One message is gone before the bump; the rebuild
         // must pair a present parse with its own stored twin by fingerprint — a (bank, date) budget
