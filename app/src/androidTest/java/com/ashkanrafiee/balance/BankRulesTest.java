@@ -356,4 +356,103 @@ public class BankRulesTest {
         assertEquals("5678", BankRules.extractAccount("Saderat", "\u062D\u0633\u0627\u0628:5678"));
         assertNull(BankRules.extractAccount("Saderat", "\u0627\u0646\u062A\u0642\u0627\u0644 \u0628\u0647 \u062D\u0633\u0627\u0628:5678"));
     }
+
+    // ---- the reason a bank states for a movement ---------------------------------------
+    // Driven with the real messages in {@link BluMessages}: the rule test and a scan test
+    // must see the same bytes the SMS provider hands back, so the fixtures are shared
+    // rather than copied.
+
+    @Test public void reasonTable_rowsReferenceKnownBanks_uniqueAndShapely() {
+        java.util.Set<String> known = BankRules.supportedNames();
+        java.util.Set<String> banksSeen = new java.util.HashSet<>();
+        for (String[] row : BankRules.reasonRulesTestOnly()) {
+            assertEquals("row must be {bank, shape}", 2, row.length);
+            assertTrue("row bank not known: " + row[0], known.contains(row[0]));
+            assertTrue("duplicate bank row: " + row[0], banksSeen.add(row[0]));
+            assertTrue("unknown shape: " + row[1], row[1].equals("title-line"));
+        }
+    }
+
+    @Test public void reasonTable_everyCaptionKeyIsAlreadyNormalized() {
+        // A title added with a stray zero-width joiner or a double space would be stored and shown
+        // but could never be matched back, so the allowlist itself has to be normalized.
+        for (String title : BankRules.reasonCaptionKeys())
+            assertEquals("caption key not in the form the lookup uses: " + title,
+                title, BankRules.normalizeReason(title));
+    }
+
+    @Test public void reasonTable_everyBankRuleHasAtLeastOneCaption() {
+        // A row that can read a title but captions none of them can only ever store noise.
+        for (String[] row : BankRules.reasonRulesTestOnly()) {
+            boolean captioned = false;
+            for (String title : BankRules.reasonCaptionKeys())
+                if (BankRules.extractReason(row[0], "x\n" + title + "\ny\n") != null) captioned = true;
+            assertTrue("no captioned title for " + row[0], captioned);
+        }
+    }
+
+    @Test public void extractReason_bluTitleLine_returnsTheStatedReason() {
+        assertEquals("شارژ شدی", BankRules.extractReason("Blu", BluMessages.TOPUP));
+        assertEquals("پرداخت قبض", BankRules.extractReason("Blu", BluMessages.BILL));
+        assertEquals("برگشت پول", BankRules.extractReason("Blu", BluMessages.REFUND));
+        assertEquals("دریافت پل", BankRules.extractReason("Blu", BluMessages.TRANSFER_IN));
+        assertEquals("انتقال پل", BankRules.extractReason("Blu", BluMessages.TRANSFER_OUT));
+    }
+
+    @Test public void extractReason_plainDirectionTitle_statesNoReason() {
+        // "برداشت پول" only restates the direction the movement row already shows, so a chip saying
+        // so would be noise: the title is read, then dropped for not being one the app captions.
+        assertNull(BankRules.extractReason("Blu", BluMessages.WITHDRAWAL));
+        assertNull(BankRules.extractReason("Blu",
+            "بلو\nواریز پول\n اشکان عزیز، 500,000 ریال به حساب شما نشست.\n"
+            + " موجودی: 58,086,241 ریال\n۲۳:۲۸\n۱۴۰۵.۰۶.۱۵"));
+    }
+
+    @Test public void extractReason_uncaptionedTitle_statesNoReason() {
+        // A loan promotion and a dynamic-OTP message are both titled and neither states a movement.
+        // Even if a scan ever saw one, an untranslated fragment of a bank message must not appear as
+        // though the app had understood it.
+        assertNull(BankRules.extractReason("Blu", BluMessages.PROMO));
+        assertNull(BankRules.extractReason("Blu", BluMessages.OTP));
+    }
+
+    @Test public void extractReason_titleMustNotCarryDigitsOrRunLong() {
+        // A balance or a date line landing in the title slot, and a paragraph-shaped second line,
+        // are all refused on shape alone — before the allowlist is even consulted.
+        assertNull(BankRules.extractReason("Blu",
+            "\u0628\u0644\u0648\n\u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000 \u0631\u06CC\u0627\u0644\n\u06F2\u06F3\n"));
+        StringBuilder longLine = new StringBuilder("\u0628\u0644\u0648\n");
+        for (int i = 0; i < 80; i++) longLine.append('x');
+        longLine.append("\n\u06F2\u06F3\n");
+        assertNull(BankRules.extractReason("Blu", longLine.toString()));
+    }
+
+    @Test public void extractReason_titleMustBeFollowedByTheRestOfTheMessage() {
+        // A bare two-line body is not a movement message: the title is only a title when the amount,
+        // balance, time and date lines follow it.
+        assertNull(BankRules.extractReason("Blu", "\u0628\u0644\u0648\n\u0634\u0627\u0631\u0698 \u0634\u062F\u06CC"));
+    }
+
+    @Test public void extractReason_bankWithoutTheTable_statesNoReason() {
+        // Every other bank's movements are read exactly as before this table existed.
+        for (String bank : BankRules.supportedNames())
+            if (!bank.equals("Blu")) assertNull(bank, BankRules.extractReason(bank, BluMessages.TOPUP));
+    }
+
+    @Test public void extractReason_missingPieces_stateNoReason() {
+        assertNull(BankRules.extractReason(null, BluMessages.TOPUP));
+        assertNull(BankRules.extractReason("Blu", null));
+        assertNull(BankRules.extractReason("Blu", ""));
+        assertNull(BankRules.extractReason("Blu", "\u0628\u0644\u0648\n"));
+        assertNull(BankRules.extractReason("NoSuchBank", BluMessages.TOPUP));
+    }
+
+    @Test public void extractReason_indentedAndMarkedTitles_matchTheSameReason() {
+        // A sender that indents the title, or wraps it in the invisible right-to-left marks, states
+        // the same event and must land on the same stored reason.
+        String indented = BluMessages.TOPUP.replace("\n \u0627\u0634\u06A9\u0627\u0646", "\n   \u0627\u0634\u06A9\u0627\u0646");
+        assertEquals("شارژ شدی", BankRules.extractReason("Blu", indented));
+        String marked = "\u0628\u0644\u0648\n\u200F\u0634\u0627\u0631\u0698\u200C \u0634\u062F\u06CC\n\u0627\u0634\u06A9\u0627\u0646\ny\n";
+        assertEquals("شارژ شدی", BankRules.extractReason("Blu", marked));
+    }
 }

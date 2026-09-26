@@ -137,8 +137,10 @@ final class BankRules {
     };
 
     /** Version fingerprint of the rule tables, used to detect bank-list changes and force a full rescan.
-     *  Assigned in a later static block once {@link #ACCOUNT_RULES} is built, so account-rule changes
-     *  also force the rebuild (their absence left existing installs scanning with stale keys). */
+     *  Assigned in a later static block once {@link #ACCOUNT_RULES} and {@link #REASON_RULES} are built,
+     *  so account- and reason-rule changes also force the rebuild (their absence left existing installs
+     *  scanning with stale keys, and a reason rule that never re-reads the inbox reaches no history
+     *  that was scanned before the rule existed). */
     static final int VERSION;
 
     private static final Set<String> SUPPORTED_BANKS = new HashSet<>();
@@ -197,6 +199,19 @@ final class BankRules {
         String[][] all = new String[ACCOUNT_RULES.length][];
         for (int i = 0; i < ACCOUNT_RULES.length; i++) all[i] = ACCOUNT_RULES[i].clone();
         return all;
+    }
+
+    /** The reason-rule rows of {@link #REASON_RULES} in declaration order. Test-only oracle input. */
+    static String[][] reasonRulesTestOnly() {
+        String[][] all = new String[REASON_RULES.length][];
+        for (int i = 0; i < REASON_RULES.length; i++) all[i] = REASON_RULES[i].clone();
+        return all;
+    }
+
+    /** Every title {@link #REASON_CAPTION_RES} can caption, in the normalized form the lookup uses.
+     *  Test-only oracle input. */
+    static java.util.Set<String> reasonCaptionKeys() {
+        return new HashSet<>(REASON_CAPTION_RES.keySet());
     }
 
     /** Bank names an incoming SMS can actually reach: every rule alias resolves exactly the way a sender
@@ -267,6 +282,12 @@ final class BankRules {
         for (String[] row : ACCOUNT_RULES) accounts.add(row[0]);
         java.util.Collections.sort(accounts);
         for (String bank : accounts) v = v * 31 + bank.hashCode() * 31 + ACCOUNT_PATTERNS.get(bank).pattern().hashCode();
+        List<String> reasons = new ArrayList<>();
+        for (String[] row : REASON_RULES) reasons.add(row[0]);
+        java.util.Collections.sort(reasons);
+        for (String bank : reasons) v = v * 31 + bank.hashCode() * 31 + REASON_PATTERNS.get(bank).pattern().hashCode();
+        for (String title : new java.util.TreeSet<>(REASON_CAPTION_RES.keySet()))
+            v = v * 31 + title.hashCode() * 31 + REASON_CAPTION_RES.get(title);
         return v;
     }
 
@@ -355,8 +376,6 @@ final class BankRules {
         for (String[] row : ACCOUNT_RULES) ACCOUNT_PATTERNS.put(row[0], compileAccount(row));
     }
 
-    static { VERSION = rulesVersion(); }
-
     /** Returns the account number a message from the given bank belongs to, or null when the bank
      *  never states one in this message. Matching runs over ASCII digits only (Persian/Arabic digit
      *  forms are folded in) so punctuation like ":", ".", and thousand separators keep their role. */
@@ -372,4 +391,105 @@ final class BankRules {
     private static String digitsToAscii(String raw) {
         return Digits.ascii(raw);
     }
+
+    // ====================================================================
+    // Movement reasons
+    // ====================================================================
+
+    /** Per-bank rules that read the reason a bank states for a movement, for the banks whose messages
+     *  name one. One row per bank, mirroring the alias table above: the row picks one of the matcher
+     *  shapes in {@link #compileReason}, and the bank only ever states a reason the app knows how to
+     *  caption (see {@link #REASON_CAPTION_RES}). A bank absent from this table, or a message whose
+     *  shape does not fit, states no reason and behaves exactly as it did before this table existed —
+     *  the movement is still read, dated and summed, it just carries no reason. Row columns:
+     *  {bank, shape}. */
+    private static final String[][] REASON_RULES = {
+        {"Blu", "title-line"},
+    };
+
+    /** Longest title line {@link #compileReason} will read as a reason. A bank names the event in a few
+     *  words; the cap keeps the sentence underneath it, and anything a malformed message makes of a
+     *  second line, out of a store that then renders it on a movement row. */
+    private static final int MAX_REASON_LENGTH = 60;
+
+    /** The event titles a bank is known to state, mapped to the caption that names each one in the
+     *  app's own language. This table is the allowlist: a title that is not listed here states no
+     *  reason the app can caption, so nothing is shown and nothing is stored — rather than an
+     *  untranslated fragment of a bank message appearing as though the app had understood it. Keys
+     *  are the title in its normalized form (see {@link #normalizeReason}), which the rules test
+     *  enforces so a title added with a stray joiner fails there instead of silently never matching.
+     *
+     *  <p>A bank that titles its movements "واریز پول"/"برداشت پول" is deliberately absent: that only
+     *  restates the direction the movement row already shows, and a chip saying so would be noise. */
+    private static final Map<String, Integer> REASON_CAPTION_RES = new HashMap<>();
+    static {
+        REASON_CAPTION_RES.put("شارژ شدی", R.string.reason_topup);
+        REASON_CAPTION_RES.put("پرداخت قبض", R.string.reason_bill_payment);
+        REASON_CAPTION_RES.put("برگشت پول", R.string.reason_refund);
+        REASON_CAPTION_RES.put("دریافت پل", R.string.reason_transfer_in);
+        REASON_CAPTION_RES.put("انتقال پل", R.string.reason_transfer_out);
+    }
+
+    /** Builds the matcher for one {@link #REASON_RULES} row. Each shape carries the guards that keep a
+     *  balance, an amount, a time or a date line from ever being read as the reason. */
+    private static Pattern compileReason(String[] row) {
+        switch (row[1]) {
+            case "title-line":  // Blu: the event title on the line under the brand ("شارژ شدی")
+                // Pinned to the second line, digit-free, at most MAX_REASON_LENGTH characters, and
+                // required to be followed by another line. Every Blu title is a bare noun phrase
+                // while every other line in the message carries a figure — the sentence the amount is
+                // in, the "موجودی" balance, the time, the date — so the guards here and the
+                // allowlist in {@link #REASON_CAPTION_RES} agree on which line can be a title.
+                return Pattern.compile("\\A[ \\t]*[^\\r\\n]*\\r?\\n[ \\t]*([^\\d\\r\\n][^\\d\\r\\n]{0,"
+                    + (MAX_REASON_LENGTH - 2) + "}[^\\d\\s\\r\\n])[ \\t]*\\r?\\n");
+            default:
+                throw new IllegalArgumentException("unknown reason shape '" + row[1] + "' for " + row[0]);
+        }
+    }
+
+    /** Compiled matchers for {@link #REASON_RULES}, keyed by canonical bank name. */
+    private static final Map<String, Pattern> REASON_PATTERNS = new HashMap<>();
+    static {
+        for (String[] row : REASON_RULES) REASON_PATTERNS.put(row[0], compileReason(row));
+    }
+
+    /** The reason the bank stated for this movement, in the bank's own words, or null when the bank is
+     *  not one this app reads reasons from, its message states none, or the title it uses is not one
+     *  {@link #REASON_CAPTION_RES} captions. The text is the normalized title rather than a caption, so
+     *  what is stored stays a fact about the message and can still be captioned in another language
+     *  later. */
+    static String extractReason(String bank, String body) {
+        if (bank == null || body == null) return null;
+        Pattern p = REASON_PATTERNS.get(bank);
+        if (p == null) return null;
+        Matcher m = p.matcher(Digits.ascii(body));
+        if (!m.find()) return null;
+        String title = normalizeReason(m.group(1));
+        return title.isEmpty() || !REASON_CAPTION_RES.containsKey(title) ? null : title;
+    }
+
+    /** The caption for a reason {@link #extractReason} returned, in the app's current language, or
+     *  null when the stored reason is not one this build captions (an older backup, say). */
+    static String reasonCaption(Context context, String reason) {
+        if (reason == null) return null;
+        Integer resId = REASON_CAPTION_RES.get(normalizeReason(reason));
+        return resId == null ? null : context.getString(resId);
+    }
+
+    /** Normalizes a stated title so the caption table can be looked up: the invisible marks a bank's
+     *  text may carry (right-to-left overrides, zero-width joiners) dropped and the whitespace
+     *  collapsed, so a title matches however the sender happened to encode it. */
+    static String normalizeReason(String raw) {
+        StringBuilder out = new StringBuilder(raw.length());
+        for (char c : raw.toCharArray()) {
+            if (c == '\u200C' || c == '\u200D' || c == '\u200E' || c == '\u200F'
+                    || (c >= '\u202A' && c <= '\u202E') || (c >= '\u2066' && c <= '\u2069')) continue;
+            out.append(c);
+        }
+        return out.toString().trim().replaceAll("\\s+", " ");
+    }
+
+    // Last, so every table the fingerprint folds has been built: static initializers run in the order
+    // they are written, and a table read before it is filled would be null here rather than complete.
+    static { VERSION = rulesVersion(); }
 }
