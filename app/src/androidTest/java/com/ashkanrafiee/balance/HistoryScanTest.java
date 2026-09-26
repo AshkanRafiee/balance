@@ -46,6 +46,22 @@ public class HistoryScanTest {
         + "\u0627\u0632 \u0637\u0631\u06CC\u0642: \u0633\u0627\u0645\u0627\u0646\u0647 \u067E\u0644 (\u067E\u0631\u062F\u0627\u062E\u062A \u0644\u062D\u0638\u0647 \u0627\u06CC)  \n"
         + "\u0645\u0627\u0646\u062F\u0647: 361,919,288 \u0631\u06CC\u0627\u0644 \n"
         + "1405/06/06\n00:08";
+    /** The movement the app was never told about in time: 290,696,000 out on the 7th, leaving
+     *  71,223,288 — precisely where the deposit and the withdrawal below say it must be. */
+    private static final String TEJARAT_LATE_MOVEMENT =
+        "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n"
+        + "\u062D\u0633\u0627\u0628: 01351234567890 \n"
+        + "\u0628\u0631\u062F\u0627\u0634\u062A: 290,696,000 \u0631\u06CC\u0627\u0644 \n"
+        + "\u0645\u0627\u0646\u062F\u0647: 71,223,288 \u0631\u06CC\u0627\u0644 \n"
+        + "1405/06/07\n12:00";
+    /** The same shape and the same old date, but a different amount and so a balance that does not
+     *  follow from the known movements. Well-formed, and still no reason to trust it. */
+    private static final String TEJARAT_MISCOUNTED_LATE_MOVEMENT =
+        "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n"
+        + "\u062D\u0633\u0627\u0628: 01351234567890 \n"
+        + "\u0628\u0631\u062F\u0627\u0634\u062A: 100,000,000 \u0631\u06CC\u0627\u0644 \n"
+        + "\u0645\u0627\u0646\u062F\u0647: 261,919,288 \u0631\u06CC\u0627\u0644 \n"
+        + "1405/06/07\n12:00";
     private static final String BLU_WITHDRAWAL =
         "\u0628\u0644\u0648\n"
         + "\u0628\u0631\u062F\u0627\u0634\u062A \u067E\u0648\u0644\n"
@@ -900,6 +916,85 @@ public class HistoryScanTest {
         assertEquals(2, txs.size());
         assertEquals(1, amountsOf(txs, 200000L));
         assertEquals(1, amountsOf(txs, -120000L));
+    }
+
+    @Test public void aLateMessage_closesTheGapItBelongsTo() throws Exception {
+        // The scenario this whole class of change exists for. A movement is announced on the 7th,
+        // the app is not told until the 20th, and in the meantime the balance chain has a hole in
+        // it: the app is holding money it cannot account for. Dated by its arrival, the late
+        // message lands outside the bracket and the gap stays open forever — the user is told they
+        // are short 290,696,000 rial for money sitting in their own account. Dated by what the bank
+        // wrote, it drops into the bracket, the two movements account for the exact fall in balance,
+        // and the gap closes itself with no guessing and nothing to undo.
+        long announced = at(2026, 8, 30, 9, 0);
+        seed("TejaratBank", TEJARAT_DEPOSIT, announced);
+        seed("TejaratBank", TEJARAT_WITHDRAWAL, announced + 3600000L);
+        assertEquals(2, BalanceData.scanHistory(ctx));
+
+        List<Residual> gap = Residual.between(BalanceData.readTransactions(ctx));
+        assertEquals("the fixture must show a gap before the late message lands",
+            1, gap.size());
+        assertEquals("the shortfall is exactly the movement the app was never told about",
+            -290696000L, gap.get(0).amount);
+        long until = at(2026, 9, 10, 9, 0);
+        assertTrue("the gap must predate the late message, or it proves nothing",
+            gap.get(0).toDate < until);
+
+        // The movement the app was never told about: 290,696,000 out on the 7th, and the resulting
+        // balance of 71,223,288 is exactly where the two known messages say it must be.
+        seed("TejaratBank", TEJARAT_LATE_MOVEMENT, until);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(3, txs.size());
+        assertEquals("the balance chain is now unbroken, so nothing is unaccounted for",
+            0, Residual.between(txs).size());
+
+        Transaction late = null;
+        for (Transaction t : txs) {
+            if (t.amount == -290696000L) late = t;
+        }
+        assertNotNull("the late movement must be stored, not ignored", late);
+        assertEquals("and it must carry the date the bank stated, not the day it turned up",
+            persian(1405, 6, 7, 12, 0), late.date);
+        assertTrue("it must predate its own arrival, which is the whole point",
+            late.date < until);
+    }
+
+    @Test public void aBackDatedMessageThatDoesNotFitTheChain_mustNotSilenceTheGap() throws Exception {
+        // Trusting the stated time must not become trusting a stranger's claim. A message can carry
+        // a perfectly well-formed old date and still be wrong about what it did — a re-sent
+        // statement, a mis-parsed amount, a forged SMS. If back-dating alone could cancel a gap,
+        // any message that merely looked old would be able to declare the user's money accounted
+        // for. It is the second, independent fact — the resulting balance — that earns the gap's
+        // closure, and without it the shortfall must still be reported, in full.
+        long announced = at(2026, 8, 30, 9, 0);
+        seed("TejaratBank", TEJARAT_DEPOSIT, announced);
+        seed("TejaratBank", TEJARAT_WITHDRAWAL, announced + 3600000L);
+        assertEquals(2, BalanceData.scanHistory(ctx));
+        assertEquals(1, Residual.between(BalanceData.readTransactions(ctx)).size());
+
+        // Same shape, same old date, but it claims a different amount and leaves a different balance.
+        seed("TejaratBank", TEJARAT_MISCOUNTED_LATE_MOVEMENT, at(2026, 9, 10, 9, 0));
+        assertEquals(1, BalanceData.scanHistory(ctx));
+
+        List<Residual> still = Residual.between(BalanceData.readTransactions(ctx));
+        assertEquals("a message that does not reconcile the chain must not be taken as proof",
+            1, still.size());
+        assertEquals("and the shortfall must be reported, not quietly reduced to nothing",
+            -190696000L, still.get(0).amount);
+    }
+
+    private static long at(int y, int mo, int d, int h, int mi) {
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        c.clear();
+        c.set(y, mo - 1, d, h, mi, 0);
+        return c.getTimeInMillis();
+    }
+
+    private static long persian(int jy, int jm, int jd, int h, int mi) {
+        int[] g = JalaliCalendar.of(jy, jm, jd).toGregorian();
+        return at(g[0], g[1], g[2], h, mi);
     }
 
     @Test public void rulesBump_afterEveryMessageIsDeleted_leavesEveryResidualUntouched() throws Exception {
