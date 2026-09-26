@@ -44,6 +44,7 @@ public class HistoryCountUiTest {
     private static final long BASE = 1788000000000L;
 
     @Before public void setUp() {
+        finishAnyResumedHistory();
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         originalTag = LocaleHelper.currentTag(ctx);
         originalCurrency = CurrencyHelper.currency(ctx);
@@ -172,6 +173,22 @@ public class HistoryCountUiTest {
             }
         }
         return null;
+    }
+
+    /**
+     * Closes any history screen an earlier test left standing.
+     *
+     * <p>These tests read every resumed view, so one screen left over from a previous test would
+     * contribute its rows to the next test's count. That passes when a class runs alone and fails in
+     * a full suite, which is the worst way for a test to be wrong.
+     */
+    private static void finishAnyResumedHistory() {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            for (Activity a : ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(Stage.RESUMED)) {
+                if (a instanceof HistoryActivity) a.finish();
+            }
+        });
     }
 
     private static List<Activity> resumed() {
