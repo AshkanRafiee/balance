@@ -67,73 +67,73 @@ final class BankRules {
     }
 
     private static final String[][] RULES = {
-        {"Pasargad", "b.pasargad|098500019000|98500019000|+98500019000"},
-        {"Eghtesad Novin", "ENBank|Enbank|+9890004800|90004800"},
-        {"Shahr", "+98200035|20005|20003502|+98200085|700820428285|9200035|98200035|200035"},
-        {"Ansar", "+98200036|100036|98100038"},
-        {"Tejarat", "5000973189|985000973189|tejaratbank|TejaratBank"},
-        {"Refah", "Refah|REFAH|REFAH BANK|Refah Bank|RefahBank"},
-        {"Saman", "+9820000|Saman Bank|Saman|500095|SamanBank|9999920000|2000084080|99999984080|099999984080|9899999984080|+989999984080|+9899999984080|989999920000|+989999920000"},
-        {"Sarmayeh", "+98300058|98300058|7007058|987007058|+987007058"},
-        {"Sina", "Sina Bank|+9850003700798704|9850003700798704|50003700798704|09850004756|+9850004756|9850004756|50004756|50004751|+98300028|500048|500019|98500048|sina bank|SinaBank|sinabank"},
-        {"Saderat", "BankSaderat|Bank Saderat|Saderat| صادرات"},
-        {"Mellat", "Bank Mellat|BankMellat|Mellat"},
-        {"Melli", "Bank Melli|BankMelli|Melli Iran"},
-        {"Maskan", "Bank Maskan|BankMaskan|Maskan"},
-        {"Keshavarzi", "Keshavarzi|Bank Keshavarzi"},
-        {"Parsian", "ParsianBank|Parsian|Bank Parsian"},
-        {"Post", "Post|PostBank|Post Bank"},
-        {"Dey", "Dey|Bank Dey"},
-        {"Hekmat", "Hekmat Iranian|Hekmat"},
-        {"Tosee Taavon", "Tosee Taavon"},
-        {"Noor", "Noor Credit Inst.|Noor|0200080947001|0200002734006"},
-        {"Blu", "Blu|blu|+982187641|98300087641|300087641|989999987641|9999987641|+989999987641|+9890000258"},
-        {"Kosar", "Kosar|Kosar Credit"},
-        {"Mehr", "Mehr Iran|MehrIran"},
-        {"Mehr Eghtesad", "Mehr Eghtesad|MehrEghtesad"},
-        {"Ghavamin", "Ghavamin|Ghavamin Bank"},
-        {"Zamin", "Iran Zamin|IranZamin"},
-        {"Gardeshgari", "Gardeshgari|Tourism Bank"},
-        {"Middle East", "Middle East Bank|Khavarmianeh"},
-        {"Tosee", "Tosee|Tosee Bank"},
-        {"Karafarin", "Karafarin|Karafarin Bank"},
-        {"Resalat", "Resalat|Bank Resalat"},
-        {"Venezuela", "Iran Venezuela|IranVenezuela"},
-        {"Melal", "Melal|Melal Credit Inst."},
-        {"Sanat Madan", "Sanat Madan|SanatMadan"},
-        {"Sepah", "Sepah|Bank Sepah"},
-        {"Tosee Saderat", "Tosee Saderat|ToseeSaderat"},
-        {"Bankino", "Bankino|Bankino Bank"},
-        {"Wepod", "Wepod|Wepod Bank"}
+        {"Pasargad", "b.pasargad|098500019000|98500019000|+98500019000", "J"},
+        {"Eghtesad Novin", "ENBank|Enbank|+9890004800|90004800", "J"},
+        {"Shahr", "+98200035|20005|20003502|+98200085|700820428285|9200035|98200035|200035", "J"},
+        {"Ansar", "+98200036|100036|98100038", "J"},
+        {"Tejarat", "5000973189|985000973189|tejaratbank|TejaratBank", "J"},
+        {"Refah", "Refah|REFAH|REFAH BANK|Refah Bank|RefahBank", "J"},
+        {"Saman", "+9820000|Saman Bank|Saman|500095|SamanBank|9999920000|2000084080|99999984080|099999984080|9899999984080|+989999984080|+9899999984080|989999920000|+989999920000", "J"},
+        {"Sarmayeh", "+98300058|98300058|7007058|987007058|+987007058", "J"},
+        {"Sina", "Sina Bank|+9850003700798704|9850003700798704|50003700798704|09850004756|+9850004756|9850004756|50004756|50004751|+98300028|500048|500019|98500048|sina bank|SinaBank|sinabank", "J"},
+        {"Saderat", "BankSaderat|Bank Saderat|Saderat| صادرات", "J"},
+        {"Mellat", "Bank Mellat|BankMellat|Mellat", "J"},
+        {"Melli", "Bank Melli|BankMelli|Melli Iran", "J"},
+        {"Maskan", "Bank Maskan|BankMaskan|Maskan", "J"},
+        {"Keshavarzi", "Keshavarzi|Bank Keshavarzi", "J"},
+        {"Parsian", "ParsianBank|Parsian|Bank Parsian", "J"},
+        {"Post", "Post|PostBank|Post Bank", "J"},
+        {"Dey", "Dey|Bank Dey", "J"},
+        {"Hekmat", "Hekmat Iranian|Hekmat", "J"},
+        {"Tosee Taavon", "Tosee Taavon", "J"},
+        {"Noor", "Noor Credit Inst.|Noor|0200080947001|0200002734006", "J"},
+        {"Blu", "Blu|blu|+982187641|98300087641|300087641|989999987641|9999987641|+989999987641|+9890000258", "J"},
+        {"Kosar", "Kosar|Kosar Credit", "J"},
+        {"Mehr", "Mehr Iran|MehrIran", "J"},
+        {"Mehr Eghtesad", "Mehr Eghtesad|MehrEghtesad", "J"},
+        {"Ghavamin", "Ghavamin|Ghavamin Bank", "J"},
+        {"Zamin", "Iran Zamin|IranZamin", "J"},
+        {"Gardeshgari", "Gardeshgari|Tourism Bank", "J"},
+        {"Middle East", "Middle East Bank|Khavarmianeh", "J"},
+        {"Tosee", "Tosee|Tosee Bank", "J"},
+        {"Karafarin", "Karafarin|Karafarin Bank", "J"},
+        {"Resalat", "Resalat|Bank Resalat", "J"},
+        {"Venezuela", "Iran Venezuela|IranVenezuela", "J"},
+        {"Melal", "Melal|Melal Credit Inst.", "J"},
+        {"Sanat Madan", "Sanat Madan|SanatMadan", "J"},
+        {"Sepah", "Sepah|Bank Sepah", "J"},
+        {"Tosee Saderat", "Tosee Saderat|ToseeSaderat", "J"},
+        {"Bankino", "Bankino|Bankino Bank", "J"},
+        {"Wepod", "Wepod|Wepod Bank", "J"}
     };
     private static final String[][] OFFICIAL_EXTRA_RULES = {
-        {"Saderat", "+987007851040|+9830009419|9830009419|30009419|983-000-9419|+98200060|+98200040|+9820004008|+98700719|700710|700718|98700719|700719|7007190"},
-        {"Sepah", "100072419|SEPAHBANK|SEPAH BANK|SepahBank|Sepah Bank|986715001|+986715001|6715001|986715000|6715000|+986715000|+986715000015|986715000015|+989122200207|200015|6715000015|+986830068400107|98715000015|6715000016"},
-        {"Industry & Mine", "+9820004003|+98100099|100099"},
-        {"Resalat", "2000474701|+982000474701|982000474701|Resalat|resalat|RESALAT|ResalatBank|Resalat Bank|resalatbank|50001474701|9850001474701|+9850001474701|9850004747|+9850004747|989999904747|9999904747|50004747|500014747|+9820004747|20004746|20004747|+98500014747|9820004747"},
-        {"Mehr", "B.QMEHRIRAN"},
-        {"Ghavamin", "+981000222|+9820000222|+981105151|2000222|2000228"},
-        {"Maskan", "+9810002503|+9850004920|+98500094|100025|98100025|9850004930"},
-        {"Mellat", "+9815560001|+981000920000|981000920000|1000920000|9815560001|+9830007505|+9820003304|+9820003305|+9830003304|30003305|500092000"},
-        {"Melli", "+987007170|98500043087|300084731|+989032229936|+98700717|+98200044|+9820004000|98700717|700717|9830009417|+9830009417|30009417|983000941001|200080|3000941001|98300094170|+983000941001|+98700759"},
-        {"Mehr Eghtesad", "+98200089|+98100089|+982000089|+981000089"},
-        {"Parsian", "99902318|99992318|+98200082|+98300054|+98500024|+9850002318|+9850001099|50001099|300071|9830007171|9810005403|9830007171|9899902318"},
-        {"Post", "9840400108|+9840400108|40400108|50004940|+9820004940|9820004940|20004940|+98200029|+98100029|50004949|98700717|9850004940|98500009440|+9850004940"},
-        {"Karafarin", "200057780|B.Karafarin|98200004321|+9830004321|30004321|+98200004321|50004858|50004857|98200002341|981000004|200004321"},
-        {"Keshavarzi", "+98300081301|5000181301|+989999944444|9999944444|989999944444"},
-        {"Zamin", "IZBANK"},
-        {"Gardeshgari", "TourismBank|+982000300|982000309|982000300"},
-        {"Kosar", "+9850002477|10002477|9810002477|6715014005|98715014005"},
-        {"Tosee Taavon", "ttbank|TTBANK|+9820006438|+985000257|5000157|+985000157|500158|30005816|+989810007000|9810007000"},
-        {"Middle East", "9820004861|+9820004861|20004861|20004840|+9820004860|9820004860|20004860"},
-        {"Dey", "2000766|+9820004002|+9820043|+9830002726|Day Bank|Day|+98300097500027|3000766|500018|982000766|DayBank|98200766|+982000766"},
-        {"Hekmat", "+9820008955"},
-        {"Tosee Credit Inst.", "+9830005816"},
-        {"EDBI", "7000730|+9830009430|9830009430|30009430"},
-        {"Melal Credit Inst.", "+98200022222"},
-        {"Noor Credit Inst.", "9830009480|30009480|+9820004009|7007780|20004293"},
-        {"Wepod", "+981000214|98500011|5000114|+985000114|985000114|981000214|1000214|9830009017|30009017"},
-        {"Bankino", "20004860"}
+        {"Saderat", "+987007851040|+9830009419|9830009419|30009419|983-000-9419|+98200060|+98200040|+9820004008|+98700719|700710|700718|98700719|700719|7007190", "J"},
+        {"Sepah", "100072419|SEPAHBANK|SEPAH BANK|SepahBank|Sepah Bank|986715001|+986715001|6715001|986715000|6715000|+986715000|+986715000015|986715000015|+989122200207|200015|6715000015|+986830068400107|98715000015|6715000016", "J"},
+        {"Industry & Mine", "+9820004003|+98100099|100099", "J"},
+        {"Resalat", "2000474701|+982000474701|982000474701|Resalat|resalat|RESALAT|ResalatBank|Resalat Bank|resalatbank|50001474701|9850001474701|+9850001474701|9850004747|+9850004747|989999904747|9999904747|50004747|500014747|+9820004747|20004746|20004747|+98500014747|9820004747", "J"},
+        {"Mehr", "B.QMEHRIRAN", "J"},
+        {"Ghavamin", "+981000222|+9820000222|+981105151|2000222|2000228", "J"},
+        {"Maskan", "+9810002503|+9850004920|+98500094|100025|98100025|9850004930", "J"},
+        {"Mellat", "+9815560001|+981000920000|981000920000|1000920000|9815560001|+9830007505|+9820003304|+9820003305|+9830003304|30003305|500092000", "J"},
+        {"Melli", "+987007170|98500043087|300084731|+989032229936|+98700717|+98200044|+9820004000|98700717|700717|9830009417|+9830009417|30009417|983000941001|200080|3000941001|98300094170|+983000941001|+98700759", "J"},
+        {"Mehr Eghtesad", "+98200089|+98100089|+982000089|+981000089", "J"},
+        {"Parsian", "99902318|99992318|+98200082|+98300054|+98500024|+9850002318|+9850001099|50001099|300071|9830007171|9810005403|9830007171|9899902318", "J"},
+        {"Post", "9840400108|+9840400108|40400108|50004940|+9820004940|9820004940|20004940|+98200029|+98100029|50004949|98700717|9850004940|98500009440|+9850004940", "J"},
+        {"Karafarin", "200057780|B.Karafarin|98200004321|+9830004321|30004321|+98200004321|50004858|50004857|98200002341|981000004|200004321", "J"},
+        {"Keshavarzi", "+98300081301|5000181301|+989999944444|9999944444|989999944444", "J"},
+        {"Zamin", "IZBANK", "J"},
+        {"Gardeshgari", "TourismBank|+982000300|982000309|982000300", "J"},
+        {"Kosar", "+9850002477|10002477|9810002477|6715014005|98715014005", "J"},
+        {"Tosee Taavon", "ttbank|TTBANK|+9820006438|+985000257|5000157|+985000157|500158|30005816|+989810007000|9810007000", "J"},
+        {"Middle East", "9820004861|+9820004861|20004861|20004840|+9820004860|9820004860|20004860", "J"},
+        {"Dey", "2000766|+9820004002|+9820043|+9830002726|Day Bank|Day|+98300097500027|3000766|500018|982000766|DayBank|98200766|+982000766", "J"},
+        {"Hekmat", "+9820008955", "J"},
+        {"Tosee Credit Inst.", "+9830005816", "J"},
+        {"EDBI", "7000730|+9830009430|9830009430|30009430", "J"},
+        {"Melal Credit Inst.", "+98200022222", "J"},
+        {"Noor Credit Inst.", "9830009480|30009480|+9820004009|7007780|20004293", "J"},
+        {"Wepod", "+981000214|98500011|5000114|+985000114|985000114|981000214|1000214|9830009017|30009017", "J"},
+        {"Bankino", "20004860", "J"}
     };
 
     /** Version fingerprint of the rule tables, used to detect bank-list changes and force a full rescan.
@@ -145,6 +145,29 @@ final class BankRules {
     static {
         for (String[] rule : RULES) SUPPORTED_BANKS.add(rule[0]);
         for (String[] rule : OFFICIAL_EXTRA_RULES) SUPPORTED_BANKS.add(rule[0]);
+    }
+
+    /** The calendar each rule row declares, keyed by canonical bank name. Every row states one, so
+     *  a bank outside Iran is added by declaring Gregorian here rather than by having its dates
+     *  assumed, and a row that declared neither would be caught by the rules test. */
+    private static final Map<String, CalendarSystem> CALENDARS = new HashMap<>();
+    static {
+        for (String[] rule : RULES) declareCalendar(rule);
+        for (String[] rule : OFFICIAL_EXTRA_RULES) declareCalendar(rule);
+    }
+
+    private static void declareCalendar(String[] rule) {
+        CalendarSystem cal = CalendarSystem.ofTag(rule.length > 2 ? rule[2] : null);
+        if (cal != null) CALENDARS.put(rule[0], cal);
+    }
+
+    /** The calendar a bank writes its dates in, which decides how its year-less dates are read: the
+     *  two calendars are about three months apart, so a message stating no year has to be read in the
+     *  right one. Falls back to Persian only for a bank that is in neither table, which no bank name
+     *  the app resolves can be. */
+    static CalendarSystem calendar(String bank) {
+        CalendarSystem cal = CALENDARS.get(bank);
+        return cal == null ? CalendarSystem.JALALI : cal;
     }
 
     /** Every canonical bank name listed by a rule table (reachable or not). */
@@ -163,7 +186,7 @@ final class BankRules {
 
     /** The raw rule tables in resolution order. Test-only oracle input. */
     static String[][] rulesTestOnly() {
-        String[][] all = new String[RULES.length + OFFICIAL_EXTRA_RULES.length][2];
+        String[][] all = new String[RULES.length + OFFICIAL_EXTRA_RULES.length][];
         System.arraycopy(RULES, 0, all, 0, RULES.length);
         System.arraycopy(OFFICIAL_EXTRA_RULES, 0, all, RULES.length, OFFICIAL_EXTRA_RULES.length);
         return all;
