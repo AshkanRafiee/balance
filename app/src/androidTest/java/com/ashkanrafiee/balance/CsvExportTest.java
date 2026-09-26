@@ -84,7 +84,7 @@ public class CsvExportTest {
         // A UTF-8 BOM leads the file so spreadsheets (Excel first) read Persian text as UTF-8 instead
         // of mis-decoding it; the header itself follows right after it.
         assertTrue(csv.startsWith("\uFEFF"));
-        assertEquals("bank,account,date,date_local,time,amount_rial,amount_display,currency,note",
+        assertEquals("bank,account,date,date_local,time,amount_rial,amount_display,currency,note,kind",
             line(csv, 0).substring(1));
         assertEquals(1, csv.split("\n").length);
     }
@@ -105,11 +105,12 @@ public class CsvExportTest {
         Transaction t = new Transaction("bank_melli", "910251846", DATE_2026, 1_250_000L, "sig");
         String row = line(CsvExport.csv(ctx, Arrays.asList(t), java.util.Collections.<String, String>emptyMap()), 1);
         List<String> cells = parse(row);
-        assertEquals(9, cells.size());
+        assertEquals(10, cells.size());
         assertEquals(BankRules.displayName(ctx, "bank_melli"), cells.get(0));
         assertEquals("910251846", cells.get(1));
         assertEquals("2026-01-01T00:00:00Z", cells.get(2));
         assertEquals("1250000", cells.get(5));
+        assertEquals(CsvExport.KIND_MOVEMENT, cells.get(9));
         assertEquals("125,000", cells.get(6));
         assertEquals("Toman", cells.get(7));
         assertEquals("", cells.get(8));
@@ -157,8 +158,9 @@ public class CsvExportTest {
         assertTrue(row.contains("\"picked up from the cashier, watch out, \"\"late\"\"\""));
         // …and a plain parser sees the original text unquoted in the last cell.
         List<String> cells = parse(row);
-        assertEquals(9, cells.size());
+        assertEquals(10, cells.size());
         assertEquals("picked up from the cashier, watch out, \"late\"", cells.get(8));
+        assertEquals(CsvExport.KIND_MOVEMENT, cells.get(9));
     }
 
     @Test public void csv_persianNote_survivesUtf8RoundTripAfterTheBom() {
@@ -178,5 +180,99 @@ public class CsvExportTest {
 
         String decoded = new String(utf8, StandardCharsets.UTF_8);
         assertTrue(decoded.contains("مبلغ را نگه داشتم برای روز مبادا"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Unaccounted money in the exported file
+    // -----------------------------------------------------------------------
+
+    /** A movement plus the gap its later statement proved, at two known instants. */
+    private static final long DATE_2026_LATER = 1767398400000L; // 2026-01-03T00:00:00Z
+
+    @Test public void csv_unaccounted_isExportedAsItsOwnRow() {
+        Transaction t = new Transaction("bank_melli", "910251846", DATE_2026, 1_250_000L, "sig");
+        Residual gap = new Residual("bank_melli", "910251846", DATE_2026, DATE_2026_LATER,
+            -2_000_000L, 2);
+        String csv = CsvExport.csv(ctx, Arrays.asList(t), Arrays.asList(gap),
+            java.util.Collections.<String, String>emptyMap());
+        assertEquals(3, csv.split("\n").length);
+
+        List<String> cells = parse(line(csv, 2));
+        assertEquals(10, cells.size());
+        assertEquals(CsvExport.KIND_UNACCOUNTED, cells.get(9));
+        // It carries the same amount columns a movement does, because it moves the totals the same
+        // way — a spreadsheet sum over the file has to reconcile with the app and the bank.
+        assertEquals("-2000000", cells.get(5));
+        assertEquals("2026-01-03T00:00:00Z", cells.get(2));
+        assertEquals(BankRules.displayName(ctx, "bank_melli"), cells.get(0));
+        // …but there is no message behind it, so there is no note to carry and no content to claim.
+        assertEquals("", cells.get(8));
+    }
+
+    @Test public void csv_movementAndUnaccounted_interleaveByDate() {
+        // The exported file has to read as the timeline the user saw, so the gap lands on its own
+        // date rather than being appended after everything else.
+        Transaction before = new Transaction("bank_melli", "1", DATE_2026, 1_000_000L, "a");
+        Transaction between = new Transaction("bank_melli", "1", DATE_2026_LATER, -1_000_000L, "b");
+        Residual gap = new Residual("bank_melli", "1", DATE_2026, DATE_2026_LATER, -2_000_000L, 1);
+        String csv = CsvExport.csv(ctx, Arrays.asList(between, before), Arrays.asList(gap),
+            java.util.Collections.<String, String>emptyMap());
+        assertEquals("before", CsvExport.KIND_MOVEMENT, parse(line(csv, 1)).get(9));
+        assertEquals("gap", CsvExport.KIND_UNACCOUNTED, parse(line(csv, 2)).get(9));
+        assertEquals("statement", CsvExport.KIND_MOVEMENT, parse(line(csv, 3)).get(9));
+        assertEquals("2026-01-01T00:00:00Z", parse(line(csv, 1)).get(2));
+        assertEquals("2026-01-03T00:00:00Z", parse(line(csv, 2)).get(2));
+        assertEquals("2026-01-03T00:00:00Z", parse(line(csv, 3)).get(2));
+    }
+
+    @Test public void csv_unaccountedAtTheSameInstant_leadsTheStatement() {
+        // Same rule as the screen: the gap reads before the statement that proves it.
+        Transaction statement = new Transaction("bank_melli", "1", DATE_2026_LATER, -1_000_000L, "s");
+        Residual gap = new Residual("bank_melli", "1", DATE_2026, DATE_2026_LATER, -2_000_000L, 1);
+        String csv = CsvExport.csv(ctx, Arrays.asList(statement), Arrays.asList(gap),
+            java.util.Collections.<String, String>emptyMap());
+        assertEquals(CsvExport.KIND_UNACCOUNTED, parse(line(csv, 1)).get(9));
+        assertEquals(CsvExport.KIND_MOVEMENT, parse(line(csv, 2)).get(9));
+    }
+
+    @Test public void csv_unaccounted_onlyRows_isStillAValidFile() {
+        Residual gap = new Residual("bank_melli", "910251846", DATE_2026, DATE_2026_LATER,
+            -2_000_000L, 2);
+        String csv = CsvExport.csv(ctx, new ArrayList<Transaction>(), Arrays.asList(gap),
+            java.util.Collections.<String, String>emptyMap());
+        assertTrue(csv.startsWith("\uFEFF"));
+        assertEquals(2, csv.split("\n").length);
+        assertEquals(CsvExport.KIND_UNACCOUNTED, parse(line(csv, 1)).get(9));
+    }
+
+    @Test public void csv_unaccounted_accountLessRow_leavesTheAccountCellEmpty() {
+        // A bank that states no account number exports an empty cell, exactly as a movement from the
+        // same messages does, so the two kinds stay comparable in a spreadsheet.
+        Residual gap = new Residual("bank_melli", null, DATE_2026, DATE_2026_LATER, -2_000_000L, 1);
+        String csv = CsvExport.csv(ctx, new ArrayList<Transaction>(), Arrays.asList(gap),
+            java.util.Collections.<String, String>emptyMap());
+        List<String> cells = parse(line(csv, 1));
+        assertEquals("", cells.get(1));
+        assertEquals(CsvExport.KIND_UNACCOUNTED, cells.get(9));
+    }
+
+    @Test public void csv_nullResiduals_behavesAsThePlainExport() {
+        Transaction t = new Transaction("bank_melli", "910251846", DATE_2026, 1_250_000L, "sig");
+        assertEquals(CsvExport.csv(ctx, Arrays.asList(t), java.util.Collections.<String, String>emptyMap()),
+            CsvExport.csv(ctx, Arrays.asList(t), null, java.util.Collections.<String, String>emptyMap()));
+    }
+
+    @Test public void csv_unaccountedAmountsSumToTheDisplayedTotal() {
+        // The whole point of exporting the gap: the file's raw rial column adds up to the same net
+        // the history screen shows, so the user can reconcile the two without second-guessing it.
+        Transaction t = new Transaction("bank_melli", "1", DATE_2026, 1_250_000L, "sig");
+        Residual gap = new Residual("bank_melli", "1", DATE_2026, DATE_2026_LATER, -2_000_000L, 1);
+        String csv = CsvExport.csv(ctx, Arrays.asList(t), Arrays.asList(gap),
+            java.util.Collections.<String, String>emptyMap());
+        long sum = 0;
+        for (int i = 1; i < csv.split("\n").length; i++) {
+            sum += Long.parseLong(parse(line(csv, i)).get(5));
+        }
+        assertEquals(-750_000L, sum);
     }
 }
