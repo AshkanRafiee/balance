@@ -93,6 +93,9 @@ public final class HistoryActivity extends Activity {
     private int todayColor, monthColor, yearColor;
     private int heroTop, heroBottom, rail, openBg, chipBg;
     private int depBg, depFg, witBg, witFg, badgeFg, badgeBg;
+    /** The amber pair reserved for unaccounted money. Reused from the stale-balance warning so the
+     *  "we are not sure about this" reading is the app's own, in both themes. */
+    private int warnFg, warnBg;
     private LinearLayout body;
     private LockOverlay lockOverlay;
     /** Draws the pull-to-refresh chip pinned to the true top of the screen — clear of the hero card
@@ -364,6 +367,8 @@ public final class HistoryActivity extends Activity {
         witFg = color(R.color.history_wit_fg);
         badgeFg = color(R.color.history_badge_fg);
         badgeBg = color(R.color.history_badge_bg);
+        warnFg = color(R.color.warn);
+        warnBg = color(R.color.warn_bg);
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
         getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(bg));
@@ -626,15 +631,27 @@ public final class HistoryActivity extends Activity {
             try {
                 final List<Transaction> txs;
                 final java.util.Map<String, String> notes;
+                final List<Residual> residuals;
                 synchronized (BalanceData.class) {
                     txs = BalanceData.readTransactions(getApplicationContext());
                     notes = BalanceData.readNotes(getApplicationContext());
+                    // Detected before narrowing, exactly as on screen, so the file reconciles with
+                    // the totals the user just looked at.
+                    residuals = Residual.between(txs);
                 }
                 List<Transaction> scope = txs;
-                if (bankFilter != null) scope = filterByBank(txs, bankFilter);
-                if (accountFilter != null) scope = filterByAccount(scope, accountFilter);
+                List<Residual> residualScope = residuals;
+                if (bankFilter != null) {
+                    scope = filterByBank(txs, bankFilter);
+                    residualScope = filterResidualsByBank(residualScope, bankFilter);
+                }
+                if (accountFilter != null) {
+                    scope = filterByAccount(scope, accountFilter);
+                    residualScope = filterResidualsByAccount(residualScope, accountFilter);
+                }
+                List<Residual> residualOut = applyResidualFilters(residualScope, filter, iranCalendar);
                 scope = applyFilters(scope, filter, iranCalendar);
-                String csv = CsvExport.csv(getApplicationContext(), scope, notes);
+                String csv = CsvExport.csv(getApplicationContext(), scope, residualOut, notes);
                 OutputStream out = getContentResolver().openOutputStream(uri, "w");
                 if (out == null) throw new IOException("no output stream");
                 try {
@@ -1062,6 +1079,10 @@ public final class HistoryActivity extends Activity {
     /** Cached reference to the year list so year-header taps can re-render the whole section. */
     private List<YearGroup> allYears;
 
+    /** The unaccounted money on screen for the current data, newest first. Drives the explainer
+     *  affordance next to the breakdown heading; empty whenever the history fully adds up. */
+    private List<Residual> allResiduals = new ArrayList<>();
+
     /** Scroll container, kept so the list position survives rotation. */
     private PullRefreshScrollView scrollView;
 
@@ -1228,8 +1249,13 @@ public final class HistoryActivity extends Activity {
                 List<Transaction> txs = BalanceData.readTransactions(getApplicationContext());
                 if (bank != null) txs = filterByBank(txs, bank);
                 if (acct != null) txs = filterByAccount(txs, acct);
+                // Detected across the whole account before any narrowing, since a residual is only
+                // provable between two balance statements a filter may hide, and then narrowed by the
+                // same rules so what is on screen and what the totals say always agree.
+                final List<Residual> residuals = applyResidualFilters(Residual.between(txs), f, iran);
                 final List<Transaction> filtered = applyFilters(txs, f, iran);
-                final Lists lists = buildLists(filtered, iran);
+                final Lists lists = buildLists(filtered, residuals, iran);
+                allResiduals = residuals;
                 final Map<String, String> notesNow =
                     BalanceData.readNotes(getApplicationContext());
                 runOnUiThread(() -> {
@@ -1242,7 +1268,7 @@ public final class HistoryActivity extends Activity {
                         emptyState();
                     } else {
                         body.addView(heroCard(lists), margin(0, 0, 0, 6));
-                        body.addView(sectionLabel(getString(R.string.history_breakdown)), margin(0, 16, 0, 12));
+                        body.addView(breakdownHeading(), margin(0, 16, 0, 12));
                         allYears = lists.years;
                         seedExpanded();
                         renderYears(body, allYears);
@@ -1269,6 +1295,21 @@ public final class HistoryActivity extends Activity {
     static List<Transaction> filterByAccount(List<Transaction> txs, String account) {
         List<Transaction> only = new ArrayList<>();
         for (Transaction t : txs) if (account.equals(t.account)) only.add(t);
+        return only;
+    }
+
+    /** The same bank narrowing for unaccounted money, so an export of one bank never carries
+     *  another bank's gaps. */
+    static List<Residual> filterResidualsByBank(List<Residual> residuals, String bank) {
+        List<Residual> only = new ArrayList<>();
+        for (Residual r : residuals) if (bank.equals(r.bank)) only.add(r);
+        return only;
+    }
+
+    /** The same account narrowing for unaccounted money. */
+    static List<Residual> filterResidualsByAccount(List<Residual> residuals, String account) {
+        List<Residual> only = new ArrayList<>();
+        for (Residual r : residuals) if (account.equals(r.account)) only.add(r);
         return only;
     }
 
@@ -1385,6 +1426,32 @@ public final class HistoryActivity extends Activity {
         t.setLetterSpacing(t.getResources().getConfiguration().getLayoutDirection()
             == View.LAYOUT_DIRECTION_LTR ? 0.09f : 0f);
         return t;
+    }
+
+    /**
+     * The breakdown heading, carrying a question-mark button only while unaccounted money is on
+     * screen. The button is how the amber rows explain themselves without every row having to spell
+     * it out, and its absence when the history adds up is itself the reassurance.
+     */
+    private LinearLayout breakdownHeading() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(sectionLabel(getString(R.string.history_breakdown)));
+        if (allResiduals.isEmpty()) return row;
+
+        LinearLayout.LayoutParams spacer = new LinearLayout.LayoutParams(0, 0, 1);
+        row.addView(new View(this), spacer);
+
+        TextView ask = text("?", 12, warnFg, MEDIUM);
+        ask.setGravity(Gravity.CENTER);
+        ask.setContentDescription(getString(R.string.residual_explainer_cd));
+        ask.setBackground(ripple(rounded(warnBg, 11)));
+        ask.setClickable(true);
+        ask.setFocusable(true);
+        ask.setOnClickListener(v -> residualExplainer());
+        row.addView(ask, new LinearLayout.LayoutParams(dp(28), dp(28)));
+        return row;
     }
 
     // ====================================================================
@@ -1624,7 +1691,8 @@ public final class HistoryActivity extends Activity {
             LinearLayout rows = new LinearLayout(this);
             rows.setOrientation(LinearLayout.VERTICAL);
             rows.setPaddingRelative(dp(8), dp(2), 0, 0);
-            for (int i = 0; i < g.txs.size(); i++) {
+            List<Line> lines = dayLines(g);
+            for (int i = 0; i < lines.size(); i++) {
                 if (i > 0) {
                     View sep = new View(this);
                     sep.setBackgroundColor(divider);
@@ -1633,11 +1701,158 @@ public final class HistoryActivity extends Activity {
                     slp.setMarginStart(dp(34));
                     rows.addView(sep, slp);
                 }
-                rows.addView(txRow(g.txs.get(i)), new LinearLayout.LayoutParams(-1, -2));
+                Line line = lines.get(i);
+                rows.addView(line.residual != null ? residualRow(line.residual) : txRow(line.tx),
+                    new LinearLayout.LayoutParams(-1, -2));
             }
             box.addView(rows, new LinearLayout.LayoutParams(-1, -2));
         }
         return box;
+    }
+
+    /**
+     * One day's movements and unaccounted money as a single newest-first list.
+     *
+     * <p>A residual sits immediately before the balance statement that revealed it: the statement is
+     * the proof, so reading the gap first and the evidence after it is the order that makes sense.
+     * When both share a timestamp the residual still leads, since a gap is a statement's companion
+     * rather than a peer of it. The tie-break compares whether the residual is absent, never the
+     * residual objects themselves — two different gaps on one day are equal by that measure, and
+     * comparing references would break the ordering contract.
+     */
+    private static List<Line> dayLines(DayGroup g) {
+        List<Line> lines = new ArrayList<>(g.txs.size() + g.residuals.size());
+        for (Transaction t : g.txs) lines.add(new Line(t.date, t, null));
+        for (Residual r : g.residuals) lines.add(new Line(r.toDate, null, r));
+        lines.sort((a, b) -> {
+            int byDate = Long.compare(b.date, a.date);
+            if (byDate != 0) return byDate;
+            if ((a.residual == null) != (b.residual == null))
+                return a.residual == null ? 1 : -1;
+            return 0;
+        });
+        return lines;
+    }
+
+    /** A rendered history line: exactly one of a parsed movement or unaccounted money. */
+    private static final class Line {
+        final long date;
+        final Transaction tx;
+        final Residual residual;
+
+        Line(long date, Transaction tx, Residual residual) {
+            this.date = date;
+            this.tx = tx;
+            this.residual = residual;
+        }
+    }
+
+    /**
+     * One unaccounted amount: an amber row carrying the signed net, the window of balance statements
+     * that prove it, and a plain statement of the one thing the app genuinely cannot say. Tappable
+     * for the full arithmetic.
+     */
+    private LinearLayout residualRow(final Residual r) {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setPaddingRelative(dp(4), dp(3), dp(4), dp(3));
+        cell.setBackground(rounded(warnBg, 10));
+        cell.setClickable(true);
+        cell.setFocusable(true);
+        cell.setOnClickListener(v -> residualDetail(r));
+
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPaddingRelative(dp(4), dp(3), dp(4), dp(3));
+
+        // A question mark, not a bank badge: there is no sender to attribute this to, and showing a
+        // bank icon there would imply a message we never received.
+        TextView ask = text("?", 13, warnFg, MEDIUM);
+        ask.setGravity(Gravity.CENTER);
+        ask.setBackground(roundedStroke(Color.TRANSPARENT, 12, warnFg));
+        row.addView(ask, new LinearLayout.LayoutParams(dp(24), dp(24)));
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        boolean perBank = bankFilter != null;
+        if (!perBank) {
+            col.addView(text(BankRules.displayName(this, r.bank), 13, warnFg),
+                new LinearLayout.LayoutParams(-2, -2));
+        }
+        TextView time = text(timeText(r.toDate), perBank ? 13 : 11, warnFg);
+        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-2, -2);
+        if (!perBank) tp.topMargin = dp(2);
+        col.addView(time, tp);
+        TextView label = text(getString(R.string.residual_label), 10.5f, warnFg);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.topMargin = dp(1);
+        col.addView(label, lp);
+        LinearLayout.LayoutParams colLp = new LinearLayout.LayoutParams(0, -2, 1);
+        colLp.setMarginStart(dp(9));
+        row.addView(col, colLp);
+
+        TextView amt = bold(signedAmount(r.amount), 13, warnFg);
+        fitToWidth(amt, 13, 10, 0);
+        row.addView(amt, new LinearLayout.LayoutParams(-2, -2));
+        cell.addView(row, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView why = text(getString(R.string.residual_row_hint), 10.5f, warnFg);
+        why.setLineSpacing(0, 1.05f);
+        LinearLayout.LayoutParams wp = new LinearLayout.LayoutParams(-1, -2);
+        wp.setMarginStart(dp(37));
+        wp.setMarginEnd(dp(4));
+        wp.topMargin = dp(2);
+        cell.addView(why, wp);
+        cell.setContentDescription(getString(R.string.residual_row_cd, signedAmount(r.amount)));
+        return cell;
+    }
+
+    /**
+     * The full explanation for one gap, as plain arithmetic the user can check against their own
+     * statement: what the bank said the balance became, what we received in between, and the
+     * difference — with an explicit note that the app will not guess what it was.
+     */
+    private void residualDetail(Residual r) {
+        LockManager.holdUnlock();
+        String body = getString(R.string.residual_detail_body,
+            dateText(calOfResidual(r.fromDate)),
+            dateText(calOfResidual(r.toDate)),
+            BankRules.displayName(this, r.bank),
+            r.account == null ? "" : digits(r.account));
+        android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.residual_detail_title, signedAmount(r.amount)))
+            .setMessage(body)
+            .setPositiveButton(android.R.string.ok, null)
+            .create();
+        dlg.show();
+    }
+
+    /**
+     * What the amber rows mean, in general, plus every gap currently on screen — so a user who taps
+     * the "?" once can see the whole picture rather than hunting row by row.
+     */
+    private void residualExplainer() {
+        LockManager.holdUnlock();
+        StringBuilder body = new StringBuilder(getString(R.string.residual_explainer_body));
+        for (Residual r : allResiduals) {
+            body.append("\n\n• ")
+                .append(BankRules.displayName(this, r.bank))
+                .append(r.account == null ? "" : " " + digits(r.account))
+                .append(" — ").append(signedAmount(r.amount))
+                .append(" (").append(dateText(calOfResidual(r.fromDate)))
+                .append(" → ").append(dateText(calOfResidual(r.toDate))).append(")");
+        }
+        android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.residual_explainer_title)
+            .setMessage(body.toString())
+            .setPositiveButton(android.R.string.ok, null)
+            .create();
+        dlg.show();
+    }
+
+    private CalDate calOfResidual(long date) {
+        int[] g = gDate(date);
+        return CalDate.fromGregorian(g[0], g[1], g[2], iranCalendar);
     }
 
     /** One movement: bank badge, bank name with time, the account number it hit, and the signed
@@ -1885,6 +2100,9 @@ public final class HistoryActivity extends Activity {
         final CalDate date;
         long sum;
         final List<Transaction> txs = new ArrayList<>();
+        /** Unaccounted money detected on this day, shown beside the movements rather than among
+         *  them: it is proven by the day's own balance statements, not read off a message. */
+        final List<Residual> residuals = new ArrayList<>();
         DayGroup(CalDate date) {
             this.date = date;
         }
@@ -1980,6 +2198,31 @@ public final class HistoryActivity extends Activity {
         return out;
     }
 
+    /**
+     * The same narrowing for unaccounted money, keyed on the date it is placed at.
+     *
+     * <p>Detection always runs on the <em>unfiltered</em> movements, because a residual is only
+     * provable between two balance statements that a date or direction filter may well hide; it is
+     * this pass that decides whether the result belongs on screen. Filtering afterwards can therefore
+     * only ever hide a residual, never invent one.
+     */
+    static List<Residual> applyResidualFilters(List<Residual> residuals, Filter f, boolean iran) {
+        List<Residual> out = new ArrayList<>();
+        if (residuals == null) return out;
+        for (Residual r : residuals) {
+            if (f.direction == DIR_DEPOSIT && r.amount <= 0) continue;
+            if (f.direction == DIR_WITHDRAWAL && r.amount >= 0) continue;
+            if (f.from != null || f.to != null) {
+                int[] g = gDate(r.toDate);
+                CalDate d = CalDate.fromGregorian(g[0], g[1], g[2], iran);
+                if (f.from != null && d.compare(f.from) < 0) continue;
+                if (f.to != null && d.compare(f.to) > 0) continue;
+            }
+            out.add(r);
+        }
+        return out;
+    }
+
     /** Replaces the date bounds with what the preset means on {@code now}; CUSTOM is never applied
      *  here — the dialog sets its own bounds. Kept static so the instrumented tests cover it. */
     static Filter rangePreset(Filter f, int preset, JalaliCalendar now) {
@@ -2010,72 +2253,113 @@ public final class HistoryActivity extends Activity {
     }
 
     static Lists buildLists(List<Transaction> txs, boolean iran) {
-        Lists lists = new Lists();
-        if (txs.isEmpty()) return lists;
+        return buildLists(txs, null, iran);
+    }
 
-        List<Transaction> sorted = new ArrayList<>(txs);
-        Collections.sort(sorted, new Comparator<Transaction>() {
+    /**
+     * The same breakdown, additionally folding in the unaccounted money for the day each residual is
+     * placed on.
+     *
+     * <p>A residual counts toward every sum and subtotal — otherwise the totals would quietly omit
+     * money the app knows moved, which is the one failure this feature exists to prevent — but it
+     * never counts toward the movement <em>count</em>, because "12 transactions" must mean twelve
+     * messages were actually received. The gap between those two numbers is the point.
+     *
+     * <p>Movements and residuals are folded in one date-ordered pass rather than movements first and
+     * residuals afterwards. A residual carries no movement of its own to carry it into place, and a
+     * filter can leave it without the statement that dated it, so folding it in second would append
+     * its day at the end of the month and put the days out of order.
+     */
+    static Lists buildLists(List<Transaction> txs, List<Residual> residuals, boolean iran) {
+        Lists lists = new Lists();
+        boolean anyResidual = residuals != null && !residuals.isEmpty();
+        if ((txs == null || txs.isEmpty()) && !anyResidual) return lists;
+
+        // One newest-first stream of both kinds, so every day group is built in one go and the
+        // groups come out ordered without a second pass.
+        List<Line> lines = new ArrayList<>();
+        if (txs != null) for (Transaction t : txs) lines.add(new Line(t.date, t, null));
+        if (anyResidual) for (Residual r : residuals) lines.add(new Line(r.toDate, null, r));
+        Collections.sort(lines, new Comparator<Line>() {
             @Override
-            public int compare(Transaction a, Transaction b) {
-                return Long.compare(b.date, a.date);
+            public int compare(Line a, Line b) {
+                int byDate = Long.compare(b.date, a.date);
+                if (byDate != 0) return byDate;
+                if ((a.residual == null) != (b.residual == null)) return a.residual == null ? 1 : -1;
+                return 0;
             }
         });
 
         CalDate today = CalDate.today(iran);
-
         Map<String, YearGroup> yearIndex = new HashMap<>();
         Map<String, MonthGroup> monthIndex = new HashMap<>();
-        for (Transaction t : sorted) {
-            lists.total += t.amount;
-            int[] g = gDate(t.date);
-            CalDate jc = CalDate.fromGregorian(g[0], g[1], g[2], iran);
-            boolean todayMatch = jc.sameDay(today);
-            boolean monthMatch = jc.year == today.year && jc.month == today.month;
-            boolean yearMatch = jc.year == today.year;
-            if (todayMatch) {
-                lists.today += t.amount;
-                if (t.amount > 0) lists.todayDep += t.amount; else lists.todayWit += t.amount;
-            }
-            if (monthMatch) {
-                lists.month += t.amount;
-                if (t.amount > 0) lists.monthDep += t.amount; else lists.monthWit += t.amount;
-            }
-            if (yearMatch) {
-                lists.year += t.amount;
-                if (t.amount > 0) lists.yearDep += t.amount; else lists.yearWit += t.amount;
-            }
 
-            String yearKey = String.valueOf(jc.year);
-            YearGroup year = yearIndex.get(yearKey);
-            if (year == null) {
-                year = new YearGroup(jc.year);
-                yearIndex.put(yearKey, year);
-                lists.years.add(year);
-            }
-            year.sum += t.amount;
-            year.n++;
-            if (t.amount > 0) year.dep += t.amount; else year.wit += t.amount;
-
-            String monthKey = jc.year + "/" + jc.month;
-            MonthGroup month = monthIndex.get(monthKey);
-            if (month == null) {
-                month = new MonthGroup(jc.year, jc.month);
-                monthIndex.put(monthKey, month);
-                year.months.add(month);
-            }
-            month.sum += t.amount;
-            month.n++;
-            if (t.amount > 0) month.dep += t.amount; else month.wit += t.amount;
-
-            DayGroup day = month.days.isEmpty() ? null : month.days.get(month.days.size() - 1);
-            if (day == null || day.date.day != jc.day) {
-                day = new DayGroup(jc);
-                month.days.add(day);
-            }
-            day.sum += t.amount;
-            day.txs.add(t);
+        for (Line l : lines) {
+            boolean isResidual = l.residual != null;
+            long amount = isResidual ? l.residual.amount : l.tx.amount;
+            DayGroup day = accumulate(lists, yearIndex, monthIndex, calOf(l.date, iran), amount,
+                !isResidual, today);
+            if (isResidual) day.residuals.add(l.residual); else day.txs.add(l.tx);
         }
         return lists;
+    }
+
+    /** The calendar date of a movement, in the active calendar system. */
+    private static CalDate calOf(long date, boolean iran) {
+        int[] g = gDate(date);
+        return CalDate.fromGregorian(g[0], g[1], g[2], iran);
+    }
+
+    /** Folds one signed amount into every summary, year, month and day that shares its date, and
+     *  returns the day group it landed in. {@code count} is false for unaccounted money, which moves
+     *  every total but is not a movement. */
+    private static DayGroup accumulate(Lists lists, Map<String, YearGroup> yearIndex,
+            Map<String, MonthGroup> monthIndex, CalDate jc, long amount, boolean count, CalDate today) {
+        lists.total += amount;
+        boolean todayMatch = jc.sameDay(today);
+        boolean monthMatch = jc.year == today.year && jc.month == today.month;
+        boolean yearMatch = jc.year == today.year;
+        if (todayMatch) {
+            lists.today += amount;
+            if (amount > 0) lists.todayDep += amount; else lists.todayWit += amount;
+        }
+        if (monthMatch) {
+            lists.month += amount;
+            if (amount > 0) lists.monthDep += amount; else lists.monthWit += amount;
+        }
+        if (yearMatch) {
+            lists.year += amount;
+            if (amount > 0) lists.yearDep += amount; else lists.yearWit += amount;
+        }
+
+        YearGroup year = yearIndex.get(String.valueOf(jc.year));
+        if (year == null) {
+            year = new YearGroup(jc.year);
+            yearIndex.put(String.valueOf(jc.year), year);
+            lists.years.add(year);
+        }
+        year.sum += amount;
+        if (count) year.n++;
+        if (amount > 0) year.dep += amount; else year.wit += amount;
+
+        String monthKey = jc.year + "/" + jc.month;
+        MonthGroup month = monthIndex.get(monthKey);
+        if (month == null) {
+            month = new MonthGroup(jc.year, jc.month);
+            monthIndex.put(monthKey, month);
+            year.months.add(month);
+        }
+        month.sum += amount;
+        if (count) month.n++;
+        if (amount > 0) month.dep += amount; else month.wit += amount;
+
+        DayGroup day = month.days.isEmpty() ? null : month.days.get(month.days.size() - 1);
+        if (day == null || day.date.day != jc.day) {
+            day = new DayGroup(jc);
+            month.days.add(day);
+        }
+        day.sum += amount;
+        return day;
     }
 
     private static int[] gDate(long date) {

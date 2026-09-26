@@ -231,6 +231,16 @@
     <string name="history_export_saved">CSV saved</string>
     <string name="history_export_failed">CSV export failed</string>
 
+    <!-- Unaccounted money: a balance change the bank reported for which no message arrived. -->
+    <string name="residual_label">Unaccounted</string>
+    <string name="residual_row_hint">Your bank reported this money moving, but no message reached us. Tap to see how we know.</string>
+    <string name="residual_row_cd">Unaccounted %1$s. Your bank reported this money moving but no message reached us, so we do not know what it was. Tap for details.</string>
+    <string name="residual_detail_title">Unaccounted %1$s</string>
+    <string name="residual_detail_body">Between %1$s and %2$s, %3$s reported that this account\'s balance changed by more than the messages we received account for.\n\nThe messages that did arrive are already listed normally. The difference is money that moved without a message ever reaching us — so we cannot tell you what it was, how many transactions it was, or exactly when it happened, and we will not guess.\n\nIt is counted in the totals above, because the balance really did move. If the missing message arrives later, this line disappears on its own and the real transaction takes its place.</string>
+    <string name="residual_explainer_cd">What unaccounted money means</string>
+    <string name="residual_explainer_title">Unaccounted money</string>
+    <string name="residual_explainer_body">Amber rows are money your bank told us moved, for which no SMS ever arrived — carriers sometimes drop messages below a threshold, or filter them.\n\nEach one is arithmetic on two balance statements your bank sent: the change it reported, minus the movements we did receive. That difference is real, so it is counted in every total. What it was is not something we can know, so nothing is invented to fill it in.\n\nIf a message turns up later, the amber row disappears and the real transaction appears in its place.</string>
+
     <string name="bank_pasargad">Pasargad</string>
     <string name="bank_eghtesad_novin">Eghtesad Novin</string>
     <string name="bank_shahr">Shahr</string>
