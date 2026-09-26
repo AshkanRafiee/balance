@@ -2,6 +2,8 @@ package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertTrue;
 
 import android.app.Activity;
@@ -140,6 +142,37 @@ public class HistoryLazyRowsTest {
             clockTimes() > before);
     }
 
+    @Test public void revealingMore_keepsTheRowsAlreadyOnScreen() {
+        // A reveal must add rows, not re-make the ones above them. Rebuilding the month would
+        // replace every view the user is reading, which is both the expensive way round and the one
+        // that makes the list re-measure itself under a moving finger.
+        storeTheWholePreviousMonth(3);
+        launch();
+        openOlderYearIfClosed();
+        View first = firstClockRow();
+        assertNotNull("expected movements on screen to begin with", first);
+        int before = clockTimes();
+        scrollToBottom();
+        await(() -> clockTimes() > before, 10_000, "the bottom of the list to reveal more");
+        assertSame("a row that was already on screen must not be rebuilt by a reveal",
+            first, firstClockRow());
+    }
+
+    @Test public void theNextBatchStartsBeforeTheUserReachesTheBottom() {
+        // The batch is built as the user approaches the end of what is there, not on arrival at it,
+        // so there is nothing left to wait for when they get there. Landing strictly inside the
+        // prefetch window is the point: the rows below the fold are what make this different from
+        // simply scrolling to the end.
+        int total = storeTheWholePreviousMonth(3);
+        launch();
+        openOlderYearIfClosed();
+        int before = clockTimes();
+        assertTrue("the month must open part-built for this to mean anything: built "
+            + before + " of " + total, before < total);
+        scrollNearButNotToTheBottom();
+        await(() -> clockTimes() > before, 10_000, "the next batch to start on the way down");
+    }
+
     @Test public void aSmallMonthIsUnaffectedByTheBudget() {
         // The budget must not cost anything on an ordinary month, which is nearly every month of
         // nearly every account. A month that fits is built whole, with nothing left to reveal.
@@ -162,6 +195,31 @@ public class HistoryLazyRowsTest {
         BalanceData.writeTransactions(ctx, txs);
         launch();
         assertEquals("a single crowded day must be built whole", 60, clockTimes());
+    }
+
+    /**
+     * Scrolls to a point still short of the bottom, but inside the distance the next batch starts at.
+     *
+     * <p>Stops a fixed margin short of the end so there are demonstrably rows left below the fold,
+     * which is what separates this from the bottom-of-list reveal.
+     */
+    private static void scrollNearButNotToTheBottom() {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            for (Activity a : resumed()) {
+                android.widget.ScrollView sv = tallestScrollView(a.getWindow().getDecorView(), null);
+                if (sv == null) continue;
+                ViewGroup list = (ViewGroup) sv.getChildAt(0);
+                if (list == null) continue;
+                int viewport = sv.getHeight();
+                int content = list.getHeight();
+                if (content <= viewport) continue;
+                int prefetch = Math.max(700, Math.round(viewport * 1.5f));
+                int target = content - viewport - prefetch + 200;
+                assertTrue("the test must not simply scroll to the bottom: target " + target
+                    + " of " + content, target > 0 && target < content - viewport);
+                sv.scrollTo(0, Math.max(0, target));
+            }
+        });
     }
 
     /** Scrolls the list as far down as it goes, the gesture the reveal is wired to.
@@ -193,12 +251,26 @@ public class HistoryLazyRowsTest {
 
     /** How many movement rows are on screen, told apart by the clock time only a row carries. */
     private static int clockTimes() {
-        int n = 0;
-        for (TextView t : texts()) {
-            CharSequence s = t.getText();
-            if (s != null && s.toString().matches("\\d{1,2}:\\d{2}")) n++;
-        }
-        return n;
+        return clockRows().size();
+    }
+
+    /** The topmost movement row on screen, as a view, so a test can tell a kept row from a new one. */
+    private static View firstClockRow() {
+        List<TextView> all = texts();
+        for (int i = 0; i < all.size(); i++) if (isClock(all.get(i))) return all.get(i);
+        return null;
+    }
+
+    private static List<View> clockRows() {
+        List<TextView> all = texts();
+        List<View> out = new ArrayList<>();
+        for (int i = 0; i < all.size(); i++) if (isClock(all.get(i))) out.add(all.get(i));
+        return out;
+    }
+
+    private static boolean isClock(TextView t) {
+        CharSequence s = t.getText();
+        return s != null && s.toString().matches("\\d{1,2}:\\d{2}");
     }
 
     private static List<TextView> texts() {

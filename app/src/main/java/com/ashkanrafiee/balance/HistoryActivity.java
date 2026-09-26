@@ -420,8 +420,9 @@ public final class HistoryActivity extends Activity {
 
         indicatorOverlay = new PullIndicatorOverlay();
         scrollView.setIndicatorOverlay(indicatorOverlay);
-        // Reaching the bottom of the list is the user asking for more of it, so the next batch of
-        // movements is built there and then, rather than all at once when the month opened.
+        // Coming near the bottom of what is built is the user on their way to more of it, so the next
+        // batch is built there rather than all at once when the month opened, and started far enough
+        // ahead that it is ready before they arrive.
         scrollView.setOnScrollChangeListener((v, sx, sy, ox, oy) -> {
             if (sy <= oy) return;
             android.widget.ScrollView sv = (android.widget.ScrollView) v;
@@ -433,8 +434,8 @@ public final class HistoryActivity extends Activity {
             // listener also fires on the first layout pass, when the list has no height yet, and
             // would build the whole history before the user had scrolled anywhere.
             if (content <= viewport) return;
-            if (sy + viewport < content - REVEAL_NEAR_PX) return;
-            revealMore();
+            if (sy + viewport < content - prefetchPx(viewport)) return;
+            queueReveal();
         });
         host.addView(indicatorOverlay, new FrameLayout.LayoutParams(-1, -1));
 
@@ -1115,14 +1116,23 @@ public final class HistoryActivity extends Activity {
      *  the screen. Kept as a field rather than read off the views, so it survives the rebuilds that
      *  every tap triggers and the months already opened stay opened. */
     private final Map<String, Integer> revealedRows = new HashMap<>();
-    /** Each open month's days container, so revealing more can rebuild that month alone. */
+    /** Each open month's days container, so revealing more can add to that month alone. */
     private final Map<String, LinearLayout> monthDaysHosts = new HashMap<>();
+    /** How many day cards a month has already added, by month key. A reveal starts from here rather
+     *  than from the beginning of the month, which is what lets it append instead of rebuild. */
+    private final Map<String, Integer> builtCards = new HashMap<>();
 
     /** Rows built for a month before the user asks for more, and how many more each request adds. */
     private static final int FIRST_BATCH = 25;
     private static final int BATCH = 30;
-    /** How close to the bottom of the list counts as reaching it. */
-    private static final int REVEAL_NEAR_PX = 700;
+    /** How far ahead of the end of what is built the next batch is started, as a multiple of the
+     *  screen height, and the floor for it. Starting a screen and a half out is the compromise: far
+     *  enough that the work has finished by the time the user gets there, near enough that a fling
+     *  that is never going to reach the end has not had the whole history built underneath it. */
+    private static final float PREFETCH_SCREENS = 1.5f;
+    private static final int PREFETCH_MIN_PX = 700;
+    /** A reveal asked for by a scroll and still waiting to be appended. */
+    private boolean revealQueued;
 
     /** The unaccounted money on screen for the current data, newest first. Drives the explainer
      *  affordance next to the breakdown heading; empty whenever the history fully adds up. */
@@ -1303,6 +1313,7 @@ public final class HistoryActivity extends Activity {
                     body.setContentDescription(null);
                     body.removeAllViews();
                     monthDaysHosts.clear();
+                    builtCards.clear();
                     if (lists.years.isEmpty()) {
                         emptyState();
                     } else {
@@ -1847,26 +1858,51 @@ public final class HistoryActivity extends Activity {
             View v = daysHost.getChildAt(i);
             if (DAY_TAG.equals(v.getTag())) daysHost.removeViewAt(i);
         }
-        int left = revealedFor(monthKey);
-        boolean builtAny = false;
-        for (int i = 0; i < days.size(); i++) {
-            DayGroup g = days.get(i);
-            int rows = g.txs.size() + g.residuals.size();
-            if (expandedDays.contains(g.key()) && !builtAny && rows > left) {
-                // Always make progress, even when one day is larger than a whole batch.
-                left -= rows;
-                builtAny = true;
-            } else if (expandedDays.contains(g.key())) {
-                if (rows > left) break;
-                left -= rows;
-                builtAny = true;
-            }
-            LinearLayout card = dayCard(g, daysHost, days, monthKey);
+        appendDays(daysHost, days, monthKey, 0);
+    }
+
+    /**
+     * Adds the month's day cards from {@code from} up to what its budget allows, and leaves every
+     * card before that untouched.
+     *
+     * <p>This is the half of {@link #renderDays} that a reveal can use. Rebuilding the month instead
+     * would throw away and reinflate every row already on screen, so the cost of one more batch grew
+     * with the month rather than with the batch, and the list re-measured itself under the finger
+     * that had just asked for it. Appending cannot move what is above, so the content the user is
+     * reading does not shift either.
+     */
+    private void appendDays(LinearLayout daysHost, List<DayGroup> days, String monthKey, int from) {
+        int want = dayCardsFor(days, revealedFor(monthKey));
+        for (int i = Math.max(0, from); i < want; i++) {
+            LinearLayout card = dayCard(days.get(i), daysHost, days, monthKey);
             card.setTag(DAY_TAG);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
             lp.topMargin = dp(i > 0 ? 2 : 0);
             daysHost.addView(card, lp);
         }
+        builtCards.put(monthKey, want);
+    }
+
+    private int prefetchPx(int viewport) {
+        return Math.max(PREFETCH_MIN_PX, Math.round(viewport * PREFETCH_SCREENS));
+    }
+
+    /**
+     * Appends the next batch on the coming frame instead of inside the scroll callback.
+     *
+     * <p>A scroll listener arrives once per pixel travelled, so building a batch there meant a fling
+     * could ask for several in the space of a few frames, each one re-measuring the month it landed
+     * in while the finger was still moving. One flag and one posted runnable turn all of those into
+     * a single append per frame, which is the most the screen can usefully do anyway.
+     */
+    private void queueReveal() {
+        if (revealQueued) return;
+        revealQueued = true;
+        body.post(() -> {
+            revealQueued = false;
+            if (isDestroyed() || isFinishing()) return;
+            revealMore();
+        });
     }
 
     /**
@@ -1874,8 +1910,9 @@ public final class HistoryActivity extends Activity {
      *
      *  <p>Months are walked oldest first, because that is the order the user reaches them in, and
      *  only the first month with movements left to build is touched, so a single scroll costs one
-     *  month's rebuild rather than a whole screen's. Appending inside a month never moves what is
-     *  already on screen, so the list does not jump under the user.
+     *  month's worth of new rows rather than a whole screen's. Only the new rows are added: what is
+     *  already on screen keeps the very views the user is looking at, which is both the cheapest
+     *  thing to do and the only way the list can avoid re-measuring itself under a moving finger.
      */
     private void revealMore() {
         if (allYears == null) return;
@@ -1890,51 +1927,54 @@ public final class HistoryActivity extends Activity {
             if (target != null) break;
         }
         if (target == null) return;
-        revealedRows.put(target.key(), revealedFor(target.key()) + BATCH);
-        LinearLayout host = monthDaysHosts.get(target.key());
-        if (host != null) renderDays(host, target.days, target.key());
+        String key = target.key();
+        revealedRows.put(key, revealedFor(key) + BATCH);
+        LinearLayout host = monthDaysHosts.get(key);
+        if (host != null) appendDays(host, target.days, key, builtCardsFor(key));
     }
 
-    /** Whether an open month still has movements the budget has not built. */
+    /** Whether an open month still has day cards the budget has not built.
+     *
+     * <p>Asked of {@link #dayCardsFor} rather than of a separate count of movements, so the question
+     * and the append that answers it can never disagree about what the budget allows. An earlier
+     * version kept a second implementation of the same rule, and the two drifted: the reveal
+     * believed a month was finished exactly when its budget ran out, so it never revealed anything. */
     private boolean hasMoreToReveal(MonthGroup m) {
-        return openLines(m) > builtLines(m);
-    }
-
-    /** Every movement an open month holds, across the days that are open. */
-    private int openLines(MonthGroup m) {
-        int n = 0;
-        for (DayGroup d : m.days) {
-            if (expandedDays.contains(d.key())) n += d.txs.size() + d.residuals.size();
-        }
-        return n;
+        return dayCardsFor(m.days, revealedFor(m.key())) < m.days.size();
     }
 
     /**
-     * How many of a month's movements its budget actually builds.
+     * How many of a month's day cards its budget builds.
      *
-     * <p>This has to follow exactly the rule {@link #renderDays} follows, including the rule that the
-     * first day is always built. An earlier version of this counted differently, which meant the
-     * reveal believed a month was finished precisely when its budget had run out, and so never
-     * revealed anything at all.
+     * <p>A day that is not open still shows as a collapsed card but costs no budget, since it holds
+     * no rows. The first open day is always built, so a month can never open onto nothing however
+     * the budget divides, and an open day that will not fit ends the list rather than being built
+     * half.
      */
-    private int builtLines(MonthGroup m) {
-        int left = revealedFor(m.key());
-        int built = 0;
+    private int dayCardsFor(List<DayGroup> days, int budget) {
+        int left = budget;
         boolean builtAny = false;
-        for (DayGroup d : m.days) {
-            if (!expandedDays.contains(d.key())) continue;
-            int rows = d.txs.size() + d.residuals.size();
-            if (builtAny && rows > left) break;
-            left -= rows;
-            built += rows;
-            builtAny = true;
+        int cards = 0;
+        for (DayGroup d : days) {
+            if (expandedDays.contains(d.key())) {
+                int rows = d.txs.size() + d.residuals.size();
+                if (builtAny && rows > left) return cards;
+                left -= rows;
+                builtAny = true;
+            }
+            cards++;
         }
-        return built;
+        return cards;
     }
 
     private int revealedFor(String monthKey) {
         Integer n = revealedRows.get(monthKey);
         return n == null ? FIRST_BATCH : n;
+    }
+
+    private int builtCardsFor(String monthKey) {
+        Integer n = builtCards.get(monthKey);
+        return n == null ? 0 : n;
     }
 
     /** A collapsible day row: caret, a Today/Yesterday tag over the date, transaction count and
