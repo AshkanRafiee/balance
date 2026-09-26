@@ -1817,8 +1817,7 @@ public final class HistoryActivity extends Activity {
         String body = getString(R.string.residual_detail_body,
             dateText(calOfResidual(r.fromDate)),
             dateText(calOfResidual(r.toDate)),
-            BankRules.displayName(this, r.bank),
-            r.account == null ? "" : digits(r.account));
+            BankRules.displayName(this, r.bank));
         android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.residual_detail_title, signedAmount(r.amount)))
             .setMessage(body)
