@@ -2328,23 +2328,24 @@ public final class HistoryActivity extends Activity {
         // facts, so both are shown. The reason is quiet and uneditable — it is the bank's own
         // statement, read out of the message, not a note anyone can change here.
         int inset = perBank ? 0 : 39;
-        String reason = reasons == null ? null : reasons.get(BalanceData.noteKey(t));
-        String caption = BankRules.reasonCaption(this, reason);
-        if (caption != null) {
-            LinearLayout reasonChip = addChip(cell, caption, false, chipBg, muted, MEDIUM, inset);
-            reasonChip.setContentDescription(getString(R.string.reason_row_cd, caption));
-        }
+        String caption = BankRules.reasonCaption(this,
+            reasons == null ? null : reasons.get(BalanceData.noteKey(t)));
+        if (caption != null) addChip(cell, caption, false, chipBg, muted, MEDIUM, inset);
         String note = notes == null ? null : notes.get(BalanceData.noteKey(t));
         if (note != null) addChip(cell, note, true, badgeBg, badgeFg, null, inset);
-        cell.setContentDescription(getString(R.string.note_row_hint));
+        // The row is a single clickable node, so a screen reader announces this description and never
+        // reaches the chips below it. The reason therefore belongs here rather than on its own chip:
+        // a reason-only row would otherwise be heard as nothing but the invitation to add a note.
+        cell.setContentDescription(caption == null ? getString(R.string.note_row_hint)
+            : getString(R.string.row_hint_with_reason, caption));
         return cell;
     }
 
     /** Adds one chip on its own line under a movement row, inset under the amount exactly as the row
      *  is so a row carrying both reads as one block, and returns it. A note carries the pencil that
      *  says it can be edited here; a reason carries no affordance at all. */
-    private LinearLayout addChip(LinearLayout cell, String label, boolean editable, int bg, int fg,
-            Typeface style, int inset) {
+    private LinearLayout addChip(LinearLayout cell, String label, boolean editable, int chipBg,
+            int chipFg, Typeface style, int inset) {
         LinearLayout chip = new LinearLayout(this);
         chip.setOrientation(LinearLayout.HORIZONTAL);
         chip.setGravity(Gravity.CENTER_VERTICAL);

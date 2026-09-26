@@ -61,7 +61,7 @@
     <string name="reason_refund">برگشت وجه</string>
     <string name="reason_transfer_in">دریافت پل</string>
     <string name="reason_transfer_out">انتقال پل</string>
-    <string name="reason_row_cd">دلیلی که بانک اعلام کرده: %1$s</string>
+    <string name="row_hint_with_reason">دلیلی که بانک اعلام کرده: %1$s. برای افزودن یا ویرایش یادداشت این تراکنش، روی آن بزنید</string>
     <string name="widget_description">نمایش موجودی بانک‌ها در صفحهٔ اصلی</string>
     <string name="widget_empty">هنوز موجودی‌ای نیست — برای خواندن پیامک‌ها روی دکمهٔ به‌روزرسانی بزنید</string>
     <string name="widget_action_refresh">به‌روزرسانی</string>

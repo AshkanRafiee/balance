@@ -61,7 +61,7 @@
     <string name="reason_refund">Refund</string>
     <string name="reason_transfer_in">Instant transfer in</string>
     <string name="reason_transfer_out">Instant transfer out</string>
-    <string name="reason_row_cd">Reason the bank gave: %1$s</string>
+    <string name="row_hint_with_reason">Reason the bank gave: %1$s. Tap to add or edit a note for this transaction</string>
     <string name="widget_description">Bank balances on your home screen</string>
     <string name="widget_empty">No balances yet — tap refresh to scan your bank SMS</string>
     <string name="widget_action_refresh">Refresh</string>
