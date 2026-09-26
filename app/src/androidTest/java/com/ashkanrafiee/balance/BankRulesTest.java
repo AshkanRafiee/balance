@@ -13,6 +13,22 @@ import org.junit.runner.RunWith;
 @RunWith(AndroidJUnit4.class)
 public class BankRulesTest {
 
+    // ---- the calendar each bank declares -------------------------------------------------
+    @Test public void everyRuleRow_declaresACalendar() {
+        // A bank added without a declaration would have its year-less dates read as Persian by
+        // default, quietly off by about three months, so the omission has to fail here instead.
+        for (String[] rule : BankRules.rulesTestOnly()) {
+            assertEquals("row for " + rule[0] + " must state a calendar", 3, rule.length);
+            assertTrue("row for " + rule[0] + " declares an unknown calendar",
+                CalendarSystem.ofTag(rule[2]) != null);
+        }
+    }
+
+    @Test public void everySupportedBank_resolvesToACalendar() {
+        for (String bank : BankRules.supportedNames())
+            assertTrue(bank, BankRules.calendar(bank) != null);
+    }
+
     // ---- exact numeric aliases ---------------------------------------------------------
     @Test public void resolve_numericShortcode_returnsBank() {
         assertEquals("Tejarat", BankRules.resolve("5000973189"));

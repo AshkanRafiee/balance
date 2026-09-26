@@ -14,11 +14,12 @@ import java.util.regex.Pattern;
  * gap for money we already hold. So the stated time is the primary source and the arrival
  * timestamp is only the fallback.
  *
- * <p>The calendar needs no per-bank table: Iranian banks write Persian years, which are
- * unambiguous by their digits (13xx/14xx), while a Gregorian year is 19xx/20xx. Only the year-less
- * layouts ({@code 05/26 08:22}, {@code 0620-21:16}) have to assume the Persian calendar, which is
- * this app's audience, and those take their year from the most recent occurrence that is not in the
- * future.
+ * <p>A year written out is self-describing: a Persian year reads 13xx/14xx where a Gregorian one
+ * reads 19xx/20xx, so those layouts need no declaration and an Iranian bank that states a Gregorian
+ * date is still read correctly. The year-less layouts ({@code 05/26 08:22}, {@code 0620-21:16})
+ * are not self-describing, and the two calendars run about three months apart, so the bank's
+ * declared {@link CalendarSystem} decides how they are read and they take their year from the most
+ * recent occurrence that is not in the future.
  *
  * <p>Every candidate is checked against the arrival time before it is believed, so a number that
  * merely looks like a date (an amount, a reference, a card number) can never move a movement to a
@@ -73,8 +74,11 @@ final class MessageDate {
     private static final Pattern SHORT_DATE = Pattern.compile(
         "(?<![0-9])([0-9]{1,2})[/.]([0-9]{1,2})(?![0-9])");
 
-    /** The time of the event, or {@code arrival} when the message states none we can believe. */
-    static long eventTime(String body, long arrival) {
+    /** The time of the event, or {@code arrival} when the message states none we can believe.
+     *
+     *  @param cal the calendar {@code body} is written in, for the layouts that do not state a year
+     *             and so cannot say it themselves */
+    static long eventTime(String body, long arrival, CalendarSystem cal) {
         if (body == null) return arrival;
         String s = Digits.ascii(body);
         int[] clock = clock(s);
@@ -82,10 +86,12 @@ final class MessageDate {
         Matcher full = FULL_YEAR_DATE.matcher(s);
         if (full.find()) {
             int year = Integer.parseInt(full.group(1));
-            // 13xx/14xx can only be a Persian year, 19xx/20xx only a Gregorian one.
-            boolean jalali = year >= 1300 && year <= 1500;
-            if (!jalali && (year < 1900 || year > 2100)) return arrival;
-            return orArrival(build(jalali, year, false, month(full.group(2)),
+            // A four-digit year says which calendar it belongs to, so it is read as that one even
+            // when the bank declares the other: an Iranian bank is known to state Gregorian dates.
+            CalendarSystem stated = CalendarSystem.JALALI.ownsYear(year) ? CalendarSystem.JALALI
+                : CalendarSystem.GREGORIAN.ownsYear(year) ? CalendarSystem.GREGORIAN : null;
+            if (stated == null) return arrival;
+            return orArrival(build(stated, year, false, month(full.group(2)),
                 day(full.group(3)), clock, arrival), arrival);
         }
 
@@ -96,21 +102,21 @@ final class MessageDate {
             int h = Integer.parseInt(compact.group(3));
             int m = Integer.parseInt(compact.group(4));
             if (h > 23 || m > 59) return arrival;
-            return orArrival(build(true, 0, true, month(compact.group(1)),
+            return orArrival(build(cal, 0, true, month(compact.group(1)),
                 day(compact.group(2)), new int[]{h, m}, arrival), arrival);
         }
 
         Matcher twoDigitYear = TWO_DIGIT_YEAR_DATE.matcher(s);
         if (twoDigitYear.find() && clock != null) {
             int yy = Integer.parseInt(twoDigitYear.group(1));
-            return orArrival(build(true, 1400 + yy, false,
+            return orArrival(build(cal, cal.twoDigitYearBase() + yy, false,
                 month(twoDigitYear.group(2)), day(twoDigitYear.group(3)), clock, arrival), arrival);
         }
 
         if (clock != null) {
             Matcher shortDate = SHORT_DATE.matcher(s);
             if (shortDate.find()) {
-                return orArrival(build(true, 0, true, month(shortDate.group(1)),
+                return orArrival(build(cal, 0, true, month(shortDate.group(1)),
                     day(shortDate.group(2)), clock, arrival), arrival);
             }
         }
@@ -141,31 +147,21 @@ final class MessageDate {
      * Turns calendar components into a timestamp, or returns -1 when they are not a real date or
      * the result cannot be true for a message that arrived at {@code arrival}.
      *
-     * @param year the stated year, or 0 to infer the most recent Persian year not in the future
+     * @param year the stated year, or 0 to infer the most recent one not in the future
      */
-    private static long build(boolean jalali, int year, boolean inferYear, int month, int day,
+    private static long build(CalendarSystem cal, int year, boolean inferYear, int month, int day,
                               int[] clock, long arrival) {
-        if (month < 1 || month > 12 || day < 1 || day > 31) return -1;
+        if (month < 1 || month > 12 || day < 1) return -1;
+        if (inferYear) year = cal.inferYear(arrival);
+        // Checked against the calendar the bank writes in, so a day that does not exist there is
+        // dropped instead of being rolled into the next month by a lenient Calendar.
+        if (day > cal.daysInMonth(year, month)) return -1;
 
-        int[] gregorian;
-        if (jalali) {
-            if (inferYear) {
-                Calendar now = Calendar.getInstance();
-                now.setTimeInMillis(arrival);
-                year = JalaliCalendar.fromGregorian(now.get(Calendar.YEAR),
-                    now.get(Calendar.MONTH) + 1, now.get(Calendar.DAY_OF_MONTH)).year;
-            }
-            if (day > JalaliCalendar.daysInMonth(year, month)) return -1;
-            gregorian = JalaliCalendar.of(year, month, day).toGregorian();
-        } else {
-            gregorian = new int[]{year, month, day};
-        }
-
-        long at = at(gregorian, clock);
-        // A Persian year inferred from the arrival can overshoot into the future by a few months
-        // (today's 5/26 has not happened yet this year), so step back a year before giving up.
+        long at = at(cal.toGregorian(year, month, day), clock);
+        // A year inferred from the arrival can overshoot into the future by a few months (today's
+        // 5/26 has not happened yet this year), so step back a year before giving up.
         if (inferYear && at > arrival + FUTURE_SLACK_MS) {
-            at = at(JalaliCalendar.of(year - 1, month, day).toGregorian(), clock);
+            at = at(cal.toGregorian(year - 1, month, day), clock);
         }
         if (at > arrival + FUTURE_SLACK_MS) return -1;
         if (at < arrival - MAX_AGE_MS) return -1;

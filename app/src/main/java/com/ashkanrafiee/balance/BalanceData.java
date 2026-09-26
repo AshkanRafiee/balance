@@ -758,7 +758,7 @@ final class BalanceData {
                 String key = storageKey(bank, BankRules.extractAccount(bank, cursor.getString(1)));
                 rowsByKey.computeIfAbsent(key, k -> new ArrayList<>())
                     .add(new Object[]{sender, cursor.getString(1),
-                        MessageDate.eventTime(cursor.getString(1), arrival)});
+                        MessageDate.eventTime(cursor.getString(1), arrival, BankRules.calendar(bank))});
             }
         } catch (Exception e) {
             Log.w(TAG, "scan failed", e);
@@ -912,7 +912,8 @@ final class BalanceData {
                     String bank = BankRules.resolve(sender);
                     if (bank == null) continue;
                     String body = cursor.getString(1);
-                    rows.add(new Object[]{bank, sender, body, MessageDate.eventTime(body, arrival)});
+                    rows.add(new Object[]{bank, sender, body,
+                        MessageDate.eventTime(body, arrival, BankRules.calendar(bank))});
                 }
                 // Oldest first, so the balance-delta fallback chain below follows time. On a full scan
                 // the chain starts from the oldest kept message; on an incremental scan it is seeded
