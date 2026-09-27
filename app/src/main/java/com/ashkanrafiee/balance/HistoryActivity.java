@@ -156,6 +156,11 @@ public final class HistoryActivity extends Activity {
      *  can never stand in for a note the user has not written. */
     private Map<String, String> reasons;
 
+    /** The channels the bank stated, read and held exactly like the reasons. A third store of its own,
+     *  so the way a movement happened stays as separate from what the user wrote about it as the bank's
+     *  reason for it is. */
+    private Map<String, String> channels;
+
     /** An account number is sensitive: it is copied to the clipboard only for the paste window,
      *  then cleared again unless the user copied something else in the meantime; the clear is keyed
      *  to the exact clip we placed, so the user's own later copy is never destroyed. Runs on its
@@ -1346,10 +1351,13 @@ public final class HistoryActivity extends Activity {
                     BalanceData.readNotes(getApplicationContext());
                 final Map<String, String> reasonsNow =
                     BalanceData.readReasons(getApplicationContext());
+                final Map<String, String> channelsNow =
+                    BalanceData.readChannels(getApplicationContext());
                 runOnUiThread(() -> {
                     if (gen != renderGen || isDestroyed() || isFinishing()) return;
                     notes = notesNow;
                     reasons = reasonsNow;
+                    channels = channelsNow;
                     refreshDates();
                     rebuildFilterBar();
                     stopShimmer();
@@ -2327,26 +2335,33 @@ public final class HistoryActivity extends Activity {
         row.addView(amt, new LinearLayout.LayoutParams(-2, -2));
         cell.addView(row, new LinearLayout.LayoutParams(-1, -2));
 
-        // What the bank said about this movement, above what the user wrote about it: two separate
-        // facts, so both are shown. The reason is quiet and uneditable — it is the bank's own
-        // statement, read out of the message, not a note anyone can change here.
+        // What the bank said about this movement, above what the user wrote about it: three separate
+        // facts, so all of them are shown. The reason and the channel are quiet and uneditable — they
+        // are the bank's own words, read out of the message, not a note anyone can change here.
         int inset = perBank ? 0 : 39;
-        String caption = BankRules.reasonCaption(this,
-            reasons == null ? null : reasons.get(BalanceData.noteKey(t)));
+        String key = BalanceData.noteKey(t);
+        String caption = BankRules.reasonCaption(this, reasons == null ? null : reasons.get(key));
         if (caption != null) addChip(cell, caption, false, chipBg, muted, MEDIUM, inset);
-        String note = notes == null ? null : notes.get(BalanceData.noteKey(t));
+        String channel = BankRules.channelCaption(this, channels == null ? null : channels.get(key));
+        if (channel != null) addChip(cell, channel, false, chipBg, muted, MEDIUM, inset);
+        String note = notes == null ? null : notes.get(key);
         if (note != null) addChip(cell, note, true, badgeBg, badgeFg, null, inset);
         // The row is a single clickable node, so a screen reader announces this description and never
-        // reaches the chips below it. The reason therefore belongs here rather than on its own chip:
-        // a reason-only row would otherwise be heard as nothing but the invitation to add a note.
-        cell.setContentDescription(caption == null ? getString(R.string.note_row_hint)
-            : getString(R.string.row_hint_with_reason, caption));
+        // reaches the chips below it. Whatever the bank stated therefore belongs here rather than on
+        // its own chip: a row carrying only a channel would otherwise be heard as nothing but the
+        // invitation to add a note. Each clause is a whole sentence, so the two of them read in order
+        // in either language rather than running into each other.
+        List<String> facts = new ArrayList<>(2);
+        if (caption != null) facts.add(getString(R.string.row_fact_reason, caption));
+        if (channel != null) facts.add(getString(R.string.row_fact_channel, channel));
+        cell.setContentDescription(facts.isEmpty() ? getString(R.string.note_row_hint)
+            : getString(R.string.row_hint_with_facts, android.text.TextUtils.join(" ", facts)));
         return cell;
     }
 
     /** Adds one chip on its own line under a movement row, inset under the amount exactly as the row
-     *  is so a row carrying both reads as one block, and returns it. A note carries the pencil that
-     *  says it can be edited here; a reason carries no affordance at all. */
+     *  is so a row carrying several reads as one block, and returns it. A note carries the pencil that
+     *  says it can be edited here; the reason and the channel carry no affordance at all. */
     private LinearLayout addChip(LinearLayout cell, String label, boolean editable, int chipBg,
             int chipFg, Typeface style, int inset) {
         LinearLayout chip = new LinearLayout(this);
