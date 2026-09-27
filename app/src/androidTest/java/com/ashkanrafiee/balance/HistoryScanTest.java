@@ -1214,4 +1214,100 @@ public class HistoryScanTest {
         assertEquals("شارژ شدی", BalanceData.readReasons(ctx)
             .get(BalanceData.noteKey(BalanceData.readTransactions(ctx).get(0))));
     }
+
+    // ---- the channel a movement went through -----------------------------------------------
+
+    @Test public void tejaratMovement_scanStoresTheStatedChannel() throws Exception {
+        // The whole feature end to end: a Tejarat message goes into the inbox, the scan reads the
+        // movement as it always did, and now also records the channel the money went through.
+        seed("TejaratBank", TEJARAT_WITHDRAWAL, T + 1000);
+
+        assertEquals(1, BalanceData.scanHistory(ctx));
+
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        assertEquals(1, txs.size());
+        assertEquals(-490098000L, txs.get(0).amount);
+        String channel = BalanceData.readChannels(ctx).get(BalanceData.noteKey(txs.get(0)));
+        assertEquals("سامانه پل (پرداخت لحظه ای)", channel);
+        // What is stored is the bank's own wording, so the caption follows the app's language rather
+        // than being frozen into the store.
+        assertTrue("the caption must be the app's own wording",
+            BankRules.channelCaption(ctx, channel) != null);
+    }
+
+    @Test public void tejaratMovementWithoutTheChannelLine_isRecordedWithNoChannel() throws Exception {
+        // The message the app was never told about in time states no channel. It is a movement like
+        // any other — read, dated and summed — and it simply carries no channel.
+        seed("TejaratBank", TEJARAT_LATE_MOVEMENT, T + 1000);
+
+        assertEquals(1, BalanceData.scanHistory(ctx));
+
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
+        assertTrue(BalanceData.readChannels(ctx).isEmpty());
+    }
+
+    @Test public void scan_neverStoresAChannelTheAppCannotCaption() throws Exception {
+        // An uncaptioned channel must leave nothing behind: the store is never a place where a
+        // fragment of a bank message waits to be shown.
+        seed("TejaratBank", TejaratMessages.UNKNOWN_CHANNEL, T + 1000);
+
+        assertEquals(1, BalanceData.scanHistory(ctx));
+
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
+        assertTrue(BalanceData.readChannels(ctx).isEmpty());
+    }
+
+    @Test public void incrementalScan_keepsTheChannelOnTheMovementItBelongsTo() throws Exception {
+        // A second message must not restate the first one's channel: each movement carries its own.
+        seed("TejaratBank", TEJARAT_WITHDRAWAL, T + 1000);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+
+        seed("TejaratBank", TejaratMessages.WITHDRAWAL_BRANCH, T + 2000);
+        BalanceData.scanHistory(ctx);
+
+        java.util.Map<String, String> channels = BalanceData.readChannels(ctx);
+        List<Transaction> txs = BalanceData.readTransactions(ctx);
+        int withChannel = 0;
+        for (Transaction t : txs) if (channels.containsKey(BalanceData.noteKey(t))) withChannel++;
+        assertTrue("both Tejarat movements must carry a channel", withChannel >= 2);
+        assertTrue("the two movements must not share one channel", channels.size() >= 2);
+        for (String channel : channels.values())
+            assertTrue("uncaptioned channel stored: " + channel,
+                BankRules.channelCaption(ctx, channel) != null);
+    }
+
+    @Test public void hardReset_reReadsTheChannelFromTheInbox() throws Exception {
+        // A reset wipes the transactions so the next scan rebuilds from the inbox, and the channel
+        // comes back with the message it was read from.
+        seed("TejaratBank", TEJARAT_WITHDRAWAL, T + 1000);
+        BalanceData.scanHistory(ctx);
+        String key = BalanceData.noteKey(BalanceData.readTransactions(ctx).get(0));
+        assertEquals("سامانه پل (پرداخت لحظه ای)", BalanceData.readChannels(ctx).get(key));
+
+        BalanceData.reset(ctx, false);
+
+        assertTrue(BalanceData.readChannels(ctx).isEmpty());
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        assertEquals("سامانه پل (پرداخت لحظه ای)", BalanceData.readChannels(ctx)
+            .get(BalanceData.noteKey(BalanceData.readTransactions(ctx).get(0))));
+    }
+
+    @Test public void scan_neverOverwritesAUsersNoteWithAChannel() throws Exception {
+        // The note belongs to the user and the channel to the bank; a rescan may read the channel and
+        // must leave the note exactly as it was written.
+        seed("TejaratBank", TEJARAT_WITHDRAWAL, T + 1000);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        Transaction t = BalanceData.readTransactions(ctx).get(0);
+        BalanceData.setNote(ctx, t, "for my number, not my brother's");
+
+        prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
+            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+        assertEquals(1, BalanceData.scanHistory(ctx));
+
+        Transaction rescanned = BalanceData.readTransactions(ctx).get(0);
+        assertEquals("for my number, not my brother's", BalanceData.getNote(ctx, rescanned));
+        assertEquals("سامانه پل (پرداخت لحظه ای)",
+            BalanceData.readChannels(ctx).get(BalanceData.noteKey(rescanned)));
+        assertEquals(1, BalanceData.readNotes(ctx).size());
+    }
 }

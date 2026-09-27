@@ -38,6 +38,10 @@ final class BalanceData {
     /** The reasons the bank itself stated, keyed exactly like the notes. Kept in a store of its own so
      *  a detected reason can never overwrite what the user wrote — and never touches it at all. */
     static final String KEY_TX_REASONS = "transaction_reasons";
+    /** The channels the bank itself stated, keyed exactly like the notes and kept in a store of their
+     *  own, for the same reason: a stated channel is a fact about the message, never something the user
+     *  wrote, and a note must be able to clear without taking it with it. */
+    static final String KEY_TX_CHANNELS = "transaction_channels";
     /** Upper bound on one transaction note, so a huge paste cannot bloat the encrypted store. */
     static final int MAX_NOTE_LENGTH = 500;
     static final String PREFS_PREF = "balance_preferences";
@@ -378,6 +382,17 @@ final class BalanceData {
         writeTextStore(context, KEY_TX_REASONS, reasons);
     }
 
+    /** Every channel a bank stated ({@code noteKey → channel}), the same plain lookup map the notes are
+     *  read as. Never null, and entirely separate from them. */
+    static Map<String, String> readChannels(Context context) {
+        return readTextStore(context, KEY_TX_CHANNELS);
+    }
+
+    /** Persists the supplied channels encrypted under {@link #KEY_TX_CHANNELS}. */
+    static void writeChannels(Context context, Map<String, String> channels) {
+        writeTextStore(context, KEY_TX_CHANNELS, channels);
+    }
+
     /** Reads one encrypted {@code key → text} store, or an empty map when it holds nothing or cannot
      *  be read. A value left in plaintext by an older build is still accepted. */
     private static Map<String, String> readTextStore(Context context, String key) {
@@ -415,15 +430,27 @@ final class BalanceData {
      *  overwrite a note, and clearing a note can never lose what the bank said. Nothing is written when
      *  every detected reason was already stored, so an unchanged inbox costs no write. */
     static void mergeReasons(Context context, Map<String, String> detected) {
+        mergeDetectedTextStore(context, KEY_TX_REASONS, detected);
+    }
+
+    /** Folds the channels one scan detected into the stored ones, on exactly the terms the reasons are
+     *  folded on and for the same reason: the channel a bank stated is a fact about its message, the
+     *  user's note is theirs, and neither store can clobber the other. */
+    static void mergeChannels(Context context, Map<String, String> detected) {
+        mergeDetectedTextStore(context, KEY_TX_CHANNELS, detected);
+    }
+
+    private static void mergeDetectedTextStore(Context context, String key,
+            Map<String, String> detected) {
         if (detected == null || detected.isEmpty()) return;
-        Map<String, String> reasons = readReasons(context);
+        Map<String, String> stored = readTextStore(context, key);
         boolean changed = false;
         for (Map.Entry<String, String> e : detected.entrySet()) {
-            if (reasons.containsKey(e.getKey())) continue;
-            reasons.put(e.getKey(), e.getValue());
+            if (stored.containsKey(e.getKey())) continue;
+            stored.put(e.getKey(), e.getValue());
             changed = true;
         }
-        if (changed) writeReasons(context, reasons);
+        if (changed) writeTextStore(context, key, stored);
     }
 
     /** Serializes a per-transaction text map (the notes, or the reasons) to the JSON shape used for
@@ -492,18 +519,20 @@ final class BalanceData {
     }
 
     /** Moves the text attached to a movement that a full-history rebuild would orphan: when a stored
-     *  entry {@code from} is replaced by a freshly parsed {@code to}, both the note the user wrote and
-     *  the reason the bank stated follow the movement to the latter's key. Keyed by the legacy identity
-     *  triple before content digests existed, so the handover happens exactly when a newer rules
-     *  version re-parses the same SMS into a content-bearing entry — the one case where
-     *  {@link #noteKey} changes between the same physical message. Where the destination already
-     *  carries text, the destination's text is kept and the text of the row the rebuild drops is
+     *  entry {@code from} is replaced by a freshly parsed {@code to}, the note the user wrote, the
+     *  reason the bank stated and the channel it went through all follow the movement to the latter's
+     *  key. Keyed by the legacy identity triple before content digests existed, so the handover happens
+     *  exactly when a newer rules version re-parses the same SMS into a content-bearing entry — the one
+     *  case where {@link #noteKey} changes between the same physical message. Where the destination
+     *  already carries text, the destination's text is kept and the text of the row the rebuild drops is
      *  dropped with it, since that key can no longer be read. */
     static void migrateTransactionText(Context context, Map<Transaction, Transaction> replaced) {
         Map<String, String> notes = readNotes(context);
         if (migrateTextKeys(notes, replaced)) writeNotes(context, notes);
         Map<String, String> reasons = readReasons(context);
         if (migrateTextKeys(reasons, replaced)) writeReasons(context, reasons);
+        Map<String, String> channels = readChannels(context);
+        if (migrateTextKeys(channels, replaced)) writeChannels(context, channels);
     }
 
     /** Moves the text of every replaced entry to its replacement's key, in place. Returns whether
@@ -552,14 +581,14 @@ final class BalanceData {
      *  are choices, not data (a data reset must not dump the user back to defaults); the excluded
      *  entries are forgotten too, because a fresh install has no exclusions. Transaction notes are a
      *  hard-won recollection, so they are kept unless the user explicitly opts into deleting them. The
-     *  detected reasons go either way: they are the bank's own words, re-read from the messages the
-     *  rebuild below reprocesses, and the transactions they describe are deleted here with everything
-     *  else — keeping them would only leave entries nothing points at. */
+     *  reasons and channels the bank stated go either way: they are the bank's own words, re-read from
+     *  the messages the rebuild below reprocesses, and the transactions they describe are deleted here
+     *  with everything else — keeping them would only leave entries nothing points at. */
     static void reset(Context context, boolean alsoNotes) {
         android.content.SharedPreferences.Editor data =
             context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
                 .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).remove(KEY_HISTORY_LAST_BALANCE)
-                .remove(KEY_RECENT_MOVEMENTS).remove(KEY_TX_REASONS);
+                .remove(KEY_RECENT_MOVEMENTS).remove(KEY_TX_REASONS).remove(KEY_TX_CHANNELS);
         if (alsoNotes) data.remove(KEY_TX_NOTES);
         data.apply();
         context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
@@ -940,9 +969,11 @@ final class BalanceData {
             }
             int added = 0;
             long newest = 0;
-            // The reasons this scan reads out of the bank messages, folded into the store once the
-            // movements they belong to are written. Declared out here so it survives the cursor block.
+            // The reasons and channels this scan reads out of the bank messages, folded into their
+            // stores once the movements they belong to are written. Declared out here so they survive
+            // the cursor block.
             Map<String, String> detectedReasons = new LinkedHashMap<>();
+            Map<String, String> detectedChannels = new LinkedHashMap<>();
             String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
             String[] args = selection != null ? new String[]{Long.toString(hwm)} : null;
             try (Cursor cursor = context.getContentResolver().query(
@@ -1065,6 +1096,10 @@ final class BalanceData {
                         // is never what lands in this map.
                         String reason = BankRules.extractReason(bank, body);
                         if (reason != null) detectedReasons.put(noteKey(t), reason);
+                        // The channel the bank stated, off the same message and under the same rules:
+                        // recorded only where the movement above was kept, in a store of its own.
+                        String channel = BankRules.extractChannel(bank, body);
+                        if (channel != null) detectedChannels.put(noteKey(t), channel);
                         fresh.add(t);
                         added++;
                     }
@@ -1246,9 +1281,10 @@ final class BalanceData {
                 Log.w(TAG, "history scan failed", e);
             }
             writeTransactions(context, stored);
-            // The reasons land after the transactions they belong to, so the store never holds a
-            // reason for a movement that was not written.
+            // The reasons and channels land after the transactions they belong to, so the stores never
+            // hold one for a movement that was not written.
             mergeReasons(context, detectedReasons);
+            mergeChannels(context, detectedChannels);
             SharedPreferences.Editor editor = prefs.edit();
             // Only commit the rules version and watermark when the scan finished cleanly: marking a
             // full rebuild as done (or advancing past rows that failed) would skip the correction
