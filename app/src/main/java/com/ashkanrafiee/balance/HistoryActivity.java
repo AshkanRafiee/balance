@@ -694,11 +694,13 @@ public final class HistoryActivity extends Activity {
                 final List<Transaction> txs;
                 final java.util.Map<String, String> notes;
                 final java.util.Map<String, String> reasons;
+                final java.util.Map<String, String> channels;
                 final List<Residual> residuals;
                 synchronized (BalanceData.class) {
                     txs = BalanceData.readTransactions(getApplicationContext());
                     notes = BalanceData.readNotes(getApplicationContext());
                     reasons = BalanceData.readReasons(getApplicationContext());
+                    channels = BalanceData.readChannels(getApplicationContext());
                     // Detected before narrowing, exactly as on screen, so the file reconciles with
                     // the totals the user just looked at.
                     residuals = Residual.between(txs);
@@ -715,7 +717,8 @@ public final class HistoryActivity extends Activity {
                 }
                 List<Residual> residualOut = applyResidualFilters(residualScope, filter, iranCalendar);
                 scope = applyFilters(scope, filter, iranCalendar);
-                String csv = CsvExport.csv(getApplicationContext(), scope, residualOut, notes, reasons);
+                String csv = CsvExport.csv(getApplicationContext(), scope, residualOut,
+                    new CsvExport.Text(notes, reasons, channels));
                 OutputStream out = getContentResolver().openOutputStream(uri, "w");
                 if (out == null) throw new IOException("no output stream");
                 try {
