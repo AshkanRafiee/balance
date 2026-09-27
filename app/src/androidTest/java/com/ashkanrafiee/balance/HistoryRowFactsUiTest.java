@@ -1,5 +1,7 @@
 package com.ashkanrafiee.balance;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -178,17 +180,38 @@ public class HistoryRowFactsUiTest {
             row.getContentDescription().toString().contains("یادداشت"));
     }
 
-    @Test public void aUserNote_staysEditableBesideTheStatedFacts() {
-        // The facts the bank stated are quiet, and the row stays a way into the note the user writes.
+    @Test public void aUserNote_isSpokenAlongsideTheFactsTheBankGave() {
+        // All three at once, in the order they are read: the bank's two facts, then the user's own
+        // words, then what the tap still does. A note is the one thing on the row no rescan brings
+        // back, so leaving it out of the description would make it write-only.
         stateReason(TOPUP);
         stateChannel(SHETAB);
-        BalanceData.setNote(ctx, movement, "my own words");
+        BalanceData.setNote(ctx, movement, "rent for Ali");
         launch(ctx);
 
-        assertNotNull("the user's own note must still be shown", findByText("my own words"));
+        assertNotNull("the reason must be shown", findByText("Phone top-up"));
+        assertNotNull("the channel must be shown", findByText("Shetab"));
+        assertNotNull("the user's own note must be shown", findByText("rent for Ali"));
         View row = findByDescriptionContaining("Phone top-up");
         assertNotNull(row);
         assertTrue("tapping the row still opens the note", row.isClickable());
+        assertSpeaksInOrder(row, "Reason the bank gave: Phone top-up.", "Channel: Shetab.",
+            "Your note: rent for Ali.", "Tap to edit it");
+    }
+
+    @Test public void aUserNoteOnItsOwn_isSpokenRatherThanInvited() {
+        // A note the user wrote with the bank saying nothing is exactly the row that used to be heard
+        // as a bare invitation. It is spoken instead, and the invitation to add a note is dropped in
+        // favour of the edit the row really offers.
+        BalanceData.setNote(ctx, movement, "rent for Ali");
+        launch(ctx);
+
+        View row = findByDescriptionContaining("rent for Ali");
+        assertNotNull("the note must be spoken even when the bank said nothing", row);
+        assertEquals(ctx.getString(R.string.row_fact_note, "rent for Ali") + " "
+            + ctx.getString(R.string.row_hint_edit_note), spoken(row));
+        assertFalse("a row that already has a note must not be heard as inviting one",
+            spoken(row).contains(ctx.getString(R.string.note_row_hint)));
     }
 
     // -----------------------------------------------------------------------
@@ -265,6 +288,23 @@ public class HistoryRowFactsUiTest {
             }
         }
         return null;
+    }
+
+    /** What the row is actually announced as. */
+    private static String spoken(View row) {
+        return row.getContentDescription().toString();
+    }
+
+    /** Asserts the row is announced with these clauses, each one after the one before it. */
+    private static void assertSpeaksInOrder(View row, String... clauses) {
+        String said = spoken(row);
+        int at = -1;
+        for (String clause : clauses) {
+            int next = said.indexOf(clause, at + 1);
+            assertTrue("\"" + clause + "\" must be spoken after the clause before it, but the row is "
+                + "announced as: " + said, next > at);
+            at = next;
+        }
     }
 
     private static void await(Callable<Boolean> done, long timeoutMs) {

@@ -68,7 +68,8 @@
     <string name="channel_mobile">همراه بانک</string>
     <string name="channel_branch">شعبه</string>
     <string name="row_fact_channel">از طریق: %1$s.</string>
-    <string name="row_hint_with_facts">%1$s برای افزودن یا ویرایش یادداشت این تراکنش، روی آن بزنید</string>
+    <string name="row_fact_note">یادداشت شما: %1$s.</string>
+    <string name="row_hint_edit_note">برای ویرایش، روی آن بزنید</string>
     <string name="widget_description">نمایش موجودی بانک‌ها در صفحهٔ اصلی</string>
     <string name="widget_empty">هنوز موجودی‌ای نیست — برای خواندن پیامک‌ها روی دکمهٔ به‌روزرسانی بزنید</string>
     <string name="widget_action_refresh">به‌روزرسانی</string>

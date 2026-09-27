@@ -2347,15 +2347,20 @@ public final class HistoryActivity extends Activity {
         String note = notes == null ? null : notes.get(key);
         if (note != null) addChip(cell, note, true, badgeBg, badgeFg, null, inset);
         // The row is a single clickable node, so a screen reader announces this description and never
-        // reaches the chips below it. Whatever the bank stated therefore belongs here rather than on
-        // its own chip: a row carrying only a channel would otherwise be heard as nothing but the
-        // invitation to add a note. Each clause is a whole sentence, so the two of them read in order
-        // in either language rather than running into each other.
-        List<String> facts = new ArrayList<>(2);
-        if (caption != null) facts.add(getString(R.string.row_fact_reason, caption));
-        if (channel != null) facts.add(getString(R.string.row_fact_channel, channel));
-        cell.setContentDescription(facts.isEmpty() ? getString(R.string.note_row_hint)
-            : getString(R.string.row_hint_with_facts, android.text.TextUtils.join(" ", facts)));
+        // reaches the chips below it. Everything the row says therefore belongs here rather than on a
+        // chip of its own: a row carrying only a channel would otherwise be heard as nothing but the
+        // invitation to add a note, and a note — the user's own words, the one thing here that no
+        // rescan can bring back — would never be heard at all. Each clause is a whole sentence, so they
+        // read in order in either language rather than running into each other.
+        List<String> said = new ArrayList<>(4);
+        if (caption != null) said.add(getString(R.string.row_fact_reason, caption));
+        if (channel != null) said.add(getString(R.string.row_fact_channel, channel));
+        if (note != null) said.add(getString(R.string.row_fact_note, note));
+        // A row that already carries a note needs no invitation to add one, so it is offered only the
+        // edit it really has.
+        said.add(note != null
+            ? getString(R.string.row_hint_edit_note) : getString(R.string.note_row_hint));
+        cell.setContentDescription(android.text.TextUtils.join(" ", said));
         return cell;
     }
 
