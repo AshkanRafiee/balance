@@ -194,6 +194,19 @@ final class BankRules {
         return all;
     }
 
+    /** The channel-rule rows of {@link #CHANNEL_RULES} in declaration order. Test-only oracle input. */
+    static String[][] channelRulesTestOnly() {
+        String[][] all = new String[CHANNEL_RULES.length][];
+        for (int i = 0; i < CHANNEL_RULES.length; i++) all[i] = CHANNEL_RULES[i].clone();
+        return all;
+    }
+
+    /** Every channel {@link #CHANNEL_CAPTION_RES} can caption, in the normalized form the lookup uses.
+     *  Test-only oracle input. */
+    static Set<String> channelCaptionKeys() {
+        return new HashSet<>(CHANNEL_CAPTION_RES.keySet());
+    }
+
     /** The account-rule rows of {@link #ACCOUNT_RULES} in declaration order. Test-only oracle input. */
     static String[][] accountRulesTestOnly() {
         String[][] all = new String[ACCOUNT_RULES.length][];
@@ -293,6 +306,15 @@ final class BankRules {
         for (String title : new java.util.TreeSet<>(REASON_CAPTION_RES.keySet()))
             v = v * 31 + title.hashCode() * 31;
         v = v * 31 + REASON_INVISIBLE.hashCode() * 31 + REASON_SPACES.pattern().hashCode();
+        List<String> channels = new ArrayList<>();
+        for (String[] row : CHANNEL_RULES) channels.add(row[0]);
+        java.util.Collections.sort(channels);
+        for (String bank : channels)
+            v = v * 31 + bank.hashCode() * 31 + CHANNEL_PATTERNS.get(bank).pattern().hashCode();
+        // As with the reasons, what is stored is the bank's own wording and the caption is looked up
+        // from it when the movement is shown, so only which channels are now readable belongs in here.
+        for (String channel : new java.util.TreeSet<>(CHANNEL_CAPTION_RES.keySet()))
+            v = v * 31 + channel.hashCode() * 31;
         return v;
     }
 
@@ -491,26 +513,128 @@ final class BankRules {
     /** The invisible marks a bank's text may carry and that carry no meaning of their own: the
      *  zero-width joiner/non-joiner and the left-to-right/right-to-left marks, the bidi embedding and
      *  override run, and the isolate run. Spelled out rather than written as ranges so the table that
-     *  decides what a title may contain is one readable line, and so {@link #rulesVersion} can fold
-     *  it: a title that became readable because this list grew has to be re-read from the inbox. */
+     *  decides what a stated title or channel may contain is one readable line, and so
+     *  {@link #rulesVersion} can fold it: a title that became readable because this list grew has to be
+     *  re-read from the inbox. */
     private static final String REASON_INVISIBLE =
         "\u200C\u200D\u200E\u200F\u202A\u202B\u202C\u202D\u202E"
         + "\u2066\u2067\u2068\u2069";
 
-    /** Every run of whitespace in a stated title is one space, however the sender spaced it. Folded
-     *  into the fingerprint for the same reason as {@link #REASON_INVISIBLE}. */
+    /** Every run of whitespace in a stated title or channel is one space, however the sender spaced
+     *  it. Folded into the fingerprint for the same reason as {@link #REASON_INVISIBLE}. */
     private static final Pattern REASON_SPACES = Pattern.compile("\\s+");
 
-    /** Normalizes a stated title so the caption table can be looked up: the invisible marks a bank's
-     *  text may carry dropped, the edges trimmed and every inner run of whitespace collapsed, so a
-     *  title matches however the sender happened to encode it. */
-    static String normalizeReason(String raw) {
+    /** Normalizes text a bank stated, so the caption table can be looked up: the invisible marks a
+     *  bank's text may carry dropped, the edges trimmed and every inner run of whitespace collapsed,
+     *  so a title or channel matches however the sender happened to encode it. */
+    private static String normalizeStated(String raw) {
         StringBuilder out = new StringBuilder(raw.length());
         for (int i = 0; i < raw.length(); i++) {
             char c = raw.charAt(i);
             if (REASON_INVISIBLE.indexOf(c) < 0) out.append(c);
         }
         return REASON_SPACES.matcher(out.toString().trim()).replaceAll(" ");
+    }
+
+    /** Normalizes a stated title so the caption table can be looked up: the invisible marks a bank's
+     *  text may carry dropped, the edges trimmed and every inner run of whitespace collapsed, so a
+     *  title matches however the sender happened to encode it. */
+    static String normalizeReason(String raw) {
+        return normalizeStated(raw);
+    }
+
+    // ====================================================================
+    // Movement channels
+    // ====================================================================
+
+    /** Per-bank rules that read the channel a movement went through, for the banks whose messages name
+     *  one. One row per bank, mirroring the tables above, so a bank that starts naming a channel is one
+     *  row rather than new code: the row picks one of the matcher shapes in {@link #compileChannel} and
+     *  declares the label the bank writes it behind. A bank absent from this table, or a message whose
+     *  shape does not fit, states no channel and behaves exactly as it did before this table existed —
+     *  the movement is still read, dated and summed, it just carries no channel. Row columns:
+     *  {bank, shape, label}. */
+    private static final String[][] CHANNEL_RULES = {
+        {"Tejarat", "labeled-line", "از طريق:"},
+    };
+
+    /** Longest channel line {@link #compileChannel} will read. A channel is a short noun phrase, so
+     *  the cap keeps a whole sentence out of a store that then renders it on a movement row. */
+    private static final int MAX_CHANNEL_LENGTH = 40;
+
+    /** The channels a bank is known to state, mapped to the caption that names each one in the app's
+     *  own language. This table is the allowlist, for the same reason the reason table is: a channel
+     *  that is not listed here states nothing the app can caption, so nothing is shown and nothing is
+     *  stored — rather than an untranslated fragment of a bank message appearing as though the app had
+     *  understood it. A bank that names only its own channels, the way it writes its own brand, is
+     *  deliberately absent. Keys are the channel in its normalized form (see {@link #normalizeChannel}),
+     *  which the rules test enforces so a channel added with a stray joiner fails there instead of
+     *  silently never matching. */
+    private static final Map<String, Integer> CHANNEL_CAPTION_RES = new HashMap<>();
+    static {
+        CHANNEL_CAPTION_RES.put("شتاب", R.string.channel_shetab);
+        CHANNEL_CAPTION_RES.put("سامانه پل (پرداخت لحظه ای)", R.string.channel_sep);
+        CHANNEL_CAPTION_RES.put("پایانه فروش", R.string.channel_pos);
+        CHANNEL_CAPTION_RES.put("همراه بانک", R.string.channel_mobile);
+        CHANNEL_CAPTION_RES.put("شعبه", R.string.channel_branch);
+    }
+
+    /** Builds the matcher for one {@link #CHANNEL_RULES} row. The label is quoted, so a bank label
+     *  carrying regex punctuation stays literal, and folded to the same letter form the body is
+     *  matched in, so a bank that writes its yeh the other way round still matches. */
+    private static Pattern compileChannel(String[] row) {
+        switch (row[1]) {
+            case "labeled-line":  // Tejarat: the channel on the line under the amount ("از طريق: شتاب")
+                // Read from the label, not from a fixed line number: which line a bank puts the channel
+                // on is not something a message promises, and a movement that states no account line
+                // shifts every line after it up by one. The guards are the same ones the reason shapes
+                // use — digit-free, at most MAX_CHANNEL_LENGTH characters, a run of spaces and a group
+                // that cannot begin or end with one, and a line that has to be terminated, so an
+                // amount, a balance, a date or a time can never be read as the channel, and every split
+                // stays unique instead of a body with no newline being divided between them in N ways,
+                // which is what turns one unparsable message into seconds of stall.
+                return Pattern.compile("(?m)^[ \\t]*" + Pattern.quote(BalanceData.normalizeLetters(row[2]))
+                    + "[ \\t]*([^\\d\\s\\r\\n][^\\d\\r\\n]{0," + (MAX_CHANNEL_LENGTH - 2)
+                    + "}[^\\d\\s\\r\\n])[ \\t]*\\r?\\n");
+            default:
+                throw new IllegalArgumentException("unknown channel shape '" + row[1] + "' for " + row[0]);
+        }
+    }
+
+    /** Compiled matchers for {@link #CHANNEL_RULES}, keyed by canonical bank name. */
+    private static final Map<String, Pattern> CHANNEL_PATTERNS = new HashMap<>();
+    static {
+        for (String[] row : CHANNEL_RULES) CHANNEL_PATTERNS.put(row[0], compileChannel(row));
+    }
+
+    /** The channel the bank stated for this movement, in the bank's own words, or null when the bank is
+     *  not one this app reads channels from, its message states none, or the channel it names is not one
+     *  {@link #CHANNEL_CAPTION_RES} captions. The text is the normalized channel rather than a caption,
+     *  so what is stored stays a fact about the message and can still be captioned in another language
+     *  later. */
+    static String extractChannel(String bank, String body) {
+        if (bank == null || body == null) return null;
+        Pattern p = CHANNEL_PATTERNS.get(bank);
+        if (p == null) return null;
+        Matcher m = p.matcher(BalanceData.normalizeLetters(Digits.ascii(body)));
+        if (!m.find()) return null;
+        String channel = normalizeChannel(m.group(1));
+        return channel.isEmpty() || !CHANNEL_CAPTION_RES.containsKey(channel) ? null : channel;
+    }
+
+    /** The caption for a channel {@link #extractChannel} returned, in the app's current language, or
+     *  null when the stored channel is not one this build captions (an older backup, say). */
+    static String channelCaption(Context context, String channel) {
+        if (channel == null) return null;
+        Integer resId = CHANNEL_CAPTION_RES.get(normalizeChannel(channel));
+        return resId == null ? null : context.getString(resId);
+    }
+
+    /** Normalizes a stated channel so the caption table can be looked up. The letter folding matters
+     *  here in a way it does not for a reason: the bank writes the label with the Arabic yeh, so the
+     *  same word read back through the label can arrive with the Persian one. */
+    static String normalizeChannel(String raw) {
+        return normalizeStated(BalanceData.normalizeLetters(raw));
     }
 
     // Last, so every table the fingerprint folds has been built: static initializers run in the order

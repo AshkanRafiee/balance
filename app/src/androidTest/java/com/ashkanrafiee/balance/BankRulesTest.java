@@ -478,4 +478,129 @@ public class BankRulesTest {
         assertTrue("one unparsable message must not cost seconds",
                 System.nanoTime() - started < 5_000_000_000L);
     }
+
+    // ---- the channel a movement went through ---------------------------------------------
+    // Driven with the synthetic messages in {@link TejaratMessages}, written in the shape the bank
+    // sends them, for the same reason the reason fixtures are shared rather than copied: the rule test
+    // and a scan test must see the same bytes the SMS provider hands back.
+
+    @Test public void channelTable_rowsReferenceKnownBanks_uniqueAndShapely() {
+        java.util.Set<String> known = BankRules.supportedNames();
+        java.util.Set<String> banksSeen = new java.util.HashSet<>();
+        for (String[] row : BankRules.channelRulesTestOnly()) {
+            assertEquals("row must be {bank, shape, label}", 3, row.length);
+            assertTrue("row bank not known: " + row[0], known.contains(row[0]));
+            assertTrue("duplicate bank row: " + row[0], banksSeen.add(row[0]));
+            assertTrue("unknown shape: " + row[1], row[1].equals("labeled-line"));
+            assertTrue("label must end with its colon: " + row[2], row[2].endsWith(":"));
+        }
+    }
+
+    @Test public void channelTable_everyCaptionKeyIsAlreadyNormalized() {
+        // A channel added with a stray zero-width joiner or a double space would be stored and shown
+        // but could never be matched back, so the allowlist itself has to be normalized.
+        for (String channel : BankRules.channelCaptionKeys())
+            assertEquals("caption key not in the form the lookup uses: " + channel,
+                channel, BankRules.normalizeChannel(channel));
+    }
+
+    @Test public void channelTable_everyBankRuleHasAtLeastOneCaption() {
+        // A row that can read a channel but captions none of them can only ever store noise.
+        for (String[] row : BankRules.channelRulesTestOnly()) {
+            boolean captioned = false;
+            for (String channel : BankRules.channelCaptionKeys())
+                if (BankRules.extractChannel(row[0], row[2] + " " + channel + "  \nx\ny\n") != null)
+                    captioned = true;
+            assertTrue("no captioned channel for " + row[0], captioned);
+        }
+    }
+
+    @Test public void extractChannel_tejaratLabeledLine_returnsTheStatedChannel() {
+        assertEquals("شتاب", BankRules.extractChannel("Tejarat", TejaratMessages.WITHDRAWAL_SHETAB));
+        assertEquals("سامانه پل (پرداخت لحظه ای)",
+            BankRules.extractChannel("Tejarat", TejaratMessages.DEPOSIT_SEP));
+        assertEquals("پایانه فروش", BankRules.extractChannel("Tejarat", TejaratMessages.WITHDRAWAL_POS));
+        assertEquals("همراه بانک", BankRules.extractChannel("Tejarat", TejaratMessages.WITHDRAWAL_MOBILE));
+        assertEquals("شعبه", BankRules.extractChannel("Tejarat", TejaratMessages.WITHDRAWAL_BRANCH));
+    }
+
+    @Test public void extractChannel_storesTheBanksOwnWords() {
+        // What is stored is a fact about the message, not a caption: a build with no Persian strings
+        // still shows the channel Tejarat stated, and another language can caption the same value later.
+        assertEquals("شعبه", BankRules.extractChannel("Tejarat", TejaratMessages.WITHDRAWAL_BRANCH));
+    }
+
+    @Test public void extractChannel_messageWithoutTheLine_statesNoChannel() {
+        // The movement is read, dated and summed exactly as before; it just carries no channel.
+        assertNull(BankRules.extractChannel("Tejarat", TejaratMessages.NO_CHANNEL));
+    }
+
+    @Test public void extractChannel_uncaptionedChannel_statesNoChannel() {
+        // A channel this build has no caption for must store nothing, rather than show an
+        // untranslated fragment of a bank message as though the app had understood it.
+        assertNull(BankRules.extractChannel("Tejarat", TejaratMessages.UNKNOWN_CHANNEL));
+    }
+
+    @Test public void extractChannel_channelMustNotCarryDigitsOrRunLong() {
+        // An amount line landing in the channel slot, and a paragraph-shaped channel, are both refused
+        // on shape alone — before the allowlist is even consulted.
+        assertNull(BankRules.extractChannel("Tejarat", TejaratMessages.BALANCE_IN_CHANNEL_POSITION));
+        StringBuilder filler = new StringBuilder();
+        for (int i = 0; i < 80; i++) filler.append('x');
+        assertNull(BankRules.extractChannel("Tejarat",
+            TejaratMessages.WITHDRAWAL_SHETAB.replace("شتاب", filler.toString())));
+    }
+
+    @Test public void extractChannel_messageStoppingAtTheChannel_statesNoChannel() {
+        // A body that simply stops at the channel has not stated a whole movement, so an
+        // unterminated last line is not read as one — the same guard the reason shapes use, and for
+        // the same reason: a truncated message is not a message that says what it says.
+        assertNull(BankRules.extractChannel("Tejarat",
+            "*\u0628\u0627\u0646\u06A9 \u062A\u062C\u0627\u0631\u062A* \n\u0627\u0632 \u0637\u0631\u064A\u0642: \u0634\u062A\u0627\u0628  "));
+    }
+
+    @Test public void extractChannel_bankWithoutTheTable_statesNoChannel() {
+        // Every other bank's movements carry no channel: Blu messages have a reason line but never a
+        // channel line, and no other bank has been seen to name one.
+        for (String bank : BankRules.supportedNames())
+            if (!bank.equals("Tejarat"))
+                assertNull(bank, BankRules.extractChannel(bank, TejaratMessages.WITHDRAWAL_SHETAB));
+    }
+
+    @Test public void extractChannel_missingPieces_stateNoChannel() {
+        assertNull(BankRules.extractChannel(null, TejaratMessages.WITHDRAWAL_SHETAB));
+        assertNull(BankRules.extractChannel("Tejarat", null));
+        assertNull(BankRules.extractChannel("Tejarat", ""));
+        assertNull(BankRules.extractChannel("NoSuchBank", TejaratMessages.WITHDRAWAL_SHETAB));
+    }
+
+    @Test public void extractChannel_senderSpellingPersianYeh_matchesTheSameChannel() {
+        // The bank writes its own label; a sender that spells the yeh the other way states the same
+        // channel, and folding the two letter forms is what makes it land on the same stored value.
+        assertEquals("شتاب", BankRules.extractChannel("Tejarat", TejaratMessages.PERSIAN_YEH_CHANNEL));
+    }
+
+    @Test public void extractChannel_indentedAndMarkedChannelLines_matchTheSameChannel() {
+        // A sender that indents the line, or wraps it in the invisible right-to-left marks and pads it
+        // with a run of spaces, states the same channel.
+        String indented = TejaratMessages.WITHDRAWAL_SHETAB
+            .replace("\u0627\u0632 \u0637\u0631\u064A\u0642: ", "\u0627\u0632 \u0637\u0631\u064A\u0642:   ");
+        assertEquals("شتاب", BankRules.extractChannel("Tejarat", indented));
+        String marked = TejaratMessages.WITHDRAWAL_SHETAB
+            .replace("\u0634\u062A\u0627\u0628  ", "\u200F\u0634\u062A\u0627\u0628\u200C  \n  ");
+        assertEquals("شتاب", BankRules.extractChannel("Tejarat", marked));
+    }
+
+    @Test public void extractChannel_bodyWithoutASecondLine_isRefusedWithoutRereadingIt() {
+        // The same cost argument as the reason matchers: the line and its leading run of spaces are
+        // matched by classes that must not overlap, or a body with no newline at all could be divided
+        // between them in as many ways as it has characters. This fails rather than stalls if they are
+        // ever allowed to overlap again.
+        StringBuilder body = new StringBuilder(100_000);
+        for (int i = 0; i < 100_000; i++) body.append('7');
+        long started = System.nanoTime();
+        assertNull(BankRules.extractChannel("Tejarat", body.toString()));
+        assertTrue("one unparsable message must not cost seconds",
+                System.nanoTime() - started < 5_000_000_000L);
+    }
 }

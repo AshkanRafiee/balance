@@ -1908,7 +1908,10 @@ final class BalanceData {
         }
     }
 
-    private static String normalizeLetters(String s) {
+    /** Folds the two letter forms Persian text arrives in onto one: the Arabic yeh and kaf onto their
+     *  Persian counterparts, so a word the sender spelled either way is the same word to every matcher
+     *  and caption table in the app. */
+    static String normalizeLetters(String s) {
         StringBuilder b = new StringBuilder(s.length());
         for (char c : s.toCharArray()) {
             if (c == '\u064A' || c == '\u06CC') b.append('\u06CC');
