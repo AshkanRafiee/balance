@@ -4,7 +4,7 @@ Currently built for users in Iran, with Iranian banks and their Persian message 
 
 Features:
 - A first-run introduction explaining what is read and why, asking for SMS access in context; skippable, and re-openable from About
-- Offline SMS parsing, with no internet permission and no network requests
+- Offline SMS parsing, with no network request made at any point
 - Latest balance per bank, split per account when stated, without counting the same message twice
 - A combined total, with any account you like left out of it
 - The currency shown next to every amount: Toman (default), Rial as stored, or a custom name
@@ -16,10 +16,10 @@ Features:
 - Transaction history by day, month and year, showing out-of-order messages (a transfer and its fee) in their true order
 - Unaccounted money: when a balance statement changed by more than the messages explain, the difference appears as an amber "Unaccounted" row on the later statement's date and is counted in every total. It is arithmetic on two statements your bank sent itself, so the figure is sound — the app never invents the missing movements, and says so on the row
 - Filter the history by deposits or withdrawals and by date — today, this month, this year, or a custom range in the Persian or Gregorian calendar
-- Movement reasons read from the bank: when a message names the event behind a movement — a phone top-up, a bill payment, a refund, an instant transfer — the row says so in your own language. Where the bank states nothing, and for plain deposits and withdrawals, nothing is added, and a reason never mixes into your note
+- Movement reasons read from the bank: when a message names the event behind a movement — a phone top-up, a bill payment, a refund, an instant transfer — the row says so in your own language, and so does the channel it went through when the bank states that. Where the bank states nothing, and for plain deposits and withdrawals, nothing is added, and neither ever mixes into your note
 - Private notes: tap any row to write your own words about that movement; they follow it through every filter, into CSV exports and into encrypted backups
-- CSV export of exactly what the history shows at that moment, through the system file picker, with UTC timestamps, the date in your calendar, raw and displayed amounts, your notes, the bank's reason, and a column marking each row a movement or unaccounted money
-- Password-encrypted backup and restore of balances, history, notes and reasons
+- CSV export of exactly what the history shows at that moment, through the system file picker, with UTC timestamps, the date in your calendar, raw and displayed amounts, your notes, the bank's reason and channel, and a column marking each row a movement or unaccounted money
+- Password-encrypted backup and restore of balances, history, notes, reasons and channels
 - Optional in-app lock with PIN, password or fingerprint, covering the app, the widget and screenshots/recents
 - English and Persian interface, Persian (Jalali) or Gregorian calendar, and a light or dark theme that follows the device
 - Report (Scan diagnostics): see which bank messages parse and which do not, and send or copy exactly the ones you pick
