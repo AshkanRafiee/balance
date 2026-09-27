@@ -894,4 +894,109 @@ public class BackupRestoreTest {
         assertEquals("my private note", BalanceData.getNote(ctx, t));
         assertEquals(TOPUP, BalanceData.readReasons(ctx).get(BalanceData.noteKey(t)));
     }
+
+    // ============================================================
+    // Stated channels in backups (payload format 5)
+    // ============================================================
+
+    private static final String SHETAB = "شتاب";
+    private static final String BRANCH = "شعبه";
+    private static final String POS = "پایانه فروش";
+
+    private static java.util.Map<String, String> channelsFor(Transaction t, String channel) {
+        java.util.Map<String, String> channels = new java.util.HashMap<>();
+        channels.put(BalanceData.noteKey(t), channel);
+        return channels;
+    }
+
+    @Test public void roundTrip_channels_restoredWithTheirTransactions() throws Exception {
+        // A movement stays as it was read across a device change: the channel travels with the
+        // transaction it belongs to, so the restored history reads the same way.
+        Transaction t = new Transaction("Tejarat", "01350000000", T + 100, -220_000L, "sig-A", "content-A");
+        BalanceData.writeTransactions(ctx, Arrays.asList(t));
+        BalanceData.mergeChannels(ctx, channelsFor(t, SHETAB));
+        Uri u = uri("channels-roundtrip.balance");
+        BackupManager.create(ctx, u, PASSWORD);
+
+        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+
+        BackupManager.restore(ctx, u, PASSWORD);
+        List<Transaction> out = BalanceData.readTransactions(ctx);
+        assertEquals(1, out.size());
+        assertEquals(SHETAB, BalanceData.readChannels(ctx).get(BalanceData.noteKey(out.get(0))));
+    }
+
+    @Test public void restore_backupWithoutChannels_preservesTheLocalOnes() throws Exception {
+        // Backups written before channels existed (payload formats 1 to 4) carry no "txChannels"
+        // section. Restoring one must leave the channels the local scans found completely untouched,
+        // and the notes and reasons with them.
+        Transaction t = new Transaction("Tejarat", "01350000000", T + 100, -220_000L, "sig-A", "content-A");
+        BalanceData.writeTransactions(ctx, Arrays.asList(t));
+        BalanceData.mergeChannels(ctx, channelsFor(t, SHETAB));
+        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        BalanceData.setNote(ctx, t, "my private note");
+
+        String legacyPayload = "{\"payloadFormat\":4,\"balances\":{},"
+            + "\"transactions\":{\"transactions\":[{\"bank\":\"Tejarat\",\"account\":\"01350000000\","
+            + "\"date\":" + (T + 100)
+            + ",\"amount\":-220000,\"sig\":\"sig-A\",\"content\":\"content-A\"}]},"
+            + "\"txNotes\":{},\"txReasons\":{}}";
+        File f = file("channels-legacy.balance");
+        writeLegacyBackup(f, legacyPayload, PASSWORD);
+
+        BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
+        Transaction out = txByContent(BalanceData.readTransactions(ctx), "content-A");
+        assertEquals(SHETAB, BalanceData.readChannels(ctx).get(BalanceData.noteKey(out)));
+        assertEquals(TOPUP, BalanceData.readReasons(ctx).get(BalanceData.noteKey(out)));
+        assertEquals("my private note", BalanceData.getNote(ctx, out));
+    }
+
+    @Test public void restore_channels_mergeUnionWithLocalWins() throws Exception {
+        // Restore unions the channels exactly like the notes and the reasons: the channel the current
+        // device already has stays, and one that only exists in the backup is filled in for the
+        // movement the restore brought with it.
+        Transaction backupA = new Transaction("Tejarat", "01350000000", T + 100, -220_000L, "sig-A", "content-A");
+        Transaction backupC = new Transaction("Tejarat", "01350000000", T + 400, 540_000L, "sig-C", "content-C");
+        BalanceData.writeTransactions(ctx, Arrays.asList(backupA, backupC));
+        BalanceData.mergeChannels(ctx, channelsFor(backupA, SHETAB));
+        BalanceData.mergeChannels(ctx, channelsFor(backupC, BRANCH));
+        Uri u = uri("channels-merge.balance");
+        BackupManager.create(ctx, u, PASSWORD);
+
+        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        Transaction localA = new Transaction("Tejarat", "01350000000", T + 100, -220_000L, "sig-A", "content-A");
+        Transaction localB = new Transaction("Tejarat", "01350000000", T + 200, 50_000L, "sig-B", "content-B");
+        BalanceData.writeTransactions(ctx, Arrays.asList(localA, localB));
+        BalanceData.mergeChannels(ctx, channelsFor(localA, POS));
+        BalanceData.setNote(ctx, localB, "local note");
+
+        BackupManager.restore(ctx, u, PASSWORD);
+        List<Transaction> out = BalanceData.readTransactions(ctx);
+        java.util.Map<String, String> channels = BalanceData.readChannels(ctx);
+        assertEquals("local channel wins", POS,
+            channels.get(BalanceData.noteKey(txByContent(out, "content-A"))));
+        assertEquals(BRANCH, channels.get(BalanceData.noteKey(txByContent(out, "content-C"))));
+        assertNull(channels.get(BalanceData.noteKey(txByContent(out, "content-B"))));
+        // The union is per-store: restoring channels must not disturb the notes or the reasons.
+        assertEquals("local note", BalanceData.getNote(ctx, txByContent(out, "content-B")));
+    }
+
+    @Test public void restore_ofABackupWithNoTransactions_leavesTheChannelsAlone() throws Exception {
+        Transaction t = new Transaction("Tejarat", "01350000000", T + 100, -220_000L, "sig-A", "content-A");
+        BalanceData.writeTransactions(ctx, Arrays.asList(t));
+        BalanceData.mergeChannels(ctx, channelsFor(t, SHETAB));
+        BalanceData.setNote(ctx, t, "my private note");
+
+        BalanceData.reset(ctx, false);            // keep the note, drop the transactions
+        assertTrue(BalanceData.readChannels(ctx).isEmpty());
+        BalanceData.mergeChannels(ctx, channelsFor(t, SHETAB));
+        String emptyPayload = "{\"payloadFormat\":5,\"balances\":{},\"transactions\":{}"
+            + ",\"txNotes\":{},\"txReasons\":{},\"txChannels\":{}}";
+        File f = file("channels-empty.balance");
+        writeLegacyBackup(f, emptyPayload, PASSWORD);
+
+        BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
+        assertEquals("my private note", BalanceData.getNote(ctx, t));
+        assertEquals(SHETAB, BalanceData.readChannels(ctx).get(BalanceData.noteKey(t)));
+    }
 }
