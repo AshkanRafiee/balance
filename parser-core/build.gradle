@@ -1,0 +1,149 @@
+plugins {
+    id 'java-library'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+tasks.register('prototypeTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.ashkanrafiee.balance.parser.PrototypeTest'
+}
+
+tasks.register('packDocumentTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.ashkanrafiee.balance.parser.PackDocumentTest'
+}
+
+tasks.register('jsonLexicalGuardTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.ashkanrafiee.balance.parser.JsonLexicalGuardTest'
+}
+
+['IranianPrototypeTest', 'IranianDocumentTest'].each { suite ->
+    tasks.register(suite[0].toLowerCase() + suite.substring(1), JavaExec) {
+        dependsOn testClasses
+        classpath = sourceSets.test.runtimeClasspath
+        mainClass = 'com.ashkanrafiee.balance.parser.' + suite
+    }
+}
+
+tasks.register('legacyCompatibilityTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.ashkanrafiee.balance.parser.legacy.LegacyCompatibilityTest'
+}
+
+tasks.register('identityTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.ashkanrafiee.balance.parser.identity.IdentityTest'
+}
+
+// Compile the unchanged arithmetic oracle in isolation, never into the core artifact.
+def calendarOracle = tasks.register('compileLegacyCalendarOracle', JavaCompile) {
+    source new File(projectDir.parentFile,
+        'app/src/main/java/com/ashkanrafiee/balance/JalaliCalendar.java')
+    classpath = files()
+    destinationDirectory = layout.buildDirectory.dir('legacy-calendar-oracle')
+    options.release = 17
+}
+
+tasks.register('jalaliParityTest', JavaExec) {
+    dependsOn testClasses, calendarOracle
+    classpath = sourceSets.test.runtimeClasspath + files(calendarOracle.flatMap { it.destinationDirectory })
+    mainClass = 'com.ashkanrafiee.balance.parser.JalaliParityTest'
+}
+
+// Python's standard JSON codec rejects duplicate keys and invalid syntax before
+// Groovy decodes the canonical result. Both frontends use the Java semantic mapper.
+// Only synthetic repository fixtures pass through this development-only task.
+tasks.register('ruleExampleTest') {
+    dependsOn classes
+    doLast {
+        def repository = projectDir.parentFile
+        def input = providers.exec {
+            commandLine 'python3', '-B', new File(repository, 'tools/read_rule_examples.py'),
+                new File(repository, 'rules/examples')
+        }
+        def documents = new groovy.json.JsonSlurper().parseText(input.standardOutput.asText.get())
+        def urls = sourceSets.main.output.classesDirs.files.collect { it.toURI().toURL() } as URL[]
+        def loader = new URLClassLoader(urls, (ClassLoader) null)
+        try {
+            def packClass = loader.loadClass('com.ashkanrafiee.balance.parser.PackDocument')
+            def parserClass = loader.loadClass('com.ashkanrafiee.balance.parser.Parser')
+            def messageClass = loader.loadClass('com.ashkanrafiee.balance.parser.Parser$Message')
+            int cases = 0
+            documents.each { document ->
+                def pack = packClass.getMethod('decode', Map).invoke(null, document.pack)
+                def parser = parserClass.getConstructor(List).newInstance(pack.templates())
+                if (document.fixtures.schema != 'prototype-fixtures-1' || document.fixtures.pack != pack.id()) {
+                    throw new GradleException('Invalid fixture metadata')
+                }
+                document.fixtures.cases.each { fixture ->
+                    def message = messageClass.getConstructor(String, String, String,
+                        java.time.Instant, java.time.ZoneId).newInstance(
+                            fixture.sourceId, fixture.sender, fixture.body,
+                            java.time.Instant.parse(fixture.arrival), java.time.ZoneId.of(fixture.zone))
+                    def result = parserClass.getMethod('parse', messageClass).invoke(parser, message)
+                    if (result.status().name() != fixture.expected.status) {
+                        throw new GradleException('Example status mismatch')
+                    }
+                    if (fixture.expected.status != 'PARSED' && !result.matchedProvenance().isEmpty()) {
+                        throw new GradleException('Rejected example retained provenance')
+                    }
+                    def actual = result.facts().collect { fact ->
+                        def expected = fixture.expected.outputs.find { it.id == fact.provenance().outputId() }
+                        def projection = [id: fact.provenance().outputId(), account: fact.account(),
+                         currency: fact.money().currency().name(), minorUnits: Long.toString(fact.money().minorUnits()),
+                         scale: fact.money().scale()]
+                        if (expected?.containsKey('time')) {
+                            projection.time = [instant: fact.time().instant().toString(),
+                                precision: fact.time().precision().name(), zone: fact.time().zone().getId(),
+                                fallback: fact.time().fallback()]
+                        }
+                        ['reason', 'channel'].each { field ->
+                            if (expected?.containsKey(field)) {
+                                def text = field == 'reason' ? fact.reason() : fact.channel()
+                                projection[field] = text == null ? null : [id: text.id(), text: text.text()]
+                            }
+                        }
+                        projection
+                    }.sort { it.id }
+                    if (actual != fixture.expected.outputs.sort { it.id }) {
+                        throw new GradleException('Example output mismatch')
+                    }
+                    cases++
+                }
+            }
+            logger.lifecycle("Rule examples: ${cases} cases passed")
+        } finally {
+            loader.close()
+        }
+    }
+}
+
+tasks.register('ruleToolTest', Exec) {
+    commandLine 'python3', '-B', new File(projectDir.parentFile, 'tools/test_read_rule_examples.py')
+}
+
+tasks.register('prototypeBenchmark', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.ashkanrafiee.balance.parser.PrototypeBenchmark'
+}
+
+// Tests use a dependency-free executable main rather than a test framework.
+tasks.named('test') {
+    enabled = false
+}
+
+tasks.named('check') {
+    dependsOn prototypeTest, packDocumentTest, jsonLexicalGuardTest, ruleExampleTest, ruleToolTest,
+        iranianPrototypeTest, iranianDocumentTest, jalaliParityTest, legacyCompatibilityTest, identityTest
+}

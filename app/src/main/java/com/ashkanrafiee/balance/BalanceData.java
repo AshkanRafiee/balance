@@ -10,9 +10,10 @@ import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
 import android.util.Log;
+import com.ashkanrafiee.balance.parser.legacy.LegacyMoney;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
-import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -21,8 +22,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
@@ -93,66 +92,6 @@ final class BalanceData {
     private static final String KEY_ALIAS = "balance_enc_key";
     private static final String TRANSFORM = "AES/GCM/NoPadding";
     private static final int GCM_TAG_BITS = 128;
-    private static final Pattern balance = Pattern.compile(
-        "(?:\u0645\u0648\u062c\u0648\u062f\u06cc \u062d\u0633\u0627\u0628" +
-        "|\u0645\u0627\u0646\u062f\u0647 \u062d\u0633\u0627\u0628" +
-        "|\u0645\u0648\u062c\u0648\u062f\u06cc" +
-        "|\u0645\u0627\u0646\u062f\u0647" +
-        "|available balance|balance|bal)" +
-        "[^\\d]{0,12}?([0-9][0-9,]*)",
-        Pattern.CASE_INSENSITIVE);
-    private static final Pattern otp = Pattern.compile(
-        "(?<![\u0621-\u0640A-Za-z])" +
-        "(?:\u0631\u0645\u0632|\u067e\u0648\u06cc\u0627" +
-        "|\u06a9\u062f \\s*\u062a\u0627\u06cc\u06cc\u062f" +
-        "|\u06a9\u062f \\s*\u062a\u0623\u06cc\u06cc\u062f" +
-        "|otp|code)",
-        Pattern.CASE_INSENSITIVE);
-    /** The transaction amount in a money-movement message. Most banks write it after the "مبلغ"
-     *  (amount) label, possibly with an explicit sign (some banks, e.g. Parsian, write "مبلغ:500,000-"
-     *  where the trailing minus marks a withdrawal). */
-    private static final Pattern amountLabel = Pattern.compile(
-        "(?:\u0645\u0628\u0644\u063A)[^\\d]{0,12}?([+-]?\\s*[0-9][0-9,]*\\s*[+-]?)");
-    /** The amount written directly after a deposit/withdrawal label, as Tejarat does with
-     *  "برداشت: 490,098,000 ریال". Matching one of these also resolves the direction: a label that
-     *  feeds the amount is authoritative, so a payment-method word like "پرداخت" in the same message
-     *  does not make a deposit look ambiguous. */
-    private static final Pattern depositLabel = Pattern.compile(
-        "(?:\u0648\u0627\u0631\u06CC\u0632)[^\\d]{0,12}?([0-9][0-9,]*)");
-    private static final Pattern withdrawalLabel = Pattern.compile(
-        "(?:\u0628\u0631\u062F\u0627\u0634\u062A)[^\\d]{0,12}?([0-9][0-9,]*)");
-    /** A bare number standing next to "ریال" (e.g. Blu's "400,000 ریال از حساب شما پرید"). The stated
-     *  resulting balance is removed first, so this captures the moved amount rather than the balance. */
-    private static final Pattern rialAmount = Pattern.compile("([0-9][0-9,]*)\\s*\u0631\u06CC\u0627\u0644");
-    /** A bare, signed amount standing at the start of the message, as Resalat writes it
-     *  ("-200,000,000" on its own line, resulting balance on the last). The explicit sign tells the
-     *  direction, so no label or keyword is needed. */
-    private static final Pattern signedAmount = Pattern.compile(
-        "^\\s*([+-])\\s*([0-9][0-9,]*)", Pattern.MULTILINE);
-    /** A bare, signed amount on its own line with the sign after the number, as Mehr Iran writes it
-     *  ("400,000-" on its own line, resulting balance on the last). Allowing RTL bidi marks around
-     *  the amount and holding the whole line to the shape "digits, optional sign" keeps unsigned
-     *  balances, account lines and date lines from matching; the explicit sign gives the direction. */
-    private static final Pattern bareSignedAmount = Pattern.compile(
-        "(?m)^[ \\t\\u202A-\\u202E]*([0-9][0-9,]*)[ \\t\\u202A-\\u202E]*([+-])[ \\t\\u202A-\\u202E]*$");
-    /** A line of "<label>:<amount><sign>" where the sign trails the number, as Melli writes it
-     *  ("انتقالي:1,000,000-", "خريداينترنتي:7,600,000-", "حواله پل:7,700,000+"). The line ending in
-     *  an explicit sign distinguishes the moved amount from balances and account numbers (which are
-     *  unsigned), and the sign itself carries the direction — so "حواله پل:7,700,000+" is a deposit
-     *  even though "حواله" is a withdrawal keyword. */
-    private static final Pattern labeledSignedAmount = Pattern.compile(
-        "(?m)^([^\\r\\n:0-9][^\\r\\n:]{0,39}):[ \\t]*([0-9][0-9,]*)[ \\t]*([+-])[ \\t]*$");
-    private static final String[] DEPOSIT_KEYWORDS = {
-        "\u0648\u0627\u0631\u06cc\u0632", "\u062f\u0631\u06cc\u0627\u0641\u062a",
-        "\u0628\u0633\u062a\u0627\u0646\u06a9\u0627\u0631", "\u0627\u0641\u0632\u0627\u06cc\u0634",
-        "\u0639\u0648\u062f\u062a", "\u0628\u0631\u06af\u0634\u062a",
-        "\u0628\u0647 \u062d\u0633\u0627\u0628", "\u0646\u0634\u0633\u062a"};
-    private static final String[] WITHDRAWAL_KEYWORDS = {
-        "\u0628\u0631\u062f\u0627\u0634\u062a", "\u062e\u0631\u06cc\u062f",
-        "\u062e\u0631\u06cc\u062f\u0627\u0631\u06cc", "\u067e\u0631\u062f\u0627\u062e\u062a",
-        "\u0628\u062f\u0647\u06a9\u0627\u0631", "\u06a9\u0627\u0647\u0634",
-        "\u0627\u0646\u062a\u0642\u0627\u0644", "\u062d\u0648\u0627\u0644\u0647",
-        "\u06a9\u0627\u0631\u0645\u0632\u062f", "\u0642\u0628\u0636"};
 
     private BalanceData() {}
 
@@ -174,6 +113,13 @@ final class BalanceData {
         ks.load(null);
         if (ks.containsAlias(KEY_ALIAS)) return (SecretKey) ks.getKey(KEY_ALIAS, null);
         return createKey();
+    }
+
+    /** Shared application key for the generation store; callers must hold BalanceData.class. */
+    static SecretKey storageKey() throws IOException {
+        if (!Thread.holdsLock(BalanceData.class)) throw new IOException("LOCK");
+        try { return getOrCreateKey(); }
+        catch (Exception ignored) { throw new IOException("KEY"); }
     }
 
     private static String encrypt(String plain) throws Exception {
@@ -1344,30 +1290,7 @@ final class BalanceData {
      *  fingerprint so that two same-amount movements ending at the same resulting balance but on two
      *  different accounts of one bank stay distinct ({@code sender|account|amount|balance}). */
     static String messageSig(String sender, String body, String account) {
-        if (body == null) return null;
-        String s = normalizeLetters(digits(body.replace("\u066C", ",").replace("\u060C", ",")))
-            .trim().replaceAll("\\s+", " ");
-        if (s.isEmpty()) return null;
-        String fold;
-        long balance = extract(body);
-        Long txn = extractTransaction(body);
-        if (txn != null && balance >= 0) {
-            fold = sender + (account == null ? "" : "|" + account) + "|" + txn + "|" + balance;
-        } else {
-            fold = sender + "|" + s;
-        }
-        try {
-            byte[] h = MessageDigest.getInstance("SHA-256")
-                .digest(fold.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(32);
-            for (int i = 0; i < 16; i++) {
-                int b = h[i] & 0xFF;
-                sb.append(Character.forDigit(b >>> 4, 16)).append(Character.forDigit(b & 0xF, 16));
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            return fold;
-        }
+        return LegacyMoney.messageSig(sender, body, account);
     }
 
     /** A parse-independent digest of the message text itself (sender + normalized body), unlike
@@ -1375,22 +1298,7 @@ final class BalanceData {
      *  message therefore hashes identically no matter how the parsing rules evolve, which is what lets
      *  a rules update reconcile its re-parsed result with the entry stored under the old rules. */
     static String contentHash(String sender, String body) {
-        if (body == null) return null;
-        String s = normalizeLetters(digits(body.replace("\u066C", ",").replace("\u060C", ",")))
-            .trim().replaceAll("\\s+", " ");
-        if (s.isEmpty()) return null;
-        try {
-            byte[] h = MessageDigest.getInstance("SHA-256")
-                .digest((sender + "|" + s).getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(32);
-            for (int i = 0; i < 16; i++) {
-                int b = h[i] & 0xFF;
-                sb.append(Character.forDigit(b >>> 4, 16)).append(Character.forDigit(b & 0xF, 16));
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            return null;
-        }
+        return LegacyMoney.contentHash(sender, body);
     }
 
     /** Uniquely identifies a stored transaction for dedup: the message fingerprint when known, or the
@@ -1422,15 +1330,7 @@ final class BalanceData {
     }
 
     static long extract(String raw) {
-        if (raw == null) return -1;
-        String s = digits(raw.replace("\u066C", ",").replace("\u060C", ","));
-        if (otp.matcher(s).find()) return -1;
-        Matcher m = balance.matcher(s);
-        String n = null;
-        while (m.find()) n = m.group(1);
-        if (n == null) return -1;
-        try { return Long.parseLong(n.replace(",", "")); }
-        catch (Exception e) { return -1; }
+        return LegacyMoney.extract(raw);
     }
 
     /** Parses a signed transaction amount (in rials) from a bank message, or null if the message does
@@ -1448,100 +1348,7 @@ final class BalanceData {
      *  movement settled — so OTP payment prompts or authorization messages are never counted. Returns a
      *  negative value for a withdrawal and a positive one for a deposit. */
     static Long extractTransaction(String raw) {
-        if (raw == null) return null;
-        String s = digits(raw.replace("\u066C", ",").replace("\u060C", ","));
-        if (otp.matcher(s).find()) return null;
-        String n = normalizeLetters(s);
-
-        long amount = -1;
-        int sign = 0;
-        int labelDir = 0;
-
-        // 1) Amount following the "مبلغ" label, with an optional explicit sign.
-        String g = lastGroup(amountLabel, n);
-        if (g != null) {
-            String t = g.trim();
-            if (t.startsWith("-") || t.endsWith("-")) sign = -1;
-            else if (t.startsWith("+") || t.endsWith("+")) sign = 1;
-            t = t.replace("+", "").replace("-", "").trim();
-            amount = toLong(t);
-        }
-
-        // 2) Amount written right after a "واریز:"/"برداشت:" label.
-        if (amount <= 0) {
-            String d = lastGroup(depositLabel, n);
-            String w = lastGroup(withdrawalLabel, n);
-            if (d == null && w != null) {
-                amount = toLong(w);
-                labelDir = -1;
-            } else if (w == null && d != null) {
-                amount = toLong(d);
-                labelDir = 1;
-            }
-        }
-
-        // 3) A "<label>:<amount><sign>" line where the sign trails the number (Melli), e.g.
-        //    "انتقالي:1,000,000-" or "حواله پل:7,700,000+". The explicit sign decides the direction,
-        //    so a label that happens to contain a keyword of the opposite kind ("حواله" is a
-        //    withdrawal keyword but is a deposit here) cannot flip it.
-        if (amount <= 0) {
-            Matcher ml = labeledSignedAmount.matcher(n);
-            if (ml.find()) {
-                amount = toLong(ml.group(2));
-                sign = ml.group(3).equals("-") ? -1 : 1;
-            }
-        }
-
-        // 4) A bare number adjacent to "ریال", excluding the resulting balance itself.
-        if (amount <= 0) {
-            Matcher mb = balance.matcher(n);
-            while (mb.find()) {
-                String v = mb.group(1);
-                n = n.replace(v, "").replace(v.replace(",", ""), "");
-            }
-            Matcher mc = rialAmount.matcher(n);
-            long best = -1;
-            while (mc.find()) best = Math.max(best, toLong(mc.group(1)));
-            if (best > 0) amount = best;
-        }
-
-        // 5) A bare signed amount at the start of the message (e.g. Resalat's "-200,000,000" first
-        //    line, with the resulting balance at the end). The explicit sign is the direction.
-        if (amount <= 0) {
-            Matcher ms = signedAmount.matcher(n);
-            if (ms.find()) {
-                sign = ms.group(1).equals("-") ? -1 : 1;
-                amount = toLong(ms.group(2));
-            }
-        }
-
-        // 6) A bare signed amount on its own line with a trailing sign, the mirror of Resalat's
-        //    leading-sign form (Mehr Iran writes "400,000-" alone, then the resulting balance). The
-        //    whole-line shape keeps the unsigned account, date and balance lines out.
-        if (amount <= 0) {
-            Matcher mbs = bareSignedAmount.matcher(n);
-            if (mbs.find()) {
-                sign = mbs.group(2).equals("-") ? -1 : 1;
-                amount = toLong(mbs.group(1));
-            }
-        }
-
-        if (amount <= 0) return null;
-
-        int direction;
-        if (sign != 0) direction = sign;
-        else if (labelDir != 0) direction = labelDir;
-        else {
-            boolean deposit = containsAny(n, DEPOSIT_KEYWORDS);
-            boolean withdrawal = containsAny(n, WITHDRAWAL_KEYWORDS);
-            if (deposit == withdrawal) return null;
-            direction = deposit ? 1 : -1;
-        }
-        // After the amount and a single direction are identified, the movement is only added to
-        // history if the message also states the resulting balance; without it the message is a
-        // prompt/OTP or unconfirmed state, so it must not be recorded.
-        if (extract(raw) < 0) return null;
-        return direction > 0 ? amount : -amount;
+        return LegacyMoney.extractTransaction(raw);
     }
 
     /** Parses one bank message into a transaction, using {@link #extractTransaction} when the message
@@ -1558,39 +1365,14 @@ final class BalanceData {
         long stated = extract(body);
         Long txn = extractTransaction(body);
         if (txn == null) {
-            String n = normalizeLetters(digits(body.replace("\u066C", ",").replace("\u060C", ",")));
-            if (!containsAny(n, DEPOSIT_KEYWORDS) && !containsAny(n, WITHDRAWAL_KEYWORDS)) return null;
-            if (stated < 0 || !hasPrev) return null;
-            long delta = stated - prevBalance;
-            if (delta == 0) return null;
-            txn = delta;
+            txn = LegacyMoney.inferMovement(body, hasPrev, prevBalance);
+            if (txn == null) return null;
         }
         String account = BankRules.extractAccount(bank, body);
         // The balance the message reported travels with the movement, so the history can prove a
         // missing message later without ever touching the inbox again (see Residual).
         return new Transaction(bank, account, date, txn,
             stated < 0 ? null : stated, messageSig(sender, body, account), contentHash(sender, body));
-    }
-
-    /** The last number captured by the given pattern in the string, or null if it matched nothing. */
-    private static String lastGroup(Pattern p, String s) {
-        Matcher m = p.matcher(s);
-        String g = null;
-        while (m.find()) g = m.group(1);
-        return g;
-    }
-
-    private static boolean containsAny(String s, String[] keys) {
-        for (String k : keys) if (s.contains(k)) return true;
-        return false;
-    }
-
-    private static long toLong(String s) {
-        try {
-            return Long.parseLong(s.replace(",", ""));
-        } catch (Exception e) {
-            return -1;
-        }
     }
 
     // ============================================================
@@ -1948,17 +1730,11 @@ final class BalanceData {
      *  Persian counterparts, so a word the sender spelled either way is the same word to every matcher
      *  and caption table in the app. */
     static String normalizeLetters(String s) {
-        StringBuilder b = new StringBuilder(s.length());
-        for (char c : s.toCharArray()) {
-            if (c == '\u064A' || c == '\u06CC') b.append('\u06CC');
-            else if (c == '\u0643') b.append('\u06A9');
-            else b.append(c);
-        }
-        return b.toString();
+        return LegacyMoney.normalizeLetters(s);
     }
 
     static String digits(String s) {
-        return Digits.ascii(s);
+        return LegacyMoney.digits(s);
     }
 
     /** Formats a rial amount as toman using the app language (Persian digits for Persian). */

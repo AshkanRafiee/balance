@@ -1,0 +1,142 @@
+{
+  "schema": "prototype-1",
+  "id": "example.iranian-prototype",
+  "revision": "draft-1",
+  "bank": { "id": "synthetic.iranian", "country": "IR", "name": "Synthetic Iranian-style examples — not official bank templates" },
+  "templates": [
+    {
+      "id": "synthetic-mellat-style",
+      "senders": ["SYNTHETIC-MELLAT"],
+      "guards": [{ "line": 0, "literal": "SYNTHETIC Mellat-style", "excluded": false }],
+      "outputs": [{
+        "id": "mellat-balance",
+        "region": { "line": -1, "after": "", "before": "", "maxLength": 1024 },
+        "account": {
+          "line": 1, "after": "حساب", "before": "", "maxLength": 64,
+          "normalization": "ACCOUNT", "terminated": true,
+          "numeric": { "segments": [{ "min": 5, "max": 5 }], "mode": "PREFIX" }
+        },
+        "kind": "BOOKED_BALANCE",
+        "money": {
+          "amount": { "line": 2, "after": "مانده ", "before": " ریال", "maxLength": 32 },
+          "currency": { "fixed": "IRR" }, "decimal": ".", "group": ",", "grouping": "WESTERN",
+          "digits": "ASCII_PERSIAN_ARABIC", "unitMultiplier": 1
+        },
+        "date": {
+          "calendar": "JALALI",
+          "field": { "line": 1, "after": "تاریخ", "before": "", "maxLength": 32 },
+          "orders": ["YMD"], "separator": "/", "withTime": true, "digits": "ASCII_PERSIAN_ARABIC",
+          "maxPastSeconds": 604800, "maxFutureSeconds": 0,
+          "options": { "year": "TWO_DIGIT", "yearBase": 1400, "variableWidth": true, "layout": "SEPARATED", "timeSeparator": " ", "seconds": false, "zone": "Asia/Tehran" }
+        }
+      }]
+    },
+    {
+      "id": "synthetic-melli-style",
+      "senders": ["SYNTHETIC-MELLI"],
+      "guards": [{ "line": 0, "literal": "SYNTHETIC Melli-style", "excluded": false }],
+      "outputs": [{
+        "id": "melli-balance",
+        "region": { "line": -1, "after": "", "before": "", "maxLength": 1024 },
+        "account": {
+          "line": 1, "after": "حساب ", "before": "", "maxLength": 32, "normalization": "ACCOUNT",
+          "numeric": { "segments": [{ "min": 5, "max": 5 }], "mode": "EXACT" }
+        },
+        "kind": "BOOKED_BALANCE",
+        "money": {
+          "amount": { "line": 2, "after": "مانده ", "before": " ریال", "maxLength": 32 },
+          "currency": { "fixed": "IRR" }, "decimal": ".", "group": ",", "grouping": "WESTERN",
+          "digits": "ASCII_PERSIAN_ARABIC", "unitMultiplier": 1
+        },
+        "date": {
+          "calendar": "JALALI", "field": { "line": 3, "after": "زمان ", "before": "", "maxLength": 32 },
+          "orders": ["MD"], "separator": "/", "withTime": true, "digits": "ASCII_PERSIAN_ARABIC",
+          "maxPastSeconds": 604800, "maxFutureSeconds": 0,
+          "options": { "year": "NEIGHBOR", "yearBase": 0, "variableWidth": false, "layout": "COMPACT", "timeSeparator": "-", "seconds": false, "zone": "Asia/Tehran" }
+        }
+      }]
+    },
+    {
+      "id": "synthetic-blu-style",
+      "senders": ["SYNTHETIC-BLU"],
+      "guards": [{ "line": 0, "literal": "SYNTHETIC Blu-style", "excluded": false }],
+      "outputs": [{
+        "id": "blu-movement",
+        "region": { "line": -1, "after": "", "before": "", "maxLength": 1024 },
+        "accountOptional": true,
+        "kind": "POSTED_MOVEMENT", "direction": { "fixed": "DEBIT" },
+        "money": {
+          "amount": { "line": 1, "after": "برداشت ", "before": " تومان", "maxLength": 32 },
+          "currency": { "fixed": "IRR" }, "decimal": ".", "group": ",", "grouping": "WESTERN",
+          "digits": "ASCII_PERSIAN_ARABIC", "unitMultiplier": 10
+        },
+        "reason": {
+          "field": { "line": 2, "after": "بابت ", "before": "", "maxLength": 64, "normalization": "TEXT" },
+          "mapping": { "خرید روزانه": "daily-purchase", "انتقال وجه": "transfer" },
+          "minLength": 2, "maxLength": 64, "digitFree": true
+        }
+      }]
+    },
+    {
+      "id": "synthetic-tejarat-style",
+      "senders": ["SYNTHETIC-TEJARAT"],
+      "guards": [{ "line": 0, "literal": "SYNTHETIC Tejarat-style", "excluded": false }],
+      "outputs": [
+        {
+          "id": "tejarat-movement",
+          "region": { "line": -1, "after": "", "before": "", "maxLength": 1024 },
+          "accountOptional": true,
+          "account": {
+            "line": 1, "after": "حساب ", "before": "", "maxLength": 32, "normalization": "ACCOUNT",
+            "numeric": { "segments": [{ "min": 5, "max": 5 }], "mode": "EXACT" }
+          },
+          "kind": "POSTED_MOVEMENT", "direction": { "fixed": "CREDIT" },
+          "money": {
+            "amount": { "line": 2, "after": "واریز ", "before": " ریال", "maxLength": 32 },
+            "currency": { "fixed": "IRR" }, "decimal": ".", "group": ",", "grouping": "WESTERN",
+            "digits": "ASCII_PERSIAN_ARABIC", "unitMultiplier": 1
+          },
+          "channel": {
+            "field": { "line": 4, "after": "کانال ", "before": "", "maxLength": 64, "normalization": "CHANNEL" },
+            "mapping": { "اینترنت بانک": "internet-banking", "خودپرداز": "atm" },
+            "minLength": 2, "maxLength": 64, "digitFree": true
+          }
+        },
+        {
+          "id": "tejarat-balance",
+          "region": { "line": -1, "after": "", "before": "", "maxLength": 1024 },
+          "accountOptional": true,
+          "account": {
+            "line": 1, "after": "حساب ", "before": "", "maxLength": 32, "normalization": "ACCOUNT",
+            "numeric": { "segments": [{ "min": 5, "max": 5 }], "mode": "EXACT" }
+          },
+          "kind": "BOOKED_BALANCE",
+          "money": {
+            "amount": { "line": 3, "after": "مانده ", "before": " ریال", "maxLength": 32 },
+            "currency": { "fixed": "IRR" }, "decimal": ".", "group": ",", "grouping": "WESTERN",
+            "digits": "ASCII_PERSIAN_ARABIC", "unitMultiplier": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "synthetic-dotted-reference",
+      "senders": ["SYNTHETIC-DOTTED"],
+      "guards": [{ "line": 0, "literal": "SYNTHETIC dotted reference", "excluded": false }],
+      "outputs": [{
+        "id": "dotted-balance",
+        "region": { "line": -1, "after": "", "before": "", "maxLength": 1024 },
+        "account": {
+          "line": 1, "after": "", "before": "", "maxLength": 64, "normalization": "ACCOUNT",
+          "numeric": { "segments": [{ "min": 2, "max": 2 }, { "min": 3, "max": 3 }, { "min": 2, "max": 2 }], "mode": "UNIQUE" }
+        },
+        "kind": "BOOKED_BALANCE",
+        "money": {
+          "amount": { "line": 2, "after": "مانده ", "before": " ریال", "maxLength": 32 },
+          "currency": { "fixed": "IRR" }, "decimal": ".", "group": ",", "grouping": "WESTERN",
+          "digits": "ASCII_PERSIAN_ARABIC", "unitMultiplier": 1
+        }
+      }]
+    }
+  ]
+}

@@ -1,0 +1,270 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Balance bank pack — prototype 1",
+  "description": "Experimental codec boundary, not a stable production/import format. Semantic validation by the Java core is also required.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "revision", "bank", "templates"],
+  "properties": {
+    "schema": { "const": "prototype-1" },
+    "id": { "$ref": "#/$defs/id" },
+    "revision": { "$ref": "#/$defs/id" },
+    "bank": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "country", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "country": { "type": "string", "pattern": "^[A-Z]{2}$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "templates": {
+      "type": "array", "minItems": 1, "maxItems": 256,
+      "items": { "$ref": "#/$defs/template" }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9._-]+$" },
+    "currencyCode": { "enum": ["IRR", "USD", "EUR", "GBP", "JPY", "KWD"] },
+    "digits": { "enum": ["ASCII", "ASCII_PERSIAN_ARABIC"] },
+    "selector": {
+      "type": "object", "additionalProperties": false,
+      "required": ["line", "after", "before", "maxLength"],
+      "properties": {
+        "line": { "type": "integer", "minimum": -1, "maximum": 255 },
+        "after": { "type": "string", "maxLength": 128 },
+        "before": { "type": "string", "maxLength": 128 },
+        "maxLength": { "type": "integer", "minimum": 1, "maximum": 16384 },
+        "normalization": { "enum": ["NONE", "DIGITS", "ACCOUNT", "TEXT", "CHANNEL"] },
+        "numeric": { "$ref": "#/$defs/numeric" },
+        "terminated": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["terminated"], "properties": { "terminated": { "const": true } } },
+          "then": { "properties": { "line": { "minimum": 0 } } }
+        },
+        {
+          "if": { "anyOf": [
+            { "required": ["numeric"] },
+            { "required": ["normalization"], "properties": { "normalization": { "not": { "const": "NONE" } } } }
+          ] },
+          "then": { "properties": { "maxLength": { "maximum": 256 } } }
+        }
+      ]
+    },
+    "region": {
+      "allOf": [
+        { "$ref": "#/$defs/selector" },
+        { "properties": { "normalization": { "const": "NONE" } }, "not": { "required": ["numeric"] } }
+      ]
+    },
+    "field": {
+      "allOf": [
+        { "$ref": "#/$defs/selector" },
+        { "properties": { "maxLength": { "maximum": 256 } } }
+      ]
+    },
+    "rawField": {
+      "description": "Amount (including original amount) and date selectors remain raw; their rule's digits property is the sole digit policy.",
+      "allOf": [
+        { "$ref": "#/$defs/field" },
+        { "properties": { "normalization": { "const": "NONE" } }, "not": { "required": ["numeric"] } }
+      ]
+    },
+    "finiteTokenField": {
+      "description": "Currency and direction tokens allow only NONE or TEXT normalization, without numeric selection.",
+      "allOf": [
+        { "$ref": "#/$defs/field" },
+        { "properties": { "normalization": { "enum": ["NONE", "TEXT"] } }, "not": { "required": ["numeric"] } }
+      ]
+    },
+    "numeric": {
+      "description": "The core additionally checks min <= max and total segment widths plus dots <= 256.",
+      "type": "object", "additionalProperties": false,
+      "required": ["segments", "mode"],
+      "properties": {
+        "segments": {
+          "type": "array", "minItems": 1, "maxItems": 4,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["min", "max"],
+            "properties": {
+              "min": { "type": "integer", "minimum": 1, "maximum": 256 },
+              "max": { "type": "integer", "minimum": 1, "maximum": 256 }
+            }
+          }
+        },
+        "mode": { "enum": ["EXACT", "PREFIX", "UNIQUE"] }
+      }
+    },
+    "textRule": {
+      "description": "Optional finite metadata; the core additionally checks minLength <= maxLength.",
+      "type": "object", "additionalProperties": false,
+      "required": ["field", "mapping", "minLength", "maxLength", "digitFree"],
+      "properties": {
+        "field": { "$ref": "#/$defs/field" },
+        "mapping": {
+          "type": "object", "minProperties": 1, "maxProperties": 16,
+          "propertyNames": { "minLength": 1, "maxLength": 128 },
+          "additionalProperties": { "$ref": "#/$defs/id" }
+        },
+        "minLength": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "maxLength": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "digitFree": { "type": "boolean" }
+      }
+    },
+    "currency": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "fixed": { "$ref": "#/$defs/currencyCode" },
+        "token": { "$ref": "#/$defs/finiteTokenField" },
+        "mapping": {
+          "type": "object", "minProperties": 1, "maxProperties": 16,
+          "propertyNames": { "minLength": 1, "maxLength": 128 },
+          "additionalProperties": { "$ref": "#/$defs/currencyCode" }
+        }
+      },
+      "anyOf": [{ "required": ["fixed"] }, { "required": ["token", "mapping"] }],
+      "dependentRequired": { "token": ["mapping"], "mapping": ["token"] }
+    },
+    "money": {
+      "type": "object", "additionalProperties": false,
+      "required": ["amount", "currency", "decimal", "group", "grouping", "digits", "unitMultiplier"],
+      "properties": {
+        "amount": { "$ref": "#/$defs/rawField" },
+        "currency": { "$ref": "#/$defs/currency" },
+        "decimal": { "enum": [".", ",", "٫"] },
+        "group": { "enum": ["", ".", ",", " ", "٬"] },
+        "grouping": { "enum": ["NONE", "WESTERN", "INDIAN"] },
+        "digits": { "$ref": "#/$defs/digits" },
+        "unitMultiplier": { "enum": [1, 10] }
+      }
+    },
+    "direction": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "fixed": { "enum": ["CREDIT", "DEBIT"] },
+        "token": { "$ref": "#/$defs/finiteTokenField" },
+        "mapping": {
+          "type": "object", "minProperties": 1, "maxProperties": 16,
+          "propertyNames": { "minLength": 1, "maxLength": 128 },
+          "additionalProperties": { "enum": ["CREDIT", "DEBIT"] }
+        }
+      },
+      "anyOf": [{ "required": ["fixed"] }, { "required": ["token", "mapping"] }],
+      "dependentRequired": { "token": ["mapping"], "mapping": ["token"] }
+    },
+    "dateOptions": {
+      "type": "object", "additionalProperties": false,
+      "required": ["year", "yearBase", "variableWidth", "layout", "timeSeparator", "seconds", "zone"],
+      "properties": {
+        "year": { "enum": ["FULL", "TWO_DIGIT", "NEIGHBOR"] },
+        "yearBase": { "type": "integer", "minimum": 0, "maximum": 9900 },
+        "variableWidth": { "type": "boolean" },
+        "layout": { "enum": ["SEPARATED", "COMPACT"] },
+        "timeSeparator": { "enum": [" ", "-", "T"] },
+        "seconds": { "type": "boolean" },
+        "zone": { "type": "string", "minLength": 1, "maxLength": 128 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "year": { "const": "TWO_DIGIT" } } },
+          "then": { "properties": { "yearBase": { "minimum": 1 } } },
+          "else": { "properties": { "yearBase": { "const": 0 } } }
+        },
+        {
+          "if": { "properties": { "layout": { "const": "COMPACT" } } },
+          "then": { "properties": { "year": { "const": "NEIGHBOR" }, "variableWidth": { "const": false } } }
+        }
+      ]
+    },
+    "date": {
+      "type": "object", "additionalProperties": false,
+      "required": ["calendar", "field", "orders", "separator", "withTime", "digits", "maxPastSeconds", "maxFutureSeconds"],
+      "properties": {
+        "calendar": { "enum": ["GREGORIAN", "JALALI"] },
+        "field": { "$ref": "#/$defs/rawField" },
+        "orders": { "type": "array", "minItems": 1, "maxItems": 6, "uniqueItems": true, "items": { "enum": ["YMD", "DMY", "MDY", "YDM", "MD", "DM"] } },
+        "separator": { "enum": ["/", "-", "."] },
+        "withTime": { "type": "boolean" },
+        "digits": { "$ref": "#/$defs/digits" },
+        "maxPastSeconds": { "type": "integer", "minimum": 0, "maximum": 31622400 },
+        "maxFutureSeconds": { "type": "integer", "minimum": 0, "maximum": 172800 },
+        "options": { "$ref": "#/$defs/dateOptions" }
+      },
+      "allOf": [
+        {
+          "if": { "not": { "required": ["options"] } },
+          "then": { "properties": { "calendar": { "const": "GREGORIAN" } } }
+        },
+        {
+          "if": { "properties": { "calendar": { "const": "JALALI" } } },
+          "then": { "properties": { "options": { "properties": { "yearBase": { "maximum": 3078 } } } } }
+        },
+        {
+          "if": { "required": ["options"], "properties": { "options": { "properties": { "year": { "const": "NEIGHBOR" } } } } },
+          "then": { "properties": { "orders": { "items": { "enum": ["MD", "DM"] } } } },
+          "else": { "properties": { "orders": { "items": { "enum": ["YMD", "DMY", "MDY", "YDM"] } } } }
+        },
+        {
+          "if": { "required": ["options"], "properties": { "options": { "properties": { "seconds": { "const": true } } } } },
+          "then": { "properties": { "withTime": { "const": true } } }
+        },
+        {
+          "if": { "required": ["options"], "properties": { "options": { "properties": { "layout": { "const": "COMPACT" } } } } },
+          "then": { "properties": { "orders": { "const": ["MD"] }, "withTime": { "const": true } } }
+        }
+      ]
+    },
+    "output": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "region", "kind", "money"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "region": { "$ref": "#/$defs/region" },
+        "account": { "$ref": "#/$defs/field" },
+        "kind": { "enum": ["BOOKED_BALANCE", "AVAILABLE_BALANCE", "POSTED_MOVEMENT"] },
+        "money": { "$ref": "#/$defs/money" },
+        "direction": { "$ref": "#/$defs/direction" },
+        "originalAmount": { "$ref": "#/$defs/money" },
+        "date": { "$ref": "#/$defs/date" },
+        "accountOptional": { "type": "boolean" },
+        "reason": { "$ref": "#/$defs/textRule" },
+        "channel": { "$ref": "#/$defs/textRule" }
+      },
+      "allOf": [{
+        "if": { "required": ["accountOptional"], "properties": { "accountOptional": { "const": true } } },
+        "else": { "required": ["account"] }
+      }],
+      "if": { "properties": { "kind": { "const": "POSTED_MOVEMENT" } } },
+      "then": { "required": ["direction"] },
+      "else": { "not": { "anyOf": [{ "required": ["direction"] }, { "required": ["originalAmount"] }] } }
+    },
+    "template": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "senders", "guards", "outputs"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "senders": {
+          "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        },
+        "guards": {
+          "type": "array", "minItems": 1, "maxItems": 16,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["line", "literal", "excluded"],
+            "properties": {
+              "line": { "type": "integer", "minimum": -1, "maximum": 255 },
+              "literal": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "excluded": { "type": "boolean" }
+            }
+          },
+          "contains": { "properties": { "excluded": { "const": false } } }
+        },
+        "outputs": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "$ref": "#/$defs/output" } }
+      }
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "schema": "prototype-1",
+  "id": "example.multi-currency",
+  "revision": "r1",
+  "bank": { "id": "example.bank", "country": "GB", "name": "Synthetic Example Bank" },
+  "templates": [
+    {
+      "id": "two-balances",
+      "senders": ["EXAMPLE-BANK"],
+      "guards": [{ "line": 0, "literal": "Multi-currency statement", "excluded": false }],
+      "outputs": [
+        {
+          "id": "usd-balance",
+          "region": { "line": 1, "after": "", "before": "", "maxLength": 256 },
+          "account": { "line": -1, "after": "Account=", "before": ";", "maxLength": 32 },
+          "kind": "BOOKED_BALANCE",
+          "money": {
+            "amount": { "line": -1, "after": "Balance=", "before": ";", "maxLength": 32 },
+            "currency": {
+              "fixed": "USD",
+              "token": { "line": -1, "after": "Currency=", "before": ";", "maxLength": 3 },
+              "mapping": { "USD": "USD" }
+            },
+            "decimal": ".", "group": ",", "grouping": "WESTERN", "digits": "ASCII", "unitMultiplier": 1
+          }
+        },
+        {
+          "id": "eur-balance",
+          "region": { "line": 2, "after": "", "before": "", "maxLength": 256 },
+          "account": { "line": -1, "after": "Account=", "before": ";", "maxLength": 32 },
+          "kind": "BOOKED_BALANCE",
+          "money": {
+            "amount": { "line": -1, "after": "Balance=", "before": ";", "maxLength": 32 },
+            "currency": {
+              "fixed": "EUR",
+              "token": { "line": -1, "after": "Currency=", "before": ";", "maxLength": 3 },
+              "mapping": { "EUR": "EUR" }
+            },
+            "decimal": ".", "group": ",", "grouping": "WESTERN", "digits": "ASCII", "unitMultiplier": 1
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,187 @@
+{
+  "schema": "prototype-fixtures-1",
+  "pack": "example.iranian-prototype",
+  "cases": [
+    {
+      "id": "synthetic-mellat-glued-short-jalali",
+      "sourceId": "synthetic-ir-001", "sender": "SYNTHETIC-MELLAT",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "UTC",
+      "body": "SYNTHETIC Mellat-style\nحساب۰۰۱۲۳تاریخ۰۵/۱/۱۵ ۱۲:۰۰\nمانده ۱,۲۳۴,۵۶۷ ریال",
+      "expected": { "status": "PARSED", "outputs": [{
+        "id": "mellat-balance", "account": "00123", "currency": "IRR", "minorUnits": "1234567", "scale": 0,
+        "time": { "instant": "2026-04-04T08:30:00Z", "precision": "MINUTE", "zone": "Asia/Tehran", "fallback": false }
+      }] }
+    },
+    {
+      "id": "synthetic-mellat-invalid-date-falls-back",
+      "sourceId": "synthetic-ir-002", "sender": "SYNTHETIC-MELLAT",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "UTC",
+      "body": "SYNTHETIC Mellat-style\nحساب۰۰۱۲۳تاریخ۰۵/۱۳/۱۵ ۱۲:۰۰\nمانده ۱,۲۳۴,۵۶۷ ریال",
+      "expected": { "status": "PARSED", "outputs": [{
+        "id": "mellat-balance", "account": "00123", "currency": "IRR", "minorUnits": "1234567", "scale": 0,
+        "time": { "instant": "2026-04-04T12:00:00Z", "precision": "ARRIVAL", "zone": "Asia/Tehran", "fallback": true }
+      }] }
+    },
+    {
+      "id": "synthetic-mellat-stale-date-falls-back",
+      "sourceId": "synthetic-ir-003", "sender": "SYNTHETIC-MELLAT",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "UTC",
+      "body": "SYNTHETIC Mellat-style\nحساب۰۰۱۲۳تاریخ۰۴/۱/۱۵ ۱۲:۰۰\nمانده ۱,۲۳۴,۵۶۷ ریال",
+      "expected": { "status": "PARSED", "outputs": [{
+        "id": "mellat-balance", "account": "00123", "currency": "IRR", "minorUnits": "1234567", "scale": 0,
+        "time": { "instant": "2026-04-04T12:00:00Z", "precision": "ARRIVAL", "zone": "Asia/Tehran", "fallback": true }
+      }] }
+    },
+    {
+      "id": "synthetic-mellat-account-cannot-truncate",
+      "sourceId": "synthetic-ir-004", "sender": "SYNTHETIC-MELLAT",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "UTC",
+      "body": "SYNTHETIC Mellat-style\nحساب۰۰۱۲۳۴تاریخ۰۵/۱/۱۵ ۱۲:۰۰\nمانده ۱,۲۳۴,۵۶۷ ریال",
+      "expected": { "status": "INVALID", "outputs": [] }
+    },
+    {
+      "id": "synthetic-melli-compact-jalali",
+      "sourceId": "synthetic-ir-005", "sender": "SYNTHETIC-MELLI",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "UTC",
+      "body": "SYNTHETIC Melli-style\nحساب ٠٠١٢٣\nمانده ۲,۰۰۰ ریال\nزمان ۰۱۱۵-۱۲:۰۰",
+      "expected": { "status": "PARSED", "outputs": [{
+        "id": "melli-balance", "account": "00123", "currency": "IRR", "minorUnits": "2000", "scale": 0,
+        "time": { "instant": "2026-04-04T08:30:00Z", "precision": "MINUTE", "zone": "Asia/Tehran", "fallback": false }
+      }] }
+    },
+    {
+      "id": "synthetic-melli-neighbor-previous-year",
+      "sourceId": "synthetic-ir-006", "sender": "SYNTHETIC-MELLI",
+      "arrival": "2026-03-21T12:00:00Z", "zone": "UTC",
+      "body": "SYNTHETIC Melli-style\nحساب ۰۰۱۲۳\nمانده ۲,۰۰۰ ریال\nزمان ۱۲۲۹-۱۲:۰۰",
+      "expected": { "status": "PARSED", "outputs": [{
+        "id": "melli-balance", "account": "00123", "currency": "IRR", "minorUnits": "2000", "scale": 0,
+        "time": { "instant": "2026-03-20T08:30:00Z", "precision": "MINUTE", "zone": "Asia/Tehran", "fallback": false }
+      }] }
+    },
+    {
+      "id": "synthetic-melli-missing-date-falls-back",
+      "sourceId": "synthetic-ir-007", "sender": "SYNTHETIC-MELLI",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "UTC",
+      "body": "SYNTHETIC Melli-style\nحساب ۰۰۱۲۳\nمانده ۲,۰۰۰ ریال",
+      "expected": { "status": "PARSED", "outputs": [{
+        "id": "melli-balance", "account": "00123", "currency": "IRR", "minorUnits": "2000", "scale": 0,
+        "time": { "instant": "2026-04-04T12:00:00Z", "precision": "ARRIVAL", "zone": "Asia/Tehran", "fallback": true }
+      }] }
+    },
+    {
+      "id": "synthetic-blu-normalized-reason-no-account",
+      "sourceId": "synthetic-ir-008", "sender": "SYNTHETIC-BLU",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "Asia/Tehran",
+      "body": "SYNTHETIC Blu-style\nبرداشت ۱,۲۵۰ تومان\nبابت \u200eخرید\u200c   روزانه\u200f",
+      "expected": { "status": "PARSED", "outputs": [{
+        "id": "blu-movement", "account": null, "currency": "IRR", "minorUnits": "-12500", "scale": 0,
+        "reason": { "id": "daily-purchase", "text": "خرید روزانه" }, "channel": null,
+        "time": { "instant": "2026-04-04T12:00:00Z", "precision": "ARRIVAL", "zone": "Asia/Tehran", "fallback": true }
+      }] }
+    },
+    {
+      "id": "synthetic-blu-unknown-reason-omitted",
+      "sourceId": "synthetic-ir-009", "sender": "SYNTHETIC-BLU",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "Asia/Tehran",
+      "body": "SYNTHETIC Blu-style\nبرداشت ۱,۲۵۰ تومان\nبابت ناشناخته",
+      "expected": { "status": "PARSED", "outputs": [{
+        "id": "blu-movement", "account": null, "currency": "IRR", "minorUnits": "-12500", "scale": 0, "reason": null
+      }] }
+    },
+    {
+      "id": "synthetic-blu-digit-bearing-reason-omitted",
+      "sourceId": "synthetic-ir-010", "sender": "SYNTHETIC-BLU",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "Asia/Tehran",
+      "body": "SYNTHETIC Blu-style\nبرداشت ۱,۲۵۰ تومان\nبابت خرید ۱۲۳",
+      "expected": { "status": "PARSED", "outputs": [{
+        "id": "blu-movement", "account": null, "currency": "IRR", "minorUnits": "-12500", "scale": 0, "reason": null
+      }] }
+    },
+    {
+      "id": "synthetic-blu-absent-reason-omitted",
+      "sourceId": "synthetic-ir-011", "sender": "SYNTHETIC-BLU",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "Asia/Tehran",
+      "body": "SYNTHETIC Blu-style\nبرداشت ۱,۲۵۰ تومان",
+      "expected": { "status": "PARSED", "outputs": [{
+        "id": "blu-movement", "account": null, "currency": "IRR", "minorUnits": "-12500", "scale": 0, "reason": null
+      }] }
+    },
+    {
+      "id": "synthetic-tejarat-folded-channel",
+      "sourceId": "synthetic-ir-012", "sender": "SYNTHETIC-TEJARAT",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "Asia/Tehran",
+      "body": "SYNTHETIC Tejarat-style\nحساب ۰۰۱۲۳\nواریز ۱,۰۰۰ ریال\nمانده ۵,۰۰۰ ریال\nکانال اينترنت بانك",
+      "expected": { "status": "PARSED", "outputs": [
+        { "id": "tejarat-movement", "account": "00123", "currency": "IRR", "minorUnits": "1000", "scale": 0, "channel": { "id": "internet-banking", "text": "اینترنت بانک" } },
+        { "id": "tejarat-balance", "account": "00123", "currency": "IRR", "minorUnits": "5000", "scale": 0 }
+      ] }
+    },
+    {
+      "id": "synthetic-tejarat-unresolved-account-unknown-channel",
+      "sourceId": "synthetic-ir-013", "sender": "SYNTHETIC-TEJARAT",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "Asia/Tehran",
+      "body": "SYNTHETIC Tejarat-style\nحساب نامشخص\nواریز ۱,۰۰۰ ریال\nمانده ۵,۰۰۰ ریال\nکانال ناشناخته",
+      "expected": { "status": "PARSED", "outputs": [
+        { "id": "tejarat-movement", "account": null, "currency": "IRR", "minorUnits": "1000", "scale": 0, "channel": null },
+        { "id": "tejarat-balance", "account": null, "currency": "IRR", "minorUnits": "5000", "scale": 0 }
+      ] }
+    },
+    {
+      "id": "synthetic-tejarat-invalid-balance-no-partial-movement",
+      "sourceId": "synthetic-ir-014", "sender": "SYNTHETIC-TEJARAT",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "Asia/Tehran",
+      "body": "SYNTHETIC Tejarat-style\nحساب ۰۰۱۲۳\nواریز ۱,۰۰۰ ریال\nمانده خراب ریال\nکانال خودپرداز",
+      "expected": { "status": "INVALID", "outputs": [] }
+    },
+    {
+      "id": "synthetic-tejarat-invalid-movement-no-partial-balance",
+      "sourceId": "synthetic-ir-015", "sender": "SYNTHETIC-TEJARAT",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "Asia/Tehran",
+      "body": "SYNTHETIC Tejarat-style\nحساب ۰۰۱۲۳\nواریز خراب ریال\nمانده ۵,۰۰۰ ریال\nکانال خودپرداز",
+      "expected": { "status": "INVALID", "outputs": [] }
+    },
+    {
+      "id": "synthetic-dotted-unique-reference",
+      "sourceId": "synthetic-ir-016", "sender": "SYNTHETIC-DOTTED",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "Asia/Tehran",
+      "body": "SYNTHETIC dotted reference\nحساب ۰۱.۰۰۲.۰۳ پایان\nمانده ۹,۰۰۰ ریال",
+      "expected": { "status": "PARSED", "outputs": [{
+        "id": "dotted-balance", "account": "01.002.03", "currency": "IRR", "minorUnits": "9000", "scale": 0
+      }] }
+    },
+    {
+      "id": "synthetic-dotted-two-references-ambiguous",
+      "sourceId": "synthetic-ir-017", "sender": "SYNTHETIC-DOTTED",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "Asia/Tehran",
+      "body": "SYNTHETIC dotted reference\nحساب ۰۱.۰۰۲.۰۳ و ۰۴.۰۰۵.۰۶\nمانده ۹,۰۰۰ ریال",
+      "expected": { "status": "AMBIGUOUS", "outputs": [] }
+    },
+    {
+      "id": "synthetic-dotted-trailing-segment-not-truncated",
+      "sourceId": "synthetic-ir-018", "sender": "SYNTHETIC-DOTTED",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "Asia/Tehran",
+      "body": "SYNTHETIC dotted reference\nحساب ۰۱.۰۰۲.۰۳.۴ پایان\nمانده ۹,۰۰۰ ریال",
+      "expected": { "status": "INVALID", "outputs": [] }
+    },
+    {
+      "id": "synthetic-blu-repeated-reason-anchor-omitted",
+      "sourceId": "synthetic-ir-019", "sender": "SYNTHETIC-BLU",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "Asia/Tehran",
+      "body": "SYNTHETIC Blu-style\nبرداشت ۱,۲۵۰ تومان\nبابت خرید روزانه بابت انتقال وجه",
+      "expected": { "status": "PARSED", "outputs": [{
+        "id": "blu-movement", "account": null, "currency": "IRR", "minorUnits": "-12500", "scale": 0, "reason": null
+      }] }
+    },
+    {
+      "id": "synthetic-tejarat-repeated-channel-anchor-omitted",
+      "sourceId": "synthetic-ir-020", "sender": "SYNTHETIC-TEJARAT",
+      "arrival": "2026-04-04T12:00:00Z", "zone": "Asia/Tehran",
+      "body": "SYNTHETIC Tejarat-style\nحساب ۰۰۱۲۳\nواریز ۱,۰۰۰ ریال\nمانده ۵,۰۰۰ ریال\nکانال خودپرداز کانال اينترنت بانك",
+      "expected": { "status": "PARSED", "outputs": [
+        { "id": "tejarat-movement", "account": "00123", "currency": "IRR", "minorUnits": "1000", "scale": 0, "channel": null },
+        { "id": "tejarat-balance", "account": "00123", "currency": "IRR", "minorUnits": "5000", "scale": 0 }
+      ] }
+    }
+  ]
+}

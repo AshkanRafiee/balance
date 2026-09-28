@@ -1,15 +1,12 @@
 package com.ashkanrafiee.balance;
 
 import android.content.Context;
-import java.util.ArrayList;
+import com.ashkanrafiee.balance.parser.legacy.LegacyBankRules;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 final class BankRules {
     /** Maps a canonical (English, storage-key) bank name to its localized display string resource. */
@@ -60,394 +57,68 @@ final class BankRules {
         DISPLAY_NAME_RES.put("Noor Credit Inst.", R.string.bank_noor_credit_inst);
     }
 
-    /** Localized name for display; the canonical name passed in remains the storage/lookup key everywhere else. */
+    /** Localized name for display; the canonical name remains the storage/lookup key. */
     static String displayName(Context context, String canonical) {
         Integer resId = DISPLAY_NAME_RES.get(canonical);
         return resId != null ? context.getString(resId) : canonical;
     }
 
-    private static final String[][] RULES = {
-        {"Pasargad", "b.pasargad|098500019000|98500019000|+98500019000", "J"},
-        {"Eghtesad Novin", "ENBank|Enbank|+9890004800|90004800", "J"},
-        {"Shahr", "+98200035|20005|20003502|+98200085|700820428285|9200035|98200035|200035", "J"},
-        {"Ansar", "+98200036|100036|98100038", "J"},
-        {"Tejarat", "5000973189|985000973189|tejaratbank|TejaratBank", "J"},
-        {"Refah", "Refah|REFAH|REFAH BANK|Refah Bank|RefahBank", "J"},
-        {"Saman", "+9820000|Saman Bank|Saman|500095|SamanBank|9999920000|2000084080|99999984080|099999984080|9899999984080|+989999984080|+9899999984080|989999920000|+989999920000", "J"},
-        {"Sarmayeh", "+98300058|98300058|7007058|987007058|+987007058", "J"},
-        {"Sina", "Sina Bank|+9850003700798704|9850003700798704|50003700798704|09850004756|+9850004756|9850004756|50004756|50004751|+98300028|500048|500019|98500048|sina bank|SinaBank|sinabank", "J"},
-        {"Saderat", "BankSaderat|Bank Saderat|Saderat| صادرات", "J"},
-        {"Mellat", "Bank Mellat|BankMellat|Mellat", "J"},
-        {"Melli", "Bank Melli|BankMelli|Melli Iran", "J"},
-        {"Maskan", "Bank Maskan|BankMaskan|Maskan", "J"},
-        {"Keshavarzi", "Keshavarzi|Bank Keshavarzi", "J"},
-        {"Parsian", "ParsianBank|Parsian|Bank Parsian", "J"},
-        {"Post", "Post|PostBank|Post Bank", "J"},
-        {"Dey", "Dey|Bank Dey", "J"},
-        {"Hekmat", "Hekmat Iranian|Hekmat", "J"},
-        {"Tosee Taavon", "Tosee Taavon", "J"},
-        {"Noor", "Noor Credit Inst.|Noor|0200080947001|0200002734006", "J"},
-        {"Blu", "Blu|blu|+982187641|98300087641|300087641|989999987641|9999987641|+989999987641|+9890000258", "J"},
-        {"Kosar", "Kosar|Kosar Credit", "J"},
-        {"Mehr", "Mehr Iran|MehrIran", "J"},
-        {"Mehr Eghtesad", "Mehr Eghtesad|MehrEghtesad", "J"},
-        {"Ghavamin", "Ghavamin|Ghavamin Bank", "J"},
-        {"Zamin", "Iran Zamin|IranZamin", "J"},
-        {"Gardeshgari", "Gardeshgari|Tourism Bank", "J"},
-        {"Middle East", "Middle East Bank|Khavarmianeh", "J"},
-        {"Tosee", "Tosee|Tosee Bank", "J"},
-        {"Karafarin", "Karafarin|Karafarin Bank", "J"},
-        {"Resalat", "Resalat|Bank Resalat", "J"},
-        {"Venezuela", "Iran Venezuela|IranVenezuela", "J"},
-        {"Melal", "Melal|Melal Credit Inst.", "J"},
-        {"Sanat Madan", "Sanat Madan|SanatMadan", "J"},
-        {"Sepah", "Sepah|Bank Sepah", "J"},
-        {"Tosee Saderat", "Tosee Saderat|ToseeSaderat", "J"},
-        {"Bankino", "Bankino|Bankino Bank", "J"},
-        {"Wepod", "Wepod|Wepod Bank", "J"}
-    };
-    private static final String[][] OFFICIAL_EXTRA_RULES = {
-        {"Saderat", "+987007851040|+9830009419|9830009419|30009419|983-000-9419|+98200060|+98200040|+9820004008|+98700719|700710|700718|98700719|700719|7007190", "J"},
-        {"Sepah", "100072419|SEPAHBANK|SEPAH BANK|SepahBank|Sepah Bank|986715001|+986715001|6715001|986715000|6715000|+986715000|+986715000015|986715000015|+989122200207|200015|6715000015|+986830068400107|98715000015|6715000016", "J"},
-        {"Industry & Mine", "+9820004003|+98100099|100099", "J"},
-        {"Resalat", "2000474701|+982000474701|982000474701|Resalat|resalat|RESALAT|ResalatBank|Resalat Bank|resalatbank|50001474701|9850001474701|+9850001474701|9850004747|+9850004747|989999904747|9999904747|50004747|500014747|+9820004747|20004746|20004747|+98500014747|9820004747", "J"},
-        {"Mehr", "B.QMEHRIRAN", "J"},
-        {"Ghavamin", "+981000222|+9820000222|+981105151|2000222|2000228", "J"},
-        {"Maskan", "+9810002503|+9850004920|+98500094|100025|98100025|9850004930", "J"},
-        {"Mellat", "+9815560001|+981000920000|981000920000|1000920000|9815560001|+9830007505|+9820003304|+9820003305|+9830003304|30003305|500092000", "J"},
-        {"Melli", "+987007170|98500043087|300084731|+989032229936|+98700717|+98200044|+9820004000|98700717|700717|9830009417|+9830009417|30009417|983000941001|200080|3000941001|98300094170|+983000941001|+98700759", "J"},
-        {"Mehr Eghtesad", "+98200089|+98100089|+982000089|+981000089", "J"},
-        {"Parsian", "99902318|99992318|+98200082|+98300054|+98500024|+9850002318|+9850001099|50001099|300071|9830007171|9810005403|9830007171|9899902318", "J"},
-        {"Post", "9840400108|+9840400108|40400108|50004940|+9820004940|9820004940|20004940|+98200029|+98100029|50004949|98700717|9850004940|98500009440|+9850004940", "J"},
-        {"Karafarin", "200057780|B.Karafarin|98200004321|+9830004321|30004321|+98200004321|50004858|50004857|98200002341|981000004|200004321", "J"},
-        {"Keshavarzi", "+98300081301|5000181301|+989999944444|9999944444|989999944444", "J"},
-        {"Zamin", "IZBANK", "J"},
-        {"Gardeshgari", "TourismBank|+982000300|982000309|982000300", "J"},
-        {"Kosar", "+9850002477|10002477|9810002477|6715014005|98715014005", "J"},
-        {"Tosee Taavon", "ttbank|TTBANK|+9820006438|+985000257|5000157|+985000157|500158|30005816|+989810007000|9810007000", "J"},
-        {"Middle East", "9820004861|+9820004861|20004861|20004840|+9820004860|9820004860|20004860", "J"},
-        {"Dey", "2000766|+9820004002|+9820043|+9830002726|Day Bank|Day|+98300097500027|3000766|500018|982000766|DayBank|98200766|+982000766", "J"},
-        {"Hekmat", "+9820008955", "J"},
-        {"Tosee Credit Inst.", "+9830005816", "J"},
-        {"EDBI", "7000730|+9830009430|9830009430|30009430", "J"},
-        {"Melal Credit Inst.", "+98200022222", "J"},
-        {"Noor Credit Inst.", "9830009480|30009480|+9820004009|7007780|20004293", "J"},
-        {"Wepod", "+981000214|98500011|5000114|+985000114|985000114|981000214|1000214|9830009017|30009017", "J"},
-        {"Bankino", "20004860", "J"}
-    };
+    /** The shared legacy rule fingerprint, including account, reason and channel rules. */
+    static final int VERSION = LegacyBankRules.VERSION;
 
-    /** Version fingerprint of the rule tables, used to detect bank-list changes and force a full rescan.
-     *  Assigned in a later static block once {@link #ACCOUNT_RULES} and {@link #REASON_RULES} are built,
-     *  so account- and reason-rule changes also force the rebuild (their absence left existing installs
-     *  scanning with stale keys, and a reason rule that never re-reads the inbox reaches no history
-     *  that was scanned before the rule existed). */
-    static final int VERSION;
-
-    private static final Set<String> SUPPORTED_BANKS = new HashSet<>();
-    static {
-        for (String[] rule : RULES) SUPPORTED_BANKS.add(rule[0]);
-        for (String[] rule : OFFICIAL_EXTRA_RULES) SUPPORTED_BANKS.add(rule[0]);
-    }
-
-    /** The calendar each rule row declares, keyed by canonical bank name. Every row states one, so
-     *  a bank outside Iran is added by declaring Gregorian here rather than by having its dates
-     *  assumed, and a row that declared neither would be caught by the rules test. */
-    private static final Map<String, CalendarSystem> CALENDARS = new HashMap<>();
-    static {
-        for (String[] rule : RULES) declareCalendar(rule);
-        for (String[] rule : OFFICIAL_EXTRA_RULES) declareCalendar(rule);
-    }
-
-    private static void declareCalendar(String[] rule) {
-        CalendarSystem cal = CalendarSystem.ofTag(rule.length > 2 ? rule[2] : null);
-        if (cal != null) CALENDARS.put(rule[0], cal);
-    }
-
-    /** The calendar a bank writes its dates in, which decides how its year-less dates are read: the
-     *  two calendars are about three months apart, so a message stating no year has to be read in the
-     *  right one. Falls back to Persian only for a bank that is in neither table, which no bank name
-     *  the app resolves can be. */
     static CalendarSystem calendar(String bank) {
-        CalendarSystem cal = CALENDARS.get(bank);
-        return cal == null ? CalendarSystem.JALALI : cal;
+        return CalendarSystem.valueOf(LegacyBankRules.calendar(bank).name());
     }
 
-    /** Every canonical bank name listed by a rule table (reachable or not). */
     static Set<String> supportedNames() {
-        return new HashSet<>(SUPPORTED_BANKS);
+        return LegacyBankRules.supportedNames();
     }
 
-    /** Every rule alias, exactly in resolution order (RULES then OFFICIAL_EXTRA_RULES, pipe-split).
-     *  Test-only oracle input mirroring what scanSms feeds resolve(). */
     static List<String> aliasList() {
-        List<String> all = new ArrayList<>();
-        for (String[] rule : RULES) for (String alias : rule[1].split("\\|")) all.add(alias);
-        for (String[] rule : OFFICIAL_EXTRA_RULES) for (String alias : rule[1].split("\\|")) all.add(alias);
-        return all;
+        return LegacyBankRules.aliasList();
     }
 
-    /** The raw rule tables in resolution order. Test-only oracle input. */
     static String[][] rulesTestOnly() {
-        String[][] all = new String[RULES.length + OFFICIAL_EXTRA_RULES.length][];
-        System.arraycopy(RULES, 0, all, 0, RULES.length);
-        System.arraycopy(OFFICIAL_EXTRA_RULES, 0, all, RULES.length, OFFICIAL_EXTRA_RULES.length);
-        return all;
+        return LegacyBankRules.rulesTestOnly();
     }
 
-    /** The channel-rule rows of {@link #CHANNEL_RULES} in declaration order. Test-only oracle input. */
     static String[][] channelRulesTestOnly() {
-        String[][] all = new String[CHANNEL_RULES.length][];
-        for (int i = 0; i < CHANNEL_RULES.length; i++) all[i] = CHANNEL_RULES[i].clone();
-        return all;
+        return LegacyBankRules.channelRulesTestOnly();
     }
 
-    /** Every channel {@link #CHANNEL_CAPTION_RES} can caption, in the normalized form the lookup uses.
-     *  Test-only oracle input. */
     static Set<String> channelCaptionKeys() {
         return new HashSet<>(CHANNEL_CAPTION_RES.keySet());
     }
 
-    /** The account-rule rows of {@link #ACCOUNT_RULES} in declaration order. Test-only oracle input. */
     static String[][] accountRulesTestOnly() {
-        String[][] all = new String[ACCOUNT_RULES.length][];
-        for (int i = 0; i < ACCOUNT_RULES.length; i++) all[i] = ACCOUNT_RULES[i].clone();
-        return all;
+        return LegacyBankRules.accountRulesTestOnly();
     }
 
-    /** The reason-rule rows of {@link #REASON_RULES} in declaration order. Test-only oracle input. */
     static String[][] reasonRulesTestOnly() {
-        String[][] all = new String[REASON_RULES.length][];
-        for (int i = 0; i < REASON_RULES.length; i++) all[i] = REASON_RULES[i].clone();
-        return all;
+        return LegacyBankRules.reasonRulesTestOnly();
     }
 
-    /** Every title {@link #REASON_CAPTION_RES} can caption, in the normalized form the lookup uses.
-     *  Test-only oracle input. */
     static Set<String> reasonCaptionKeys() {
         return new HashSet<>(REASON_CAPTION_RES.keySet());
     }
 
-    /** Bank names an incoming SMS can actually reach: every rule alias resolves exactly the way a sender
-     *  does, so aliases that collide and lose to an earlier rule (e.g. Tosee Credit Inst.'s +9830005816,
-     *  claimed by Tosee Taavon) simply drop out instead of inflating the count. */
     static Set<String> reachableBanks() {
-        Set<String> reachable = new HashSet<>();
-        collectReachable(RULES, reachable);
-        collectReachable(OFFICIAL_EXTRA_RULES, reachable);
-        return reachable;
-    }
-
-    private static void collectReachable(String[][] rules, Set<String> reachable) {
-        for (String[] rule : rules) for (String alias : rule[1].split("\\|")) {
-            String resolved = resolve(alias);
-            if (resolved != null) reachable.add(resolved);
-        }
-    }
-
-    private static final class Alias {
-        final String bank;
-        final int index;
-        Alias(String bank, int index) {
-            this.bank = bank;
-            this.index = index;
-        }
-    }
-
-    /** Exact-match lookup: normalized alias -> first (lowest-index) rule that lists it. */
-    private static final Map<String, Alias> EXACT = new HashMap<>();
-
-    /** Suffix-match lookup: every digit suffix (len >= 5) of every digit alias -> first rule that lists it.
-     *  Lets the digits-only branch answer "a = alias or a.endsWith(alias)" in one lookup. */
-    private static final Map<String, Alias> SUFFIX_OF = new HashMap<>();
-
-    static {
-        int index = 0;
-        for (String[] rule : RULES)
-            for (String alias : rule[1].split("\\|")) registerAlias(normalize(alias), rule[0], index++);
-        for (String[] rule : OFFICIAL_EXTRA_RULES)
-            for (String alias : rule[1].split("\\|")) registerAlias(normalize(alias), rule[0], index++);
-    }
-
-    private static void registerAlias(String b, String bank, int index) {
-        if (b.isEmpty()) return;
-        if (EXACT.containsKey(b)) return;
-        EXACT.put(b, new Alias(bank, index));
-        if (!allDigits(b) || b.length() < 5) return;
-        for (int len = 5; len <= b.length(); len++)
-            SUFFIX_OF.putIfAbsent(b.substring(b.length() - len), new Alias(bank, index));
-    }
-
-    private static boolean allDigits(String s) {
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c < '0' || c > '9') return false;
-        }
-        return true;
-    }
-
-    // Built after the alias-index block above: reachableBanks() -> resolve() needs EXACT/SUFFIX_OF ready.
-
-    private static int rulesVersion() {
-        int v = 0;
-        for (String[] rule : RULES) for (String alias : rule[1].split("\\|")) v = v * 31 + alias.hashCode();
-        for (String[] rule : OFFICIAL_EXTRA_RULES) for (String alias : rule[1].split("\\|")) v = v * 31 + alias.hashCode();
-        List<String> accounts = new ArrayList<>();
-        for (String[] row : ACCOUNT_RULES) accounts.add(row[0]);
-        java.util.Collections.sort(accounts);
-        for (String bank : accounts) v = v * 31 + bank.hashCode() * 31 + ACCOUNT_PATTERNS.get(bank).pattern().hashCode();
-        List<String> reasons = new ArrayList<>();
-        for (String[] row : REASON_RULES) reasons.add(row[0]);
-        java.util.Collections.sort(reasons);
-        for (String bank : reasons) v = v * 31 + bank.hashCode() * 31 + REASON_PATTERNS.get(bank).pattern().hashCode();
-        // What is stored is the title, and a caption is looked up from it when it is shown, so only
-        // which titles are now readable belongs in here: the caption's own wording and the resource
-        // id it resolves to are not read out of any message, and folding the id would make an
-        // unrelated string edit rebuild every history on every install.
-        for (String title : new java.util.TreeSet<>(REASON_CAPTION_RES.keySet()))
-            v = v * 31 + title.hashCode() * 31;
-        v = v * 31 + REASON_INVISIBLE.hashCode() * 31 + REASON_SPACES.pattern().hashCode();
-        List<String> channels = new ArrayList<>();
-        for (String[] row : CHANNEL_RULES) channels.add(row[0]);
-        java.util.Collections.sort(channels);
-        for (String bank : channels)
-            v = v * 31 + bank.hashCode() * 31 + CHANNEL_PATTERNS.get(bank).pattern().hashCode();
-        // As with the reasons, what is stored is the bank's own wording and the caption is looked up
-        // from it when the movement is shown, so only which channels are now readable belongs in here.
-        for (String channel : new java.util.TreeSet<>(CHANNEL_CAPTION_RES.keySet()))
-            v = v * 31 + channel.hashCode() * 31;
-        return v;
+        return LegacyBankRules.reachableBanks();
     }
 
     static String resolve(String sender) {
-        if (sender == null || sender.indexOf('*') >= 0 || sender.indexOf('#') >= 0) return null;
-        String a = normalize(sender);
-        if (a.isEmpty()) return null;
-        if (allDigits(a) && a.length() >= 5) {
-            Alias best = SUFFIX_OF.get(a);
-            int start = a.length() - 5;
-            for (int len = 5; len <= a.length(); len++) {
-                Alias e = EXACT.get(a.substring(start));
-                if (e != null && (best == null || e.index < best.index)) best = e;
-                start--;
-            }
-            return best == null ? null : best.bank;
-        }
-        Alias e = EXACT.get(a);
-        return e == null ? null : e.bank;
+        return LegacyBankRules.resolve(sender);
     }
+
     static String normalize(String raw) {
-        StringBuilder out = new StringBuilder();
-        for (char c : Digits.ascii(raw).toCharArray()) {
-            if (Character.isLetterOrDigit(c)) out.append(Character.toLowerCase(c));
-        }
-        String s = out.toString();
-        if (s.startsWith("0098")) s = s.substring(4);
-        if (s.startsWith("98") && s.length() > 8) s = s.substring(2);
-        return s;
+        return LegacyBankRules.normalize(raw);
     }
 
-    /** Per-bank rules that pull the account number out of a message body, when the bank states one.
-     *  One row per bank, mirroring the alias {@link #RULES} table above; a row picks one of the
-     *  matcher shapes in {@link #compileAccount} and, for the labeled/bare shapes, the account-digit
-     *  length bounds. Adding a bank that prints a known shape is a one-line copy of a row here;
-     *  a brand-new layout is one new "case" in compileAccount and then the same one-line row. Banks
-     *  absent from this table (or messages that never mention an account) stay under the bank-level
-     *  balance/transaction slot. Row columns: {bank, shape, min, max} — "min"/"max" are digit-length
-     *  bounds, with "" meaning unbounded (or unused by that shape). */
-    private static final String[][] ACCOUNT_RULES = {
-        {"Mellat",   "label-glued",     "6",  ""},
-        {"Melli",    "label-colon",     "3",  "12"},
-        {"Tejarat",  "label-colon",     "6",  "24"},
-        {"Saderat",  "label-colon-line","4",  "10"},
-        {"Parsian",  "bare-mablagh",    "10", "24"},
-        {"Mehr",     "bare-bidi",       "10", "24"},
-        {"Resalat",  "dotted",          "",   ""},
-        {"Pasargad", "dotted-line",     "",   ""},
-    };
-
-    /** Builds the matcher for one {@link #ACCOUNT_RULES} row. Each shape carries the guards — the
-     *  glued/colon label, the whole-line or line-start anchors, the no-thousand-separator lookahead,
-     *  the bidi tolerance, the trailing "مبلغ:" requirement — that keep balances, amounts, dates and
-     *  one-off codes from ever being read as an account. */
-    private static Pattern compileAccount(String[] row) {
-        String shape = row[1];
-        String d = digitRange(row[2], row[3]);
-        switch (shape) {
-            case "label-glued":   // Mellat: "حساب1110000222"; the glue keeps "مانده حساب: …" out.
-                return Pattern.compile("\u062D\u0633\u0627\u0628(" + d + ")");
-            case "label-colon":   // Melli/Tejarat: "حساب: 10001"; no-thousand-separator lookahead
-                return Pattern.compile("\u062D\u0633\u0627\u0628\\s*:\\s*(" + d + ")(?![0-9,.])");
-            case "label-colon-line":  // Saderat: "حساب:48203" at its own line start, so destination
-                return Pattern.compile("(?m)^[ \\t]*\u062D\u0633\u0627\u0628\\s*:\\s*(" + d + ")(?![0-9,.])");
-            case "bare-mablagh":  // Parsian: the account line, the "مبلغ:" amount line right under it
-                return Pattern.compile("(?m)^(" + d + ")\\s*\\r?\\n\\s*\u0645\u0628\u0644\u063A:");
-            case "bare-bidi":     // Mehr: the account (bidi-wrapped) alone as the whole line
-                return Pattern.compile("(?m)^[\\u202A-\\u202E]*(" + d + ")(?![0-9,.])[\\u202A-\\u202E ]*\\r?$");
-            case "dotted":        // Resalat: free-floating three-part id; bounds keep dotted dates out
-                return Pattern.compile("(?<![0-9])[0-9]{1,2}\\.[0-9]{4,12}\\.[0-9]{1,2}(?![0-9])");
-            case "dotted-line":   // Pasargad: four-part dotted id alone on its own line
-                return Pattern.compile("(?m)^[0-9]{1,4}\\.[0-9]{1,6}\\.[0-9]{6,12}\\.[0-9]{1,3}(?![0-9.])\\s*\\r?$");
-            default:
-                throw new IllegalArgumentException("unknown account shape '" + shape + "' for " + row[0]);
-        }
-    }
-
-    /** A "[0-9]{min,max}" run from the two length-bound columns of an account row ("" max = unbounded). */
-    private static String digitRange(String min, String max) {
-        return max.isEmpty() ? "[0-9]{" + min + ",}" : "[0-9]{" + min + "," + max + "}";
-    }
-
-    /** Compiled matchers for {@link #ACCOUNT_RULES}, keyed by canonical bank name. */
-    private static final Map<String, Pattern> ACCOUNT_PATTERNS = new HashMap<>();
-    static {
-        for (String[] row : ACCOUNT_RULES) ACCOUNT_PATTERNS.put(row[0], compileAccount(row));
-    }
-
-    /** Returns the account number a message from the given bank belongs to, or null when the bank
-     *  never states one in this message. Matching runs over ASCII digits only (Persian/Arabic digit
-     *  forms are folded in) so punctuation like ":", ".", and thousand separators keep their role. */
     static String extractAccount(String bank, String body) {
-        if (bank == null || body == null) return null;
-        Pattern p = ACCOUNT_PATTERNS.get(bank);
-        if (p == null) return null;
-        Matcher m = p.matcher(digitsToAscii(body));
-        if (!m.find()) return null;
-        return m.groupCount() == 0 ? m.group(0) : m.group(1);
+        return LegacyBankRules.extractAccount(bank, body);
     }
 
-    private static String digitsToAscii(String raw) {
-        return Digits.ascii(raw);
-    }
-
-    // ====================================================================
-    // Movement reasons
-    // ====================================================================
-
-    /** Per-bank rules that read the reason a bank states for a movement, for the banks whose messages
-     *  name one. One row per bank, mirroring the alias table above: the row picks one of the matcher
-     *  shapes in {@link #compileReason}, and the bank only ever states a reason the app knows how to
-     *  caption (see {@link #REASON_CAPTION_RES}). A bank absent from this table, or a message whose
-     *  shape does not fit, states no reason and behaves exactly as it did before this table existed —
-     *  the movement is still read, dated and summed, it just carries no reason. Row columns:
-     *  {bank, shape}. */
-    private static final String[][] REASON_RULES = {
-        {"Blu", "title-line"},
-    };
-
-    /** Longest title line {@link #compileReason} will read as a reason. A bank names the event in a few
-     *  words; the cap keeps the sentence underneath it, and anything a malformed message makes of a
-     *  second line, out of a store that then renders it on a movement row. */
-    private static final int MAX_REASON_LENGTH = 60;
-
-    /** The event titles a bank is known to state, mapped to the caption that names each one in the
-     *  app's own language. This table is the allowlist: a title that is not listed here states no
-     *  reason the app can caption, so nothing is shown and nothing is stored — rather than an
-     *  untranslated fragment of a bank message appearing as though the app had understood it. Keys
-     *  are the title in its normalized form (see {@link #normalizeReason}), which the rules test
-     *  enforces so a title added with a stray joiner fails there instead of silently never matching.
-     *
-     *  <p>A bank that titles its movements "واریز پول"/"برداشت پول" is deliberately absent: that only
-     *  restates the direction the movement row already shows, and a chip saying so would be noise. */
+    /** Localized captions for the normalized event titles understood by the shared rules. */
     private static final Map<String, Integer> REASON_CAPTION_RES = new HashMap<>();
     static {
         REASON_CAPTION_RES.put("شارژ شدی", R.string.reason_topup);
@@ -457,119 +128,22 @@ final class BankRules {
         REASON_CAPTION_RES.put("انتقال پل", R.string.reason_transfer_out);
     }
 
-    /** Builds the matcher for one {@link #REASON_RULES} row. Each shape carries the guards that keep a
-     *  balance, an amount, a time or a date line from ever being read as the reason. */
-    private static Pattern compileReason(String[] row) {
-        switch (row[1]) {
-            case "title-line":  // Blu: the event title on the line under the brand ("شارژ شدی")
-                // Pinned to the second line, digit-free, at most MAX_REASON_LENGTH characters, and
-                // required to be followed by another line. Every Blu title is a bare noun phrase
-                // while every other line in the message carries a figure — the sentence the amount is
-                // in, the "موجودی" balance, the time, the date — so the guards here and the
-                // allowlist in {@link #REASON_CAPTION_RES} agree on which line can be a title.
-                //
-                // Each line is split by a run of spaces and a group that cannot begin or end with
-                // one, and the first line is matched as one whole class rather than as an indent plus
-                // a class it already contains. Both keep every split unique: a body with no newline
-                // at all would otherwise be divided between them in N ways, and each split re-walks
-                // what is left, which turns one unparsable message into seconds of stall on the
-                // scan that is holding the store's lock.
-                return Pattern.compile("\\A[^\\r\\n]*\\r?\\n[ \\t]*([^\\d\\s\\r\\n][^\\d\\r\\n]{0,"
-                    + (MAX_REASON_LENGTH - 2) + "}[^\\d\\s\\r\\n])[ \\t]*\\r?\\n");
-            default:
-                throw new IllegalArgumentException("unknown reason shape '" + row[1] + "' for " + row[0]);
-        }
-    }
-
-    /** Compiled matchers for {@link #REASON_RULES}, keyed by canonical bank name. */
-    private static final Map<String, Pattern> REASON_PATTERNS = new HashMap<>();
-    static {
-        for (String[] row : REASON_RULES) REASON_PATTERNS.put(row[0], compileReason(row));
-    }
-
-    /** The reason the bank stated for this movement, in the bank's own words, or null when the bank is
-     *  not one this app reads reasons from, its message states none, or the title it uses is not one
-     *  {@link #REASON_CAPTION_RES} captions. The text is the normalized title rather than a caption, so
-     *  what is stored stays a fact about the message and can still be captioned in another language
-     *  later. */
     static String extractReason(String bank, String body) {
-        if (bank == null || body == null) return null;
-        Pattern p = REASON_PATTERNS.get(bank);
-        if (p == null) return null;
-        Matcher m = p.matcher(Digits.ascii(body));
-        if (!m.find()) return null;
-        String title = normalizeReason(m.group(1));
-        return title.isEmpty() || !REASON_CAPTION_RES.containsKey(title) ? null : title;
+        return LegacyBankRules.extractReason(bank, body);
     }
 
-    /** The caption for a reason {@link #extractReason} returned, in the app's current language, or
-     *  null when the stored reason is not one this build captions (an older backup, say). */
+    /** The caption in the app's current language, or null for an unknown stored reason. */
     static String reasonCaption(Context context, String reason) {
         if (reason == null) return null;
         Integer resId = REASON_CAPTION_RES.get(normalizeReason(reason));
         return resId == null ? null : context.getString(resId);
     }
 
-    /** The invisible marks a bank's text may carry and that carry no meaning of their own: the
-     *  zero-width joiner/non-joiner and the left-to-right/right-to-left marks, the bidi embedding and
-     *  override run, and the isolate run. Spelled out rather than written as ranges so the table that
-     *  decides what a stated title or channel may contain is one readable line, and so
-     *  {@link #rulesVersion} can fold it: a title that became readable because this list grew has to be
-     *  re-read from the inbox. */
-    private static final String REASON_INVISIBLE =
-        "\u200C\u200D\u200E\u200F\u202A\u202B\u202C\u202D\u202E"
-        + "\u2066\u2067\u2068\u2069";
-
-    /** Every run of whitespace in a stated title or channel is one space, however the sender spaced
-     *  it. Folded into the fingerprint for the same reason as {@link #REASON_INVISIBLE}. */
-    private static final Pattern REASON_SPACES = Pattern.compile("\\s+");
-
-    /** Normalizes text a bank stated, so the caption table can be looked up: the invisible marks a
-     *  bank's text may carry dropped, the edges trimmed and every inner run of whitespace collapsed,
-     *  so a title or channel matches however the sender happened to encode it. */
-    private static String normalizeStated(String raw) {
-        StringBuilder out = new StringBuilder(raw.length());
-        for (int i = 0; i < raw.length(); i++) {
-            char c = raw.charAt(i);
-            if (REASON_INVISIBLE.indexOf(c) < 0) out.append(c);
-        }
-        return REASON_SPACES.matcher(out.toString().trim()).replaceAll(" ");
-    }
-
-    /** Normalizes a stated title so the caption table can be looked up: the invisible marks a bank's
-     *  text may carry dropped, the edges trimmed and every inner run of whitespace collapsed, so a
-     *  title matches however the sender happened to encode it. */
     static String normalizeReason(String raw) {
-        return normalizeStated(raw);
+        return LegacyBankRules.normalizeReason(raw);
     }
 
-    // ====================================================================
-    // Movement channels
-    // ====================================================================
-
-    /** Per-bank rules that read the channel a movement went through, for the banks whose messages name
-     *  one. One row per bank, mirroring the tables above, so a bank that starts naming a channel is one
-     *  row rather than new code: the row picks one of the matcher shapes in {@link #compileChannel} and
-     *  declares the label the bank writes it behind. A bank absent from this table, or a message whose
-     *  shape does not fit, states no channel and behaves exactly as it did before this table existed —
-     *  the movement is still read, dated and summed, it just carries no channel. Row columns:
-     *  {bank, shape, label}. */
-    private static final String[][] CHANNEL_RULES = {
-        {"Tejarat", "labeled-line", "از طريق:"},
-    };
-
-    /** Longest channel line {@link #compileChannel} will read. A channel is a short noun phrase, so
-     *  the cap keeps a whole sentence out of a store that then renders it on a movement row. */
-    private static final int MAX_CHANNEL_LENGTH = 40;
-
-    /** The channels a bank is known to state, mapped to the caption that names each one in the app's
-     *  own language. This table is the allowlist, for the same reason the reason table is: a channel
-     *  that is not listed here states nothing the app can caption, so nothing is shown and nothing is
-     *  stored — rather than an untranslated fragment of a bank message appearing as though the app had
-     *  understood it. A bank that names only its own channels, the way it writes its own brand, is
-     *  deliberately absent. Keys are the channel in its normalized form (see {@link #normalizeChannel}),
-     *  which the rules test enforces so a channel added with a stray joiner fails there instead of
-     *  silently never matching. */
+    /** Localized captions for the normalized channels understood by the shared rules. */
     private static final Map<String, Integer> CHANNEL_CAPTION_RES = new HashMap<>();
     static {
         CHANNEL_CAPTION_RES.put("شتاب", R.string.channel_shetab);
@@ -579,65 +153,18 @@ final class BankRules {
         CHANNEL_CAPTION_RES.put("شعبه", R.string.channel_branch);
     }
 
-    /** Builds the matcher for one {@link #CHANNEL_RULES} row. The label is quoted, so a bank label
-     *  carrying regex punctuation stays literal, and folded to the same letter form the body is
-     *  matched in, so a bank that writes its yeh the other way round still matches. */
-    private static Pattern compileChannel(String[] row) {
-        switch (row[1]) {
-            case "labeled-line":  // Tejarat: the channel on the line under the amount ("از طريق: شتاب")
-                // Read from the label, not from a fixed line number: which line a bank puts the channel
-                // on is not something a message promises, and a movement that states no account line
-                // shifts every line after it up by one. The guards are the same ones the reason shapes
-                // use — digit-free, at most MAX_CHANNEL_LENGTH characters, a run of spaces and a group
-                // that cannot begin or end with one, and a line that has to be terminated, so an
-                // amount, a balance, a date or a time can never be read as the channel, and every split
-                // stays unique instead of a body with no newline being divided between them in N ways,
-                // which is what turns one unparsable message into seconds of stall.
-                return Pattern.compile("(?m)^[ \\t]*" + Pattern.quote(BalanceData.normalizeLetters(row[2]))
-                    + "[ \\t]*([^\\d\\s\\r\\n][^\\d\\r\\n]{0," + (MAX_CHANNEL_LENGTH - 2)
-                    + "}[^\\d\\s\\r\\n])[ \\t]*\\r?\\n");
-            default:
-                throw new IllegalArgumentException("unknown channel shape '" + row[1] + "' for " + row[0]);
-        }
-    }
-
-    /** Compiled matchers for {@link #CHANNEL_RULES}, keyed by canonical bank name. */
-    private static final Map<String, Pattern> CHANNEL_PATTERNS = new HashMap<>();
-    static {
-        for (String[] row : CHANNEL_RULES) CHANNEL_PATTERNS.put(row[0], compileChannel(row));
-    }
-
-    /** The channel the bank stated for this movement, in the bank's own words, or null when the bank is
-     *  not one this app reads channels from, its message states none, or the channel it names is not one
-     *  {@link #CHANNEL_CAPTION_RES} captions. The text is the normalized channel rather than a caption,
-     *  so what is stored stays a fact about the message and can still be captioned in another language
-     *  later. */
     static String extractChannel(String bank, String body) {
-        if (bank == null || body == null) return null;
-        Pattern p = CHANNEL_PATTERNS.get(bank);
-        if (p == null) return null;
-        Matcher m = p.matcher(BalanceData.normalizeLetters(Digits.ascii(body)));
-        if (!m.find()) return null;
-        String channel = normalizeChannel(m.group(1));
-        return channel.isEmpty() || !CHANNEL_CAPTION_RES.containsKey(channel) ? null : channel;
+        return LegacyBankRules.extractChannel(bank, body);
     }
 
-    /** The caption for a channel {@link #extractChannel} returned, in the app's current language, or
-     *  null when the stored channel is not one this build captions (an older backup, say). */
+    /** The caption in the app's current language, or null for an unknown stored channel. */
     static String channelCaption(Context context, String channel) {
         if (channel == null) return null;
         Integer resId = CHANNEL_CAPTION_RES.get(normalizeChannel(channel));
         return resId == null ? null : context.getString(resId);
     }
 
-    /** Normalizes a stated channel so the caption table can be looked up. The letter folding matters
-     *  here in a way it does not for a reason: the bank writes the label with the Arabic yeh, so the
-     *  same word read back through the label can arrive with the Persian one. */
     static String normalizeChannel(String raw) {
-        return normalizeStated(BalanceData.normalizeLetters(raw));
+        return LegacyBankRules.normalizeChannel(raw);
     }
-
-    // Last, so every table the fingerprint folds has been built: static initializers run in the order
-    // they are written, and a table read before it is filled would be null here rather than complete.
-    static { VERSION = rulesVersion(); }
 }

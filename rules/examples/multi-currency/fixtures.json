@@ -1,0 +1,39 @@
+{
+  "schema": "prototype-fixtures-1",
+  "pack": "example.multi-currency",
+  "cases": [
+    {
+      "id": "same-account-two-currencies",
+      "sourceId": "synthetic-occurrence-1",
+      "sender": "EXAMPLE-BANK",
+      "arrival": "2026-04-04T12:00:00Z",
+      "zone": "Europe/London",
+      "body": "Multi-currency statement\nAccount=0001;Currency=USD;Balance=100.00;\nAccount=0001;Currency=EUR;Balance=200.00;",
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          { "id": "usd-balance", "account": "0001", "currency": "USD", "minorUnits": "10000", "scale": 2 },
+          { "id": "eur-balance", "account": "0001", "currency": "EUR", "minorUnits": "20000", "scale": 2 }
+        ]
+      }
+    },
+    {
+      "id": "required-second-output-invalid",
+      "sourceId": "synthetic-occurrence-2",
+      "sender": "EXAMPLE-BANK",
+      "arrival": "2026-04-04T12:00:00Z",
+      "zone": "Europe/London",
+      "body": "Multi-currency statement\nAccount=0001;Currency=USD;Balance=100.00;\nAccount=0001;Currency=EUR;Balance=bad;",
+      "expected": { "status": "INVALID", "outputs": [] }
+    },
+    {
+      "id": "wrong-currency-must-not-relabel",
+      "sourceId": "synthetic-occurrence-3",
+      "sender": "EXAMPLE-BANK",
+      "arrival": "2026-04-04T12:00:00Z",
+      "zone": "Europe/London",
+      "body": "Multi-currency statement\nAccount=0001;Currency=EUR;Balance=100.00;\nAccount=0001;Currency=EUR;Balance=200.00;",
+      "expected": { "status": "INVALID", "outputs": [] }
+    }
+  ]
+}
