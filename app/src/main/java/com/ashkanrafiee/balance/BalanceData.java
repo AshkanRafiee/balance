@@ -787,6 +787,9 @@ final class BalanceData {
             }
         } catch (Exception e) {
             Log.w(TAG, "scan failed", e);
+            // A partial cursor traversal is not a valid scan result. Do not persist its
+            // reconciliation window, balances, or watermark; the next refresh retries the rows.
+            return 0;
         }
 
         // A full re-scan that re-keys a bank's messages per account supersedes the legacy plain
@@ -1225,6 +1228,9 @@ final class BalanceData {
                 completed = true;
             } catch (Exception e) {
                 Log.w(TAG, "history scan failed", e);
+                // Do not publish partially parsed history or advance any watermark after a
+                // cursor/parse failure. The next scan must see the same source rows again.
+                return 0;
             }
             writeTransactions(context, stored);
             // The reasons and channels land after the transactions they belong to, so the stores never
