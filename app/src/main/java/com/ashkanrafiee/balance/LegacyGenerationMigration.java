@@ -37,7 +37,8 @@ import com.ashkanrafiee.balance.EncryptedGenerationStore.Snapshot;
  * retains two full manifests (unchanged component files are shared, not redundant copies).
  * Its journal records the first full generation as provenance, not a restriction on later commits.
  * Corrupt adopted data propagates; absence of the journal with ANY artifacts fails closed.
- * Initial journal staging interruption therefore needs external diagnosis, not automatic disposal.
+ * A state-less staging interruption is recoverable only when staging is the sole artifact and
+ * the complete legacy snapshot validates before that unauthenticated stage is discarded.
  * Authentication is not rollback protection against replay of the entire directory.
  */
 public final class LegacyGenerationMigration {
@@ -90,7 +91,13 @@ public final class LegacyGenerationMigration {
             try {
                 String[] entries = inventory();
                 boolean hasState = Arrays.asList(entries).contains(STATE);
-                if (!hasState && entries.length != 0) throw failure("MISSING_STATE");
+                boolean adoptingPreparingStage = !hasState && entries.length == 1
+                        && STAGE.equals(entries[0]);
+                // A stage is unauthenticated until its source has been read and fully
+                // validated.  It is recoverable only as the sole artifact: in particular,
+                // never infer authority for a missing journal from a destination directory.
+                if (!hasState && entries.length != 0 && !adoptingPreparingStage)
+                    throw failure("MISSING_STATE");
                 byte[] state = hasState ? readState() : null;
                 if (hasState) sync(parent); // Resolve a previous rename's uncertain directory sync.
                 if (state != null && state[0] == 2) {
@@ -101,6 +108,14 @@ public final class LegacyGenerationMigration {
                 }
                 if (source == null) throw failure("INVALID_ARGUMENT");
                 Map<String, byte[]> values = validatedCopy(source.readValidatedSnapshot());
+                if (adoptingPreparingStage) {
+                    // Do not inspect or authenticate the old bytes.  Validation of the
+                    // complete legacy snapshot is the only authorization to discard this
+                    // interrupted, unauthenticated journal staging file.
+                    File stage = new File(parent, STAGE);
+                    if (!stage.delete()) throw failure("IO");
+                    sync(parent);
+                }
                 if (state == null) publish(new byte[] { 1 }, Step.PREPARING_PARTIAL);
                 // Only authenticated PREPARING + successful intact-source validation permits this.
                 discardDestination();

@@ -1,6 +1,7 @@
 package com.ashkanrafiee.balance;
 
 import android.system.Os;
+import android.system.OsConstants;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -132,9 +133,10 @@ public class LegacyGenerationMigrationTest {
             assertTrue(step.name(), hit[0]);
             int before = reads;
             if (step == Step.PREPARING_PARTIAL || step == Step.PREPARING_SYNCED) {
-                assertEquals("MISSING_STATE",
-                        fails(() -> migration(parent).open(this::forbidden)).getMessage());
-                assertFalse(new File(parent, "generations").exists());
+                same(sample(), migration(parent).open(this::source).getSnapshot());
+                assertEquals(before + 1, reads);
+                same(sample(), migration(parent).open(this::forbidden).getSnapshot());
+                assertEquals(2, manifests(parent).length);
             } else {
                 boolean adopted = step == Step.ADOPTED_RENAMED || step == Step.ADOPTED_DURABLE;
                 same(sample(), migration(parent).open(adopted ? this::forbidden : this::source)
@@ -309,6 +311,53 @@ public class LegacyGenerationMigrationTest {
             }
             fails(() -> migration(parent).open(this::forbidden));
             if (mode < 3) assertTrue(manifests(parent).length > 0);
+            untouched();
+        }
+    }
+
+    @Test public void stateLessStageIsDiscardedOnlyAfterCompleteSourceValidation() throws Exception {
+        File parent = parent();
+        File stage = new File(parent, "migration.state.stage");
+        write(stage, new byte[] { 1, 2, 3 });
+
+        IOException sourceFailure = fails(() -> migration(parent).open(() -> {
+            reads++;
+            throw new IOException("SOURCE");
+        }));
+        assertEquals("SOURCE", sourceFailure.getMessage());
+        assertTrue(stage.exists());
+        assertFalse(new File(parent, "generations").exists());
+
+        SecretKey wrongKey = new SecretKeySpec(new byte[32], "AES");
+        same(sample(), new LegacyGenerationMigration(parent, wrongKey, LIMITS).open(this::source)
+                .getSnapshot());
+        assertFalse(stage.exists());
+        assertEquals(2, manifests(parent).length);
+        untouched();
+    }
+
+    @Test public void stateLessStageMustBeOwnedRegularAndSingleLink() throws Exception {
+        for (int mode = 0; mode < 3; mode++) {
+            File parent = parent();
+            File stage = new File(parent, "migration.state.stage");
+            if (mode == 0) Os.symlink(new File(legacy, "notes").getPath(), stage.getPath());
+            if (mode == 1) {
+                try {
+                    Os.link(new File(legacy, "notes").getPath(), stage.getPath());
+                } catch (android.system.ErrnoException denied) {
+                    // Some emulator filesystems prohibit hard links for app UIDs. The
+                    // production inventory still rejects nlink != 1 when the platform exposes it.
+                    assertEquals(OsConstants.EACCES, denied.errno);
+                    delete(parent);
+                    continue;
+                }
+            }
+            if (mode == 2) {
+                write(stage, new byte[] { 1 });
+                write(new File(parent, "foreign"), new byte[] { 2 });
+            }
+            fails(() -> migration(parent).open(this::forbidden));
+            assertFalse(new File(parent, "generations").exists());
             untouched();
         }
     }

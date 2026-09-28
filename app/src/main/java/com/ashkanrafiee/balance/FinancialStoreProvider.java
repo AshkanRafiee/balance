@@ -7,6 +7,7 @@ import android.system.OsConstants;
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.IOException;
+import java.security.KeyStore;
 import java.util.Map;
 
 import javax.crypto.SecretKey;
@@ -27,6 +28,7 @@ final class FinancialStoreProvider {
     private final EncryptedGenerationStore.Limits limits;
 
     interface KeyAccess {
+        /** Returns null only when the configured key alias is conclusively absent. */
         SecretKey existing() throws IOException;
         /** Must reuse an existing alias, never overwrite an unavailable existing key. */
         SecretKey create() throws IOException;
@@ -53,8 +55,18 @@ final class FinancialStoreProvider {
             File parent = new File(noBackup.getCanonicalFile(), DIRECTORY);
             KeyAccess keys = new KeyAccess() {
                 @Override public SecretKey existing() throws IOException {
-                    try { return LegacyFinancialSource.androidKeyStore().resolve(); }
-                    catch (Exception ignored) { throw failure("KEY"); }
+                    try {
+                        KeyStore store = KeyStore.getInstance("AndroidKeyStore");
+                        store.load(null);
+                        if (!store.containsAlias("balance_enc_key")) return null;
+                        java.security.Key key = store.getKey("balance_enc_key", null);
+                        if (!(key instanceof SecretKey)) throw failure("KEY");
+                        return (SecretKey) key;
+                    } catch (IOException failure) {
+                        throw failure;
+                    } catch (Exception unavailable) {
+                        throw failure("KEY");
+                    }
                 }
                 @Override public SecretKey create() throws IOException {
                     return BalanceData.storageKey();
@@ -85,12 +97,7 @@ final class FinancialStoreProvider {
             // The production source resolves legacy keys fetch-only. Encrypted input with a
             // missing/unavailable key therefore fails here, before creation is even considered.
             Map<String, byte[]> snapshot = pristine ? source.readValidatedSnapshot() : null;
-            SecretKey key;
-            try { key = keys.existing(); }
-            catch (IOException unavailable) {
-                if (!pristine) throw failure("KEY");
-                key = null;
-            }
+            SecretKey key = keys.existing();
             if (key == null) {
                 if (!pristine) throw failure("KEY");
                 key = keys.create();

@@ -72,6 +72,24 @@ public class FinancialStoreProviderTest {
         legacyWithoutKey(false);
     }
 
+    @Test public void pristineValidPlaintextWithUnavailableKeyDoesNotCreate() throws Exception {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        File parent = directory(context);
+        Keys keys = new Keys(null);
+        keys.unavailable = true;
+        try {
+            FinancialStoreProvider provider = FinancialStoreProvider.create(context, parent, keys,
+                    () -> {
+                        Map<String, byte[]> snapshot = new LinkedHashMap<>();
+                        snapshot.put("transaction_notes", bytes("{}"));
+                        return snapshot;
+                    }, EncryptedGenerationStore.Limits.defaults());
+            try { provider.open(); fail("unavailable key accepted"); }
+            catch (IOException expected) { assertEquals("KEY", expected.getMessage()); }
+            assertEquals(0, keys.creates);
+        } finally { delete(parent); }
+    }
+
     @Test public void encryptedLegacyWithoutKeyNeverCreatesReplacement() throws Exception {
         legacyWithoutKey(true);
     }
@@ -127,6 +145,7 @@ public class FinancialStoreProviderTest {
                     EncryptedGenerationStore.Limits.defaults());
             provider.open();
             keys.key = null;
+            keys.unavailable = false;
             try { provider.open(); fail("lost adopted key replaced"); }
             catch (IOException expected) { assertEquals("KEY", expected.getMessage()); }
             assertEquals(1, keys.creates);
@@ -178,11 +197,12 @@ public class FinancialStoreProviderTest {
     private static final class Keys implements FinancialStoreProvider.KeyAccess {
         SecretKey key;
         int creates;
+        boolean unavailable;
 
         Keys(SecretKey key) { this.key = key; }
 
         @Override public SecretKey existing() throws IOException {
-            if (key == null) throw new IOException("KEY");
+            if (unavailable) throw new IOException("KEY");
             return key;
         }
 
