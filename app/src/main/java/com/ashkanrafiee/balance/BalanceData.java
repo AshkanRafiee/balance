@@ -925,6 +925,8 @@ final class BalanceData {
             Map<String, String> detectedChannels = new LinkedHashMap<>();
             String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
             String[] args = selection != null ? new String[]{Long.toString(hwm)} : null;
+            Map<String, List<Reconcile.Entry>> windowsForSave = null;
+            Map<String, Long> lastBalanceForSave = null;
             try (Cursor cursor = context.getContentResolver().query(
                 Telephony.Sms.Inbox.CONTENT_URI,
                 new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
@@ -953,6 +955,7 @@ final class BalanceData {
                 // from the last balance persisted by the previous scan.
                 rows.sort((a, b) -> Long.compare((Long) a[3], (Long) b[3]));
                 Map<String, Long> lastBalance = full ? new HashMap<>() : loadLastBalances(context);
+                lastBalanceForSave = lastBalance;
 
                 // Group this scan's rows by bank, merge each bank's movements into its recent-window,
                 // and reconcile the balance chains, so a fee and its transfer that arrived in the wrong
@@ -982,7 +985,7 @@ final class BalanceData {
                     }
                     windows.put(key, pruneWindow(merged));
                 }
-                saveRecentMovements(context, windows);
+                windowsForSave = windows;
 
                 // Reorder the date-sorted rows so that adjacent same-bank movements known to a unique
                 // chain appear in their true order. Everything else keeps its current relative order.
@@ -1224,7 +1227,6 @@ final class BalanceData {
                         stored.add(fresh.get(i));
                     }
                 }
-                saveLastBalances(context, lastBalance);
                 completed = true;
             } catch (Exception e) {
                 Log.w(TAG, "history scan failed", e);
@@ -1232,6 +1234,8 @@ final class BalanceData {
                 // cursor/parse failure. The next scan must see the same source rows again.
                 return 0;
             }
+            saveRecentMovements(context, windowsForSave);
+            saveLastBalances(context, lastBalanceForSave);
             writeTransactions(context, stored);
             // The reasons and channels land after the transactions they belong to, so the stores never
             // hold one for a movement that was not written.
