@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Collections;
 
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
@@ -106,6 +107,41 @@ public class FinancialSnapshotAdapterTest {
         });
         assertEquals(1, fake.commits);
         assertArrayEquals(new byte[] { 4 }, adapter.snapshot().get("future"));
+    }
+
+    @Test public void publicationUpdatesBalanceScanComponentsOnceAndPreservesOmittedData() throws Exception {
+        Fake fake = new Fake();
+        FinancialSnapshotAdapter adapter = new FinancialSnapshotAdapter(new FinancialRepository(fake));
+        adapter.transaction(draft -> {
+            draft.put("future", new byte[] { 9, 8 });
+            draft.put(FinancialSnapshotAdapter.TRANSACTIONS, bytes("{\"transactions\":[]}"));
+            return null;
+        });
+        int commits = fake.commits;
+        Map<String, byte[]> updates = new LinkedHashMap<>();
+        updates.put(FinancialSnapshotAdapter.BALANCES, bytes("{}"));
+        updates.put(FinancialSnapshotAdapter.SCANNED_THROUGH, bytes("42"));
+        updates.put(FinancialSnapshotAdapter.RULES_VERSION, bytes("7"));
+        adapter.publish(updates);
+        assertEquals(commits + 1, fake.commits);
+        assertArrayEquals(bytes("{}"), adapter.snapshot().get(FinancialSnapshotAdapter.BALANCES));
+        assertArrayEquals(bytes("42"), adapter.snapshot().get(FinancialSnapshotAdapter.SCANNED_THROUGH));
+        assertArrayEquals(bytes("{\"transactions\":[]}"),
+                adapter.snapshot().get(FinancialSnapshotAdapter.TRANSACTIONS));
+        assertArrayEquals(new byte[] { 9, 8 }, adapter.snapshot().get("future"));
+    }
+
+    @Test public void invalidPublicationDoesNotCommitAnyUpdate() throws Exception {
+        Fake fake = new Fake();
+        FinancialSnapshotAdapter adapter = new FinancialSnapshotAdapter(new FinancialRepository(fake));
+        adapter.publish(Collections.singletonMap(FinancialSnapshotAdapter.BALANCES, bytes("{}")));
+        Map<String, byte[]> updates = new LinkedHashMap<>();
+        updates.put(FinancialSnapshotAdapter.BALANCES, bytes("{\"ok\":1}"));
+        updates.put(FinancialSnapshotAdapter.RULES_VERSION, bytes("01"));
+        try { adapter.publish(updates); fail("invalid publication committed"); }
+        catch (IOException expected) { }
+        assertEquals(1, fake.commits);
+        assertArrayEquals(bytes("{}"), adapter.snapshot().get(FinancialSnapshotAdapter.BALANCES));
     }
 
     @Test public void worksWithEncryptedGenerationStore() throws Exception {

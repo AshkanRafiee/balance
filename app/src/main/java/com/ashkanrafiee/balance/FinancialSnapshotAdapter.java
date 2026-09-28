@@ -91,6 +91,16 @@ final class FinancialSnapshotAdapter {
         });
     }
 
+    /** Publishes prepared scan components as one generation, leaving omitted components untouched. */
+    void publish(Map<String, byte[]> updates) throws IOException {
+        if (updates == null) throw new IllegalArgumentException("ARGUMENT");
+        transaction(draft -> {
+            for (Map.Entry<String, byte[]> entry : updates.entrySet())
+                draft.put(entry.getKey(), entry.getValue());
+            return null;
+        });
+    }
+
     private static Snapshot checked(FinancialRepository.Snapshot source) throws IOException {
         Map<String, byte[]> values = source.components();
         for (Map.Entry<String, byte[]> entry : values.entrySet()) validate(entry.getKey(), entry.getValue());
