@@ -4,13 +4,13 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.assertTrue;
 
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.widget.TextView;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -26,6 +26,9 @@ import org.junit.runner.RunWith;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * A month is not read in one go. Its first batch of days is built when it opens, and the rest
@@ -158,18 +161,17 @@ public class HistoryLazyRowsTest {
             first, firstClockRow());
     }
 
-    @Test public void theNextBatchStartsBeforeTheUserReachesTheBottom() {
+    @Test public void theNextBatchStartsBeforeTheUserReachesTheBottom() throws Exception {
         // The batch is built as the user approaches the end of what is there, not on arrival at it,
         // so there is nothing left to wait for when they get there. Landing strictly inside the
         // prefetch window is the point: the rows below the fold are what make this different from
         // simply scrolling to the end.
         int total = storeTheWholePreviousMonth(3);
         launch();
+        // The header exists even while the skeleton is still being shown.
+        afterHistoryLayout(() -> { });
         openOlderYearIfClosed();
-        int before = clockTimes();
-        assertTrue("the month must open part-built for this to mean anything: built "
-            + before + " of " + total, before < total);
-        scrollNearButNotToTheBottom();
+        int before = scrollNearButNotToTheBottom(total);
         await(() -> clockTimes() > before, 10_000, "the next batch to start on the way down");
     }
 
@@ -215,11 +217,12 @@ public class HistoryLazyRowsTest {
     /**
      * Scrolls to a point still short of the bottom, but inside the distance the next batch starts at.
      *
-     * <p>Stops a fixed margin short of the end so there are demonstrably rows left below the fold,
+     * <p>Stops inside the prefetch window so there are demonstrably rows left below the fold,
      * which is what separates this from the bottom-of-list reveal.
      */
-    private static void scrollNearButNotToTheBottom() {
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+    private static int scrollNearButNotToTheBottom(int total) throws Exception {
+        final int[] before = {0};
+        afterHistoryLayout(() -> {
             for (Activity a : resumed()) {
                 android.widget.ScrollView sv = tallestScrollView(a.getWindow().getDecorView(), null);
                 if (sv == null) continue;
@@ -227,14 +230,71 @@ public class HistoryLazyRowsTest {
                 if (list == null) continue;
                 int viewport = sv.getHeight();
                 int content = list.getHeight();
-                if (content <= viewport) continue;
+                List<TextView> rows = new ArrayList<>();
+                collect(list, rows);
+                for (TextView row : rows) if (isClock(row)) before[0]++;
+                assertTrue("the month must open part-built: " + before[0] + " of " + total,
+                    before[0] > 0 && before[0] < total);
+                int range = content - viewport;
+                assertTrue("the laid-out history must have room for a non-bottom scroll", range > 1);
                 int prefetch = Math.max(700, Math.round(viewport * 1.5f));
-                int target = content - viewport - prefetch + 200;
+                // A short scroll range can already be inside the prefetch window at the top.
+                // Still make a real downward scroll, leaving content strictly below the fold.
+                int remaining = Math.min(prefetch - 200, range / 2);
+                int target = range - remaining;
                 assertTrue("the test must not simply scroll to the bottom: target " + target
-                    + " of " + content, target > 0 && target < content - viewport);
-                sv.scrollTo(0, Math.max(0, target));
+                    + " of " + content, target > 0 && target < range);
+                assertTrue("the target must be strictly inside the prefetch window",
+                    remaining > 0 && remaining < prefetch);
+                assertEquals("the initial history must start at the top", 0, sv.getScrollY());
+                sv.scrollTo(0, target);
+                assertEquals("the scroll must reach the non-bottom target", target, sv.getScrollY());
+                return;
             }
+            throw new AssertionError("the history scroller was not found");
         });
+        return before[0];
+    }
+
+    /** Run in pre-draw, after the real history (including an expanded year) has been laid out.
+     * Row existence alone is insufficient: heights can still belong to the previous skeleton. */
+    private static void afterHistoryLayout(Runnable action) throws Exception {
+        CountDownLatch done = new CountDownLatch(1);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        final View[] root = {null};
+        final ViewTreeObserver.OnPreDrawListener[] listener = {null};
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            List<Activity> activities = resumed();
+            assertEquals("expected one history screen", 1, activities.size());
+            Activity activity = activities.get(0);
+            root[0] = activity.getWindow().getDecorView();
+            listener[0] = () -> {
+                List<TextView> labels = new ArrayList<>();
+                collect(root[0], labels);
+                boolean loaded = false;
+                String heading = activity.getString(R.string.history_breakdown);
+                for (TextView label : labels) {
+                    if (heading.contentEquals(label.getText())) loaded = true;
+                }
+                if (!loaded || root[0].isLayoutRequested()) return true;
+                root[0].getViewTreeObserver().removeOnPreDrawListener(listener[0]);
+                try { action.run(); } catch (Throwable t) { failure.set(t); }
+                finally { done.countDown(); }
+                return true;
+            };
+            root[0].getViewTreeObserver().addOnPreDrawListener(listener[0]);
+            root[0].invalidate();
+        });
+        try {
+            assertTrue("timed out waiting for real history layout", done.await(15, TimeUnit.SECONDS));
+            if (failure.get() != null) throw new AssertionError("history layout assertion failed", failure.get());
+        } finally {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                if (root[0].getViewTreeObserver().isAlive()) {
+                    root[0].getViewTreeObserver().removeOnPreDrawListener(listener[0]);
+                }
+            });
+        }
     }
 
     /** Scrolls the list as far down as it goes, the gesture the reveal is wired to.

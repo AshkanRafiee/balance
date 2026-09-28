@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.widget.TextView;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -23,7 +24,12 @@ import org.junit.runner.RunWith;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * What the history screen shows while it is still reading its history.
@@ -38,6 +44,7 @@ public class HistoryLoadingStateTest {
     private Context ctx;
     private String originalTag;
     private String originalCurrency;
+    private HistoryActivity activity;
 
     private static final String MELLAT = "Mellat";
     private static final String ACCOUNT = "111";
@@ -53,58 +60,42 @@ public class HistoryLoadingStateTest {
     }
 
     @After public void tearDown() {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            if (activity != null) activity.finish();
+        });
         LocaleHelper.setLanguage(ctx, originalTag);
         CurrencyHelper.setCurrency(ctx, originalCurrency);
         BalanceData.reset(ctx, true);
     }
 
-    /**
-     * Enough movements that reading and grouping them takes long enough to be observed.
-     *
-     * <p>The placeholders are put up during the screen's own setup and taken down by the render that
-     * follows, so a small store would finish before anything could look. A large one holds the
-     * window open without making the test slow.
-     */
-    private void storeEnoughToBeSlowToRead() {
+    /** A real, nonempty history; loading visibility must not depend on how slow it is to read. */
+    private void storeHistory() {
         long now = System.currentTimeMillis();
         List<Transaction> txs = new ArrayList<>();
-        for (int i = 0; i < 2000; i++) {
+        for (int i = 0; i < 3; i++) {
             txs.add(new Transaction(MELLAT, ACCOUNT, now - i * HOUR,
                 (i % 3 == 0 ? 1 : -1) * (100_000L + i), "sig" + i, null));
         }
         BalanceData.writeTransactions(ctx, txs);
     }
 
-    @Test public void whileItIsStillReading_theScreenShowsPlaceholdersRatherThanBlank() {
-        storeEnoughToBeSlowToRead();
-        openHistory();
-
-        assertNotNull("a blank white page is not a loading state",
-            findByDescription(ctx.getString(R.string.history_loading)));
-
-        // Collect the placeholders while they are still the content. They are the only thing wearing
-        // a shimmer, so this cannot be satisfied later by the real history taking their place.
-        final List<View> bars = shimmerBars();
-        assertTrue("the placeholders must have something to show", !bars.isEmpty());
-        // Children alone prove nothing: a bare View carrying only a background has no intrinsic size,
-        // so a placeholder left to wrap its content lays out at zero and the skeleton is a set of
-        // empty cards. The screen has not been measured when the activity starts, so let it have the
-        // frames it needs; bars that can never lay out never satisfy this.
-        await(() -> allLaidOut(bars), 15_000, "the placeholders to be laid out");
+    @Test public void whileItIsStillReading_theScreenShowsPlaceholdersRatherThanBlank()
+            throws Exception {
+        storeHistory();
+        try (HeldHistoryReads reads = new HeldHistoryReads()) {
+            openHistory();
+            assertTrue("the history worker must start", reads.started.await(10, TimeUnit.SECONDS));
+            awaitLayoutState(true);
+            reads.release.countDown();
+            // The held task must do the real read/group/render, not just leave a convincing skeleton.
+            awaitLayoutState(false);
+        }
     }
 
-    @Test public void onceLoaded_thePlaceholdersAreGone() {
-        storeEnoughToBeSlowToRead();
+    @Test public void onceLoaded_thePlaceholdersAreGone() throws Exception {
+        storeHistory();
         openHistory();
-
-        // The breakdown heading only exists once a render has produced real history. Waiting on a
-        // control that is simply always on screen (the export action, say) would return before the
-        // read finished and then report the placeholders as leftovers.
-        await(() -> findByText(ctx.getString(R.string.history_breakdown)) != null, 60_000,
-            "the history to finish loading");
-        assertNull("the loading state must not outlive the load",
-            findByDescription(ctx.getString(R.string.history_loading)));
-        assertTrue("the placeholders must not outlive the load", shimmerBars().isEmpty());
+        awaitLayoutState(false);
     }
 
     private void openHistory() {
@@ -112,22 +103,70 @@ public class HistoryLoadingStateTest {
             .putExtra(HistoryActivity.EXTRA_BANK, MELLAT)
             .putExtra(HistoryActivity.EXTRA_ACCOUNT, ACCOUNT)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        InstrumentationRegistry.getInstrumentation().startActivitySync(i);
+        activity = (HistoryActivity) InstrumentationRegistry.getInstrumentation().startActivitySync(i);
     }
 
-    private static boolean allLaidOut(List<View> bars) {
-        for (View v : bars) if (v.getWidth() <= 0 || v.getHeight() <= 0) return false;
-        return true;
-    }
-
-    /** Every view on screen still wearing a placeholder surface. */
-    private static List<View> shimmerBars() {
-        HistoryActivity a = opened();
-        if (a == null) return new ArrayList<>();
-        final List<View> hits = new ArrayList<>();
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(
-            () -> collectShimmer(a.getWindow().getDecorView(), hits));
-        return hits;
+    /** Observe attached views after an actual traversal, with every view access on the UI thread. */
+    private void awaitLayoutState(boolean loading) throws Exception {
+        CountDownLatch observed = new CountDownLatch(1);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        final View[] root = {null};
+        final ViewTreeObserver.OnPreDrawListener[] listener = {null};
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            root[0] = activity.getWindow().getDecorView();
+            listener[0] = () -> {
+                if (root[0].isLayoutRequested()) return true;
+                List<View> headings = new ArrayList<>();
+                collectText(root[0], ctx.getString(R.string.history_breakdown), headings);
+                // The header/export action exists before loading finishes; the breakdown does not.
+                if (!loading && headings.isEmpty()) return true;
+                root[0].getViewTreeObserver().removeOnPreDrawListener(listener[0]);
+                try {
+                    List<View> placeholders = new ArrayList<>();
+                    collect(root[0], ctx.getString(R.string.history_loading), placeholders);
+                    List<View> bars = new ArrayList<>();
+                    collectShimmer(root[0], bars);
+                    if (loading) {
+                        assertTrue("real history must not render before the worker is released",
+                            headings.isEmpty());
+                        View placeholder = placeholders.isEmpty() ? null : placeholders.get(0);
+                        assertNotNull("a blank white page is not a loading state", placeholder);
+                        assertTrue("the loading state must be attached and shown",
+                            placeholder.isAttachedToWindow() && placeholder.isShown());
+                        assertTrue("the placeholders must have something to show", !bars.isEmpty());
+                        for (View bar : bars) {
+                            assertTrue("each placeholder bar must be attached, shown and laid out",
+                                bar.isAttachedToWindow() && bar.isShown() && bar.isLaidOut()
+                                    && bar.getWidth() > 0 && bar.getHeight() > 0);
+                        }
+                    } else {
+                        assertTrue("real history must be attached and laid out",
+                            headings.get(0).isAttachedToWindow() && headings.get(0).isLaidOut());
+                        assertNull("the loading state must not outlive the load",
+                            placeholders.isEmpty() ? null : placeholders.get(0));
+                        assertTrue("the placeholders must not outlive the load", bars.isEmpty());
+                    }
+                } catch (Throwable t) {
+                    failure.set(t);
+                } finally {
+                    observed.countDown();
+                }
+                return true;
+            };
+            root[0].getViewTreeObserver().addOnPreDrawListener(listener[0]);
+            root[0].invalidate();
+        });
+        try {
+            assertTrue("timed out waiting for " + (loading ? "placeholder layout" : "loaded history"),
+                observed.await(loading ? 15 : 60, TimeUnit.SECONDS));
+            if (failure.get() != null) throw new AssertionError("history state assertion failed", failure.get());
+        } finally {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                if (root[0].getViewTreeObserver().isAlive()) {
+                    root[0].getViewTreeObserver().removeOnPreDrawListener(listener[0]);
+                }
+            });
+        }
     }
 
     private static void collectShimmer(View v, List<View> out) {
@@ -147,45 +186,6 @@ public class HistoryLoadingStateTest {
         });
     }
 
-    /**
-     * The screen this test opened, and only that one.
-     *
-     * <p>An activity closed by a previous test can still be in the resumed stage for a moment, and a
-     * search across every resumed screen would then find the old one's placeholders and report that
-     * the loading state outlived the load.
-     */
-    private static HistoryActivity opened() {
-        final List<Activity> out = new ArrayList<>();
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            for (Activity a : ActivityLifecycleMonitorRegistry.getInstance()
-                    .getActivitiesInStage(Stage.RESUMED)) {
-                if (a instanceof HistoryActivity) out.add(a);
-            }
-        });
-        return out.isEmpty() ? null : (HistoryActivity) out.get(out.size() - 1);
-    }
-
-    private static View findByDescription(String want) {
-        // Resolve the activity first: runOnMainSync blocks the caller while the runnable is
-        // pending, so asking for it from inside another runOnMainSync would wait on the main
-        // thread from the main thread and never come back.
-        HistoryActivity a = opened();
-        if (a == null) return null;
-        final List<View> hits = new ArrayList<>();
-        InstrumentationRegistry.getInstrumentation()
-            .runOnMainSync(() -> collect(a.getWindow().getDecorView(), want, hits));
-        return hits.isEmpty() ? null : hits.get(0);
-    }
-
-    private static View findByText(String want) {
-        HistoryActivity a = opened();
-        if (a == null) return null;
-        final List<View> hits = new ArrayList<>();
-        InstrumentationRegistry.getInstrumentation()
-            .runOnMainSync(() -> collectText(a.getWindow().getDecorView(), want, hits));
-        return hits.isEmpty() ? null : hits.get(0);
-    }
-
     private static void collectText(View v, String want, List<View> out) {
         if (v instanceof TextView && want.contentEquals(((TextView) v).getText())) out.add(v);
         if (v instanceof ViewGroup) {
@@ -202,15 +202,49 @@ public class HistoryLoadingStateTest {
         }
     }
 
-    private static void await(Callable<Boolean> done, long timeoutMs, String what) {
-        long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline) {
-            try { if (done.call()) return; } catch (Exception ignored) { }
-            try { Thread.sleep(150); } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
+    /** Hold dispatched reads off the UI thread, and restore dispatch even when a UI assertion fails.
+     * All requests are held because a scan notification can request another render during launch. */
+    private static final class HeldHistoryReads implements Executor, AutoCloseable {
+        final CountDownLatch started = new CountDownLatch(1);
+        final CountDownLatch release = new CountDownLatch(1);
+        private final ExecutorService worker = Executors.newSingleThreadExecutor();
+        private final AtomicReference<Throwable> failure = new AtomicReference<>();
+        private Executor original;
+
+        HeldHistoryReads() {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                original = HistoryActivity.historyReadExecutor;
+                HistoryActivity.historyReadExecutor = this;
+            });
+        }
+
+        @Override public void execute(Runnable command) {
+            worker.execute(() -> {
+                started.countDown();
+                try {
+                    if (!release.await(60, TimeUnit.SECONDS)) {
+                        throw new AssertionError("history read gate was not released");
+                    }
+                    command.run();
+                } catch (Throwable t) {
+                    failure.compareAndSet(null, t);
+                    if (t instanceof InterruptedException) Thread.currentThread().interrupt();
+                }
+            });
+        }
+
+        @Override public void close() throws Exception {
+            release.countDown();
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(
+                () -> HistoryActivity.historyReadExecutor = original);
+            worker.shutdown();
+            try {
+                assertTrue("history reads must finish before cleanup",
+                    worker.awaitTermination(60, TimeUnit.SECONDS));
+                if (failure.get() != null) throw new AssertionError("history worker failed", failure.get());
+            } finally {
+                worker.shutdownNow();
             }
         }
-        throw new AssertionError("timed out waiting for " + what);
     }
 }

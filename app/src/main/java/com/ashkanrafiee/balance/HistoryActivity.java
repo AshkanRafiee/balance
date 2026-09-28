@@ -50,6 +50,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Executor;
 
 /**
  * Shows the transaction history parsed from supported bank SMS: the net sum of transactions for
@@ -63,6 +64,9 @@ import java.util.Set;
  * (a ContentObserver, like the main screen), silently re-rendering on completion.
  */
 public final class HistoryActivity extends Activity {
+    /** Dispatches history reads and grouping off the UI thread. Replacements must remain asynchronous. */
+    static volatile Executor historyReadExecutor = command -> new Thread(command).start();
+
     private static final String MONTH_TAG = "history_month";
     /** Visible to the instrumented tests so a test can count how much of a month is built
      *  without having to recognise a day header by its text. */
@@ -1335,7 +1339,7 @@ public final class HistoryActivity extends Activity {
         final String bank = bankFilter;
         final String acct = accountFilter;
         final boolean iran = iranCalendar;
-        new Thread(() -> {
+        historyReadExecutor.execute(() -> {
             try {
                 List<Transaction> txs = BalanceData.readTransactions(getApplicationContext());
                 if (bank != null) txs = filterByBank(txs, bank);
@@ -1389,7 +1393,7 @@ public final class HistoryActivity extends Activity {
                     emptyState();
                 });
             }
-        }).start();
+        });
     }
 
     /** Returns only the transactions whose bank equals {@code bank}, preserving input order.
