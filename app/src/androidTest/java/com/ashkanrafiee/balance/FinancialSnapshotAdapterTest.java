@@ -144,6 +144,64 @@ public class FinancialSnapshotAdapterTest {
         assertArrayEquals(bytes("{}"), adapter.snapshot().get(FinancialSnapshotAdapter.BALANCES));
     }
 
+    @Test public void historyPublicationCommitsOnceAndPreservesBalanceWatermark() throws Exception {
+        Fake fake = new Fake();
+        FinancialSnapshotAdapter adapter = new FinancialSnapshotAdapter(new FinancialRepository(fake));
+        Map<String, byte[]> balance = new LinkedHashMap<>();
+        balance.put(FinancialSnapshotAdapter.BALANCES, bytes("{}"));
+        balance.put(FinancialSnapshotAdapter.SCANNED_THROUGH, bytes("42"));
+        balance.put(FinancialSnapshotAdapter.RULES_VERSION, bytes("7"));
+        adapter.publishBalance(balance);
+        int commits = fake.commits;
+
+        Map<String, byte[]> updates = new LinkedHashMap<>();
+        updates.put(FinancialSnapshotAdapter.TRANSACTIONS, bytes("[]"));
+        updates.put(FinancialSnapshotAdapter.HISTORY_THROUGH, bytes("99"));
+        updates.put(FinancialSnapshotAdapter.HISTORY_RULES_VERSION, bytes("2"));
+        updates.put(FinancialSnapshotAdapter.HISTORY_SCHEMA, bytes("1"));
+        adapter.publishHistory(updates);
+
+        assertEquals(commits + 1, fake.commits);
+        assertArrayEquals(bytes("99"), adapter.snapshot().get(FinancialSnapshotAdapter.HISTORY_THROUGH));
+        assertArrayEquals(bytes("42"), adapter.snapshot().get(FinancialSnapshotAdapter.SCANNED_THROUGH));
+        assertArrayEquals(bytes("{}"), adapter.snapshot().get(FinancialSnapshotAdapter.BALANCES));
+    }
+
+    @Test public void historyPublicationRejectsUnknownKeyBeforeTransaction() throws Exception {
+        Fake fake = new Fake();
+        FinancialSnapshotAdapter adapter = new FinancialSnapshotAdapter(new FinancialRepository(fake));
+        Map<String, byte[]> updates = new LinkedHashMap<>();
+        updates.put(FinancialSnapshotAdapter.TRANSACTIONS, bytes("[]"));
+        updates.put(FinancialSnapshotAdapter.SCANNED_THROUGH, bytes("42"));
+        try {
+            adapter.publishHistory(updates);
+            fail("accepted balance-owned key");
+        } catch (IllegalArgumentException expected) { }
+        assertEquals(0, fake.commits);
+    }
+
+    @Test public void historyPublicationWithInvalidUpdateDoesNotPartiallyCommit() throws Exception {
+        Fake fake = new Fake();
+        FinancialSnapshotAdapter adapter = new FinancialSnapshotAdapter(new FinancialRepository(fake));
+        Map<String, byte[]> updates = new LinkedHashMap<>();
+        updates.put(FinancialSnapshotAdapter.TRANSACTIONS, bytes("[]"));
+        updates.put(FinancialSnapshotAdapter.HISTORY_SCHEMA, bytes("01"));
+        try {
+            adapter.publishHistory(updates);
+            fail("invalid history publication committed");
+        } catch (IOException expected) { }
+        assertEquals(0, fake.commits);
+        assertFalse(adapter.snapshot().contains(FinancialSnapshotAdapter.TRANSACTIONS));
+    }
+
+    @Test public void emptyHistoryPublicationIsAValidatedNoOp() throws Exception {
+        Fake fake = new Fake();
+        FinancialSnapshotAdapter adapter = new FinancialSnapshotAdapter(new FinancialRepository(fake));
+        adapter.publishHistory(Collections.emptyMap());
+        assertEquals(0, fake.commits);
+        assertTrue(adapter.snapshot().components().isEmpty());
+    }
+
     @Test public void worksWithEncryptedGenerationStore() throws Exception {
         File root = new File(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
                 .getTargetContext().getCacheDir(), "financial-adapter-" + UUID.randomUUID());

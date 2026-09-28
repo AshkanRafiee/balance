@@ -38,6 +38,11 @@ final class FinancialSnapshotAdapter {
     private static final int MAX_DEPTH = 32, MAX_NODES = 2_000_000;
     private static final String[] LONGS = { SCANNED_THROUGH, HISTORY_THROUGH };
     private static final String[] INTS = { RULES_VERSION, HISTORY_RULES_VERSION, HISTORY_SCHEMA };
+    private static final Set<String> HISTORY_COMPONENTS = components(TRANSACTIONS,
+            TRANSACTION_REASONS, TRANSACTION_CHANNELS, RECENT_MOVEMENTS, HISTORY_LAST_BALANCE,
+            HISTORY_THROUGH, HISTORY_RULES_VERSION, HISTORY_SCHEMA);
+    private static final Set<String> BALANCE_COMPONENTS = components(BALANCES, RECENT_MOVEMENTS,
+            SCANNED_THROUGH, RULES_VERSION);
 
     interface Work<T> { T run(MutableSnapshot snapshot) throws Exception; }
 
@@ -94,6 +99,27 @@ final class FinancialSnapshotAdapter {
     /** Publishes prepared scan components as one generation, leaving omitted components untouched. */
     void publish(Map<String, byte[]> updates) throws IOException {
         if (updates == null) throw new IllegalArgumentException("ARGUMENT");
+        transaction(draft -> {
+            for (Map.Entry<String, byte[]> entry : updates.entrySet())
+                draft.put(entry.getKey(), entry.getValue());
+            return null;
+        });
+    }
+
+    /** Publishes history-owned components as one generation, leaving other components untouched. */
+    void publishHistory(Map<String, byte[]> updates) throws IOException {
+        publishRestricted(updates, HISTORY_COMPONENTS);
+    }
+
+    /** Publishes balance-owned components as one generation, leaving other components untouched. */
+    void publishBalance(Map<String, byte[]> updates) throws IOException {
+        publishRestricted(updates, BALANCE_COMPONENTS);
+    }
+
+    private void publishRestricted(Map<String, byte[]> updates, Set<String> allowed) throws IOException {
+        if (updates == null) throw new IllegalArgumentException("ARGUMENT");
+        for (String name : updates.keySet())
+            if (name == null || !allowed.contains(name)) throw new IllegalArgumentException("ARGUMENT");
         transaction(draft -> {
             for (Map.Entry<String, byte[]> entry : updates.entrySet())
                 draft.put(entry.getKey(), entry.getValue());
@@ -240,6 +266,12 @@ final class FinancialSnapshotAdapter {
     private static boolean is(String name, String[] names) {
         for (String candidate : names) if (candidate.equals(name)) return true;
         return false;
+    }
+
+    private static Set<String> components(String... names) {
+        Set<String> result = new HashSet<>();
+        Collections.addAll(result, names);
+        return Collections.unmodifiableSet(result);
     }
 
     private static Map<String, byte[]> copy(Map<String, byte[]> source) {
