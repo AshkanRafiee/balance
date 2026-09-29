@@ -182,8 +182,7 @@ public class EncryptedGenerationStoreTest {
         } finally { pool.shutdownNow(); }
     }
 
-    private boolean race(File root, String expected, String revision, CountDownLatch start)
-            throws Exception {
+    private boolean race(File root, String expected, String revision, CountDownLatch start) throws Exception {
         start.await();
         try { store(root).commit(expected, data(revision)); return true; }
         catch (StoreException e) { assertEquals(Code.STALE, e.code); return false; }
@@ -295,8 +294,7 @@ public class EncryptedGenerationStoreTest {
         assertEquals(before, names(root));
     }
 
-    @Test public void interruptedRecoveryPublicationStillAllowsActivePredecessorFallback()
-            throws Exception {
+    @Test public void interruptedRecoveryPublicationStillAllowsActivePredecessorFallback() throws Exception {
         for (boolean manifest : new boolean[] { true, false }) {
             File root = root();
             Snapshot old = store(root).commit("", data("old"));
@@ -369,8 +367,7 @@ public class EncryptedGenerationStoreTest {
         same(data("old"), store(root).getSnapshot());
     }
 
-    @Test public void missingAndTruncatedActiveFilesRecoverButMissingBothPointersIsNotEmpty()
-            throws Exception {
+    @Test public void missingAndTruncatedActiveFilesRecoverButMissingBothPointersIsNotEmpty() throws Exception {
         File root = root();
         Snapshot old = store(root).commit("", data("old"));
         Snapshot next = store(root).commit(old.generation(), data("new"));
@@ -460,8 +457,7 @@ public class EncryptedGenerationStoreTest {
         assertEquals(before, names(root));
     }
 
-    @Test public void authenticatedLargeManifestExceedingReaderPolicyDoesNotRollBack()
-            throws Exception {
+    @Test public void authenticatedLargeManifestExceedingReaderPolicyDoesNotRollBack() throws Exception {
         File root = root();
         Map<String, byte[]> small = new HashMap<>();
         small.put("old", new byte[0]);
@@ -483,8 +479,7 @@ public class EncryptedGenerationStoreTest {
         same(large, store(root).getSnapshot());
     }
 
-    @Test public void damagedLargeManifestsAndInvalidFormatCountsRecoverUnderLowerPolicy()
-            throws Exception {
+    @Test public void damagedLargeManifestsAndInvalidFormatCountsRecoverUnderLowerPolicy() throws Exception {
         for (int damage = 0; damage < 5; damage++) {
             File root = root();
             Map<String, byte[]> small = new HashMap<>();
@@ -539,8 +534,7 @@ public class EncryptedGenerationStoreTest {
     }
 
     /** Authenticated format-v1 fixture: invalid count must be corruption, not a policy LIMIT. */
-    private void writeManifestCount(File root, String generation, String previous, int count)
-            throws Exception {
+    private void writeManifestCount(File root, String generation, String previous, int count) throws Exception {
         ByteArrayOutputStream plain = new ByteArrayOutputStream();
         try (DataOutputStream out = new DataOutputStream(plain)) {
             out.writeInt(1);

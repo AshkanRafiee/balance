@@ -76,11 +76,19 @@ public class ParserScanExperimentTest {
         instrumentation = InstrumentationRegistry.getInstrumentation();
         automation = instrumentation.getUiAutomation();
         Context target = instrumentation.getTargetContext();
-        // BalanceData's scan/read/write/window helpers use the supplied context, not a global
-        // application context. Prefix every requested preference name, including future helpers.
+        // BalanceData's scan/read/window helpers use the supplied context, not a global
+        // application context. Prefix every requested preference name and the store directory,
+        // including future helpers, so this run touches no state another test depends on.
         context = new ContextWrapper(target) {
             @Override public SharedPreferences getSharedPreferences(String name, int mode) {
                 return super.getSharedPreferences(PREFIX + name, mode);
+            }
+
+            @Override public File getNoBackupFilesDir() {
+                File isolated = new File(super.getNoBackupFilesDir(), PREFIX);
+                //noinspection ResultOfMethodCallIgnored
+                isolated.mkdirs();
+                return isolated;
             }
 
             @Override public Context getApplicationContext() { return this; }
@@ -100,8 +108,8 @@ public class ParserScanExperimentTest {
                 for (int sample = 1; sample <= SAMPLES; sample++) {
                     if (!withinBudget()) return;
                     resetPreferences();
-                    assertEquals(0L, watermark(BalanceData.KEY_SCANNED_THROUGH));
-                    assertEquals(0L, watermark(BalanceData.KEY_HISTORY_THROUGH));
+                    assertEquals(0L, watermark("balance_watermark"));
+                    assertEquals(0L, watermark("history_watermark"));
                     verifyInbox(rows);
                     if (!measurePair(rows, sample, true)) return;
                     verifyIncrementalState(rows);
@@ -146,6 +154,7 @@ public class ParserScanExperimentTest {
         for (String name : STORES) {
             assertTrue("flush_preferences", preferences(name).edit().commit());
         }
+        long storeBytes = storeBytes();
         Bundle result = new Bundle();
         result.putString("scan_experiment", "sample");
         result.putString("dataset", "ten_accounts_duplicate_movements");
@@ -158,24 +167,22 @@ public class ParserScanExperimentTest {
         result.putInt("history_added", added);
         result.putInt("balance_size", balances.size());
         result.putInt("history_size", historySize);
-        result.putLong("data_xml_bytes", xmlBytes(BalanceData.PREFS_DATA));
+        result.putLong("data_xml_bytes", storeBytes);
         result.putLong("preferences_xml_bytes", xmlBytes(BalanceData.PREFS_PREF));
         instrumentation.sendStatus(0, result);
         completedPairs++;
         return withinBudget();
     }
 
-    private void verifyIncrementalState(int rows) {
+    private void verifyIncrementalState(int rows) throws Exception {
         verifyInbox(rows);
         long newest = BASE + (rows - 1) * STEP;
-        assertEquals("balance_watermark", newest, watermark(BalanceData.KEY_SCANNED_THROUGH));
-        assertEquals("history_watermark", newest, watermark(BalanceData.KEY_HISTORY_THROUGH));
-        SharedPreferences prefs = preferences(BalanceData.PREFS_PREF);
-        assertEquals(BankRules.VERSION, prefs.getInt(BalanceData.KEY_RULES_VERSION, -1));
-        assertEquals(BalanceData.HISTORY_RULES_VERSION,
-                prefs.getInt(BalanceData.KEY_HISTORY_RULES_VERSION, -1));
-        assertEquals(BalanceData.HISTORY_SCHEMA,
-                prefs.getInt(BalanceData.KEY_HISTORY_SCHEMA, -1));
+        FinancialSnapshotAdapter.Snapshot state = snapshot();
+        assertEquals("balance_watermark", newest, state.scannedThrough());
+        assertEquals("history_watermark", newest, state.historyThrough());
+        assertEquals(BankRules.VERSION, state.rulesVersion());
+        assertEquals(BalanceData.HISTORY_RULES_VERSION, state.historyRulesVersion());
+        assertEquals(BalanceData.HISTORY_SCHEMA, state.historySchema());
         assertEquals("no_arrivals", 0, count(Telephony.Sms.DATE + " > ?",
                 new String[]{Long.toString(newest)}));
     }
@@ -266,23 +273,54 @@ public class ParserScanExperimentTest {
         return context.getSharedPreferences(name, Context.MODE_PRIVATE);
     }
 
-    private long watermark(String key) {
-        return preferences(BalanceData.PREFS_PREF).getLong(key, 0L);
-    }
-
-    private void resetPreferences() {
-        boolean cleared = true;
-        for (String name : STORES) {
-            cleared &= preferences(name).edit().clear().commit();
-        }
-        assertTrue("reset_isolated_preferences", cleared);
-    }
-
     private long xmlBytes(String name) {
         File xml = new File(new File(context.getApplicationInfo().dataDir, "shared_prefs"),
                 PREFIX + name + ".xml");
         assertTrue("isolated_xml_exists", xml.isFile());
         return xml.length();
+    }
+
+    private FinancialSnapshotAdapter.Snapshot snapshot() throws Exception {
+        return FinancialAuthority.open(context).snapshots().snapshot();
+    }
+
+    private long watermark(String which) throws Exception {
+        FinancialSnapshotAdapter.Snapshot state = snapshot();
+        return "balance_watermark".equals(which) ? state.scannedThrough() : state.historyThrough();
+    }
+
+    private void resetPreferences() throws Exception {
+        boolean cleared = true;
+        for (String name : STORES) {
+            cleared &= preferences(name).edit().clear().commit();
+        }
+        assertTrue("reset_isolated_preferences", cleared);
+        FinancialAuthority.forget();
+        File directory = FinancialStoreProvider.directory(context);
+        if (directory.exists() && !deleteTree(directory)) {
+            throw new AssertionError("reset_isolated_store");
+        }
+    }
+
+    private long storeBytes() throws Exception {
+        return directoryBytes(FinancialStoreProvider.directory(context));
+    }
+
+    private static long directoryBytes(File directory) {
+        File[] children = directory.listFiles();
+        if (children == null) return 0;
+        long total = 0;
+        for (File child : children)
+            total += child.isDirectory() ? directoryBytes(child) : child.length();
+        return total;
+    }
+
+    private static boolean deleteTree(File file) {
+        File[] children = file.listFiles();
+        if (children == null) return file.delete();
+        boolean deleted = true;
+        for (File child : children) deleted &= deleteTree(child);
+        return file.delete() && deleted;
     }
 
     private boolean withinBudget() {

@@ -31,14 +31,16 @@ public class TransactionNoteTest {
 
     private Context ctx;
 
-    @Before public void setUp() {
+    @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
+        FinancialTestStore.wipe(ctx);
     }
 
-    @After public void tearDown() {
+    @After public void tearDown() throws Exception {
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        FinancialTestStore.wipe(ctx);
     }
 
     private Transaction tx(String bank, String account, String sig, String content) {
@@ -86,7 +88,7 @@ public class TransactionNoteTest {
         assertEquals(BalanceData.txIdentityKey(legacy), BalanceData.noteKey(legacy));
     }
 
-    @Test public void note_followsLegacyReplacementThroughFullRebuild() {
+    @Test public void note_followsLegacyReplacementThroughFullRebuild() throws Exception {
         // A note written on a pre-content-digest entry lives under its legacy identity triple; when a
         // full re-scan re-parses the same SMS into a content-bearing entry, migrateTransactionText must move
         // the note to the new key instead of letting it silently vanish from the rows and the export.
@@ -97,20 +99,20 @@ public class TransactionNoteTest {
         BalanceData.setNote(ctx, legacy, "carried over");
         Map<Transaction, Transaction> replaced = new java.util.HashMap<>();
         replaced.put(legacy, fresh);
-        BalanceData.migrateTransactionText(ctx, replaced);
+        FinancialTestStore.migrateTransactionText(ctx, replaced);
 
         assertNull(BalanceData.getNote(ctx, legacy));
         assertEquals("carried over", BalanceData.getNote(ctx, fresh));
     }
 
-    @Test public void note_migrationNeverOverwritesTheLaterNote() {
+    @Test public void note_migrationNeverOverwritesTheLaterNote() throws Exception {
         Transaction legacy = new Transaction("Tejarat", null, T, 500_000L, null, null);
         Transaction fresh = new Transaction("Tejarat", null, T, 500_000L, "sig-1", "content-A");
         BalanceData.setNote(ctx, legacy, "old on the legacy entry");
         BalanceData.setNote(ctx, fresh, "new on the fresh entry");
         Map<Transaction, Transaction> replaced = new java.util.HashMap<>();
         replaced.put(legacy, fresh);
-        BalanceData.migrateTransactionText(ctx, replaced);
+        FinancialTestStore.migrateTransactionText(ctx, replaced);
 
         assertEquals("new on the fresh entry", BalanceData.getNote(ctx, fresh));
         // The text of the row the rebuild drops goes with it: that key belongs to an entry no scan
@@ -119,14 +121,14 @@ public class TransactionNoteTest {
         assertEquals("new on the fresh entry", BalanceData.getNote(ctx, fresh));
     }
 
-    @Test public void note_migrationIsANoopWhenTheKeysAlreadyAgree() {
+    @Test public void note_migrationIsANoopWhenTheKeysAlreadyAgree() throws Exception {
         Transaction a = tx("Tejarat", null, "sig-A", "content-A");
         Transaction b = tx("Tejarat", "9102", "sig-B", "content-A");
         assertEquals(BalanceData.noteKey(a), BalanceData.noteKey(b));
         Map<Transaction, Transaction> replaced = new java.util.HashMap<>();
         replaced.put(a, b);
         BalanceData.setNote(ctx, a, "stable");
-        BalanceData.migrateTransactionText(ctx, replaced);
+        FinancialTestStore.migrateTransactionText(ctx, replaced);
 
         assertEquals("stable", BalanceData.getNote(ctx, b));
         assertEquals("stable", BalanceData.getNote(ctx, a));
@@ -169,13 +171,13 @@ public class TransactionNoteTest {
         assertEquals("stored off-device safe", round.get(BalanceData.noteKey(t)));
     }
 
-    @Test public void reset_keepsNotesByDefault_deletesWhenRequested() {
+    @Test public void reset_keepsNotesByDefault_deletesWhenRequested() throws Exception {
         // A reset wipes balances and transactions so the next scan rebuilds from the inbox; the note
         // map is exactly what lets a note reattach to the same physical SMS afterwards. So the reset
         // must keep the map unless the user opted into deleting it.
         Transaction tA = tx("Tejarat", null, "sig-A", "content-A");
         Transaction tB = tx("Melli", null, "sig-B", "content-B");
-        BalanceData.writeTransactions(ctx, Arrays.asList(tA, tB));
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(tA, tB));
         BalanceData.setNote(ctx, tA, "survivor");
 
         BalanceData.reset(ctx, false);

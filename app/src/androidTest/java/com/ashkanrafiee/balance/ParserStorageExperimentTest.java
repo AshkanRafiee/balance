@@ -343,8 +343,7 @@ public class ParserStorageExperimentTest {
         setPointer(dir, candidate.getName());
     }
 
-    private static void checkSelected(File dir, SecretKey key, String name, byte[] expected)
-            throws Exception {
+    private static void checkSelected(File dir, SecretKey key, String name, byte[] expected) throws Exception {
         assertEquals(name, selected(dir));
         assertArrayEquals(expected, decrypt(read(new File(dir, selected(dir))), key));
     }

@@ -59,11 +59,11 @@ public class WidgetOrderTest {
     }
 
     /** Widget ordering matches the app at every sort mode (after stripping excluded banks). */
-    @Test public void widgetBanks_matchesAppForEveryMode() {
+    @Test public void widgetBanks_matchesAppForEveryMode() throws Exception {
         Set<String> excluded = new HashSet<>();
         excluded.add("Saman");
         BalanceData.setExcluded(ctx, excluded);
-        BalanceData.write(ctx, banks());
+        FinancialTestStore.write(ctx, banks());
 
         for (int mode : new int[]{BalanceData.SORT_BALANCE_HIGH, BalanceData.SORT_BALANCE_LOW,
                 BalanceData.SORT_DATE_RECENT, BalanceData.SORT_DATE_OLDEST}) {
@@ -74,12 +74,12 @@ public class WidgetOrderTest {
     }
 
     /** Excluded banks never appear in the widget list, no matter the mode. */
-    @Test public void widgetBanks_excludedNeverListed() {
+    @Test public void widgetBanks_excludedNeverListed() throws Exception {
         Set<String> excluded = new HashSet<>();
         excluded.add("Melli");
         excluded.add("Tejarat");
         BalanceData.setExcluded(ctx, excluded);
-        BalanceData.write(ctx, banks());
+        FinancialTestStore.write(ctx, banks());
 
         for (int mode : new int[]{BalanceData.SORT_BALANCE_HIGH, BalanceData.SORT_BALANCE_LOW,
                 BalanceData.SORT_DATE_RECENT, BalanceData.SORT_DATE_OLDEST}) {
@@ -91,13 +91,13 @@ public class WidgetOrderTest {
     }
 
     /** Widget list is empty when no included banks remain. */
-    @Test public void widgetBanks_emptyWhenAllExcludedOrNoData() {
+    @Test public void widgetBanks_emptyWhenAllExcludedOrNoData() throws Exception {
         Set<String> all = new HashSet<>();
         all.add("Tejarat");
         all.add("Saman");
         all.add("Melli");
         BalanceData.setExcluded(ctx, all);
-        BalanceData.write(ctx, banks());
+        FinancialTestStore.write(ctx, banks());
         assertEquals(0, BalanceWidgetService.widgetBanks(ctx).size());
 
         BalanceData.reset(ctx, false);
@@ -106,12 +106,12 @@ public class WidgetOrderTest {
 
     /** Excluding one account of a multi-account bank must drop only that account; its sibling and
      *  every other bank stay in the widget list. */
-    @Test public void widgetBanks_excludesOnlyTheChosenAccount() {
+    @Test public void widgetBanks_excludesOnlyTheChosenAccount() throws Exception {
         LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
         map.put("Mellat|1110000222", new Bank("Mellat", 1_000_000, 1000L, "5300", "1110000222"));
         map.put("Mellat|1110000333", new Bank("Mellat", 2_000_000, 2000L, "5300", "1110000333"));
         map.put("Tejarat", new Bank("Tejarat", 5_000_000, 3000L, "5301"));
-        BalanceData.write(ctx, map);
+        FinancialTestStore.write(ctx, map);
 
         Set<String> excluded = new HashSet<>();
         excluded.add("Mellat|1110000222");
@@ -127,12 +127,12 @@ public class WidgetOrderTest {
     /** A multi-account bank contributes one widget row per account, each with its own balance, so the
      *  widget mirrors the main app's flat per-entry cards. Rows keep the app's order: the bank with
      *  the largest balance first, then that bank's accounts newest first. */
-    @Test public void widgetBanks_oneRowPerAccount() {
+    @Test public void widgetBanks_oneRowPerAccount() throws Exception {
         LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
         map.put("Mellat|1110000222", new Bank("Mellat", 1_000_000, 1000L, "5300", "1110000222"));
         map.put("Mellat|1110000333", new Bank("Mellat", 2_000_000, 2000L, "5300", "1110000333"));
         map.put("Tejarat", new Bank("Tejarat", 5_000_000, 3000L, "5301"));
-        BalanceData.write(ctx, map);
+        FinancialTestStore.write(ctx, map);
 
         List<Bank> widget = BalanceWidgetService.widgetBanks(ctx);
         assertEquals(3, widget.size());

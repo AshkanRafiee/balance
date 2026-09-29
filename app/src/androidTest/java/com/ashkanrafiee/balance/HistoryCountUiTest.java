@@ -59,7 +59,7 @@ public class HistoryCountUiTest {
     }
 
     /** Three movements on one account and five on another, all inside the last two weeks. */
-    private void storeTwoAccounts() {
+    private void storeTwoAccounts() throws Exception {
         List<Transaction> txs = new ArrayList<>();
         for (int i = 0; i < 3; i++) {
             txs.add(new Transaction(MELLAT, ONE, BASE - i * DAY, 10_000_000L + i, "a" + i, null));
@@ -67,7 +67,7 @@ public class HistoryCountUiTest {
         for (int i = 0; i < 5; i++) {
             txs.add(new Transaction(MELLAT, TWO, BASE - i * DAY, 20_000_000L + i, "b" + i, null));
         }
-        BalanceData.writeTransactions(ctx, txs);
+        FinancialTestStore.writeTransactions(ctx, txs);
     }
 
     private void launch(String account) {
@@ -81,14 +81,14 @@ public class HistoryCountUiTest {
         await(() -> findByDescription(ctx.getString(R.string.history_export)) != null, 20_000);
     }
 
-    @Test public void theScreen_saysHowManyMovementsItIsShowing() {
+    @Test public void theScreen_saysHowManyMovementsItIsShowing() throws Exception {
         storeTwoAccounts();
         launch(ONE);
         assertNotNull("the count must be on screen, not only knowable by scrolling",
             findCountInHeading(counted(3)));
     }
 
-    @Test public void theCount_followsTheAccountBeingViewed() {
+    @Test public void theCount_followsTheAccountBeingViewed() throws Exception {
         // The count has to describe what is on screen. A total taken from the whole store would read
         // "8 transactions" on an account that holds three, and quietly misreport every account the
         // user ever opens.
@@ -99,14 +99,14 @@ public class HistoryCountUiTest {
             findCountInHeading(counted(8)));
     }
 
-    @Test public void theCount_followsTheWholeHistoryWhenNothingIsFiltered() {
+    @Test public void theCount_followsTheWholeHistoryWhenNothingIsFiltered() throws Exception {
         storeTwoAccounts();
         launch(null);
         assertNotNull(findCountInHeading(counted(8)));
     }
 
-    @Test public void theCount_saysTransactionInTheSingular() {
-        BalanceData.writeTransactions(ctx, new ArrayList<>(Arrays.asList(
+    @Test public void theCount_saysTransactionInTheSingular() throws Exception {
+        FinancialTestStore.writeTransactions(ctx, new ArrayList<>(Arrays.asList(
             new Transaction(MELLAT, ONE, BASE, 10_000_000L, "only", null))));
         launch(ONE);
         assertNotNull(findCountInHeading(counted(1)));

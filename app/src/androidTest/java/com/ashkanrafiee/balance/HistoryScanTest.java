@@ -7,7 +7,6 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import android.content.Context;
-import android.content.SharedPreferences;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -108,6 +107,7 @@ public class HistoryScanTest {
         exec("pm grant " + ctx.getPackageName() + " android.permission.READ_SMS");
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        FinancialTestStore.wipe(ctx);
         clearInbox();
     }
 
@@ -218,12 +218,12 @@ public class HistoryScanTest {
         return n;
     }
 
-    private SharedPreferences prefs() {
-        return ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE);
+    private long historyWatermark() throws Exception {
+        return FinancialTestStore.snapshot(ctx).historyThrough();
     }
 
-    private long historyWatermark() {
-        return prefs().getLong(BalanceData.KEY_HISTORY_THROUGH, 0);
+    private int storedHistoryRulesVersion() throws Exception {
+        return FinancialTestStore.snapshot(ctx).historyRulesVersion();
     }
 
     private static final String DEPOSIT =
@@ -284,7 +284,7 @@ public class HistoryScanTest {
         String freeSig = BalanceData.messageSig(sender, TEJARAT_DEPOSIT);
         List<Transaction> oldRules = new java.util.ArrayList<>();
         oldRules.add(new Transaction("Tejarat", null, date, 805000000L, freeSig));
-        BalanceData.writeTransactions(ctx, oldRules);
+        FinancialTestStore.writeTransactions(ctx, oldRules);
 
         int added = BalanceData.scanHistory(ctx);
 
@@ -308,7 +308,7 @@ public class HistoryScanTest {
         String content = BalanceData.contentHash(sender, TEJARAT_DEPOSIT);
         List<Transaction> oldRules = new java.util.ArrayList<>();
         oldRules.add(new Transaction("Tejarat", null, date, 1L, "stale-fingerprint", content));
-        BalanceData.writeTransactions(ctx, oldRules);
+        FinancialTestStore.writeTransactions(ctx, oldRules);
 
         int added = BalanceData.scanHistory(ctx);
 
@@ -332,7 +332,7 @@ public class HistoryScanTest {
         String wrongParseSig = BalanceData.messageSig(sender, TEJARAT_DEPOSIT) + "x";
         List<Transaction> oldRules = new java.util.ArrayList<>();
         oldRules.add(new Transaction("Tejarat", null, date, 805000000L, wrongParseSig));
-        BalanceData.writeTransactions(ctx, oldRules);
+        FinancialTestStore.writeTransactions(ctx, oldRules);
 
         int added = BalanceData.scanHistory(ctx);
 
@@ -710,7 +710,7 @@ public class HistoryScanTest {
         seed("500095", DEPOSIT, T + 1000);
         List<Transaction> legacy = new java.util.ArrayList<>();
         legacy.add(new Transaction("Saman", T + 1000, 200000L, null));
-        BalanceData.writeTransactions(ctx, legacy);
+        FinancialTestStore.writeTransactions(ctx, legacy);
 
         int added = BalanceData.scanHistory(ctx);
 
@@ -857,10 +857,10 @@ public class HistoryScanTest {
         // change, replacing the stale entry the old rules recorded instead of being deduped against it.
         seed("500095", DEPOSIT, T + 1000);
         assertEquals(1, BalanceData.scanHistory(ctx));
-        BalanceData.writeTransactions(ctx, java.util.Arrays.asList(
+        FinancialTestStore.writeTransactions(ctx, java.util.Arrays.asList(
             new Transaction("Saman", T + 1000, 999_999L, "stale-sig")));
-        prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+        FinancialTestStore.putInt(ctx, FinancialSnapshotAdapter.HISTORY_RULES_VERSION,
+            BalanceData.HISTORY_RULES_VERSION - 1);
 
         int added = BalanceData.scanHistory(ctx);
 
@@ -870,7 +870,7 @@ public class HistoryScanTest {
         assertEquals(200000L, txs.get(0).amount);
         assertFalse("stale-sig".equals(txs.get(0).sig));
         assertEquals(BalanceData.HISTORY_RULES_VERSION,
-            prefs().getInt(BalanceData.KEY_HISTORY_RULES_VERSION, -1));
+            storedHistoryRulesVersion());
     }
 
     @Test public void rulesBump_reprocessesPresent_whileKeepingDeletedMessagesInHistory() throws Exception {
@@ -884,8 +884,8 @@ public class HistoryScanTest {
 
         clearInbox();
         seed("500095", WITHDRAWAL, T + 2000);
-        prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+        FinancialTestStore.putInt(ctx, FinancialSnapshotAdapter.HISTORY_RULES_VERSION,
+            BalanceData.HISTORY_RULES_VERSION - 1);
 
         int added = BalanceData.scanHistory(ctx);
 
@@ -895,7 +895,7 @@ public class HistoryScanTest {
         assertEquals(-120000L, txs.get(0).amount);   // present withdrawal re-processed, newest first
         assertEquals(200000L, txs.get(1).amount);    // deleted deposit preserved as an orphan
         assertEquals(BalanceData.HISTORY_RULES_VERSION,
-            prefs().getInt(BalanceData.KEY_HISTORY_RULES_VERSION, -1));
+            storedHistoryRulesVersion());
     }
 
     @Test public void rulesBump_emptyInbox_keepsAllStoredHistory() throws Exception {
@@ -906,8 +906,8 @@ public class HistoryScanTest {
         assertEquals(2, BalanceData.scanHistory(ctx));
 
         clearInbox();
-        prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+        FinancialTestStore.putInt(ctx, FinancialSnapshotAdapter.HISTORY_RULES_VERSION,
+            BalanceData.HISTORY_RULES_VERSION - 1);
 
         int added = BalanceData.scanHistory(ctx);
 
@@ -1014,8 +1014,8 @@ public class HistoryScanTest {
 
         // The user empties their inbox, then the app updates and rebuilds under the new rules.
         clearInbox();
-        prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+        FinancialTestStore.putInt(ctx, FinancialSnapshotAdapter.HISTORY_RULES_VERSION,
+            BalanceData.HISTORY_RULES_VERSION - 1);
         assertEquals("an empty inbox can add nothing", 0, BalanceData.scanHistory(ctx));
 
         List<Residual> after = Residual.between(BalanceData.readTransactions(ctx));
@@ -1038,12 +1038,12 @@ public class HistoryScanTest {
         assertEquals(1, BalanceData.scanHistory(ctx));
         Transaction deposit = BalanceData.readTransactions(ctx).get(0);
         // Put the orphan first so a (bank, date)-keyed match would hit it.
-        BalanceData.writeTransactions(ctx, java.util.Arrays.asList(
+        FinancialTestStore.writeTransactions(ctx, java.util.Arrays.asList(
             new Transaction("Saman", T, 999_999L, "orphan-sig"), deposit));
         assertEquals(2, BalanceData.readTransactions(ctx).size());
 
-        prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+        FinancialTestStore.putInt(ctx, FinancialSnapshotAdapter.HISTORY_RULES_VERSION,
+            BalanceData.HISTORY_RULES_VERSION - 1);
         int added = BalanceData.scanHistory(ctx);
 
         assertEquals(1, added);
@@ -1065,8 +1065,8 @@ public class HistoryScanTest {
 
         clearInbox();
         seed("500095", DEPOSIT, T + 2000);            // only the newer copy remains
-        prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+        FinancialTestStore.putInt(ctx, FinancialSnapshotAdapter.HISTORY_RULES_VERSION,
+            BalanceData.HISTORY_RULES_VERSION - 1);
 
         int added = BalanceData.scanHistory(ctx);
 
@@ -1171,8 +1171,8 @@ public class HistoryScanTest {
         String key = BalanceData.noteKey(t);
 
         // A rules bump makes the next scan re-read the message already in the inbox.
-        prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+        FinancialTestStore.putInt(ctx, FinancialSnapshotAdapter.HISTORY_RULES_VERSION,
+            BalanceData.HISTORY_RULES_VERSION - 1);
         assertEquals(1, BalanceData.scanHistory(ctx));
 
         Transaction rescanned = BalanceData.readTransactions(ctx).get(0);
@@ -1300,8 +1300,8 @@ public class HistoryScanTest {
         Transaction t = BalanceData.readTransactions(ctx).get(0);
         BalanceData.setNote(ctx, t, "for my number, not my brother's");
 
-        prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+        FinancialTestStore.putInt(ctx, FinancialSnapshotAdapter.HISTORY_RULES_VERSION,
+            BalanceData.HISTORY_RULES_VERSION - 1);
         assertEquals(1, BalanceData.scanHistory(ctx));
 
         Transaction rescanned = BalanceData.readTransactions(ctx).get(0);

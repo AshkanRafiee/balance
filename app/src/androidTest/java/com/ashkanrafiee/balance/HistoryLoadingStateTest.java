@@ -69,18 +69,17 @@ public class HistoryLoadingStateTest {
     }
 
     /** A real, nonempty history; loading visibility must not depend on how slow it is to read. */
-    private void storeHistory() {
+    private void storeHistory() throws Exception {
         long now = System.currentTimeMillis();
         List<Transaction> txs = new ArrayList<>();
         for (int i = 0; i < 3; i++) {
             txs.add(new Transaction(MELLAT, ACCOUNT, now - i * HOUR,
                 (i % 3 == 0 ? 1 : -1) * (100_000L + i), "sig" + i, null));
         }
-        BalanceData.writeTransactions(ctx, txs);
+        FinancialTestStore.writeTransactions(ctx, txs);
     }
 
-    @Test public void whileItIsStillReading_theScreenShowsPlaceholdersRatherThanBlank()
-            throws Exception {
+    @Test public void whileItIsStillReading_theScreenShowsPlaceholdersRatherThanBlank() throws Exception {
         storeHistory();
         try (HeldHistoryReads reads = new HeldHistoryReads()) {
             openHistory();

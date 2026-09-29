@@ -69,11 +69,11 @@ public class HistoryLazyRowsTest {
      * The previous month also always exists and always has enough days to outrun one batch, so the
      * test behaves the same on the first of a month as on the last.
      */
-    private int storeTheWholePreviousMonth() {
+    private int storeTheWholePreviousMonth() throws Exception {
         return storeTheWholePreviousMonth(1);
     }
 
-    private int storeTheWholePreviousMonth(int perDay) {
+    private int storeTheWholePreviousMonth(int perDay) throws Exception {
         CalDate now = CalDate.today(true);
         int year = now.month == 1 ? now.year - 1 : now.year;
         int month = now.month == 1 ? 12 : now.month - 1;
@@ -85,7 +85,7 @@ public class HistoryLazyRowsTest {
                     1_000_000L + d * 10 + k, "sig" + d + "_" + k, null));
             }
         }
-        BalanceData.writeTransactions(ctx, txs);
+        FinancialTestStore.writeTransactions(ctx, txs);
         return days * perDay;
     }
 
@@ -117,7 +117,7 @@ public class HistoryLazyRowsTest {
             "the history screen");
     }
 
-    @Test public void aMonthTooCrowdedForOneBatch_isNotBuiltWhole() {
+    @Test public void aMonthTooCrowdedForOneBatch_isNotBuiltWhole() throws Exception {
         // A month with one movement on every day has more day groups than a single batch can hold,
         // so it opens part-built. This is the whole point of the budget, and it is what a user with
         // years of history would otherwise feel on every open.
@@ -130,7 +130,7 @@ public class HistoryLazyRowsTest {
             + built, built < days);
     }
 
-    @Test public void reachingTheBottom_revealsMoreOfTheMonth() {
+    @Test public void reachingTheBottom_revealsMoreOfTheMonth() throws Exception {
         // The other half of the contract: the rows held back must actually arrive, and arrive
         // because the user scrolled. Without this the budget could simply be dropping movements.
         int rows = storeTheWholePreviousMonth(3);
@@ -145,7 +145,7 @@ public class HistoryLazyRowsTest {
             clockTimes() > before);
     }
 
-    @Test public void revealingMore_keepsTheRowsAlreadyOnScreen() {
+    @Test public void revealingMore_keepsTheRowsAlreadyOnScreen() throws Exception {
         // A reveal must add rows, not re-make the ones above them. Rebuilding the month would
         // replace every view the user is reading, which is both the expensive way round and the one
         // that makes the list re-measure itself under a moving finger.
@@ -175,7 +175,7 @@ public class HistoryLazyRowsTest {
         await(() -> clockTimes() > before, 10_000, "the next batch to start on the way down");
     }
 
-    @Test public void aCrowdedMonthStillFinishesFillingOut() {
+    @Test public void aCrowdedMonthStillFinishesFillingOut() throws Exception {
         // Scrolling down through a crowded month must eventually show the whole of it. A fill that
         // quietly stopped would leave the account short, with nothing on screen to say so.
         int rows = storeTheWholePreviousMonth(3);
@@ -190,10 +190,10 @@ public class HistoryLazyRowsTest {
         assertEquals("every day of the month must end up on screen", days, dayCards());
     }
 
-    @Test public void aSmallMonthIsUnaffectedByTheBudget() {
+    @Test public void aSmallMonthIsUnaffectedByTheBudget() throws Exception {
         // The budget must not cost anything on an ordinary month, which is nearly every month of
         // nearly every account. A month that fits is built whole, with nothing left to reveal.
-        BalanceData.writeTransactions(ctx, new ArrayList<>(java.util.Arrays.asList(
+        FinancialTestStore.writeTransactions(ctx, new ArrayList<>(java.util.Arrays.asList(
             new Transaction(MELLAT, ACCOUNT, System.currentTimeMillis(), 1_000_000L, "a", null),
             new Transaction(MELLAT, ACCOUNT, System.currentTimeMillis() - 2 * DAY, 1_000_001L, "b", null),
             new Transaction(MELLAT, ACCOUNT, System.currentTimeMillis() - 4 * DAY, 1_000_002L, "c", null))));
@@ -201,7 +201,7 @@ public class HistoryLazyRowsTest {
         assertEquals("a month that fits must be built whole", 3, clockTimes());
     }
 
-    @Test public void theFirstDayIsBuiltEvenWhenItExceedsTheBudget() {
+    @Test public void theFirstDayIsBuiltEvenWhenItExceedsTheBudget() throws Exception {
         // A single day holding more movements than a whole batch must still show, or a month could
         // open onto nothing at all and look broken.
         long now = System.currentTimeMillis();
@@ -209,7 +209,7 @@ public class HistoryLazyRowsTest {
         for (int i = 0; i < 60; i++) {
             txs.add(new Transaction(MELLAT, ACCOUNT, now, 1_000_000L + i, "big" + i, null));
         }
-        BalanceData.writeTransactions(ctx, txs);
+        FinancialTestStore.writeTransactions(ctx, txs);
         launch();
         assertEquals("a single crowded day must be built whole", 60, clockTimes());
     }

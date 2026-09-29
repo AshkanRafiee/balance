@@ -46,12 +46,20 @@ public class BackupRestoreTest {
 
     @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        wipeData();
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
     }
 
     @After public void tearDown() throws Exception {
+        wipeData();
+    }
+
+    /** Empties everything a fresh install would hold: the legacy financial preferences the store
+     *  would otherwise migrate from, the display preferences, and the store itself. */
+    private void wipeData() throws Exception {
+        ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        FinancialTestStore.wipe(ctx);
     }
 
     private File file(String name) {
@@ -92,7 +100,7 @@ public class BackupRestoreTest {
     // ============================================================
 
     @Test public void roundTrip_restoresAllBalances() throws Exception {
-        BalanceData.write(ctx, map(
+        FinancialTestStore.write(ctx, map(
             bank("Tejarat", 1_000_000L, T + 1000),
             bank("Saman", 5_000_000L, T + 2000),
             bank("Pasargad", 3_000_000L, T + 3000)));
@@ -100,7 +108,7 @@ public class BackupRestoreTest {
         Uri u = uri("roundtrip.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        wipeData();
 
         BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
         assertEquals(3, res.added);
@@ -127,7 +135,7 @@ public class BackupRestoreTest {
     @Test public void roundTrip_accountCompositeKeys_survive() throws Exception {
         LinkedHashMap<String, Bank> m = new LinkedHashMap<>();
         m.put("Mellat|1110000222", new Bank("Mellat", 2_000_000L, T + 1000, "x", "1110000222"));
-        BalanceData.write(ctx, m);
+        FinancialTestStore.write(ctx, m);
 
         LinkedHashMap<String, Bank> out = BalanceData.read(ctx);
         assertEquals(1, out.size());
@@ -145,7 +153,7 @@ public class BackupRestoreTest {
     @Test public void roundTrip_accountLessBank_keepsPlainKey() throws Exception {
         LinkedHashMap<String, Bank> m = new LinkedHashMap<>();
         m.put("Tejarat", new Bank("Tejarat", 1_000_000L, T + 1000, "x"));
-        BalanceData.write(ctx, m);
+        FinancialTestStore.write(ctx, m);
 
         LinkedHashMap<String, Bank> out = BalanceData.read(ctx);
         assertEquals(1, out.size());
@@ -157,7 +165,7 @@ public class BackupRestoreTest {
     @Test public void roundTrip_transactions_withAccount() throws Exception {
         List<Transaction> txs = new ArrayList<>();
         txs.add(new Transaction("Mellat", "1110000222", T + 1000, -500_000L, null));
-        BalanceData.writeTransactions(ctx, txs);
+        FinancialTestStore.writeTransactions(ctx, txs);
 
         List<Transaction> out = BalanceData.readTransactions(ctx);
         assertEquals(1, out.size());
@@ -177,7 +185,7 @@ public class BackupRestoreTest {
             "sig", "content"));
         txs.add(new Transaction("Mellat", "1110000222", T + 2000, 5_000_000L, 1_229_567_890L,
             "sig2", "content2"));
-        BalanceData.writeTransactions(ctx, txs);
+        FinancialTestStore.writeTransactions(ctx, txs);
 
         List<Transaction> out = BalanceData.readTransactions(ctx);
         assertEquals(2, out.size());
@@ -196,7 +204,7 @@ public class BackupRestoreTest {
         List<Transaction> txs = new ArrayList<>();
         txs.add(new Transaction("Mellat", "1", T + 1000, 0L, 0L, "a", null));
         txs.add(new Transaction("Mellat", "1", T + 2000, -1L, -1L, "b", null));
-        BalanceData.writeTransactions(ctx, txs);
+        FinancialTestStore.writeTransactions(ctx, txs);
         List<Transaction> out = BalanceData.readTransactions(ctx);
         assertEquals(Long.valueOf(0L), out.get(0).balance);
         assertEquals(Long.valueOf(-1L), out.get(1).balance);
@@ -209,7 +217,7 @@ public class BackupRestoreTest {
         // make every such message look like a balance witness and fabricate gaps between them.
         List<Transaction> txs = new ArrayList<>();
         txs.add(new Transaction("Mellat", "1110000222", T + 1000, -500_000L, null));
-        BalanceData.writeTransactions(ctx, txs);
+        FinancialTestStore.writeTransactions(ctx, txs);
         List<Transaction> out = BalanceData.readTransactions(ctx);
         assertNull(out.get(0).balance);
         assertNull(BalanceData.deserializeTransactions(
@@ -236,11 +244,11 @@ public class BackupRestoreTest {
         List<Transaction> txs = new ArrayList<>();
         txs.add(new Transaction("Mellat", "1110000222", T + 1000, -500_000L, 987_654_321L,
             "sig", "content"));
-        BalanceData.writeTransactions(ctx, txs);
+        FinancialTestStore.writeTransactions(ctx, txs);
         Uri u = uri("withbalance.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        wipeData();
         assertTrue(BalanceData.readTransactions(ctx).isEmpty());
 
         BackupManager.restore(ctx, u, PASSWORD);
@@ -251,7 +259,7 @@ public class BackupRestoreTest {
     }
 
     @Test public void headerCarriesSelfDescribingEncryptionParameters() throws Exception {
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
         File f = file("header.balance");
         BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
 
@@ -279,7 +287,7 @@ public class BackupRestoreTest {
     // ============================================================
 
     @Test public void wrongPassword_isRejected() throws Exception {
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
         Uri u = uri("wrongpw.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
@@ -307,7 +315,7 @@ public class BackupRestoreTest {
     }
 
     @Test public void newerFormatVersion_isRejected() throws Exception {
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
         File f = file("futuristic.balance");
         BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
         byte[] bytes = readFile(f);
@@ -324,7 +332,7 @@ public class BackupRestoreTest {
     }
 
     @Test public void tamperedCiphertext_isRejected() throws Exception {
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
         File f = file("tampered.balance");
         BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
         byte[] bytes = readFile(f);
@@ -342,7 +350,7 @@ public class BackupRestoreTest {
     }
 
     @Test public void tamperedHeader_isRejected() throws Exception {
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
         File f = file("tamperedHeader.balance");
         BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
         byte[] bytes = readFile(f);
@@ -404,7 +412,7 @@ public class BackupRestoreTest {
     }
 
     @Test public void hostileIterations_aboveCap_isRejectedBeforeDerivation() throws Exception {
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
         File f = file("hostileIter.balance");
         BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
         BackupManager.BackupException e = restoreExpecting(
@@ -413,7 +421,7 @@ public class BackupRestoreTest {
     }
 
     @Test public void hostileZeroIterations_isRejected() throws Exception {
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
         File f = file("hostileZeroIter.balance");
         BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
         assertEquals(R.string.backup_error_unsupported,
@@ -421,7 +429,7 @@ public class BackupRestoreTest {
     }
 
     @Test public void hostileHugeKeyBits_isRejectedBeforeDerivation() throws Exception {
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
         File f = file("hostileKeyBits.balance");
         BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
         assertEquals(R.string.backup_error_unsupported,
@@ -429,7 +437,7 @@ public class BackupRestoreTest {
     }
 
     @Test public void hostileOddKeyBits_isRejected() throws Exception {
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
         File f = file("hostileOddKeyBits.balance");
         BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
         assertEquals(R.string.backup_error_unsupported,
@@ -437,7 +445,7 @@ public class BackupRestoreTest {
     }
 
     @Test public void hostileTagBits_isRejected() throws Exception {
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
         File f = file("hostileTagBits.balance");
         BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
         assertEquals(R.string.backup_error_unsupported,
@@ -445,7 +453,7 @@ public class BackupRestoreTest {
     }
 
     @Test public void hostileIvLength_isRejected() throws Exception {
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
         File f = file("hostileIv.balance");
         BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
         assertEquals(R.string.backup_error_unsupported,
@@ -456,7 +464,7 @@ public class BackupRestoreTest {
     @Test public void hostileOversizedSalt_isRejectedBeforeDerivation() throws Exception {
         // A 1 MB KDF salt would multiply the PBKDF2 work factor enormously if it ever reached
         // derivation, so it must be rejected up front, before any key is derived.
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
         File f = file("hostileSalt.balance");
         BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
         byte[] huge = new byte[1024 * 1024];
@@ -488,16 +496,16 @@ public class BackupRestoreTest {
     @Test public void merge_keepsNewestPerBank_addsUnknownBanks() throws Exception {
         // Backup holds: a bank never seen before (Saman, Pasargad) and one older than current (Tejarat).
         {
-            BalanceData.write(ctx, map(
+            FinancialTestStore.write(ctx, map(
                 bank("Tejarat", 2_000_000L, T + 2000),
                 bank("Saman", 9_000_000L, T + 3000),
                 bank("Pasargad", 3_000_000L, T + 1500)));
             Uri u = uri("merge1.balance");
             BackupManager.create(ctx, u, PASSWORD);
 
-            ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+            wipeData();
             // Current holds: an older Tejarat (backup is newer) and a bank missing from the backup.
-            BalanceData.write(ctx, map(
+            FinancialTestStore.write(ctx, map(
                 bank("Tejarat", 1_000_000L, T + 1000),
                 bank("Melat", 4_000_000L, T + 2500)));
 
@@ -516,12 +524,12 @@ public class BackupRestoreTest {
     }
 
     @Test public void merge_backupNewerThanCurrent_wins() throws Exception {
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
         Uri u = uri("merge2.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
-        BalanceData.write(ctx, map(bank("Tejarat", 500_000L, T + 500)));
+        wipeData();
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 500_000L, T + 500)));
 
         BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
         assertEquals(0, res.added);
@@ -530,12 +538,12 @@ public class BackupRestoreTest {
     }
 
     @Test public void merge_currentNewerThanBackup_keepsCurrent() throws Exception {
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
         Uri u = uri("merge3.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
-        BalanceData.write(ctx, map(bank("Tejarat", 7_000_000L, T + 9999)));
+        wipeData();
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 7_000_000L, T + 9999)));
 
         BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
         assertEquals(0, res.added);
@@ -545,12 +553,12 @@ public class BackupRestoreTest {
     }
 
     @Test public void merge_sameDate_keepsCurrent() throws Exception {
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
         Uri u = uri("merge4.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        wipeData();
+        FinancialTestStore.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
 
         BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
         assertEquals(0, res.added);
@@ -565,15 +573,15 @@ public class BackupRestoreTest {
         LinkedHashMap<String, Bank> backupMap = new LinkedHashMap<>();
         backupMap.put("Mellat|1110000222", new Bank("Mellat", 2_000_000L, T + 3000, "x", "1110000222"));
         backupMap.put("Mellat|1110000333", new Bank("Mellat", 9_000_000L, T + 2500, "x", "1110000333"));
-        BalanceData.write(ctx, backupMap);
+        FinancialTestStore.write(ctx, backupMap);
         Uri u = uri("composite.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        wipeData();
         LinkedHashMap<String, Bank> current = new LinkedHashMap<>();
         current.put("Mellat|1110000222", new Bank("Mellat", 1_000_000L, T + 1000, "x", "1110000222"));
         current.put("Mellat", new Bank("Mellat", 4_000_000L, T + 2000, "x"));
-        BalanceData.write(ctx, current);
+        FinancialTestStore.write(ctx, current);
 
         BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
 
@@ -596,7 +604,7 @@ public class BackupRestoreTest {
         File f = file("legacy.balance");
         writeLegacyBackup(f, legacyPayload, PASSWORD);
 
-        BalanceData.writeTransactions(ctx, Arrays.asList(
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(
             new Transaction("Melat", T + 200, -50_000L, "sig-local")));
 
         BackupManager.RestoreResult res = BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
@@ -665,11 +673,11 @@ public class BackupRestoreTest {
         List<Transaction> backupTxs = new ArrayList<>();
         backupTxs.add(new Transaction("Tejarat", T + 1000, -500_000L));
         backupTxs.add(new Transaction("Tejarat", T + 1000, -500_000L));
-        BalanceData.writeTransactions(ctx, backupTxs);
+        FinancialTestStore.writeTransactions(ctx, backupTxs);
         Uri u = uri("txn1.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        wipeData();
 
         BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
         List<Transaction> out = BalanceData.readTransactions(ctx);
@@ -683,14 +691,14 @@ public class BackupRestoreTest {
         List<Transaction> backupTxs = new ArrayList<>();
         backupTxs.add(new Transaction("Tejarat", T + 100, 200_000L, "sig-A"));
         backupTxs.add(new Transaction("Pasargad", T + 400, 300_000L, "sig-B"));
-        BalanceData.writeTransactions(ctx, backupTxs);
+        FinancialTestStore.writeTransactions(ctx, backupTxs);
         Uri u = uri("txn2.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        wipeData();
         // Current device history: the same Tejarat deposit (same fingerprint) and a local-only Melat
         // withdrawal. Restore must not duplicate Tejarat and must keep Melat.
-        BalanceData.writeTransactions(ctx, Arrays.asList(
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(
             new Transaction("Tejarat", T + 100, 200_000L, "sig-A"),
             new Transaction("Melat", T + 200, -50_000L, "sig-C")));
 
@@ -717,11 +725,11 @@ public class BackupRestoreTest {
         List<Transaction> backupTxs = new ArrayList<>();
         backupTxs.add(new Transaction("Mellat", "1110000222", T + 1000, -500_000L, null));
         backupTxs.add(new Transaction("Mellat", "1110000333", T + 1000, -500_000L, null));
-        BalanceData.writeTransactions(ctx, backupTxs);
+        FinancialTestStore.writeTransactions(ctx, backupTxs);
         Uri u = uri("txn3.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        wipeData();
 
         BackupManager.restore(ctx, u, PASSWORD);
         List<Transaction> out = BalanceData.readTransactions(ctx);
@@ -740,12 +748,12 @@ public class BackupRestoreTest {
 
     @Test public void roundTrip_notes_restoredWithTheirTransactions() throws Exception {
         Transaction t = new Transaction("Tejarat", null, T + 100, 200_000L, "sig-A", "content-A");
-        BalanceData.writeTransactions(ctx, Arrays.asList(t));
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(t));
         BalanceData.setNote(ctx, t, "birthday gift from father");
         Uri u = uri("notes-roundtrip.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        wipeData();
 
         BackupManager.restore(ctx, u, PASSWORD);
         List<Transaction> out = BalanceData.readTransactions(ctx);
@@ -757,7 +765,7 @@ public class BackupRestoreTest {
         // Backups written before notes existed (payload formats 1 and 2) carry no "txNotes" section.
         // Restoring one must leave the notes the user typed since then completely untouched.
         Transaction t = new Transaction("Tejarat", null, T + 100, 200_000L, "sig-A", "content-A");
-        BalanceData.writeTransactions(ctx, Arrays.asList(t));
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(t));
         BalanceData.setNote(ctx, t, "my private note");
 
         String legacyPayload = "{\"payloadFormat\":2,\"balances\":{},"
@@ -777,16 +785,16 @@ public class BackupRestoreTest {
         // the restore) is filled in. Local edits are never clobbered by the backup.
         Transaction backupA = new Transaction("Tejarat", null, T + 100, 200_000L, "sig-A", "content-A");
         Transaction backupC = new Transaction("Pasargad", null, T + 400, 300_000L, "sig-C", "content-C");
-        BalanceData.writeTransactions(ctx, Arrays.asList(backupA, backupC));
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(backupA, backupC));
         BalanceData.setNote(ctx, backupA, "backup-A");
         BalanceData.setNote(ctx, backupC, "backup-C");
         Uri u = uri("notes-merge.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        wipeData();
         Transaction localA = new Transaction("Tejarat", null, T + 100, 200_000L, "sig-A", "content-A");
         Transaction localB = new Transaction("Melat", null, T + 200, -50_000L, "sig-B", "content-B");
-        BalanceData.writeTransactions(ctx, Arrays.asList(localA, localB));
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(localA, localB));
         BalanceData.setNote(ctx, localA, "local-A");
 
         BackupManager.restore(ctx, u, PASSWORD);
@@ -812,12 +820,12 @@ public class BackupRestoreTest {
         // A movement the bank explained stays explained across a device change: the reason travels
         // with the transaction it belongs to, so the restored history reads the same way.
         Transaction t = new Transaction("Blu", null, T + 100, -220_000L, "sig-A", "content-A");
-        BalanceData.writeTransactions(ctx, Arrays.asList(t));
-        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(t));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(t, TOPUP));
         Uri u = uri("reasons-roundtrip.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        wipeData();
 
         BackupManager.restore(ctx, u, PASSWORD);
         List<Transaction> out = BalanceData.readTransactions(ctx);
@@ -830,8 +838,8 @@ public class BackupRestoreTest {
         // section. Restoring one must leave the reasons the local scans found completely untouched,
         // and the notes with them.
         Transaction t = new Transaction("Blu", null, T + 100, -220_000L, "sig-A", "content-A");
-        BalanceData.writeTransactions(ctx, Arrays.asList(t));
-        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(t));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(t, TOPUP));
         BalanceData.setNote(ctx, t, "my private note");
 
         String legacyPayload = "{\"payloadFormat\":3,\"balances\":{},"
@@ -852,17 +860,17 @@ public class BackupRestoreTest {
         // restore brought with it.
         Transaction backupA = new Transaction("Blu", null, T + 100, -220_000L, "sig-A", "content-A");
         Transaction backupC = new Transaction("Blu", null, T + 400, 540_000L, "sig-C", "content-C");
-        BalanceData.writeTransactions(ctx, Arrays.asList(backupA, backupC));
-        BalanceData.mergeReasons(ctx, reasonsFor(backupA, TOPUP));
-        BalanceData.mergeReasons(ctx, reasonsFor(backupC, "پرداخت قبض"));
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(backupA, backupC));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(backupA, TOPUP));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(backupC, "پرداخت قبض"));
         Uri u = uri("reasons-merge.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        wipeData();
         Transaction localA = new Transaction("Blu", null, T + 100, -220_000L, "sig-A", "content-A");
         Transaction localB = new Transaction("Blu", null, T + 200, 50_000L, "sig-B", "content-B");
-        BalanceData.writeTransactions(ctx, Arrays.asList(localA, localB));
-        BalanceData.mergeReasons(ctx, reasonsFor(localA, "برگشت پول"));
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(localA, localB));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(localA, "برگشت پول"));
         BalanceData.setNote(ctx, localB, "local note");
 
         BackupManager.restore(ctx, u, PASSWORD);
@@ -878,13 +886,13 @@ public class BackupRestoreTest {
 
     @Test public void restore_ofABackupWithNoTransactions_leavesTheReasonsAlone() throws Exception {
         Transaction t = new Transaction("Blu", null, T + 100, -220_000L, "sig-A", "content-A");
-        BalanceData.writeTransactions(ctx, Arrays.asList(t));
-        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(t));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(t, TOPUP));
         BalanceData.setNote(ctx, t, "my private note");
 
         BalanceData.reset(ctx, false);            // keep the note, drop the transactions
         assertTrue(BalanceData.readReasons(ctx).isEmpty());
-        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(t, TOPUP));
         String emptyPayload = "{\"payloadFormat\":4,\"balances\":{},\"transactions\":{}"
             + ",\"txNotes\":{},\"txReasons\":{}}";
         File f = file("reasons-empty.balance");
@@ -913,12 +921,12 @@ public class BackupRestoreTest {
         // A movement stays as it was read across a device change: the channel travels with the
         // transaction it belongs to, so the restored history reads the same way.
         Transaction t = new Transaction("Tejarat", "01350000000", T + 100, -220_000L, "sig-A", "content-A");
-        BalanceData.writeTransactions(ctx, Arrays.asList(t));
-        BalanceData.mergeChannels(ctx, channelsFor(t, SHETAB));
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(t));
+        FinancialTestStore.mergeChannels(ctx, channelsFor(t, SHETAB));
         Uri u = uri("channels-roundtrip.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        wipeData();
 
         BackupManager.restore(ctx, u, PASSWORD);
         List<Transaction> out = BalanceData.readTransactions(ctx);
@@ -931,9 +939,9 @@ public class BackupRestoreTest {
         // section. Restoring one must leave the channels the local scans found completely untouched,
         // and the notes and reasons with them.
         Transaction t = new Transaction("Tejarat", "01350000000", T + 100, -220_000L, "sig-A", "content-A");
-        BalanceData.writeTransactions(ctx, Arrays.asList(t));
-        BalanceData.mergeChannels(ctx, channelsFor(t, SHETAB));
-        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(t));
+        FinancialTestStore.mergeChannels(ctx, channelsFor(t, SHETAB));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(t, TOPUP));
         BalanceData.setNote(ctx, t, "my private note");
 
         String legacyPayload = "{\"payloadFormat\":4,\"balances\":{},"
@@ -957,17 +965,17 @@ public class BackupRestoreTest {
         // movement the restore brought with it.
         Transaction backupA = new Transaction("Tejarat", "01350000000", T + 100, -220_000L, "sig-A", "content-A");
         Transaction backupC = new Transaction("Tejarat", "01350000000", T + 400, 540_000L, "sig-C", "content-C");
-        BalanceData.writeTransactions(ctx, Arrays.asList(backupA, backupC));
-        BalanceData.mergeChannels(ctx, channelsFor(backupA, SHETAB));
-        BalanceData.mergeChannels(ctx, channelsFor(backupC, BRANCH));
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(backupA, backupC));
+        FinancialTestStore.mergeChannels(ctx, channelsFor(backupA, SHETAB));
+        FinancialTestStore.mergeChannels(ctx, channelsFor(backupC, BRANCH));
         Uri u = uri("channels-merge.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        wipeData();
         Transaction localA = new Transaction("Tejarat", "01350000000", T + 100, -220_000L, "sig-A", "content-A");
         Transaction localB = new Transaction("Tejarat", "01350000000", T + 200, 50_000L, "sig-B", "content-B");
-        BalanceData.writeTransactions(ctx, Arrays.asList(localA, localB));
-        BalanceData.mergeChannels(ctx, channelsFor(localA, POS));
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(localA, localB));
+        FinancialTestStore.mergeChannels(ctx, channelsFor(localA, POS));
         BalanceData.setNote(ctx, localB, "local note");
 
         BackupManager.restore(ctx, u, PASSWORD);
@@ -983,13 +991,13 @@ public class BackupRestoreTest {
 
     @Test public void restore_ofABackupWithNoTransactions_leavesTheChannelsAlone() throws Exception {
         Transaction t = new Transaction("Tejarat", "01350000000", T + 100, -220_000L, "sig-A", "content-A");
-        BalanceData.writeTransactions(ctx, Arrays.asList(t));
-        BalanceData.mergeChannels(ctx, channelsFor(t, SHETAB));
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(t));
+        FinancialTestStore.mergeChannels(ctx, channelsFor(t, SHETAB));
         BalanceData.setNote(ctx, t, "my private note");
 
         BalanceData.reset(ctx, false);            // keep the note, drop the transactions
         assertTrue(BalanceData.readChannels(ctx).isEmpty());
-        BalanceData.mergeChannels(ctx, channelsFor(t, SHETAB));
+        FinancialTestStore.mergeChannels(ctx, channelsFor(t, SHETAB));
         String emptyPayload = "{\"payloadFormat\":5,\"balances\":{},\"transactions\":{}"
             + ",\"txNotes\":{},\"txReasons\":{},\"txChannels\":{}}";
         File f = file("channels-empty.balance");

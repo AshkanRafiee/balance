@@ -183,10 +183,10 @@ public class WidgetThemeTest {
     }
 
     /** The main widget's total, unit and permission hint. */
-    @Test public void mainWidget_carriesTheAppText() {
+    @Test public void mainWidget_carriesTheAppText() throws Exception {
         for (String theme : new String[]{ThemeHelper.THEME_DARK, ThemeHelper.THEME_LIGHT}) {
             ThemeHelper.setTheme(ctx, theme);
-            BalanceData.write(ctx, oneBank());
+            FinancialTestStore.write(ctx, oneBank());
             View root = inflate(BalanceWidgetProvider.buildViews(ctx));
 
             assertEquals(theme + " card", appColor(R.color.widget_bg), fillOf(root));
@@ -253,9 +253,9 @@ public class WidgetThemeTest {
 
     /** No surface may quietly keep the device's palette under a forced theme — the regression that
      *  left the widget light on a dark phone. */
-    @Test public void noSurfaceFallsBackToTheDevicePalette() {
+    @Test public void noSurfaceFallsBackToTheDevicePalette() throws Exception {
         ThemeHelper.setTheme(ctx, deviceDark() ? ThemeHelper.THEME_LIGHT : ThemeHelper.THEME_DARK);
-        BalanceData.write(ctx, oneBank());
+        FinancialTestStore.write(ctx, oneBank());
         String theme = ThemeHelper.theme(ctx);
 
         assertNotEquals(theme + " locked card", ctx.getColor(R.color.widget_bg),
@@ -336,12 +336,12 @@ public class WidgetThemeTest {
 
     /** The point of the setting: the widget can be light while the app is dark, and the card really
      *  does come out light, not merely the text. */
-    @Test public void widgetTheme_canDisagreeWithTheApp() {
+    @Test public void widgetTheme_canDisagreeWithTheApp() throws Exception {
         String appTheme = deviceDark() ? ThemeHelper.THEME_DARK : ThemeHelper.THEME_LIGHT;
         String widgetTheme = deviceDark() ? ThemeHelper.THEME_LIGHT : ThemeHelper.THEME_DARK;
         ThemeHelper.setTheme(ctx, appTheme);
         ThemeHelper.setWidgetTheme(ctx, widgetTheme);
-        BalanceData.write(ctx, oneBank());
+        FinancialTestStore.write(ctx, oneBank());
 
         View root = inflate(BalanceWidgetProvider.buildViews(ctx));
         assertEquals("card follows the widget, not the app",

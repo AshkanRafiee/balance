@@ -7,7 +7,6 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -54,6 +53,7 @@ public class BalanceScanTest {
         exec("pm grant " + ctx.getPackageName() + " android.permission.READ_SMS");
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        FinancialTestStore.wipe(ctx);
         clearInbox();
     }
 
@@ -117,16 +117,12 @@ public class BalanceScanTest {
         fail("seeded SMS did not arrive in time: sender=" + sender);
     }
 
-    private SharedPreferences prefs() {
-        return ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE);
+    private long watermark() throws Exception {
+        return FinancialTestStore.snapshot(ctx).scannedThrough();
     }
 
-    private long watermark() {
-        return prefs().getLong(BalanceData.KEY_SCANNED_THROUGH, 0);
-    }
-
-    private int storedRulesVersion() {
-        return prefs().getInt(BalanceData.KEY_RULES_VERSION, -1);
+    private int storedRulesVersion() throws Exception {
+        return FinancialTestStore.snapshot(ctx).rulesVersion();
     }
 
     private static long date(Bank b) {
@@ -225,7 +221,7 @@ public class BalanceScanTest {
         // per-account rows.
         LinkedHashMap<String, Bank> legacy = new LinkedHashMap<>();
         legacy.put("Melli", new Bank("Melli", 7_408_835L, T, "9830009417", null));
-        BalanceData.write(ctx, legacy);
+        FinancialTestStore.write(ctx, legacy);
 
         seed("9830009417", "\u0627\u0646\u062A\u0642\u0627\u0644\u06CC:87,925,688-\n"
             + "\u062D\u0633\u0627\u0628:10001\n"
@@ -552,7 +548,7 @@ public class BalanceScanTest {
         LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
         BalanceData.scanSms(ctx, saved);
 
-        prefs().edit().putInt(BalanceData.KEY_RULES_VERSION, 0).commit();
+        FinancialTestStore.putInt(ctx, FinancialSnapshotAdapter.RULES_VERSION, 0);
 
         seed("500095", "available balance 6,000,000", T + 400);
 
@@ -634,7 +630,8 @@ public class BalanceScanTest {
         assertEquals(1_000_000L, amount(find(saved, "Tejarat")));
         assertEquals(BankRules.VERSION, storedRulesVersion());
 
-        prefs().edit().putInt(BalanceData.KEY_RULES_VERSION, BankRules.VERSION - 1).commit();
+        FinancialTestStore.putInt(ctx, FinancialSnapshotAdapter.RULES_VERSION,
+                BankRules.VERSION - 1);
         clearInbox();
         saved = new LinkedHashMap<>();
         int matched = BalanceData.scanSms(ctx, saved);

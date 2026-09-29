@@ -58,8 +58,8 @@ final class FinancialStoreProvider {
                     try {
                         KeyStore store = KeyStore.getInstance("AndroidKeyStore");
                         store.load(null);
-                        if (!store.containsAlias("balance_enc_key")) return null;
-                        java.security.Key key = store.getKey("balance_enc_key", null);
+                        if (!store.containsAlias(BalanceData.KEY_ALIAS)) return null;
+                        java.security.Key key = store.getKey(BalanceData.KEY_ALIAS, null);
                         if (!(key instanceof SecretKey)) throw failure("KEY");
                         return (SecretKey) key;
                     } catch (IOException failure) {

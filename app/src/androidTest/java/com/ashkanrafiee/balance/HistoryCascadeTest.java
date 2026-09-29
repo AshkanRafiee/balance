@@ -63,17 +63,17 @@ public class HistoryCascadeTest {
     private static final long PREVIOUS_YEAR = 400L * 24 * HOUR;
 
     /** One movement today, and one in an earlier month that nothing has opened. */
-    private void storeThisMonth() {
+    private void storeThisMonth() throws Exception {
         long now = System.currentTimeMillis();
-        BalanceData.writeTransactions(ctx, new ArrayList<>(java.util.Arrays.asList(
+        FinancialTestStore.writeTransactions(ctx, new ArrayList<>(java.util.Arrays.asList(
             new Transaction(MELLAT, ACCOUNT, now, 10_000_000L, "now", null),
             new Transaction(MELLAT, ACCOUNT, now - PREVIOUS_MONTH, 12_000_000L, "earlier", null))));
     }
 
     /** One movement today, and one in an earlier year that nothing has opened. */
-    private void storePastYear() {
+    private void storePastYear() throws Exception {
         long now = System.currentTimeMillis();
-        BalanceData.writeTransactions(ctx, new ArrayList<>(java.util.Arrays.asList(
+        FinancialTestStore.writeTransactions(ctx, new ArrayList<>(java.util.Arrays.asList(
             new Transaction(MELLAT, ACCOUNT, now, 10_000_000L, "now", null),
             new Transaction(MELLAT, ACCOUNT, now - PREVIOUS_YEAR, 34_000_000L, "lastyear", null))));
     }
@@ -87,7 +87,7 @@ public class HistoryCascadeTest {
         await(() -> findByDescription(ctx.getString(R.string.history_export)) != null, 20_000, "the history screen");
     }
 
-    @Test public void todaysMovements_areVisibleWithoutTouchingAnything() {
+    @Test public void todaysMovements_areVisibleWithoutTouchingAnything() throws Exception {
         // Whatever else changes, the freshest history has to be on screen the moment it opens.
         storeThisMonth();
         launch();
@@ -95,7 +95,7 @@ public class HistoryCascadeTest {
             findByTextContaining("10,000,000"));
     }
 
-    @Test public void theCurrentYearArrivesWholeBecauseItsMonthsFollowIt() {
+    @Test public void theCurrentYearArrivesWholeBecauseItsMonthsFollowIt() throws Exception {
         // The visible consequence of dropping the expand-all switch: the year is now the unit. The
         // current year opens, so its months and their days come with it and the screen shows the
         // year rather than only today. Nothing here is built past the row budget, so this stays
@@ -108,7 +108,7 @@ public class HistoryCascadeTest {
         assertEquals("both movements are on screen", 2, clockTimes());
     }
 
-    @Test public void anEarlierYear_staysClosedSoItsRowsAreNeverBuilt() {
+    @Test public void anEarlierYear_staysClosedSoItsRowsAreNeverBuilt() throws Exception {
         // Nothing beyond the current year opens by itself, so an older year builds no rows at all
         // until the user opens it. The test counts clock times rather than amounts on purpose: a
         // collapsed month still shows its own net, so an amount on screen proves nothing. Only a
@@ -124,7 +124,7 @@ public class HistoryCascadeTest {
         assertEquals("opening a year must bring its months, and so its movements", 2, clockTimes());
     }
 
-    @Test public void thereIsNoLongerAWayToAskForEverythingAtOnce() {
+    @Test public void thereIsNoLongerAWayToAskForEverythingAtOnce() throws Exception {
         // The Display menu used to carry an "expand all history" switch. With it gone, no single
         // choice opens every row, which is what used to make a long account take seconds.
         storeThisMonth();

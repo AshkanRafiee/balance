@@ -67,15 +67,15 @@ public class HistoryResidualUiTest {
     private androidx.test.core.app.ActivityScenario<HistoryActivity> scenario;
 
     /** Two statements whose balances prove a 2,000,000 rial withdrawal that never arrived. */
-    private void storeAGap() {
-        BalanceData.writeTransactions(ctx, new ArrayList<>(Arrays.asList(
+    private void storeAGap() throws Exception {
+        FinancialTestStore.writeTransactions(ctx, new ArrayList<>(Arrays.asList(
             new Transaction(MELLAT, ACCOUNT, now() - 2_000L, -30_000_000L, 290_000_000L, "a", null),
             new Transaction(MELLAT, ACCOUNT, now() - 1_000L, -5_000_000L, 283_000_000L, "b", null))));
     }
 
     /** Statements that agree with the movements we hold, so nothing should be flagged. */
-    private void storeNoGap() {
-        BalanceData.writeTransactions(ctx, new ArrayList<>(Arrays.asList(
+    private void storeNoGap() throws Exception {
+        FinancialTestStore.writeTransactions(ctx, new ArrayList<>(Arrays.asList(
             new Transaction(MELLAT, ACCOUNT, now() - 2_000L, -30_000_000L, 290_000_000L, "a", null),
             new Transaction(MELLAT, ACCOUNT, now() - 1_000L, -7_000_000L, 283_000_000L, "b", null))));
     }
@@ -95,7 +95,7 @@ public class HistoryResidualUiTest {
     // The amber row
     // -----------------------------------------------------------------------
 
-    @Test public void aDetectedGap_rendersAnUnaccountedRow() {
+    @Test public void aDetectedGap_rendersAnUnaccountedRow() throws Exception {
         storeAGap();
         launch();
         assertNotNull("the unaccounted label must reach the screen",
@@ -107,7 +107,7 @@ public class HistoryResidualUiTest {
             findByTextContaining("\u22122,000,000"));
     }
 
-    @Test public void aDetectedGap_explainsItselfInWordsOnTheRow() {
+    @Test public void aDetectedGap_explainsItselfInWordsOnTheRow() throws Exception {
         // A bare number the user cannot interpret is worse than no number at all, so the row carries
         // the reason in plain language rather than leaving it entirely to the dialog.
         storeAGap();
@@ -115,7 +115,7 @@ public class HistoryResidualUiTest {
         assertNotNull(findByText(ctx.getString(R.string.residual_row_hint)));
     }
 
-    @Test public void aDetectedGap_rowCarriesAnAccessibleDescription() {
+    @Test public void aDetectedGap_rowCarriesAnAccessibleDescription() throws Exception {
         // The row is a button, so a screen reader has to be told what it is and why it is there; the
         // visible hint alone is not what gets announced.
         storeAGap();
@@ -125,7 +125,7 @@ public class HistoryResidualUiTest {
         assertTrue("the row must be reachable by touch", row.isClickable());
     }
 
-    @Test public void aDetectedGap_showsTheExplanationsButton() {
+    @Test public void aDetectedGap_showsTheExplanationsButton() throws Exception {
         // The breakdown heading carries a way into the longer explanation, and it only appears while
         // there is something to explain.
         storeAGap();
@@ -133,7 +133,7 @@ public class HistoryResidualUiTest {
         assertNotNull(findByDescription(ctx.getString(R.string.residual_explainer_cd)));
     }
 
-    @Test public void aDetectedGap_tappingTheRow_survivesBuildingTheArithmetic() {
+    @Test public void aDetectedGap_tappingTheRow_survivesBuildingTheArithmetic() throws Exception {
         // The dialog is the one place the app does the subtraction in front of the user, so a wrong
         // format argument would fail exactly there. Clicking for real is the only way to cover it.
         storeAGap();
@@ -145,7 +145,7 @@ public class HistoryResidualUiTest {
         await(() -> findByDescriptionContaining("Unaccounted") != null, 10_000);
     }
 
-    @Test public void aDetectedGap_tappingTheExplanationsButton_survivesBuildingIt() {
+    @Test public void aDetectedGap_tappingTheExplanationsButton_survivesBuildingIt() throws Exception {
         storeAGap();
         launch();
         final View ask = findByDescription(ctx.getString(R.string.residual_explainer_cd));
@@ -158,14 +158,14 @@ public class HistoryResidualUiTest {
     // Silence when the books agree
     // -----------------------------------------------------------------------
 
-    @Test public void noGap_rendersNoUnaccountedRow() {
+    @Test public void noGap_rendersNoUnaccountedRow() throws Exception {
         storeNoGap();
         launch();
         assertTrue("a history that adds up must stay quiet",
             findByText(ctx.getString(R.string.residual_label)) == null);
     }
 
-    @Test public void noGap_showsNoExplanationsButton() {
+    @Test public void noGap_showsNoExplanationsButton() throws Exception {
         // The button's absence is itself the reassurance, so it must not linger once a delayed
         // message has closed the last gap.
         storeNoGap();
@@ -173,7 +173,7 @@ public class HistoryResidualUiTest {
         assertTrue(findByDescription(ctx.getString(R.string.residual_explainer_cd)) == null);
     }
 
-    @Test public void noGap_stillShowsTheMovementsThemselves() {
+    @Test public void noGap_stillShowsTheMovementsThemselves() throws Exception {
         storeNoGap();
         launch();
         assertNotNull("the movements must still be listed", findByTextContaining("7,000,000"));

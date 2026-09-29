@@ -38,17 +38,19 @@ public class TransactionReasonTest {
     private Context ctx;
     private String originalTag;
 
-    @Before public void setUp() {
+    @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         originalTag = LocaleHelper.currentTag(ctx);
         LocaleHelper.setLanguage(ctx, "en");
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
+        FinancialTestStore.wipe(ctx);
     }
 
-    @After public void tearDown() {
+    @After public void tearDown() throws Exception {
         LocaleHelper.setLanguage(ctx, originalTag);
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        FinancialTestStore.wipe(ctx);
     }
 
     private Transaction tx(String bank, String account, String sig, String content) {
@@ -61,20 +63,20 @@ public class TransactionReasonTest {
         return reasons;
     }
 
-    @Test public void reason_detectedByAScan_isReadableBack() {
+    @Test public void reason_detectedByAScan_isReadableBack() throws Exception {
         Transaction t = tx("Blu", null, "sig-A", "content-A");
         assertTrue(BalanceData.readReasons(ctx).isEmpty());
 
-        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(t, TOPUP));
 
         assertEquals(TOPUP, BalanceData.readReasons(ctx).get(BalanceData.noteKey(t)));
     }
 
-    @Test public void reason_andNote_liveSideBySide() {
+    @Test public void reason_andNote_liveSideBySide() throws Exception {
         // The two are separate stores on purpose: a movement the bank explained and a movement the
         // user wrote about both keep their own text, and neither stands in for the other.
         Transaction t = tx("Blu", null, "sig-A", "content-A");
-        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(t, TOPUP));
         BalanceData.setNote(ctx, t, "my number");
 
         assertEquals(TOPUP, BalanceData.readReasons(ctx).get(BalanceData.noteKey(t)));
@@ -84,23 +86,23 @@ public class TransactionReasonTest {
         assertEquals(1, BalanceData.readNotes(ctx).size());
     }
 
-    @Test public void reason_neverOverwritesTheUsersNote() {
+    @Test public void reason_neverOverwritesTheUsersNote() throws Exception {
         // The whole reason for keeping reasons out of the notes store: no scan, however it reads a
         // message, can put a word into a note the user wrote.
         Transaction t = tx("Blu", null, "sig-A", "content-A");
         BalanceData.setNote(ctx, t, "do not lose this");
         Map<String, String> notesBefore = BalanceData.readNotes(ctx);
 
-        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
-        BalanceData.mergeReasons(ctx, reasonsFor(t, BILL));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(t, BILL));
 
         assertEquals("do not lose this", BalanceData.getNote(ctx, t));
         assertEquals(notesBefore, BalanceData.readNotes(ctx));
     }
 
-    @Test public void note_neverOverwritesTheStatedReason() {
+    @Test public void note_neverOverwritesTheStatedReason() throws Exception {
         Transaction t = tx("Blu", null, "sig-A", "content-A");
-        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(t, TOPUP));
 
         BalanceData.setNote(ctx, t, "a note");
         BalanceData.setNote(ctx, t, null);
@@ -108,10 +110,10 @@ public class TransactionReasonTest {
         assertEquals(TOPUP, BalanceData.readReasons(ctx).get(BalanceData.noteKey(t)));
     }
 
-    @Test public void reason_survivesTheUserClearingTheirNote() {
+    @Test public void reason_survivesTheUserClearingTheirNote() throws Exception {
         // Clearing a note is the user saying "I have nothing to add", not "there was nothing here".
         Transaction t = tx("Blu", null, "sig-A", "content-A");
-        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(t, TOPUP));
         BalanceData.setNote(ctx, t, "temp");
 
         BalanceData.setNote(ctx, t, null);
@@ -120,15 +122,15 @@ public class TransactionReasonTest {
         assertEquals(TOPUP, BalanceData.readReasons(ctx).get(BalanceData.noteKey(t)));
     }
 
-    @Test public void reason_mergeIsAdditive_firstDetectionWins() {
+    @Test public void reason_mergeIsAdditive_firstDetectionWins() throws Exception {
         // A later scan must never rewrite a reason already on record — the stored text is a fact
         // about the message, and merging also never removes a reason whose SMS is long gone.
         Transaction a = tx("Blu", null, "sig-A", "content-A");
         Transaction b = tx("Blu", null, "sig-B", "content-B");
-        BalanceData.mergeReasons(ctx, reasonsFor(a, TOPUP));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(a, TOPUP));
 
-        BalanceData.mergeReasons(ctx, reasonsFor(a, BILL));
-        BalanceData.mergeReasons(ctx, reasonsFor(b, TRANSFER_IN));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(a, BILL));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(b, TRANSFER_IN));
 
         Map<String, String> reasons = BalanceData.readReasons(ctx);
         assertEquals(TOPUP, reasons.get(BalanceData.noteKey(a)));
@@ -136,30 +138,30 @@ public class TransactionReasonTest {
         assertEquals(2, reasons.size());
     }
 
-    @Test public void reason_mergeOfNothing_changesNothing() {
+    @Test public void reason_mergeOfNothing_changesNothing() throws Exception {
         Transaction t = tx("Blu", null, "sig-A", "content-A");
-        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(t, TOPUP));
 
-        BalanceData.mergeReasons(ctx, null);
-        BalanceData.mergeReasons(ctx, new HashMap<String, String>());
+        FinancialTestStore.mergeReasons(ctx, null);
+        FinancialTestStore.mergeReasons(ctx, new HashMap<String, String>());
 
         assertEquals(TOPUP, BalanceData.readReasons(ctx).get(BalanceData.noteKey(t)));
         assertEquals(1, BalanceData.readReasons(ctx).size());
     }
 
-    @Test public void reason_keyedByContent_notByAmountOrBank() {
+    @Test public void reason_keyedByContent_notByAmountOrBank() throws Exception {
         // The reason must follow the same physical SMS the note does, including across a re-parse
         // that fills in an account number the older rules could not read.
         Transaction fresh = tx("Blu", "3810021456", "sig-NEW", "content-same");
         Transaction legacy = tx("Blu", null, "sig-OLD", "content-same");
         assertEquals(BalanceData.noteKey(fresh), BalanceData.noteKey(legacy));
 
-        BalanceData.mergeReasons(ctx, reasonsFor(fresh, TOPUP));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(fresh, TOPUP));
 
         assertEquals(TOPUP, BalanceData.readReasons(ctx).get(BalanceData.noteKey(legacy)));
     }
 
-    @Test public void reason_followsLegacyReplacementThroughFullRebuild() {
+    @Test public void reason_followsLegacyReplacementThroughFullRebuild() throws Exception {
         // A reason recorded on a pre-content-digest entry lives under its legacy identity; when a full
         // re-scan re-parses the same SMS into a content-bearing entry, the migration carries it over
         // instead of leaving the row without the reason the bank gave.
@@ -167,52 +169,51 @@ public class TransactionReasonTest {
         Transaction fresh = new Transaction("Blu", null, T, 500_000L, "sig-1", "content-A");
         assertFalse(BalanceData.noteKey(legacy).equals(BalanceData.noteKey(fresh)));
 
-        BalanceData.mergeReasons(ctx, reasonsFor(legacy, TOPUP));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(legacy, TOPUP));
         Map<Transaction, Transaction> replaced = new HashMap<>();
         replaced.put(legacy, fresh);
-        BalanceData.migrateTransactionText(ctx, replaced);
+        FinancialTestStore.migrateTransactionText(ctx, replaced);
 
         assertNull(BalanceData.readReasons(ctx).get(BalanceData.noteKey(legacy)));
         assertEquals(TOPUP, BalanceData.readReasons(ctx).get(BalanceData.noteKey(fresh)));
     }
 
-    @Test public void reason_migrationNeverOverwritesTheLaterReason() {
+    @Test public void reason_migrationNeverOverwritesTheLaterReason() throws Exception {
         Transaction legacy = new Transaction("Blu", null, T, 500_000L, null, null);
         Transaction fresh = new Transaction("Blu", null, T, 500_000L, "sig-1", "content-A");
-        BalanceData.mergeReasons(ctx, reasonsFor(legacy, TOPUP));
-        BalanceData.mergeReasons(ctx, reasonsFor(fresh, BILL));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(legacy, TOPUP));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(fresh, BILL));
         Map<Transaction, Transaction> replaced = new HashMap<>();
         replaced.put(legacy, fresh);
-        BalanceData.migrateTransactionText(ctx, replaced);
+        FinancialTestStore.migrateTransactionText(ctx, replaced);
 
         assertEquals(BILL, BalanceData.readReasons(ctx).get(BalanceData.noteKey(fresh)));
     }
 
-    @Test public void reason_migrationLeavesTheNotesAlone() {
+    @Test public void reason_migrationLeavesTheNotesAlone() throws Exception {
         // Both stores migrate through one pass, so this pins that carrying a reason over never
         // reorders, drops or rewrites the note that was already under the new key.
         Transaction legacy = new Transaction("Blu", null, T, 500_000L, null, null);
         Transaction fresh = new Transaction("Blu", null, T, 500_000L, "sig-1", "content-A");
         BalanceData.setNote(ctx, legacy, "note on the legacy entry");
         BalanceData.setNote(ctx, fresh, "note on the fresh entry");
-        BalanceData.mergeReasons(ctx, reasonsFor(legacy, TOPUP));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(legacy, TOPUP));
         Map<Transaction, Transaction> replaced = new HashMap<>();
         replaced.put(legacy, fresh);
-        BalanceData.migrateTransactionText(ctx, replaced);
+        FinancialTestStore.migrateTransactionText(ctx, replaced);
 
         assertEquals("note on the fresh entry", BalanceData.getNote(ctx, fresh));
         assertEquals(TOPUP, BalanceData.readReasons(ctx).get(BalanceData.noteKey(fresh)));
     }
 
-    @Test public void reason_persistsInTheEncryptedStore() {
+    @Test public void reason_persistsInTheEncryptedStore() throws Exception {
         Transaction t = tx("Blu", null, "sig-A", "content-A");
-        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(t, TOPUP));
 
-        // What sits in the preferences is ciphertext, not the bank's wording in the clear: this is
-        // the store the notes use too, and both are readable only through the app.
-        String stored = ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE)
-            .getString(BalanceData.KEY_TX_REASONS, "");
-        assertFalse("reasons must not sit in the prefs as plaintext", stored.contains(TOPUP));
+        // What reaches storage is ciphertext, not the bank's wording in the clear: this is the
+        // store the notes and the channels use too, and all are readable only through the app.
+        assertFalse("reasons must not reach the files in the clear",
+            FinancialTestStore.rawStoreText(ctx).contains(TOPUP));
         assertEquals(TOPUP, BalanceData.readReasons(ctx).get(BalanceData.noteKey(t)));
     }
 
@@ -220,7 +221,7 @@ public class TransactionReasonTest {
         // Backup and restore speak the same serialized form the store itself does, so a reason
         // survives being written out and read back in one piece.
         Transaction t = tx("Blu", null, "sig-A", "content-A");
-        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(t, TOPUP));
 
         String serialized;
         try {
@@ -231,7 +232,7 @@ public class TransactionReasonTest {
         assertEquals(TOPUP, BalanceData.deserializeTextMap(serialized).get(BalanceData.noteKey(t)));
     }
 
-    @Test public void reason_isCaptionedInTheAppLanguage() {
+    @Test public void reason_isCaptionedInTheAppLanguage() throws Exception {
         // What is stored is the bank's own title, so the caption follows the app's language at the
         // moment it is shown rather than being frozen into the store.
         assertEquals("Phone top-up", BankRules.reasonCaption(ctx, TOPUP));
@@ -241,7 +242,7 @@ public class TransactionReasonTest {
         assertEquals("شارژ تلفن همراه", BankRules.reasonCaption(fa, TOPUP));
     }
 
-    @Test public void reason_storedTextThisBuildCannotCaption_showsNothing() {
+    @Test public void reason_storedTextThisBuildCannotCaption_showsNothing() throws Exception {
         // Storage is not the filter: a title with no caption — a promotion, or one from an older
         // build — simply has no caption, so nothing appears on the row.
         assertNull(BankRules.reasonCaption(ctx, "برای وام گرفتن وقت تنگه"));
@@ -249,13 +250,13 @@ public class TransactionReasonTest {
         assertNull(BankRules.reasonCaption(ctx, null));
     }
 
-    @Test public void reset_dropsTheReasonsAndKeepsTheNotesByDefault() {
+    @Test public void reset_dropsTheReasonsAndKeepsTheNotesByDefault() throws Exception {
         // The reasons are the inbox's to state: a reset wipes the transactions so the next scan
         // re-reads every message, and the re-read brings the reasons back with it. A note the user
         // typed has no such source, so it stays unless they asked for it to go.
         Transaction t = tx("Blu", null, "sig-A", "content-A");
-        BalanceData.writeTransactions(ctx, Arrays.asList(t));
-        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(t));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(t, TOPUP));
         BalanceData.setNote(ctx, t, "survivor");
 
         BalanceData.reset(ctx, false);
@@ -264,10 +265,10 @@ public class TransactionReasonTest {
         assertEquals("survivor", BalanceData.readNotes(ctx).get(BalanceData.noteKey(t)));
     }
 
-    @Test public void reset_deletingTheNotes_dropsBoth() {
+    @Test public void reset_deletingTheNotes_dropsBoth() throws Exception {
         Transaction t = tx("Blu", null, "sig-A", "content-A");
-        BalanceData.writeTransactions(ctx, Arrays.asList(t));
-        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
+        FinancialTestStore.writeTransactions(ctx, Arrays.asList(t));
+        FinancialTestStore.mergeReasons(ctx, reasonsFor(t, TOPUP));
         BalanceData.setNote(ctx, t, "doomed");
 
         BalanceData.reset(ctx, true);

@@ -15,51 +15,31 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
-import javax.crypto.spec.GCMParameterSpec;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 final class BalanceData {
+    /** The legacy data file. Only the one-time store migration reads it; nothing writes it any more. */
     static final String PREFS_DATA = "balance_data";
-    static final String KEY_BALANCES = "balances";
-    static final String KEY_TRANSACTIONS = "transactions";
-    static final String KEY_TX_NOTES = "transaction_notes";
-    /** The reasons the bank itself stated, keyed exactly like the notes. Kept in a store of its own so
-     *  a detected reason can never overwrite what the user wrote — and never touches it at all. */
-    static final String KEY_TX_REASONS = "transaction_reasons";
-    /** The channels the bank itself stated, keyed exactly like the notes and kept in a store of their
-     *  own, for the same reason: a stated channel is a fact about the message, never something the user
-     *  wrote, and a note must be able to clear without taking it with it. */
-    static final String KEY_TX_CHANNELS = "transaction_channels";
     /** Upper bound on one transaction note, so a huge paste cannot bloat the encrypted store. */
     static final int MAX_NOTE_LENGTH = 500;
+    /** Display and lock preferences. Choices, not financial state, so they stay in SharedPreferences
+     *  and survive a data reset. */
     static final String PREFS_PREF = "balance_preferences";
     static final String KEY_HIDDEN = "balances_hidden";
     static final String KEY_WIDGET_HIDDEN = "widget_balances_hidden";
     static final String KEY_AUTO_HIDE = "balances_auto_hide";
-    static final String KEY_SCANNED_THROUGH = "scanned_through";
-    static final String KEY_RULES_VERSION = "rules_version";
-    static final String KEY_HISTORY_THROUGH = "history_through";
-    static final String KEY_HISTORY_RULES_VERSION = "history_rules_version";
-    /** Which schema generation of the stored history this build writes. Bumped when existing
-     *  entries have to be rebuilt from the inbox to acquire a datum older entries lack — today the
-     *  balance each movement reported ({@link Transaction#balance}), without which {@link Residual}
-     *  cannot prove a missing message. Tracked beside {@link #KEY_HISTORY_RULES_VERSION} rather than
-     *  folded into it, so a schema change never masquerades as a change of parsing rules. */
-    static final String KEY_HISTORY_SCHEMA = "history_schema";
-    static final int HISTORY_SCHEMA = 1;
-    static final String KEY_HISTORY_LAST_BALANCE = "history_last_balance";
-    static final String KEY_EXCLUDED = "excluded_banks";
     static final String KEY_SORT = "sort_mode";
     static final String KEY_STALE_DAYS = "stale_days";
     static final int DEFAULT_STALE_DAYS = 7;
@@ -76,8 +56,13 @@ final class BalanceData {
     /** Bumped whenever the movement-message recognition rules change, forcing a full history re-scan. */
     static final int HISTORY_RULES_VERSION = BankRules.VERSION;
 
-    /** Persisted recent-movement window for balance-chain reconciliation across split scans. */
-    static final String KEY_RECENT_MOVEMENTS = "recent_movements";
+    /** Which schema generation of the stored history this build writes. Bumped when existing entries
+     *  have to be rebuilt from the inbox to acquire a datum older entries lack — today the balance each
+     *  movement reported ({@link Transaction#balance}), without which {@link Residual} cannot prove a
+     *  missing message. Tracked beside the history rules version rather than folded into it, so a
+     *  schema change never masquerades as a change of parsing rules. */
+    static final int HISTORY_SCHEMA = 1;
+
     private static final long RECENT_WINDOW_MS = 5 * 60 * 1000;
     private static final int MAX_RECENT_ENTRIES = 16;
 
@@ -89,11 +74,46 @@ final class BalanceData {
 
     private static final String TAG = "BalanceData";
     private static final String KEYSTORE = "AndroidKeyStore";
-    private static final String KEY_ALIAS = "balance_enc_key";
-    private static final String TRANSFORM = "AES/GCM/NoPadding";
-    private static final int GCM_TAG_BITS = 128;
+    static final String KEY_ALIAS = "balance_enc_key";
 
     private BalanceData() {}
+
+    // ====================================================================
+    // The financial store
+    //
+    // Every balance, transaction, note, exclusion, reconciliation window and scan watermark below
+    // lives in the encrypted generation store behind one process-wide authority. The legacy
+    // preference files are read exactly once, by the migration that opens that store, and are never
+    // consulted again — so a store that cannot be opened reads as empty rather than falling back to
+    // a stale copy the authority no longer owns. The display and lock preferences below stay in
+    // SharedPreferences: they are choices, not financial state.
+    // ====================================================================
+
+    /** The process authority, or null when the store cannot be opened. */
+    private static FinancialAuthority authority(Context context) {
+        try { return FinancialAuthority.open(context); }
+        catch (IOException failure) { Log.w(TAG, "financial store unavailable", failure); return null; }
+    }
+
+    /** One pinned read of the whole financial state, or null when it cannot be read. Callers that
+     *  decide something and then publish it must read through a single snapshot, so the decision is
+     *  made from exactly the state the publication is based on. */
+    private static FinancialSnapshotAdapter.Snapshot view(Context context) {
+        FinancialAuthority authority = authority(context);
+        if (authority == null) return null;
+        try { return authority.snapshots().snapshot(); }
+        catch (IOException failure) { Log.w(TAG, "financial store unreadable", failure); return null; }
+    }
+
+    /** Runs one atomic financial change, reporting failure rather than throwing: a caller that
+     *  cannot persist must not be left believing it did. */
+    private static void commit(Context context, String what,
+            FinancialSnapshotAdapter.Work<Void> work) {
+        FinancialAuthority authority = authority(context);
+        if (authority == null) return;
+        try { authority.snapshots().transaction(work); }
+        catch (IOException failure) { Log.w(TAG, what + " failed", failure); }
+    }
 
     private static SecretKey createKey() throws Exception {
         KeyGenerator kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE);
@@ -122,40 +142,9 @@ final class BalanceData {
         catch (Exception ignored) { throw new IOException("KEY"); }
     }
 
-    private static String encrypt(String plain) throws Exception {
-        Cipher cipher = Cipher.getInstance(TRANSFORM);
-        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey());
-        byte[] iv = cipher.getIV();
-        byte[] ct = cipher.doFinal(plain.getBytes(StandardCharsets.UTF_8));
-        byte[] out = new byte[iv.length + ct.length];
-        System.arraycopy(iv, 0, out, 0, iv.length);
-        System.arraycopy(ct, 0, out, iv.length, ct.length);
-        return Base64.encodeToString(out, Base64.NO_WRAP);
-    }
-
-    private static String decrypt(String blob) throws Exception {
-        byte[] in = Base64.decode(blob, Base64.NO_WRAP);
-        Cipher cipher = Cipher.getInstance(TRANSFORM);
-        GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_BITS, in, 0, 12);
-        cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), spec);
-        return new String(cipher.doFinal(in, 12, in.length - 12), StandardCharsets.UTF_8);
-    }
-
     static LinkedHashMap<String, Bank> read(Context context) {
-        LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
-        try {
-            String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
-                .getString(KEY_BALANCES, null);
-            if (stored == null) return map;
-            boolean legacy = stored.indexOf('{') == 0;
-            String json = legacy ? stored : decrypt(stored);
-            parse(map, json);
-            if (legacy && !map.isEmpty()) write(context, map);
-        } catch (Exception e) {
-            Log.w(TAG, "read failed", e);
-            return map;
-        }
-        return map;
+        FinancialSnapshotAdapter.Snapshot snapshot = view(context);
+        return snapshot == null ? new LinkedHashMap<>() : snapshot.balances();
     }
 
     private static LinkedHashMap<String, Bank> parse(LinkedHashMap<String, Bank> map, String json) {
@@ -220,33 +209,8 @@ final class BalanceData {
 
     /** Reads all saved transactions, newest first, the order in which they were appended. */
     static List<Transaction> readTransactions(Context context) {
-        try {
-            String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
-                .getString(KEY_TRANSACTIONS, null);
-            if (stored == null) return new ArrayList<>();
-            String json = stored.indexOf('{') == 0 ? stored : decrypt(stored);
-            List<Transaction> list = parseTransactions(json);
-            if (stored.indexOf('{') == 0 && !list.isEmpty()) writeTransactions(context, list);
-            return list;
-        } catch (Exception e) {
-            Log.w(TAG, "readTransactions failed", e);
-            return new ArrayList<>();
-        }
-    }
-
-    /** Persists the supplied transactions encrypted under {@link #KEY_TRANSACTIONS}. */
-    static void writeTransactions(Context context, List<Transaction> txs) {
-        try {
-            if (txs.isEmpty()) {
-                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-                    .remove(KEY_TRANSACTIONS).apply();
-                return;
-            }
-            context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-                .putString(KEY_TRANSACTIONS, encrypt(serializeTransactions(txs))).apply();
-        } catch (Exception e) {
-            Log.w(TAG, "writeTransactions failed", e);
-        }
+        FinancialSnapshotAdapter.Snapshot snapshot = view(context);
+        return snapshot == null ? new ArrayList<>() : snapshot.transactions();
     }
 
     /** Serializes transactions to the JSON shape used for the local store and the backup payload. The
@@ -265,7 +229,7 @@ final class BalanceData {
             if (t.content != null) e.put("content", t.content);
             arr.put(e);
         }
-        return new JSONObject().put(KEY_TRANSACTIONS, arr).toString();
+        return new JSONObject().put(FinancialSnapshotAdapter.TRANSACTIONS, arr).toString();
     }
 
     /** Parses a transaction JSON (as produced by {@link #serializeTransactions}) into a fresh list. */
@@ -276,7 +240,8 @@ final class BalanceData {
     private static List<Transaction> parseTransactions(String json) {
         List<Transaction> list = new ArrayList<>();
         try {
-            JSONArray arr = new JSONObject(json).optJSONArray(KEY_TRANSACTIONS);
+            JSONArray arr = new JSONObject(json)
+                .optJSONArray(FinancialSnapshotAdapter.TRANSACTIONS);
             if (arr == null) return list;
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject e = arr.getJSONObject(i);
@@ -308,98 +273,42 @@ final class BalanceData {
     /** Reads every saved note ({@code noteKey → text}), newest-first irrelevant since it is a plain
      *  lookup map. A missing or corrupt store reads as empty, never null. */
     static Map<String, String> readNotes(Context context) {
-        return readTextStore(context, KEY_TX_NOTES);
-    }
-
-    /** Persists the supplied notes encrypted under {@link #KEY_TX_NOTES}. An empty map removes the
-     *  key so a notes-free device stores nothing at all. */
-    static void writeNotes(Context context, Map<String, String> notes) {
-        writeTextStore(context, KEY_TX_NOTES, notes);
+        FinancialSnapshotAdapter.Snapshot snapshot = view(context);
+        return snapshot == null ? new LinkedHashMap<>() : snapshot.transactionNotes();
     }
 
     /** Every reason the bank stated ({@code noteKey → title}), the same plain lookup map the notes are
      *  read as. Never null, and entirely separate from them. */
     static Map<String, String> readReasons(Context context) {
-        return readTextStore(context, KEY_TX_REASONS);
+        FinancialSnapshotAdapter.Snapshot snapshot = view(context);
+        return snapshot == null ? new LinkedHashMap<>() : snapshot.transactionReasons();
     }
 
-    /** Persists the supplied reasons encrypted under {@link #KEY_TX_REASONS}. */
-    static void writeReasons(Context context, Map<String, String> reasons) {
-        writeTextStore(context, KEY_TX_REASONS, reasons);
-    }
-
-    /** Every channel a bank stated ({@code noteKey → channel}), the same plain lookup map the notes are
-     *  read as. Never null, and entirely separate from them. */
+    /** Every channel a bank stated ({@code noteKey → channel}), the same plain lookup map the notes
+     *  are read as. Never null, and entirely separate from them. */
     static Map<String, String> readChannels(Context context) {
-        return readTextStore(context, KEY_TX_CHANNELS);
+        FinancialSnapshotAdapter.Snapshot snapshot = view(context);
+        return snapshot == null ? new LinkedHashMap<>() : snapshot.transactionChannels();
     }
 
-    /** Persists the supplied channels encrypted under {@link #KEY_TX_CHANNELS}. */
-    static void writeChannels(Context context, Map<String, String> channels) {
-        writeTextStore(context, KEY_TX_CHANNELS, channels);
-    }
-
-    /** Reads one encrypted {@code key → text} store, or an empty map when it holds nothing or cannot
-     *  be read. A value left in plaintext by an older build is still accepted. */
-    private static Map<String, String> readTextStore(Context context, String key) {
-        try {
-            String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
-                .getString(key, null);
-            if (stored == null) return new LinkedHashMap<>();
-            String json = stored.indexOf('{') == 0 ? stored : decrypt(stored);
-            return new LinkedHashMap<>(deserializeTextMap(json));
-        } catch (Exception e) {
-            Log.w(TAG, "text store read failed", e);
-            return new LinkedHashMap<>();
-        }
-    }
-
-    /** Writes one {@code key → text} store encrypted under {@code key}. An empty map removes the key,
-     *  so a device with nothing to say about this store keeps nothing at all. */
-    private static void writeTextStore(Context context, String key, Map<String, String> map) {
-        try {
-            android.content.SharedPreferences.Editor e =
-                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit();
-            if (map == null || map.isEmpty()) {
-                e.remove(key).apply();
-                return;
-            }
-            e.putString(key, encrypt(serializeTextMap(map))).apply();
-        } catch (Exception ex) {
-            Log.w(TAG, "text store write failed", ex);
-        }
-    }
-
-    /** Folds the reasons one scan detected into the stored ones. Detection only ever adds: a reason
-     *  already stored for a movement is kept as it is, nothing is removed, and the user's own notes are
-     *  not touched at all — they live in a store of their own, so a detected reason can never
-     *  overwrite a note, and clearing a note can never lose what the bank said. Nothing is written when
-     *  every detected reason was already stored, so an unchanged inbox costs no write. */
-    static void mergeReasons(Context context, Map<String, String> detected) {
-        mergeDetectedTextStore(context, KEY_TX_REASONS, detected);
-    }
-
-    /** Folds the channels one scan detected into the stored ones, on exactly the terms the reasons are
-     *  folded on and for the same reason: the channel a bank stated is a fact about its message, the
-     *  user's note is theirs, and neither store can clobber the other. */
-    static void mergeChannels(Context context, Map<String, String> detected) {
-        mergeDetectedTextStore(context, KEY_TX_CHANNELS, detected);
-    }
-
-    private static void mergeDetectedTextStore(Context context, String key,
-            Map<String, String> detected) {
-        if (detected == null || detected.isEmpty()) return;
-        Map<String, String> stored = readTextStore(context, key);
+    /** Folds the values one scan detected into a copy of the stored ones, in place. Detection only
+     *  ever adds: a value already stored for a movement is kept as it is, nothing is removed, and
+     *  the user's own notes are not touched at all — they live in a store of their own, so a detected
+     *  reason can never overwrite a note, and clearing a note can never lose what the bank said.
+     *  Reports whether anything was added, so the caller publishes only when the store changed. */
+    private static boolean mergeDetected(Map<String, String> stored, Map<String, String> detected) {
+        if (detected == null || detected.isEmpty()) return false;
         boolean changed = false;
         for (Map.Entry<String, String> e : detected.entrySet()) {
             if (stored.containsKey(e.getKey())) continue;
             stored.put(e.getKey(), e.getValue());
             changed = true;
         }
-        if (changed) writeTextStore(context, key, stored);
+        return changed;
     }
 
     /** Serializes a per-transaction text map (the notes, or the reasons) to the JSON shape used for
+
      *  the local stores and the backup payload. Empty or null values are dropped, so a cleared entry
      *  vanishes from the map. */
     static String serializeTextMap(Map<String, String> text) throws Exception {
@@ -432,58 +341,67 @@ final class BalanceData {
 
     /** The transaction's note, or null when none is saved. */
     static String getNote(Context context, Transaction t) {
-        return readNotes(context).get(noteKey(t));
+        FinancialAuthority authority = authority(context);
+        if (authority == null) return null;
+        try { return authority.operations().notes().get(noteKey(t)); }
+        catch (IOException failure) { Log.w(TAG, "notes unreadable", failure); return null; }
     }
 
     /** Saves (or with a blank input, clears) the note for a transaction. The text is trimmed and
      *  capped at {@link #MAX_NOTE_LENGTH}, so hostile or accidental multi-megabyte pastes are cut
      *  down to a bounded size before they are written encrypted. */
     static void setNote(Context context, Transaction t, String text) {
-        Map<String, String> notes = readNotes(context);
-        String key = noteKey(t);
-        if (text == null) {
-            notes.remove(key);
-            writeNotes(context, notes);
-            return;
-        }
-        String trimmed = text.trim();
-        if (trimmed.isEmpty()) {
-            notes.remove(key);
-            writeNotes(context, notes);
-            return;
-        }
-        notes.put(key, capNoteLength(trimmed));
-        writeNotes(context, notes);
+        FinancialAuthority authority = authority(context);
+        if (authority == null) return;
+        try { authority.operations().setNote(t, text); }
+        catch (IOException failure) { Log.w(TAG, "note write failed", failure); }
     }
 
-    /** Trims a text to {@link #MAX_NOTE_LENGTH} characters without splitting a surrogate pair. */
-    private static String capNoteLength(String s) {
-        if (s.length() <= MAX_NOTE_LENGTH) return s;
-        int end = MAX_NOTE_LENGTH;
-        while (end > 0 && Character.isLowSurrogate(s.charAt(end))) end--;
-        return s.substring(0, end);
+    /** The three per-transaction text stores a completed history scan publishes: the pinned copies,
+     *  re-keyed by any rebuild the scan performed, with the reasons and channels it detected folded
+     *  in. Each store reports separately whether it moved, so a scan that changed nothing publishes
+     *  nothing and an unchanged inbox costs no write. */
+    private static TextStores textStores(FinancialSnapshotAdapter.Snapshot snapshot,
+            Map<Transaction, Transaction> replaced, Map<String, String> detectedReasons,
+            Map<String, String> detectedChannels) {
+        Map<String, String> notes = new LinkedHashMap<>(snapshot.transactionNotes());
+        Map<String, String> reasons = new LinkedHashMap<>(snapshot.transactionReasons());
+        Map<String, String> channels = new LinkedHashMap<>(snapshot.transactionChannels());
+        boolean notesChanged = false, reasonsChanged = false, channelsChanged = false;
+        if (replaced != null && !replaced.isEmpty()) {
+            notesChanged = migrateTextKeys(notes, replaced);
+            reasonsChanged = migrateTextKeys(reasons, replaced);
+            channelsChanged = migrateTextKeys(channels, replaced);
+        }
+        reasonsChanged |= mergeDetected(reasons, detectedReasons);
+        channelsChanged |= mergeDetected(channels, detectedChannels);
+        return new TextStores(notes, reasons, channels, notesChanged, reasonsChanged, channelsChanged);
     }
 
-    /** Moves the text attached to a movement that a full-history rebuild would orphan: when a stored
-     *  entry {@code from} is replaced by a freshly parsed {@code to}, the note the user wrote, the
-     *  reason the bank stated and the channel it went through all follow the movement to the latter's
-     *  key. Keyed by the legacy identity triple before content digests existed, so the handover happens
-     *  exactly when a newer rules version re-parses the same SMS into a content-bearing entry — the one
-     *  case where {@link #noteKey} changes between the same physical message. Where the destination
-     *  already carries text, the destination's text is kept and the text of the row the rebuild drops is
-     *  dropped with it, since that key can no longer be read. */
-    static void migrateTransactionText(Context context, Map<Transaction, Transaction> replaced) {
-        Map<String, String> notes = readNotes(context);
-        if (migrateTextKeys(notes, replaced)) writeNotes(context, notes);
-        Map<String, String> reasons = readReasons(context);
-        if (migrateTextKeys(reasons, replaced)) writeReasons(context, reasons);
-        Map<String, String> channels = readChannels(context);
-        if (migrateTextKeys(channels, replaced)) writeChannels(context, channels);
+    /** The published text maps of one history scan, with the per-store change flags. */
+    private static final class TextStores {
+        final Map<String, String> notes, reasons, channels;
+        final boolean notesChanged, reasonsChanged, channelsChanged;
+
+        TextStores(Map<String, String> notes, Map<String, String> reasons, Map<String, String> channels,
+                boolean notesChanged, boolean reasonsChanged, boolean channelsChanged) {
+            this.notes = notes;
+            this.reasons = reasons;
+            this.channels = channels;
+            this.notesChanged = notesChanged;
+            this.reasonsChanged = reasonsChanged;
+            this.channelsChanged = channelsChanged;
+        }
     }
 
     /** Moves the text of every replaced entry to its replacement's key, in place. Returns whether
-     *  anything moved, so the caller writes the store only when it changed. */
-    private static boolean migrateTextKeys(Map<String, String> text,
+     *  anything moved, so the caller publishes the store only when it changed. The handover a
+     *  full-history rebuild needs: a stored entry the rebuild replaces by a freshly parsed one leaves
+     *  the note the user wrote, the reason the bank stated and the channel it went through attached to
+     *  a key nothing can read any more, so all three follow the movement to the replacement's key.
+     *  Where the destination already carries text, the destination's text is kept and the text of the
+     *  row the rebuild drops is dropped with it. */
+    static boolean migrateTextKeys(Map<String, String> text,
             Map<Transaction, Transaction> replaced) {
         boolean changed = false;
         for (Map.Entry<Transaction, Transaction> e : replaced.entrySet()) {
@@ -505,22 +423,6 @@ final class BalanceData {
         return changed;
     }
 
-    static void write(Context context, LinkedHashMap<String, Bank> map) {
-        try {
-            String existing = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
-                .getString(KEY_BALANCES, null);
-            if (map.isEmpty() && existing != null) {
-                Log.w(TAG, "refusing to persist empty balances over existing data");
-                return;
-            }
-            String json = serialize(map);
-            context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-                .putString(KEY_BALANCES, encrypt(json)).apply();
-        } catch (Exception e) {
-            Log.w(TAG, "write failed", e);
-        }
-    }
-
     /** Discards every saved balance and transaction and forgets both scan watermarks, so the next scans
      *  behave like a fresh install and rebuild from the messages currently in the inbox. Display
      *  preferences are deliberately untouched — the hide/unmask toggle, the language and the sort mode
@@ -531,20 +433,10 @@ final class BalanceData {
      *  the messages the rebuild below reprocesses, and the transactions they describe are deleted here
      *  with everything else — keeping them would only leave entries nothing points at. */
     static void reset(Context context, boolean alsoNotes) {
-        android.content.SharedPreferences.Editor data =
-            context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-                .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).remove(KEY_HISTORY_LAST_BALANCE)
-                .remove(KEY_RECENT_MOVEMENTS).remove(KEY_TX_REASONS).remove(KEY_TX_CHANNELS);
-        if (alsoNotes) data.remove(KEY_TX_NOTES);
-        data.apply();
-        context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
-            .remove(KEY_SCANNED_THROUGH)
-            .remove(KEY_RULES_VERSION)
-            .remove(KEY_HISTORY_THROUGH)
-            .remove(KEY_HISTORY_RULES_VERSION)
-            .remove(KEY_HISTORY_SCHEMA)
-            .remove(KEY_EXCLUDED)
-            .apply();
+        FinancialAuthority authority = authority(context);
+        if (authority == null) return;
+        try { authority.operations().reset(alsoNotes); }
+        catch (IOException failure) { Log.w(TAG, "reset failed", failure); }
     }
 
     static boolean isHidden(Context context) {
@@ -579,24 +471,17 @@ final class BalanceData {
     /** The set of excluded entries, each stored under its {@link #storageKey} — so exclusion is per
      *  account: {@code bank} for an account-less bank, {@code bank|account} for a specific one. */
     static Set<String> getExcluded(Context context) {
-        Set<String> set = new HashSet<>();
-        try {
-            String raw = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
-                .getString(KEY_EXCLUDED, null);
-            if (raw == null) return set;
-            JSONArray arr = new JSONArray(raw);
-            for (int i = 0; i < arr.length(); i++) set.add(arr.getString(i));
-        } catch (Exception e) {
-            Log.w(TAG, "excluded entries unreadable; treating as none", e);
-        }
-        return set;
+        FinancialAuthority authority = authority(context);
+        if (authority == null) return new LinkedHashSet<>();
+        try { return authority.operations().getExcluded(); }
+        catch (IOException failure) { Log.w(TAG, "excluded entries unreadable", failure); return new LinkedHashSet<>(); }
     }
 
     static void setExcluded(Context context, Set<String> excluded) {
-        JSONArray arr = new JSONArray();
-        for (String key : excluded) arr.put(key);
-        context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
-            .putString(KEY_EXCLUDED, arr.toString()).apply();
+        FinancialAuthority authority = authority(context);
+        if (authority == null) return;
+        try { authority.operations().setExcluded(excluded); }
+        catch (IOException failure) { Log.w(TAG, "excluded entries write failed", failure); }
     }
 
     static boolean isExcluded(Context context, String key) {
@@ -604,10 +489,10 @@ final class BalanceData {
     }
 
     static void toggleExcluded(Context context, String key) {
-        Set<String> excluded = getExcluded(context);
-        if (excluded.contains(key)) excluded.remove(key);
-        else excluded.add(key);
-        setExcluded(context, excluded);
+        FinancialAuthority authority = authority(context);
+        if (authority == null) return;
+        try { authority.operations().toggleExcluded(key); }
+        catch (IOException failure) { Log.w(TAG, "excluded entries write failed", failure); }
     }
 
     /** Orders the supplied banks for display: included banks first (sorted by the given mode),
@@ -727,10 +612,10 @@ final class BalanceData {
      *  This method is synchronized and re-reads the authoritative store INSIDE the lock: the caller's
      *  map can be a stale snapshot taken the moment before an overlapping scan won the lock, so merging
      *  into a fresh copy guarantees one scan can never overwrite a newer balance written by another (the
-     *  fresh copy is merged, persisted, and then copied back into the caller's map so its view stays
-     *  authoritative too). Balances are persisted BEFORE the watermark is advanced, so a process death
-     *  in between can only cause a harmless re-read of already-scanned rows, never a permanently skipped
-     *  message.
+     *  fresh copy is merged, published, and then copied back into the caller's map so its view stays
+     *  authoritative too). The balances and the watermark that produced them are published as one
+     *  generation, so a process death can leave both or neither — never a balance without the watermark
+     *  that would skip the message behind it, nor a watermark past balances that were never written.
      *
      *  Incremental reads only query messages newer than the last-scanned watermark, so refreshes stay
      *  fast no matter how large the inbox grows, and each bank only ever receives newer data. The full
@@ -741,9 +626,13 @@ final class BalanceData {
     static synchronized int scanSms(Context context, LinkedHashMap<String, Bank> saved) {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
             return 0;
-        LinkedHashMap<String, Bank> current = read(context);
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
-        long watermark = prefs.getLong(KEY_SCANNED_THROUGH, 0);
+        FinancialAuthority authority = authority(context);
+        if (authority == null) return 0;
+        FinancialSnapshotAdapter.Snapshot snapshot;
+        try { snapshot = authority.snapshots().snapshot(); }
+        catch (IOException failure) { Log.w(TAG, "financial store unreadable", failure); return 0; }
+        LinkedHashMap<String, Bank> current = snapshot.balances();
+        long watermark = snapshot.scannedThrough();
         int rulesVersion = BankRules.VERSION;
         // Inbox dates are trusted as-served and each row is clamped to the device clock, so a forged
         // or clock-skewed message dated in the future can never push the watermark past real time.
@@ -753,7 +642,7 @@ final class BalanceData {
         // rescan, which re-reads the whole inbox and re-pins the watermark under the current clock.
         long now = System.currentTimeMillis();
         boolean full = watermark == 0 || watermark > now
-            || prefs.getInt(KEY_RULES_VERSION, -1) != rulesVersion;
+            || snapshot.rulesVersion() != rulesVersion;
         if (full) watermark = 0;
         int matched = 0;
         long newest = 0;
@@ -806,7 +695,7 @@ final class BalanceData {
             if (!splitBanks.isEmpty()) current.keySet().removeIf(splitBanks::contains);
         }
 
-        Map<String, List<Reconcile.Entry>> windows = loadRecentMovements(context);
+        Map<String, List<Reconcile.Entry>> windows = snapshot.recentMovements();
         for (Map.Entry<String, List<Object[]>> e : rowsByKey.entrySet()) {
             String key = e.getKey();
             String bank = bankOfKey(key);
@@ -849,18 +738,30 @@ final class BalanceData {
             }
             windows.put(key, pruneWindow(merged));
         }
-        saveRecentMovements(context, windows);
-
-        write(context, current);
         // A full scan that finds no bank message at all could not have re-derived anything, so it
         // must not confirm the rules version or advance the watermark: the stored balances may be
         // stale (the messages they came from are gone, or the SMS store is not available yet) and
         // the rebuild must be retried on the next open instead of being marked as done.
         boolean emptyFullScan = full && rowsByKey.isEmpty() && !current.isEmpty();
-        if (!emptyFullScan) {
-            SharedPreferences.Editor editor = prefs.edit().putInt(KEY_RULES_VERSION, rulesVersion);
-            if (newest > watermark) editor.putLong(KEY_SCANNED_THROUGH, newest);
-            editor.apply();
+        try {
+            // The balances, the reconciliation window and the scan metadata land in ONE generation,
+            // so a process death can never leave a balance published without the watermark that
+            // produced it (which would skip the message that moved it) or the watermark advanced
+            // past balances that were never written.
+            Set<String> removals = windows.isEmpty()
+                ? Collections.singleton(FinancialSnapshotAdapter.RECENT_MOVEMENTS)
+                : Collections.emptySet();
+            BalanceScanPublication.prepare(
+                    serialize(current).getBytes(StandardCharsets.UTF_8),
+                    windows.isEmpty() ? null
+                            : serializeRecentMovements(windows).getBytes(StandardCharsets.UTF_8),
+                    !emptyFullScan && newest > watermark ? newest : null,
+                    emptyFullScan ? null : rulesVersion,
+                    matched,
+                    removals).publish(authority.snapshots());
+        } catch (Exception e) {
+            Log.w(TAG, "balance publication failed", e);
+            return 0;
         }
         saved.clear();
         saved.putAll(current);
@@ -876,31 +777,36 @@ final class BalanceData {
      *  install (or after {@link #reset}) reads the WHOLE inbox instead of stopping at the newest message
      *  per bank, so older movements that the balance scan skips are still captured into history.
      *
-     *  <p>Persistence is committed before the watermark advances, so a process death mid-scan only causes
-     *  a harmless re-read of already-deduped messages. A scan that is already running is reported as a
-     *  no-op so concurrent triggers (app open + history open) collapse into a single pass.
+     *  <p>Everything the scan derives is published as one generation, so a process death mid-scan
+     *  cannot leave a transaction without its reason or a watermark past history that was never
+     *  written. A scan that is already running is reported as a no-op so concurrent triggers (app
+     *  open + history open) collapse into a single pass.
      *
      *  <p>A rules-version change triggers a full re-scan that rebuilds the stored history from the
      *  messages currently in the inbox (correcting entries the old rules parsed wrongly) while keeping
-     *  every stored entry whose message was deleted. If that scan fails part-way, neither the rules
-     *  version nor the watermark is advanced, so the rebuild runs again on the next scan. */
+     *  every stored entry whose message was deleted. If that scan fails part-way, nothing at all is
+     *  published — neither the rules version nor the watermark is advanced — so the rebuild runs again
+     *  on the next scan. */
     static synchronized int scanHistory(Context context) {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
             return 0;
         if (HISTORY_SCANNING) return 0;
         HISTORY_SCANNING = true;
-        boolean completed = false;
         try {
-            List<Transaction> stored = readTransactions(context);
-            SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
-            long hwm = prefs.getLong(KEY_HISTORY_THROUGH, 0);
+            FinancialAuthority authority = authority(context);
+            if (authority == null) return 0;
+            FinancialSnapshotAdapter.Snapshot snapshot;
+            try { snapshot = authority.snapshots().snapshot(); }
+            catch (IOException failure) { Log.w(TAG, "financial store unreadable", failure); return 0; }
+            List<Transaction> stored = new ArrayList<>(snapshot.transactions());
+            long hwm = snapshot.historyThrough();
             // As in scanSms, a history watermark ahead of the current clock means the device clock
             // moved backward since the last scan; fall back to a full rescan so messages dated after
             // the rollback are not skipped forever by the incremental "newer than watermark" read.
             long now = System.currentTimeMillis();
             boolean full = hwm == 0 || hwm > now
-                || prefs.getInt(KEY_HISTORY_RULES_VERSION, -1) != HISTORY_RULES_VERSION
-                || prefs.getInt(KEY_HISTORY_SCHEMA, -1) != HISTORY_SCHEMA;
+                || snapshot.historyRulesVersion() != HISTORY_RULES_VERSION
+                || snapshot.historySchema() != HISTORY_SCHEMA;
             if (full) hwm = 0;
             // On an incremental scan the stored history doubles as the dedup set: a message already
             // recorded (by fingerprint, or by the legacy bank|date|amount triple) is left alone. On a
@@ -927,6 +833,9 @@ final class BalanceData {
             String[] args = selection != null ? new String[]{Long.toString(hwm)} : null;
             Map<String, List<Reconcile.Entry>> windowsForSave = null;
             Map<String, Long> lastBalanceForSave = null;
+            // The rows a rebuild re-keys, recorded here and turned into text-store changes only after
+            // the whole scan succeeded, so a failed scan re-keys nothing.
+            Map<Transaction, Transaction> replacedForText = null;
             try (Cursor cursor = context.getContentResolver().query(
                 Telephony.Sms.Inbox.CONTENT_URI,
                 new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
@@ -954,7 +863,8 @@ final class BalanceData {
                 // the chain starts from the oldest kept message; on an incremental scan it is seeded
                 // from the last balance persisted by the previous scan.
                 rows.sort((a, b) -> Long.compare((Long) a[3], (Long) b[3]));
-                Map<String, Long> lastBalance = full ? new HashMap<>() : loadLastBalances(context);
+                Map<String, Long> lastBalance = full ? new HashMap<>()
+                    : new LinkedHashMap<>(snapshot.historyLastBalances());
                 lastBalanceForSave = lastBalance;
 
                 // Group this scan's rows by bank, merge each bank's movements into its recent-window,
@@ -964,7 +874,7 @@ final class BalanceData {
                 for (Object[] row : rows) {
                     rowsByBank.computeIfAbsent(rowCompositeKey(row), k -> new ArrayList<>()).add(row);
                 }
-                Map<String, List<Reconcile.Entry>> windows = loadRecentMovements(context);
+                Map<String, List<Reconcile.Entry>> windows = snapshot.recentMovements();
                 Map<String, Map<String, Integer>> chainPosByBank = new LinkedHashMap<>();
                 Map<String, List<Reconcile.Entry>> chainByBank = new LinkedHashMap<>();
                 for (Map.Entry<String, List<Object[]>> e : rowsByBank.entrySet()) {
@@ -1219,7 +1129,7 @@ final class BalanceData {
                     stored = rebuilt;
                     if (!replaced.isEmpty() || !twinOf.isEmpty()) {
                         replaced.putAll(twinOf);
-                        migrateTransactionText(context, replaced);
+                        replacedForText = replaced;
                     }
                 } else {
                     for (int i = fresh.size() - 1; i >= 0; i--) {
@@ -1227,33 +1137,58 @@ final class BalanceData {
                         stored.add(fresh.get(i));
                     }
                 }
-                completed = true;
             } catch (Exception e) {
                 Log.w(TAG, "history scan failed", e);
                 // Do not publish partially parsed history or advance any watermark after a
                 // cursor/parse failure. The next scan must see the same source rows again.
                 return 0;
             }
-            saveRecentMovements(context, windowsForSave);
-            saveLastBalances(context, lastBalanceForSave);
-            writeTransactions(context, stored);
-            // The reasons and channels land after the transactions they belong to, so the stores never
-            // hold one for a movement that was not written.
-            mergeReasons(context, detectedReasons);
-            mergeChannels(context, detectedChannels);
-            SharedPreferences.Editor editor = prefs.edit();
-            // Only commit the rules version and watermark when the scan finished cleanly: marking a
-            // full rebuild as done (or advancing past rows that failed) would skip the correction
-            // forever until the next manual version bump.
-            if (completed && full) editor.putInt(KEY_HISTORY_RULES_VERSION, HISTORY_RULES_VERSION);
-            if (completed && full) editor.putInt(KEY_HISTORY_SCHEMA, HISTORY_SCHEMA);
-            if (completed && newest > 0) editor.putLong(KEY_HISTORY_THROUGH, newest);
-            editor.apply();
+            try {
+                // The reasons and channels land in the same generation as the transactions they
+                // belong to, so the stores never hold one for a movement that was not written.
+                TextStores text = textStores(snapshot, replacedForText, detectedReasons, detectedChannels);
+                // Only commit the rules version and watermark now that the scan finished cleanly:
+                // marking a full rebuild as done (or advancing past rows that failed) would skip the
+                // correction forever until the next manual version bump.
+                HistoryScanPublication.prepare(
+                        serializeTransactions(stored).getBytes(StandardCharsets.UTF_8),
+                        text.reasonsChanged
+                                ? serializeTextMap(text.reasons).getBytes(StandardCharsets.UTF_8) : null,
+                        text.channelsChanged
+                                ? serializeTextMap(text.channels).getBytes(StandardCharsets.UTF_8) : null,
+                        windowsForSave == null || windowsForSave.isEmpty() ? null
+                                : serializeRecentMovements(windowsForSave)
+                                        .getBytes(StandardCharsets.UTF_8),
+                        lastBalanceForSave == null || lastBalanceForSave.isEmpty() ? null
+                                : serializeLastBalances(lastBalanceForSave)
+                                        .getBytes(StandardCharsets.UTF_8),
+                        newest > 0 ? newest : null,
+                        full ? HISTORY_RULES_VERSION : null,
+                        full ? HISTORY_SCHEMA : null,
+                        removals(stored, windowsForSave, lastBalanceForSave))
+                        .publish(authority.snapshots());
+            } catch (Exception e) {
+                Log.w(TAG, "history publication failed", e);
+                return 0;
+            }
             return added;
         } finally {
             HISTORY_SCANNING = false;
             notifyHistoryChanged();
         }
+    }
+
+    /** The history components a completed scan derived nothing for, and therefore deletes — the
+     *  generation-store equivalent of the legacy empty-value key removal. */
+    private static Set<String> removals(List<Transaction> stored,
+            Map<String, List<Reconcile.Entry>> windows, Map<String, Long> lastBalances) {
+        Set<String> removals = new LinkedHashSet<>();
+        if (stored.isEmpty()) removals.add(FinancialSnapshotAdapter.TRANSACTIONS);
+        if (windows == null || windows.isEmpty())
+            removals.add(FinancialSnapshotAdapter.RECENT_MOVEMENTS);
+        if (lastBalances == null || lastBalances.isEmpty())
+            removals.add(FinancialSnapshotAdapter.HISTORY_LAST_BALANCE);
+        return removals;
     }
 
     /** Notifies registered listeners that a history re-scan finished, so an open history screen can
@@ -1645,21 +1580,6 @@ final class BalanceData {
         }
     }
 
-    /** Loads the persisted recent-movements window, keyed by bank. */
-    private static Map<String, List<Reconcile.Entry>> loadRecentMovements(Context context) {
-        Map<String, List<Reconcile.Entry>> map = new HashMap<>();
-        try {
-            String raw = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
-                .getString(KEY_RECENT_MOVEMENTS, null);
-            if (raw == null) return map;
-            String json = raw.indexOf('{') == 0 ? raw : decrypt(raw);
-            map = deserializeRecentMovements(json);
-        } catch (Exception e) {
-            Log.w(TAG, "loadRecentMovements failed", e);
-        }
-        return map;
-    }
-
     static String serializeRecentMovements(Map<String, List<Reconcile.Entry>> map) throws Exception {
         JSONObject obj = new JSONObject();
         for (Map.Entry<String, List<Reconcile.Entry>> e : map.entrySet()) {
@@ -1694,47 +1614,8 @@ final class BalanceData {
         return map;
     }
 
-    /** Persists the recent-movements window, encrypted like the rest of the data store. */
-    private static void saveRecentMovements(Context context, Map<String, List<Reconcile.Entry>> map) {
-        try {
-            if (map.isEmpty()) {
-                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-                    .remove(KEY_RECENT_MOVEMENTS).apply();
-                return;
-            }
-            JSONObject obj = new JSONObject();
-            for (Map.Entry<String, List<Reconcile.Entry>> e : map.entrySet()) {
-                JSONArray arr = new JSONArray();
-                for (Reconcile.Entry en : e.getValue()) {
-                    JSONObject je = new JSONObject().put("d", en.date).put("a", en.amount).put("b", en.balance);
-                    je.put("s", en.sig != null ? en.sig : JSONObject.NULL);
-                    arr.put(je);
-                }
-                obj.put(e.getKey(), arr);
-            }
-            context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-                .putString(KEY_RECENT_MOVEMENTS, encrypt(obj.toString())).apply();
-        } catch (Exception e) {
-            Log.w(TAG, "saveRecentMovements failed", e);
-        }
-    }
-
     /** The last stated balance per bank, persisted so an incremental scan can delta the first new
      *  message against it instead of the very first message in the scan window. */
-    private static Map<String, Long> loadLastBalances(Context context) {
-        Map<String, Long> map = new HashMap<>();
-        try {
-            String raw = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
-                .getString(KEY_HISTORY_LAST_BALANCE, null);
-            if (raw == null) return map;
-            String json = raw.indexOf('{') == 0 ? raw : decrypt(raw);
-            map = deserializeLastBalances(json);
-        } catch (Exception e) {
-            Log.w(TAG, "loadLastBalances failed", e);
-        }
-        return map;
-    }
-
     static String serializeLastBalances(Map<String, Long> map) throws Exception {
         JSONObject obj = new JSONObject();
         for (Map.Entry<String, Long> e : map.entrySet()) obj.put(e.getKey(), e.getValue().longValue());
@@ -1752,22 +1633,6 @@ final class BalanceData {
             }
         } catch (Exception ignored) { }
         return map;
-    }
-
-    private static void saveLastBalances(Context context, Map<String, Long> map) {
-        try {
-            JSONObject obj = new JSONObject();
-            for (Map.Entry<String, Long> e : map.entrySet()) obj.put(e.getKey(), e.getValue().longValue());
-            if (map.isEmpty()) {
-                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-                    .remove(KEY_HISTORY_LAST_BALANCE).apply();
-                return;
-            }
-            context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-                .putString(KEY_HISTORY_LAST_BALANCE, encrypt(obj.toString())).apply();
-        } catch (Exception ex) {
-            Log.w(TAG, "saveLastBalances failed", ex);
-        }
     }
 
     /** Folds the two letter forms Persian text arrives in onto one: the Arabic yeh and kaf onto their

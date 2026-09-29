@@ -2,9 +2,13 @@ package com.ashkanrafiee.balance;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Immutable, already-prepared result of a history scan. */
 final class HistoryScanPublication {
@@ -16,10 +20,11 @@ final class HistoryScanPublication {
     private final Long historyThrough;
     private final Integer historyRulesVersion;
     private final Integer historySchema;
+    private final Set<String> removals;
 
     private HistoryScanPublication(byte[] transactionsJson, byte[] reasonsJson, byte[] channelsJson,
             byte[] recentMovementsJson, byte[] historyLastBalanceJson, Long historyThrough,
-            Integer historyRulesVersion, Integer historySchema) {
+            Integer historyRulesVersion, Integer historySchema, Set<String> removals) {
         if (transactionsJson == null) throw new IllegalArgumentException("ARGUMENT");
         this.transactionsJson = transactionsJson.clone();
         this.reasonsJson = clone(reasonsJson);
@@ -29,6 +34,14 @@ final class HistoryScanPublication {
         this.historyThrough = historyThrough;
         this.historyRulesVersion = historyRulesVersion;
         this.historySchema = historySchema;
+        this.removals = removals(removals, Arrays.asList(FinancialSnapshotAdapter.TRANSACTIONS,
+                FinancialSnapshotAdapter.TRANSACTION_REASONS,
+                FinancialSnapshotAdapter.TRANSACTION_CHANNELS,
+                FinancialSnapshotAdapter.RECENT_MOVEMENTS,
+                FinancialSnapshotAdapter.HISTORY_LAST_BALANCE,
+                FinancialSnapshotAdapter.HISTORY_THROUGH,
+                FinancialSnapshotAdapter.HISTORY_RULES_VERSION,
+                FinancialSnapshotAdapter.HISTORY_SCHEMA));
     }
 
     static Builder builder() { return new Builder(); }
@@ -36,9 +49,18 @@ final class HistoryScanPublication {
     static HistoryScanPublication prepare(byte[] transactionsJson, byte[] reasonsJson,
             byte[] channelsJson, byte[] recentMovementsJson, byte[] historyLastBalanceJson,
             Long historyThrough, Integer historyRulesVersion, Integer historySchema) {
+        return prepare(transactionsJson, reasonsJson, channelsJson, recentMovementsJson,
+                historyLastBalanceJson, historyThrough, historyRulesVersion, historySchema,
+                Collections.emptySet());
+    }
+
+    static HistoryScanPublication prepare(byte[] transactionsJson, byte[] reasonsJson,
+            byte[] channelsJson, byte[] recentMovementsJson, byte[] historyLastBalanceJson,
+            Long historyThrough, Integer historyRulesVersion, Integer historySchema,
+            Set<String> removals) {
         return new HistoryScanPublication(transactionsJson, reasonsJson, channelsJson,
                 recentMovementsJson, historyLastBalanceJson, historyThrough,
-                historyRulesVersion, historySchema);
+                historyRulesVersion, historySchema, removals);
     }
 
     byte[] transactionsJson() { return transactionsJson.clone(); }
@@ -49,6 +71,9 @@ final class HistoryScanPublication {
     Long historyThrough() { return historyThrough; }
     Integer historyRulesVersion() { return historyRulesVersion; }
     Integer historySchema() { return historySchema; }
+
+    /** The history-owned components this publication deletes, because the scan derived none. */
+    Set<String> removals() { return removals; }
 
     /** Returns only the history-owned components represented by this publication. */
     Map<String, byte[]> updates() {
@@ -73,7 +98,7 @@ final class HistoryScanPublication {
 
     void publish(FinancialSnapshotAdapter adapter) throws IOException {
         if (adapter == null) throw new IllegalArgumentException("ARGUMENT");
-        adapter.publishHistory(updates());
+        adapter.publishHistory(updates(), removals);
     }
 
     static final class Builder {
@@ -85,6 +110,7 @@ final class HistoryScanPublication {
         private Long historyThrough;
         private Integer historyRulesVersion;
         private Integer historySchema;
+        private Set<String> removals = Collections.emptySet();
 
         Builder transactionsJson(byte[] value) { transactionsJson = value; return this; }
         Builder reasonsJson(byte[] value) { reasonsJson = value; return this; }
@@ -94,12 +120,25 @@ final class HistoryScanPublication {
         Builder historyThrough(Long value) { historyThrough = value; return this; }
         Builder historyRulesVersion(Integer value) { historyRulesVersion = value; return this; }
         Builder historySchema(Integer value) { historySchema = value; return this; }
+        Builder removals(Set<String> value) { removals = value; return this; }
 
         HistoryScanPublication build() {
             return new HistoryScanPublication(transactionsJson, reasonsJson, channelsJson,
                     recentMovementsJson, historyLastBalanceJson, historyThrough,
-                    historyRulesVersion, historySchema);
+                    historyRulesVersion, historySchema, removals);
         }
+    }
+
+    /** Rejects a null, overlapping or non-history-owned removal. */
+    private static Set<String> removals(Set<String> values, List<String> owned) {
+        if (values == null) throw new IllegalArgumentException("ARGUMENT");
+        Set<String> result = new LinkedHashSet<>();
+        for (String name : values) {
+            if (name == null || !owned.contains(name) || result.contains(name))
+                throw new IllegalArgumentException("ARGUMENT");
+            result.add(name);
+        }
+        return Collections.unmodifiableSet(result);
     }
 
     private static byte[] clone(byte[] value) { return value == null ? null : value.clone(); }

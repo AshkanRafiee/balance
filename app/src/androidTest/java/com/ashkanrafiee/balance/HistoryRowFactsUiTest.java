@@ -52,7 +52,7 @@ public class HistoryRowFactsUiTest {
      *  anything. */
     private Transaction movement;
 
-    @Before public void setUp() {
+    @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         originalTag = LocaleHelper.currentTag(ctx);
         originalCurrency = CurrencyHelper.currency(ctx);
@@ -64,10 +64,10 @@ public class HistoryRowFactsUiTest {
         BalanceData.reset(ctx, true);
         movement = new Transaction(BANK, ACCOUNT, System.currentTimeMillis(), -220_000L, 48_000_000L,
             "sig-A", "content-A");
-        BalanceData.writeTransactions(ctx, new ArrayList<>(Arrays.asList(movement)));
+        FinancialTestStore.writeTransactions(ctx, new ArrayList<>(Arrays.asList(movement)));
     }
 
-    @After public void tearDown() {
+    @After public void tearDown() throws Exception {
         if (scenario != null) scenario.close();
         LocaleHelper.setLanguage(ctx, originalTag);
         CurrencyHelper.setCurrency(ctx, originalCurrency);
@@ -76,16 +76,16 @@ public class HistoryRowFactsUiTest {
 
     private androidx.test.core.app.ActivityScenario<HistoryActivity> scenario;
 
-    private void stateReason(String reason) {
+    private void stateReason(String reason) throws Exception {
         java.util.Map<String, String> reasons = new java.util.HashMap<>();
         reasons.put(BalanceData.noteKey(movement), reason);
-        BalanceData.mergeReasons(ctx, reasons);
+        FinancialTestStore.mergeReasons(ctx, reasons);
     }
 
-    private void stateChannel(String channel) {
+    private void stateChannel(String channel) throws Exception {
         java.util.Map<String, String> channels = new java.util.HashMap<>();
         channels.put(BalanceData.noteKey(movement), channel);
-        BalanceData.mergeChannels(ctx, channels);
+        FinancialTestStore.mergeChannels(ctx, channels);
     }
 
     /** Renders the screen and waits for it. {@code stringsIn} is the context the assertions read
@@ -103,7 +103,7 @@ public class HistoryRowFactsUiTest {
         await(() -> findByDescription(stringsIn.getString(R.string.history_export)) != null, 20_000);
     }
 
-    @Test public void aMovementWithAReason_showsTheCaptionAndSpeaksIt() {
+    @Test public void aMovementWithAReason_showsTheCaptionAndSpeaksIt() throws Exception {
         stateReason(TOPUP);
         launch(ctx);
 
@@ -114,7 +114,7 @@ public class HistoryRowFactsUiTest {
         assertTrue("the row must stay reachable by touch", row.isClickable());
     }
 
-    @Test public void aMovementWithAChannel_showsTheCaptionAndSpeaksIt() {
+    @Test public void aMovementWithAChannel_showsTheCaptionAndSpeaksIt() throws Exception {
         // A channel on its own is the whole reason a screen reader has to be told: the chip inside the
         // row is never reached, so a row the bank said nothing else about would otherwise be heard as
         // nothing but the invitation to add a note.
@@ -127,7 +127,7 @@ public class HistoryRowFactsUiTest {
         assertTrue("the row must stay reachable by touch", row.isClickable());
     }
 
-    @Test public void aMovementWithBoth_showsAndSpeaksBoth() {
+    @Test public void aMovementWithBoth_showsAndSpeaksBoth() throws Exception {
         stateReason(TOPUP);
         stateChannel(SHETAB);
         launch(ctx);
@@ -144,7 +144,7 @@ public class HistoryRowFactsUiTest {
                 ctx.getString(R.string.note_row_hint)));
     }
 
-    @Test public void aMovementWithNeither_keepsThePlainNoteHint() {
+    @Test public void aMovementWithNeither_keepsThePlainNoteHint() throws Exception {
         launch(ctx);
         View row = findByDescription(ctx.getString(R.string.note_row_hint));
         assertNotNull("a movement the bank said nothing about is just an invitation to add a note",
@@ -152,7 +152,7 @@ public class HistoryRowFactsUiTest {
         assertTrue(row.isClickable());
     }
 
-    @Test public void aChannelThisBuildCannotCaption_showsNothingAndSpeaksNothing() {
+    @Test public void aChannelThisBuildCannotCaption_showsNothingAndSpeaksNothing() throws Exception {
         // Storage is not the filter: an unknown channel is not on the row and not in the description,
         // so a fragment of a bank message never reaches the user as though the app understood it.
         stateChannel("درگاه اینترنتی");
@@ -162,7 +162,7 @@ public class HistoryRowFactsUiTest {
         assertNotNull(findByDescription(ctx.getString(R.string.note_row_hint)));
     }
 
-    @Test public void bothFacts_inPersian_areSpokenInPersian() {
+    @Test public void bothFacts_inPersian_areSpokenInPersian() throws Exception {
         // The same row in the other language: the clauses and the hint are all built from resources,
         // so a Persian user hears Persian and a missing translation would show up here.
         LocaleHelper.setLanguage(ctx, "fa");
@@ -180,7 +180,7 @@ public class HistoryRowFactsUiTest {
             row.getContentDescription().toString().contains("یادداشت"));
     }
 
-    @Test public void aUserNote_isSpokenAlongsideTheFactsTheBankGave() {
+    @Test public void aUserNote_isSpokenAlongsideTheFactsTheBankGave() throws Exception {
         // All three at once, in the order they are read: the bank's two facts, then the user's own
         // words, then what the tap still does. A note is the one thing on the row no rescan brings
         // back, so leaving it out of the description would make it write-only.
@@ -199,7 +199,7 @@ public class HistoryRowFactsUiTest {
             "Your note: rent for Ali.", "Tap to edit it");
     }
 
-    @Test public void aUserNoteOnItsOwn_isSpokenRatherThanInvited() {
+    @Test public void aUserNoteOnItsOwn_isSpokenRatherThanInvited() throws Exception {
         // A note the user wrote with the bank saying nothing is exactly the row that used to be heard
         // as a bare invitation. It is spoken instead, and the invitation to add a note is dropped in
         // favour of the edit the row really offers.

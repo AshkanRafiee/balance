@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.spec.KeySpec;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -282,12 +283,11 @@ final class BackupManager {
                 result.updated++;
             }
         }
-        BalanceData.write(context, merged);
 
         // Transaction history is merged as a union (deduped), never dropped, so restoring onto the
         // same device does not lose locally-scanned movements and a newer backup cannot destroy older
         // ones. The roster is capped so a hostile backup cannot bloat the in-memory history.
-        List<Transaction> currentTxs = BalanceData.readTransactions(context);
+        List<Transaction> currentTxs = new ArrayList<>(BalanceData.readTransactions(context));
         if (backupTxs.size() > MAX_TRANSACTIONS)
             backupTxs = backupTxs.subList(0, MAX_TRANSACTIONS);
         Set<String> seen = new HashSet<>();
@@ -301,34 +301,34 @@ final class BackupManager {
             seen.add(key);
             currentTxs.add(t);
         }
-        BalanceData.writeTransactions(context, currentTxs);
 
         // Notes are merged as a union with the local text winning, mirroring the transaction union:
         // a restore must never clobber the note the user typed since the backup was made, and notes
         // that only exist in the backup (for movements brought in by this restore) land here too. An
-        // older backup without a notes section leaves the current notes completely untouched.
-        if (!backupNotes.isEmpty()) {
-            Map<String, String> currentNotes = BalanceData.readNotes(context);
-            if (unionLocalFirst(currentNotes, backupNotes)) BalanceData.writeNotes(context, currentNotes);
-        }
+        // older backup without a notes section leaves the current notes completely untouched. The
+        // reasons the banks stated travel with the movements they describe, merged exactly like the
+        // notes, and so do the channels — so a movement whose SMS was deleted before the backup
+        // still shows why it happened and how the money moved.
+        Map<String, String> currentNotes = new LinkedHashMap<>(BalanceData.readNotes(context));
+        Map<String, String> currentReasons = new LinkedHashMap<>(BalanceData.readReasons(context));
+        Map<String, String> currentChannels = new LinkedHashMap<>(BalanceData.readChannels(context));
+        boolean notesChanged = unionLocalFirst(currentNotes, backupNotes);
+        boolean reasonsChanged = unionLocalFirst(currentReasons, backupReasons);
+        boolean channelsChanged = unionLocalFirst(currentChannels, backupChannels);
 
-        // The reasons the banks stated travel with the movements they describe, merged exactly like the
-        // notes: the local text wins, and a reason that only exists in the backup lands here so a
-        // movement whose SMS was deleted before the backup still shows why it happened. A backup
-        // without a reasons section leaves the current reasons completely untouched.
-        if (!backupReasons.isEmpty()) {
-            Map<String, String> currentReasons = BalanceData.readReasons(context);
-            if (unionLocalFirst(currentReasons, backupReasons))
-                BalanceData.writeReasons(context, currentReasons);
-        }
-
-        // The channels the banks stated travel the same way, so a movement whose SMS was deleted
-        // before the backup still shows how the money moved.
-        if (!backupChannels.isEmpty()) {
-            Map<String, String> currentChannels = BalanceData.readChannels(context);
-            if (unionLocalFirst(currentChannels, backupChannels))
-                BalanceData.writeChannels(context, currentChannels);
-        }
+        // The whole merge is one generation: a restore can no longer leave the balances applied
+        // while its transactions failed to write, or a movement in the history with no note.
+        FinancialAuthority authority = FinancialAuthority.open(context);
+        RestorePublication.prepare(
+                BalanceData.serialize(merged).getBytes(StandardCharsets.UTF_8),
+                BalanceData.serializeTransactions(currentTxs).getBytes(StandardCharsets.UTF_8),
+                notesChanged ? BalanceData.serializeTextMap(currentNotes)
+                        .getBytes(StandardCharsets.UTF_8) : null,
+                reasonsChanged ? BalanceData.serializeTextMap(currentReasons)
+                        .getBytes(StandardCharsets.UTF_8) : null,
+                channelsChanged ? BalanceData.serializeTextMap(currentChannels)
+                        .getBytes(StandardCharsets.UTF_8) : null,
+                result.added, result.updated).publish(authority.snapshots());
         return result;
     }
 
