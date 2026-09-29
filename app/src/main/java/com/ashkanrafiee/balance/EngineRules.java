@@ -16,8 +16,10 @@ import java.util.Map;
 
 /** Loads the official bank packs bundled as main assets (rules/official/IR) and indexes them by
  *  sender, so the production path can dispatch a message to the pack engine exactly
- *  where the engine covers it. It is inert until {@link #active()} is made true by the seam; the
- *  app keeps using {@link BankRules} and the legacy reducers while this instance is inactive.
+ *  where the engine covers it. {@link #activate(Context)} is called from every scan entry
+ *  point, so the engine owns a covered message; anything it does not cover, or any message
+ *  it does not parse, still goes through {@link BankRules} and the legacy reducers, and
+ *  {@link #active()} is the single kill switch for the whole seam.
  *
  *  <p>The sender index uses the same normalization as {@code BankRules.resolve}, so an inbox
  *  sender that differs from the alias only in whitespace, case, or an IR mobile prefix still finds
