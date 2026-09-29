@@ -1,0 +1,143 @@
+{
+  "schema": "prototype-fixtures-1",
+  "pack": "official.ir.hekmat",
+  "cases": [
+    {
+      "id": "balance",
+      "sourceId": "balance",
+      "sender": "Hekmat Iranian",
+      "arrival": "2026-08-30T06:00:00Z",
+      "zone": "Asia/Tehran",
+      "body": "\u0645\u0648\u062c\u0648\u062f\u06cc:900",
+      "legacy": {
+        "status": "PARSED",
+        "bank": "ir.hekmat",
+        "account": null,
+        "reason": null,
+        "channel": null,
+        "txn": null,
+        "balance": 900,
+        "time": 1788069600000,
+        "timeArrival": true
+      },
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "account": null,
+            "currency": "IRR",
+            "scale": 0,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Tehran",
+              "fallback": true
+            },
+            "id": "balance",
+            "minorUnits": "900"
+          }
+        ]
+      }
+    },
+    {
+      "id": "debit",
+      "sourceId": "debit",
+      "sender": "Hekmat Iranian",
+      "arrival": "2026-08-30T06:00:00Z",
+      "zone": "Asia/Tehran",
+      "body": "\u0645\u0648\u062c\u0648\u062f\u06cc:900\n\u0645\u0628\u0644\u063a:100-",
+      "legacy": {
+        "status": "PARSED",
+        "bank": "ir.hekmat",
+        "account": null,
+        "reason": null,
+        "channel": null,
+        "txn": -100,
+        "balance": 900,
+        "time": 1788069600000,
+        "timeArrival": true
+      },
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "account": null,
+            "currency": "IRR",
+            "scale": 0,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Tehran",
+              "fallback": true
+            },
+            "id": "balance",
+            "minorUnits": "900"
+          },
+          {
+            "account": null,
+            "currency": "IRR",
+            "scale": 0,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Tehran",
+              "fallback": true
+            },
+            "id": "debit",
+            "minorUnits": "-100"
+          }
+        ]
+      }
+    },
+    {
+      "id": "credit",
+      "sourceId": "credit",
+      "sender": "Hekmat Iranian",
+      "arrival": "2026-08-30T06:00:00Z",
+      "zone": "Asia/Tehran",
+      "body": "\u0645\u0648\u062c\u0648\u062f\u06cc:900\n\u0648\u0627\u0631\u06cc\u0632:100+",
+      "legacy": {
+        "status": "PARSED",
+        "bank": "ir.hekmat",
+        "account": null,
+        "reason": null,
+        "channel": null,
+        "txn": 100,
+        "balance": 900,
+        "time": 1788069600000,
+        "timeArrival": true
+      },
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "account": null,
+            "currency": "IRR",
+            "scale": 0,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Tehran",
+              "fallback": true
+            },
+            "id": "balance",
+            "minorUnits": "900"
+          },
+          {
+            "account": null,
+            "currency": "IRR",
+            "scale": 0,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Tehran",
+              "fallback": true
+            },
+            "id": "credit",
+            "minorUnits": "100"
+          }
+        ]
+      }
+    }
+  ]
+}
