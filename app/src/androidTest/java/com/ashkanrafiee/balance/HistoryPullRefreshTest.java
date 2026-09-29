@@ -56,6 +56,7 @@ public class HistoryPullRefreshTest {
         exec("pm grant " + ctx.getPackageName() + " android.permission.READ_SMS");
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        FinancialTestStore.wipe(ctx);
         clearInbox();
     }
 
@@ -69,6 +70,10 @@ public class HistoryPullRefreshTest {
                 }
             }
         });
+        // Let a refresh the pull already started drain before the next test wipes the store,
+        // otherwise it repopulates the balances after the wipe and the observer assertion trips.
+        sleep(1_500);
+        FinancialTestStore.wipe(ctx);
     }
 
     @Test public void pullDownOverEmptyArea_refreshesTheWholeApp() throws Exception {
