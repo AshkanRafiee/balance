@@ -1,0 +1,160 @@
+{
+  "schema": "prototype-fixtures-1",
+  "pack": "example.international",
+  "cases": [
+    {
+      "id": "dst-across-seasons",
+      "sourceId": "synthetic-occurrence-1",
+      "sender": "EXAMPLE-BANK",
+      "arrival": "2026-08-30T06:00:00Z",
+      "zone": "America/New_York",
+      "body": "International statement\nAccount=0001;Balance=100.00;AsOf=15/01/2026 09:30:00;Move=11.00;Original=10.00;Dir=DR;Posted=07/15/2026 09:30:00;",
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "id": "balance-usd",
+            "account": "0001",
+            "currency": "USD",
+            "minorUnits": "10000",
+            "scale": 2,
+            "time": {
+              "instant": "2026-01-15T14:30:00Z",
+              "precision": "SECOND",
+              "zone": "America/New_York",
+              "fallback": false
+            }
+          },
+          {
+            "id": "movement",
+            "account": null,
+            "currency": "USD",
+            "minorUnits": "-1100",
+            "scale": 2,
+            "time": {
+              "instant": "2026-07-15T13:30:00Z",
+              "precision": "SECOND",
+              "zone": "America/New_York",
+              "fallback": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "negative-fractional-balance",
+      "sourceId": "synthetic-occurrence-2",
+      "sender": "EXAMPLE-BANK",
+      "arrival": "2026-08-30T06:00:00Z",
+      "zone": "Europe/Berlin",
+      "body": "International statement\nAccount=0001;Balance=-11.25;AsOf=20/02/2026 09:30:00;Move=1.00;Original=1.00;Dir=DR;Posted=02/20/2026 09:30:00;",
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "id": "balance-usd",
+            "account": "0001",
+            "currency": "USD",
+            "minorUnits": "-1125",
+            "scale": 2,
+            "time": {
+              "instant": "2026-02-20T14:30:00Z",
+              "precision": "SECOND",
+              "zone": "America/New_York",
+              "fallback": false
+            }
+          },
+          {
+            "id": "movement",
+            "account": null,
+            "currency": "USD",
+            "minorUnits": "-100",
+            "scale": 2,
+            "time": {
+              "instant": "2026-02-20T14:30:00Z",
+              "precision": "SECOND",
+              "zone": "America/New_York",
+              "fallback": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "movement-only-statement",
+      "sourceId": "synthetic-occurrence-3",
+      "sender": "EXAMPLE-BANK",
+      "arrival": "2026-08-30T06:00:00Z",
+      "zone": "America/New_York",
+      "body": "Movement statement\nAccount=0001;Move=55.50;Cur=USD;Dir=CR;Post=03/30/2026 12:00:00;",
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "id": "movement-only",
+            "account": null,
+            "currency": "USD",
+            "minorUnits": "5550",
+            "scale": 2,
+            "time": {
+              "instant": "2026-03-30T16:00:00Z",
+              "precision": "SECOND",
+              "zone": "America/New_York",
+              "fallback": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "unsupported-currency",
+      "sourceId": "synthetic-occurrence-4",
+      "sender": "EXAMPLE-BANK",
+      "arrival": "2026-08-30T06:00:00Z",
+      "zone": "America/New_York",
+      "body": "Movement statement\nAccount=0001;Move=55.50;Cur=JPY;Dir=CR;Post=03/30/2026 12:00:00;",
+      "expected": {
+        "status": "INVALID",
+        "outputs": []
+      }
+    },
+    {
+      "id": "unsupported-direction",
+      "sourceId": "synthetic-occurrence-5",
+      "sender": "EXAMPLE-BANK",
+      "arrival": "2026-08-30T06:00:00Z",
+      "zone": "America/New_York",
+      "body": "Movement statement\nAccount=0001;Move=55.50;Cur=USD;Dir=TR;Post=03/30/2026 12:00:00;",
+      "expected": {
+        "status": "INVALID",
+        "outputs": []
+      }
+    },
+    {
+      "id": "neighbor-year-short-date",
+      "sourceId": "synthetic-occurrence-6",
+      "sender": "EXAMPLE-BANK",
+      "arrival": "2026-09-20T00:00:00Z",
+      "zone": "America/New_York",
+      "body": "Short date statement\nAccount=0001;Balance=40.00;Date=15/09;",
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "id": "short-balance",
+            "account": "0001",
+            "currency": "USD",
+            "minorUnits": "4000",
+            "scale": 2,
+            "time": {
+              "instant": "2026-09-15T04:00:00Z",
+              "precision": "DAY",
+              "zone": "America/New_York",
+              "fallback": false
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

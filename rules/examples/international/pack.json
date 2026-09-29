@@ -1,0 +1,328 @@
+{
+  "schema": "prototype-1",
+  "id": "example.international",
+  "revision": "r1",
+  "bank": {
+    "id": "example.international",
+    "country": "US",
+    "name": "International Example"
+  },
+  "templates": [
+    {
+      "id": "statement",
+      "senders": [
+        "EXAMPLE-BANK"
+      ],
+      "guards": [
+        {
+          "line": 0,
+          "literal": "International statement",
+          "excluded": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "balance-usd",
+          "region": {
+            "line": 1,
+            "after": "",
+            "before": "",
+            "maxLength": 256
+          },
+          "kind": "BOOKED_BALANCE",
+          "account": {
+            "line": -1,
+            "after": "Account=",
+            "before": ";",
+            "maxLength": 4
+          },
+          "money": {
+            "amount": {
+              "line": -1,
+              "after": "Balance=",
+              "before": ";",
+              "maxLength": 10
+            },
+            "currency": {
+              "fixed": "USD"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII",
+            "unitMultiplier": 1
+          },
+          "date": {
+            "calendar": "GREGORIAN",
+            "field": {
+              "line": -1,
+              "after": "AsOf=",
+              "before": ";",
+              "maxLength": 23
+            },
+            "orders": [
+              "DMY"
+            ],
+            "separator": "/",
+            "withTime": true,
+            "digits": "ASCII",
+            "maxPastSeconds": 31622400,
+            "maxFutureSeconds": 172800,
+            "options": {
+              "year": "FULL",
+              "yearBase": 0,
+              "variableWidth": false,
+              "layout": "SEPARATED",
+              "timeSeparator": " ",
+              "seconds": true,
+              "zone": "America/New_York"
+            }
+          }
+        },
+        {
+          "id": "movement",
+          "region": {
+            "line": 1,
+            "after": "",
+            "before": "",
+            "maxLength": 256
+          },
+          "kind": "POSTED_MOVEMENT",
+          "accountOptional": true,
+          "direction": {
+            "token": {
+              "line": -1,
+              "after": "Dir=",
+              "before": ";",
+              "maxLength": 2
+            },
+            "mapping": {
+              "DR": "DEBIT",
+              "CR": "CREDIT"
+            }
+          },
+          "money": {
+            "amount": {
+              "line": -1,
+              "after": "Move=",
+              "before": ";",
+              "maxLength": 10
+            },
+            "currency": {
+              "fixed": "USD"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII",
+            "unitMultiplier": 1
+          },
+          "originalAmount": {
+            "amount": {
+              "line": -1,
+              "after": "Original=",
+              "before": ";",
+              "maxLength": 8
+            },
+            "currency": {
+              "fixed": "EUR"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII",
+            "unitMultiplier": 1
+          },
+          "date": {
+            "calendar": "GREGORIAN",
+            "field": {
+              "line": -1,
+              "after": "Posted=",
+              "before": ";",
+              "maxLength": 23
+            },
+            "orders": [
+              "MDY"
+            ],
+            "separator": "/",
+            "withTime": true,
+            "digits": "ASCII",
+            "maxPastSeconds": 31622400,
+            "maxFutureSeconds": 172800,
+            "options": {
+              "year": "FULL",
+              "yearBase": 0,
+              "variableWidth": false,
+              "layout": "SEPARATED",
+              "timeSeparator": " ",
+              "seconds": true,
+              "zone": "America/New_York"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "movement-only",
+      "senders": [
+        "EXAMPLE-BANK"
+      ],
+      "guards": [
+        {
+          "line": 0,
+          "literal": "Movement statement",
+          "excluded": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "movement-only",
+          "region": {
+            "line": 1,
+            "after": "",
+            "before": "",
+            "maxLength": 256
+          },
+          "kind": "POSTED_MOVEMENT",
+          "accountOptional": true,
+          "direction": {
+            "token": {
+              "line": -1,
+              "after": "Dir=",
+              "before": ";",
+              "maxLength": 2
+            },
+            "mapping": {
+              "DR": "DEBIT",
+              "CR": "CREDIT"
+            }
+          },
+          "money": {
+            "amount": {
+              "line": -1,
+              "after": "Move=",
+              "before": ";",
+              "maxLength": 10
+            },
+            "currency": {
+              "token": {
+                "line": -1,
+                "after": "Cur=",
+                "before": ";",
+                "maxLength": 3
+              },
+              "mapping": {
+                "USD": "USD",
+                "EUR": "EUR"
+              }
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII",
+            "unitMultiplier": 1
+          },
+          "date": {
+            "calendar": "GREGORIAN",
+            "field": {
+              "line": -1,
+              "after": "Post=",
+              "before": ";",
+              "maxLength": 23
+            },
+            "orders": [
+              "MDY"
+            ],
+            "separator": "/",
+            "withTime": true,
+            "digits": "ASCII",
+            "maxPastSeconds": 31622400,
+            "maxFutureSeconds": 172800,
+            "options": {
+              "year": "FULL",
+              "yearBase": 0,
+              "variableWidth": false,
+              "layout": "SEPARATED",
+              "timeSeparator": " ",
+              "seconds": true,
+              "zone": "America/New_York"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "short-date",
+      "senders": [
+        "EXAMPLE-BANK"
+      ],
+      "guards": [
+        {
+          "line": 0,
+          "literal": "Short date statement",
+          "excluded": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "short-balance",
+          "region": {
+            "line": 1,
+            "after": "",
+            "before": "",
+            "maxLength": 256
+          },
+          "kind": "BOOKED_BALANCE",
+          "account": {
+            "line": -1,
+            "after": "Account=",
+            "before": ";",
+            "maxLength": 4
+          },
+          "money": {
+            "amount": {
+              "line": -1,
+              "after": "Balance=",
+              "before": ";",
+              "maxLength": 10
+            },
+            "currency": {
+              "fixed": "USD"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII",
+            "unitMultiplier": 1
+          },
+          "date": {
+            "calendar": "GREGORIAN",
+            "field": {
+              "line": -1,
+              "after": "Date=",
+              "before": ";",
+              "maxLength": 6
+            },
+            "orders": [
+              "DM"
+            ],
+            "separator": "/",
+            "withTime": false,
+            "digits": "ASCII",
+            "maxPastSeconds": 31622400,
+            "maxFutureSeconds": 172800,
+            "options": {
+              "year": "NEIGHBOR",
+              "yearBase": 0,
+              "variableWidth": false,
+              "layout": "SEPARATED",
+              "timeSeparator": " ",
+              "seconds": false,
+              "zone": "America/New_York"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
