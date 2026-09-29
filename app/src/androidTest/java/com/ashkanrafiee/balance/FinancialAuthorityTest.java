@@ -71,6 +71,15 @@ public class FinancialAuthorityTest {
                 .get(FinancialSnapshotAdapter.RULES_VERSION));
     }
 
+    @Test public void repositoryConstructorsRemainIndependentForTestsAndAdapters() {
+        Fake first = new Fake();
+        Fake second = new Fake();
+        FinancialAuthority one = FinancialAuthority.fromRepository(new FinancialRepository(first));
+        FinancialAuthority two = FinancialAuthority.fromRepository(new FinancialRepository(second));
+        assertNotSame(one, two);
+        assertNotSame(one.repository(), two.repository());
+    }
+
     private static Map<String, byte[]> updates(String balances, String scannedThrough) {
         Map<String, byte[]> updates = new LinkedHashMap<>();
         updates.put(FinancialSnapshotAdapter.BALANCES, bytes(balances));

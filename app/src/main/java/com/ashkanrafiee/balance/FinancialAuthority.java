@@ -12,6 +12,7 @@ import java.io.IOException;
  * opening independent stores or mixing generation and legacy preferences.</p>
  */
 final class FinancialAuthority {
+    private static FinancialAuthority processAuthority;
     private final FinancialRepository repository;
     private final FinancialSnapshotAdapter snapshots;
     private final FinancialOperations operations;
@@ -26,7 +27,11 @@ final class FinancialAuthority {
     /** Opens the canonical store and migrates legacy financial data if required. */
     static FinancialAuthority open(Context context) throws IOException {
         if (context == null) throw new IllegalArgumentException("ARGUMENT");
-        return fromStore(FinancialStoreProvider.open(context));
+        synchronized (BalanceData.class) {
+            if (processAuthority == null)
+                processAuthority = fromStore(FinancialStoreProvider.open(context.getApplicationContext()));
+            return processAuthority;
+        }
     }
 
     /** Package-level constructor for adapters and tests using an already selected backend. */
