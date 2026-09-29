@@ -18,12 +18,30 @@ final class Reconcile {
         final long amount;
         final long balance;
         final String sig;
+        /** Currency of {@link #amount}, the currency of the movement itself. */
+        final String movementCurrency;
+        /** Currency of {@link #balance}, the currency of the ledger the movement settled in. */
+        final String balanceCurrency;
 
         Entry(long date, long amount, long balance, String sig) {
+            this(date, amount, balance, sig, BalanceData.IRR, BalanceData.IRR);
+        }
+
+        Entry(long date, long amount, long balance, String sig,
+                String movementCurrency, String balanceCurrency) {
             this.date = date;
             this.amount = amount;
             this.balance = balance;
             this.sig = sig;
+            this.movementCurrency = movementCurrency == null ? BalanceData.IRR : movementCurrency;
+            this.balanceCurrency = balanceCurrency == null ? BalanceData.IRR : balanceCurrency;
+        }
+
+        /** Whether chaining this entry's amount onto the previous entry's balance would add two
+         *  different currencies, which is arithmetic the app has no rate to perform. */
+        boolean chainsWith(Entry previous) {
+            return balanceCurrency.equals(previous.balanceCurrency)
+                    && balanceCurrency.equals(movementCurrency);
         }
     }
 
@@ -51,6 +69,7 @@ final class Reconcile {
                 if (i == j) continue;
                 Entry ei = in.get(i);
                 Entry ej = in.get(j);
+                if (!ej.chainsWith(ei)) continue;
                 long sum;
                 try {
                     sum = Math.addExact(ei.balance, ej.amount);

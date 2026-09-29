@@ -22,6 +22,12 @@ public class ReconcileTest {
         return new Reconcile.Entry(i, amount, balance, "sig-" + i);
     }
 
+    /** A card movement spent in one currency and settled into a balance held in another. */
+    private static Reconcile.Entry converted(int i, long amount, String movementCurrency,
+            long balance, String balanceCurrency) {
+        return new Reconcile.Entry(i, amount, balance, "sig-" + i, movementCurrency, balanceCurrency);
+    }
+
     private static long[] sums(List<Reconcile.Entry> in) {
         long[] a = new long[in.size()];
         for (int i = 0; i < in.size(); i++) a[i] = in.get(i).amount;
@@ -128,4 +134,36 @@ public class ReconcileTest {
         for (int i = 0; i < 65; i++) in.add(e(i, 100L, 1000L + i));
         assertNull(Reconcile.order(in));
     }
+
+    // -----------------------------------------------------------------------
+    // Reordering never mixes two currencies
+    // -----------------------------------------------------------------------
+
+    @Test public void order_aConvertedMovementIsNeverChained() {
+        // The arithmetic tempts the matcher -- 600.000 minus 50.000 is exactly the 550.000 the
+        // next message states -- but the two amounts are one in dollars and one in dinars, so the
+        // equality is a coincidence and the chain must be refused.
+        Reconcile.Entry spend = converted(1, -50000, "USD", 600000, "JOD");
+        Reconcile.Entry later = converted(2, -50000, "USD", 550000, "JOD");
+        assertNull(Reconcile.order(Arrays.asList(spend, later)));
+    }
+
+    @Test public void order_aConvertedMovementStillLinksTheStatementsItSitsBetween() {
+        // A conversion is a real statement of the ledger's balance, so the next message of that same
+        // ledger still chains onto it -- the chain uses the balances, which are one currency.
+        Reconcile.Entry spend = converted(1, -50000, "USD", 600000, "JOD");
+        Reconcile.Entry later = converted(2, -20000, "JOD", 580000, "JOD");
+        List<Reconcile.Entry> out = Reconcile.order(Arrays.asList(later, spend));
+        assertEquals(2, out.size());
+        assertSame(spend, out.get(0));
+        assertSame(later, out.get(1));
+    }
+
+    @Test public void order_ledgersInDifferentCurrenciesAreNotConnected() {
+        // Same amounts and same arithmetic, two currencies: the subtraction would be meaningless.
+        Reconcile.Entry rial = e(1, -100000, 900000);
+        Reconcile.Entry dinar = converted(2, -100000, "JOD", 800000, "JOD");
+        assertNull(Reconcile.order(Arrays.asList(rial, dinar)));
+    }
+
 }

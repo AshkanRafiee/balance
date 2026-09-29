@@ -33,6 +33,27 @@ public class ResidualTest {
         return new Transaction(bank, account, date, amount, null, null);
     }
 
+    /** A movement that stated its balance in a currency other than the rial. */
+    private static Transaction t(String bank, String account, long date, long amount, long balance,
+            String balanceCurrency) {
+        return new Transaction(bank, account, date, amount, balance, "sig", null, balanceCurrency,
+                balanceCurrency);
+    }
+
+    /** A movement in a foreign currency that stated no balance, so it can anchor nothing. */
+    private static Transaction foreign(String bank, String account, long date, long amount,
+            String currency) {
+        return new Transaction(bank, account, date, amount, null, null, null, currency);
+    }
+
+    /** A card spent in one currency and settled into a balance held in another: the two figures on
+     *  the message are two sums of money, and the app can state neither as the other. */
+    private static Transaction converted(String bank, String account, long date,
+            long amount, String movementCurrency, long balance, String balanceCurrency) {
+        return new Transaction(bank, account, date, amount, balance, "sig-" + date, null,
+                movementCurrency, balanceCurrency);
+    }
+
     private static long[] amounts(List<Residual> rs) {
         long[] a = new long[rs.size()];
         for (int i = 0; i < rs.size(); i++) a[i] = rs.get(i).amount;
@@ -318,4 +339,59 @@ public class ResidualTest {
         assertEquals(1, out.size());
         assertEquals(-3_000_000L, out.get(0).amount);
     }
+
+    // -----------------------------------------------------------------------
+    // A card conversion is not unaccounted money
+    // -----------------------------------------------------------------------
+
+    @Test public void aConvertedMovementIsNeverCountedInsideABracket() {
+        // 1000.000 held, 500.000 spent in dollars, 600.000 left. Subtracting the dollars from the
+        // dinars would "prove" a gap of a number nobody can derive; the bracket is simply dropped.
+        List<Residual> rs = Residual.between(Arrays.asList(
+                converted("Cairo Amman", null, 0, 0, "JOD", 1000000, "JOD"),
+                converted("Cairo Amman", null, DAY, 50000, "USD", 600000, "JOD"),
+                converted("Cairo Amman", null, 2 * DAY, 0, "JOD", 600000, "JOD")));
+        assertEquals(0, rs.size());
+    }
+
+    @Test public void theNextStatementAfterAConversionOpensAFreshBracket() {
+        // The converted message does not close the first bracket, but its own balance is a real
+        // statement, so the withdrawal that follows it is still measured against it.
+        List<Residual> rs = Residual.between(Arrays.asList(
+                converted("Cairo Amman", null, 0, 0, "JOD", 1000000, "JOD"),
+                converted("Cairo Amman", null, DAY, 50000, "USD", 600000, "JOD"),
+                converted("Cairo Amman", null, 2 * DAY, -20000, "JOD", 580000, "JOD"),
+                converted("Cairo Amman", null, 3 * DAY, 0, "JOD", 380000, "JOD")));
+        assertEquals(1, rs.size());
+        assertEquals(-200000L, rs.get(0).amount);
+        assertEquals(2 * DAY, rs.get(0).fromDate);
+        assertEquals(3 * DAY, rs.get(0).toDate);
+        assertEquals("JOD", rs.get(0).currency);
+    }
+
+    @Test public void aBalanceLessForeignMovementIsInert() {
+        // A message that states a foreign amount and no balance can neither anchor a bracket nor
+        // close one, so it stays out of the rial arithmetic entirely: the withdrawal we did receive
+        // still reconciles exactly, with no gap invented around the euro purchase.
+        List<Residual> rs = Residual.between(Arrays.asList(
+                t(MELLAT, null, 0, 0, 1000000),
+                foreign(MELLAT, null, DAY, -5000, "EUR"),
+                t(MELLAT, null, 2 * DAY, -50000, 950000)));
+        assertEquals(0, rs.size());
+    }
+
+    @Test public void accountsKeepSeparateBracketsPerBalanceCurrency() {
+        // The same card holding a dinar balance and a dollar balance: two brackets, because a
+        // bracket is arithmetic on two balances of the same currency. Each ledger reconciles
+        // exactly on its own -- read as one chain, the second ledger's opening balance would be
+        // measured against the first ledger's closing one and would report 85.000 that never went
+        // missing.
+        List<Residual> rs = Residual.between(Arrays.asList(
+                t("Cairo Amman", "1234", 0, 0, 100000, "JOD"),
+                t("Cairo Amman", "1234", DAY, -10000, 90000, "JOD"),
+                t("Cairo Amman", "1234", 2 * DAY, 0, 5000, "USD"),
+                t("Cairo Amman", "1234", 3 * DAY, -1000, 4000, "USD")));
+        assertEquals(0, rs.size());
+    }
+
 }

@@ -28,9 +28,18 @@ final class Transaction {
      *  scan uses it to reconcile stored entries with their re-parsed messages after a rules update.
      *  Null for entries written before this identity existed. */
     final String content;
-    /** ISO-style code of the currency {@link #amount} and {@link #balance} are denominated in, never
-     *  null; the rial default for every message the app parses today. */
+    /** ISO-style code of the currency {@link #amount} is denominated in, never null; the rial
+     *  default for every message the app parses today. */
     final String currency;
+    /** ISO-style code of the currency {@link #balance} is denominated in, never null, and equal to
+     *  {@link #currency} for every Iranian message.
+     *
+     *  <p>It is a second code only because a card can be spent in one currency and settled in
+     *  another, so the two figures on the same message are two sums of money rather than one. Where
+     *  they differ, the balance moved by an amount that includes a conversion, and the app knows
+     *  neither the rate nor the converted amount: it stores both figures in their own currencies and
+     *  never adds, subtracts or compares them. */
+    final String balanceCurrency;
 
     Transaction(String bank, long date, long amount) {
         this(bank, date, amount, null);
@@ -55,6 +64,11 @@ final class Transaction {
 
     Transaction(String bank, String account, long date, long amount, Long balance, String sig,
             String content, String currency) {
+        this(bank, account, date, amount, balance, sig, content, currency, currency);
+    }
+
+    Transaction(String bank, String account, long date, long amount, Long balance, String sig,
+            String content, String currency, String balanceCurrency) {
         this.bank = bank;
         this.account = account;
         this.date = date;
@@ -63,5 +77,12 @@ final class Transaction {
         this.sig = sig;
         this.content = content;
         this.currency = currency == null ? BalanceData.IRR : currency;
+        this.balanceCurrency = balanceCurrency == null ? BalanceData.IRR : balanceCurrency;
+    }
+
+    /** Whether the movement and the balance the same message reported are two sums in two
+     *  currencies, which is what a card conversion looks like from here. */
+    boolean converted() {
+        return balance != null && !currency.equals(balanceCurrency);
     }
 }

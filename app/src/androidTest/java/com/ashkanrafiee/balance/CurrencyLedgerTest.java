@@ -10,8 +10,10 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The currency-aware ledger identity and row format. A non-IRR row names its currency in both the
@@ -106,5 +108,57 @@ public class CurrencyLedgerTest {
             BalanceData.txIdentityKey(new Transaction("b", "acct", 1, 100, null)));
         assertEquals("b|1|100|acct|USD",
             BalanceData.txIdentityKey(new Transaction("b", "acct", 1, 100, null, null, null, "USD")));
+    }
+
+    @Test public void aConversionKeepsTheIdentityOfItsSpentCurrency() {
+        // The same message re-read under different rules must still be the same message, so the
+        // dedup key follows the money that was actually spent, not the ledger it settled into.
+        Transaction t = new Transaction("b", "acct", 1, 100, 900L, null, "c", "USD", "JOD");
+        assertEquals("b|1|100|acct|USD", BalanceData.txIdentityKey(t));
+    }
+
+    @Test public void aConversionIsFiledUnderTheLedgerItSettledIn() {
+        // A dollar purchase spends the dinar card's balance, so it belongs to the same ledger as
+        // that card's balance row -- the two are the same account and the same sum of money. The
+        // balance currency is the ledger; the spent currency is only what the movement was.
+        Transaction t = new Transaction("b", "acct", 1, 100, 900L, null, "c", "USD", "JOD");
+        assertEquals(BalanceData.storageKey(t.bank, t.account, t.balanceCurrency),
+            BalanceData.storageKey(t.bank, t.account, "JOD"));
+        assertTrue(t.converted());
+    }
+
+    @Test public void windowRoundTrip_keepsBothCurrenciesAndFoldsIrr() throws Exception {
+        // The recent-movements window is the only reconciled state that survives a restart, so it
+        // has to carry the currencies too: a window that forgot them would chain a dollar amount
+        // onto a dinar balance on the next scan.
+        Map<String, List<Reconcile.Entry>> windows = new LinkedHashMap<>();
+        List<Reconcile.Entry> entries = new ArrayList<>();
+        entries.add(new Reconcile.Entry(1, -100, 900, "sig-1"));
+        entries.add(new Reconcile.Entry(2, -50, 850, "sig-2", "USD", "JOD"));
+        windows.put("b|acct|JOD", entries);
+
+        String json = BalanceData.serializeRecentMovements(windows);
+        // The rial entry is written exactly as it always was, so an Iranian device sees the same
+        // bytes it always has; only a window that actually holds another currency grows a field.
+        assertTrue(json.contains("{\"d\":1,\"a\":-100,\"b\":900,\"s\":\"sig-1\"}"));
+        assertTrue(json.contains("\"c\":\"USD\""));
+        assertTrue(json.contains("\"bc\":\"JOD\""));
+
+        List<Reconcile.Entry> back = BalanceData.deserializeRecentMovements(json).get("b|acct|JOD");
+        assertEquals(2, back.size());
+        assertEquals(BalanceData.IRR, back.get(0).movementCurrency);
+        assertEquals(BalanceData.IRR, back.get(0).balanceCurrency);
+        assertEquals("USD", back.get(1).movementCurrency);
+        assertEquals("JOD", back.get(1).balanceCurrency);
+    }
+
+    @Test public void windowRoundTrip_readsAWindowWrittenBeforeCurrencies() {
+        // Every window that exists on a user's device was written by a build with no currency
+        // fields, so its entries must come back as the rial rather than as null.
+        List<Reconcile.Entry> back = BalanceData.deserializeRecentMovements(
+            "{\"b\":[{\"d\":1,\"a\":-100,\"b\":900,\"s\":\"sig-1\"}]}").get("b");
+        assertEquals(1, back.size());
+        assertEquals(BalanceData.IRR, back.get(0).movementCurrency);
+        assertEquals(BalanceData.IRR, back.get(0).balanceCurrency);
     }
 }

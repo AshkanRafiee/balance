@@ -96,7 +96,10 @@ final class Residual {
         Map<String, List<Transaction>> bySlot = new LinkedHashMap<>();
         for (Transaction t : txs) {
             if (t == null) continue;
-            bySlot.computeIfAbsent(BalanceData.storageKey(t.bank, t.account, t.currency),
+            // Brackets are arithmetic on stated balances, so an account's slots are kept apart by
+            // the currency of those balances rather than by the currency of the movements: a card
+            // spent in dollars still settles into one rial or dinar balance chain.
+            bySlot.computeIfAbsent(BalanceData.storageKey(t.bank, t.account, t.balanceCurrency),
                     k -> new ArrayList<>()).add(t);
         }
         List<Residual> found = new ArrayList<>();
@@ -154,6 +157,20 @@ final class Residual {
             // the window the two statements bracket. The closing statement's own movement counts
             // too: the balance it reports is the one read after that very movement, so leaving it
             // out would report every ordinary movement as a missing one.
+            // A card can be spent in one currency and settled in another, and the difference
+            // between the two figures is a rate the app has no way to know. Such a movement is
+            // therefore neither countable inside this window nor able to close it: the bracket is
+            // dropped and the message opens a fresh one from its own balance. Subtracting a foreign
+            // amount from a rial balance would report a gap we invented, and keeping the bracket
+            // would report the whole converted spend as money that went missing when we hold the
+            // message that says it did not.
+            if (!open.balanceCurrency.equals(t.currency)) {
+                open = t.balance == null ? null : t;
+                inside = 0;
+                count = 0;
+                exact = true;
+                continue;
+            }
             if (exact) {
                 try {
                     inside = Math.addExact(inside, t.amount);
@@ -171,7 +188,8 @@ final class Residual {
                     gap = 0;
                 }
                 if (gap != 0) {
-                    out.add(new Residual(t.bank, t.account, open.date, t.date, gap, count, t.currency));
+                    out.add(new Residual(t.bank, t.account, open.date, t.date, gap, count,
+                            t.balanceCurrency));
                 }
             }
             open = t;

@@ -27,31 +27,43 @@ final class MessageFacts {
     final String bank;
     /** The stated account number, or null when the message states none. */
     final String account;
-    /** The stated balance in rials, or {@link #NO_BALANCE} when the message states no balance. */
+    /** The stated balance in {@link #balanceCurrency} minor units, or {@link #NO_BALANCE} when the
+     *  message states no balance. */
     final long balance;
-    /** The settled signed movement in rials (negative for a withdrawal), or null when the message
-     *  does not describe one. */
+    /** The settled signed movement in {@link #movementCurrency} minor units (negative for a
+     *  withdrawal), or null when the message does not describe one. */
     final Long movement;
     /** When the money moved, in epoch millis. */
     final long time;
-    /** The ISO-style code of the currency the balance and movement are denominated in, never null;
-     *  {@link BalanceData#IRR} for the legacy path and for every pack enabled so far. */
-    final String currency;
+    /** ISO-style code of the currency the stated balance is denominated in, never null; the rial
+     *  default for the legacy path. */
+    final String balanceCurrency;
+    /** ISO-style code of the currency the movement is denominated in, never null; the rial default
+     *  for the legacy path.
+     *
+     *  <p>Two codes, not one, because a bank can spend a card in one currency and settle that card
+     *  in another: "123 USD was withdrawn, your available balance is 123.456". Those are two sums
+     *  of money in two currencies, and the difference between them is a conversion rate the app has
+     *  no way to know and must never invent, so neither may be expressed in the other's units. For
+     *  every Iranian message the two codes are the same, which is why the storage key, the history
+     *  grouping and every Iranian screen have always been able to speak of one currency. */
+    final String movementCurrency;
 
     static final long NO_BALANCE = -1;
 
     private MessageFacts(String bank, String account, long balance, Long movement, long time) {
-        this(bank, account, balance, movement, time, BalanceData.IRR);
+        this(bank, account, balance, movement, time, BalanceData.IRR, BalanceData.IRR);
     }
 
     private MessageFacts(String bank, String account, long balance, Long movement, long time,
-            String currency) {
+            String balanceCurrency, String movementCurrency) {
         this.bank = bank;
         this.account = account;
         this.balance = balance;
         this.movement = movement;
         this.time = time;
-        this.currency = currency == null ? BalanceData.IRR : currency;
+        this.balanceCurrency = balanceCurrency == null ? BalanceData.IRR : balanceCurrency;
+        this.movementCurrency = movementCurrency == null ? BalanceData.IRR : movementCurrency;
     }
 
     /** The arrival-independent reduction: stated balance, settled movement, and the account the
@@ -84,7 +96,7 @@ final class MessageFacts {
             if (packed != null)
                 return new MessageFacts(packed.bank, packed.account, packed.balance, packed.movement,
                     MessageDate.eventTime(body, arrival, BankRules.calendar(packed.bank)),
-                    packed.currency);
+                    packed.balanceCurrency, packed.movementCurrency);
         }
         String bank = BankRules.resolve(sender);
         if (bank == null) return new MessageFacts(null, null, NO_BALANCE, null, 0);
@@ -114,22 +126,24 @@ final class MessageFacts {
         Long movement = null;
         String account = null;
         String bank = null;
-        String currency = BalanceData.IRR;
+        String balanceCurrency = BalanceData.IRR;
+        String movementCurrency = BalanceData.IRR;
         for (Parser.Fact fact : result.facts()) {
             if (bank == null) bank = fact.bankId();
             if (fact.account() != null) account = fact.account();
             switch (fact.kind()) {
                 case BOOKED_BALANCE:
-                    if (fact.money().scale() == 0) {
-                        balance = fact.money().minorUnits();
-                        currency = fact.money().currency().name();
-                    }
+                case AVAILABLE_BALANCE:
+                    // Both kinds state a balance, and the app keeps one balance per account: which
+                    // of the two a bank means is its wording, not a difference in what the number
+                    // is. No Iranian pack declares the available kind, so nothing about the
+                    // messages parsed today takes a different path here.
+                    balance = fact.money().minorUnits();
+                    balanceCurrency = fact.money().currency().name();
                     break;
                 case POSTED_MOVEMENT:
-                    if (fact.money().scale() == 0) {
-                        movement = fact.money().minorUnits();
-                        currency = fact.money().currency().name();
-                    }
+                    movement = fact.money().minorUnits();
+                    movementCurrency = fact.money().currency().name();
                     break;
                 default:
                     break;
@@ -141,7 +155,7 @@ final class MessageFacts {
         // for a bank the app does not know yet falls back to the legacy path rather than writing a
         // balance under a name the UI cannot show.
         if (name == null || !BankRules.supportedNames().contains(name)) return null;
-        return new MessageFacts(name, account, balance, movement, 0, currency);
+        return new MessageFacts(name, account, balance, movement, 0, balanceCurrency, movementCurrency);
     }
 
     /** The engine only ever sees this synthetic source id: the seam identifies a message by its

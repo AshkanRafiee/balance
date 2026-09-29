@@ -233,7 +233,7 @@ final class BalanceData {
     }
 
     /** The currency embedded in a composite storage key, {@link #IRR} for the one- and two-part
-     *  legacy forms. */
+     *  legacy forms, which is every key written before currencies existed. */
     static String currencyOfKey(String key) {
         int first = key.indexOf('|');
         if (first < 0) return IRR;
@@ -262,6 +262,8 @@ final class BalanceData {
             if (t.sig != null) e.put("sig", t.sig);
             if (t.content != null) e.put("content", t.content);
             if (t.currency != null && !IRR.equals(t.currency)) e.put("cur", t.currency);
+            if (t.balanceCurrency != null && !IRR.equals(t.balanceCurrency))
+                e.put("balCur", t.balanceCurrency);
             arr.put(e);
         }
         return new JSONObject().put(FinancialSnapshotAdapter.TRANSACTIONS, arr).toString();
@@ -285,8 +287,12 @@ final class BalanceData {
                 String content = e.has("content") && !e.isNull("content") ? e.getString("content") : null;
                 Long balance = e.has("bal") && !e.isNull("bal") ? e.getLong("bal") : null;
                 String currency = e.has("cur") && !e.isNull("cur") ? e.getString("cur") : IRR;
+                // Absent means the movement currency, which is what every row written before a card
+                // could be spent in one currency and settled in another was denominated in.
+                String balanceCurrency = e.has("balCur") && !e.isNull("balCur")
+                        ? e.getString("balCur") : currency;
                 list.add(new Transaction(e.getString("bank"), account, e.getLong("date"),
-                    e.getLong("amount"), balance, sig, content, currency));
+                    e.getLong("amount"), balance, sig, content, currency, balanceCurrency));
             }
         } catch (Exception ex) {
             Log.w(TAG, "parseTransactions failed");
@@ -705,9 +711,10 @@ final class BalanceData {
                 MessageFacts facts = MessageFacts.of(sender, cursor.getString(1), arrival);
                 if (facts.bank == null) continue;
                 if (facts.balance < 0) continue;
-                String key = storageKey(facts.bank, facts.account, facts.currency);
+                String key = storageKey(facts.bank, facts.account, facts.balanceCurrency);
                 rowsByKey.computeIfAbsent(key, k -> new ArrayList<>())
-                    .add(new Object[]{sender, cursor.getString(1), facts.time});
+                    .add(new Object[]{sender, cursor.getString(1), facts.time,
+                        facts.balanceCurrency, facts.movementCurrency});
             }
         } catch (Exception e) {
             Log.w(TAG, "scan failed", e);
@@ -754,7 +761,10 @@ final class BalanceData {
             } else {
                 long bal = extract((String) newestArr[1]);
                 if (bal >= 0) {
-                    chosen = new Reconcile.Entry((Long) newestArr[2], 0, bal, null);
+                    // The whole loop walks one ledger at a time, so the newest row's balance is
+                    // stated in this key's currency whether or not the message says which.
+                    chosen = new Reconcile.Entry((Long) newestArr[2], 0, bal, null, IRR,
+                            currencyOfKey(key));
                     chosenSender = (String) newestArr[0];
                 }
             }
@@ -892,7 +902,8 @@ final class BalanceData {
                     String body = cursor.getString(1);
                     MessageFacts facts = MessageFacts.of(sender, body, arrival);
                     if (facts.bank == null) continue;
-                    rows.add(new Object[]{facts.bank, sender, body, facts.time, facts.currency});
+                    rows.add(new Object[]{facts.bank, sender, body, facts.time,
+                        facts.balanceCurrency, facts.movementCurrency});
                 }
                 // Oldest first, so the balance-delta fallback chain below follows time. On a full scan
                 // the chain starts from the oldest kept message; on an incremental scan it is seeded
@@ -1293,12 +1304,16 @@ final class BalanceData {
         return base;
     }
 
-    /** The composite storage key for a transaction's own bank slot. */
+    /** The composite storage key for a transaction's own bank slot: the account it belongs to and
+     *  the currency its balance is stated in, which is the ledger it moves in. A movement spent in
+     *  another currency still sits in that ledger, filed under the currency of the balance it
+     *  settled against, exactly as its balance row is. */
     private static String transactionCompositeKey(Transaction t) {
-        return storageKey(t.bank, t.account, t.currency);
+        return storageKey(t.bank, t.account, t.balanceCurrency);
     }
 
-    /** The composite storage key a [bank, sender, body, date, currency] history row belongs to. */
+    /** The composite storage key a [bank, sender, body, date, balanceCurrency, movementCurrency]
+     *  history row belongs to. */
     private static String rowCompositeKey(Object[] row) {
         String bank = (String) row[0];
         String currency = row.length > 4 ? (String) row[4] : IRR;
@@ -1350,24 +1365,30 @@ final class BalanceData {
         MessageFacts facts = MessageFacts.amounts(sender, body, bank);
         long stated = facts.balance;
         Long txn = facts.movement;
+        String movementCurrency = facts.movementCurrency;
         if (txn == null) {
             txn = LegacyMoney.inferMovement(body, hasPrev, prevBalance);
             if (txn == null) return null;
+            // A movement derived from the difference between two stated balances is denominated in
+            // the currency those balances are, whatever the message's own amount token would have
+            // been: the two figures it was computed from are what makes it a number at all.
+            movementCurrency = facts.balanceCurrency;
         }
         String account = facts.account;
         // The balance the message reported travels with the movement, so the history can prove a
         // missing message later without ever touching the inbox again (see Residual).
         return new Transaction(bank, account, date, txn,
             stated < 0 ? null : stated, messageSig(sender, body, account), contentHash(sender, body),
-            facts.currency);
+            movementCurrency, facts.balanceCurrency);
     }
 
     // ============================================================
     // Recent-movements window and balance-chain reconciliation
     // ============================================================
 
-    /** Adds the movement rows of this scan (messages with a transaction amount and a stated balance)
-     *  to the bank's recent-movements window, deduped by message fingerprint, and returns the merged
+    /** Adds the movement rows of this scan (messages with a transaction amount and a stated balance,
+     *  each row carrying [sender, body, time, balanceCurrency, movementCurrency]) to the bank's
+     *  recent-movements window, deduped by message fingerprint, and returns the merged
      *  list. {@code sigSender} is populated with the sender of each newly added movement so balance
      *  selection can keep the originating address. The window fingerprint folds the message's account
      *  number (mirroring the stored transactions'), so a fee and its transfer on one account are placed
@@ -1391,16 +1412,20 @@ final class BalanceData {
             String sig = messageSig(sender, body, bank == null ? null : facts.account);
             if (sig == null || !sigs.add(sig)) continue;
             if (sigSender != null) sigSender.put(sig, sender);
-            merged.add(new Reconcile.Entry((Long) row[2], txn, bal, sig));
+            merged.add(new Reconcile.Entry((Long) row[2], txn, bal, sig,
+                    row.length > 4 ? (String) row[4] : IRR, row.length > 3 ? (String) row[3] : IRR));
         }
         return merged;
     }
 
-    /** Rebinds history-scan rows [bank, sender, body, date, currency] into the [sender, body, date]
-     *  layout the window merger consumes. */
+    /** Rebinds history rows [bank, sender, body, time, balanceCurrency, movementCurrency] into the
+     *  [sender, body, time, balanceCurrency, movementCurrency] layout the window merger consumes.
+     *  The currencies travel with the row because a window is only meaningful when every entry in it
+     *  knows what currency its figures are in. */
     private static List<Object[]> senderBodyDate(List<Object[]> rows) {
         List<Object[]> out = new ArrayList<>(rows.size());
-        for (Object[] r : rows) out.add(new Object[]{r[1], r[2], r[3]});
+        for (Object[] r : rows) out.add(new Object[]{r[1], r[2], r[3],
+                r.length > 4 ? r[4] : IRR, r.length > 5 ? r[5] : IRR});
         return out;
     }
 
@@ -1627,8 +1652,16 @@ final class BalanceData {
         for (Map.Entry<String, List<Reconcile.Entry>> e : map.entrySet()) {
             JSONArray arr = new JSONArray();
             for (Reconcile.Entry en : e.getValue()) {
-                arr.put(new JSONObject().put("d", en.date).put("a", en.amount)
-                        .put("b", en.balance).put("s", en.sig != null ? en.sig : JSONObject.NULL));
+                JSONObject entry = new JSONObject().put("d", en.date).put("a", en.amount)
+                        .put("b", en.balance).put("s", en.sig != null ? en.sig : JSONObject.NULL);
+                // Absent means the rial, which is the only currency this window could hold before a
+                // card could be spent in one currency and settled in another, so every existing
+                // window is read back exactly as it was written.
+                if (en.movementCurrency != null && !IRR.equals(en.movementCurrency))
+                    entry.put("c", en.movementCurrency);
+                if (en.balanceCurrency != null && !IRR.equals(en.balanceCurrency))
+                    entry.put("bc", en.balanceCurrency);
+                arr.put(entry);
             }
             obj.put(e.getKey(), arr);
         }
@@ -1648,7 +1681,8 @@ final class BalanceData {
                 for (int i = 0; i < arr.length(); i++) {
                     JSONObject e = arr.getJSONObject(i);
                     list.add(new Reconcile.Entry(e.getLong("d"), e.getLong("a"), e.getLong("b"),
-                            e.isNull("s") ? null : e.optString("s", null)));
+                            e.isNull("s") ? null : e.optString("s", null),
+                            e.optString("c", IRR), e.optString("bc", IRR)));
                 }
                 map.put(bank, list);
             }
