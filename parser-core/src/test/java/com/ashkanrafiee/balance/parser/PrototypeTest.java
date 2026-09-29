@@ -27,6 +27,7 @@ public final class PrototypeTest {
         purchaseContext();
         independentOutputs();
         exactMoney();
+        leadingPointAmounts();
         trailingSigns();
         directions();
         conflicts();
@@ -133,6 +134,38 @@ public final class PrototypeTest {
         equal(parse(withMoney(toman), row("١٢٣", "IRR")).facts().get(0).money().minorUnits(), 1230L, "Arabic digits");
         rejection(parse(withMoney(toman), row("922337203685477581", "IRR")), Status.OVERFLOW, Code.MONEY_OVERFLOW);
         rejection(parse(withMoney(toman), row("1.01", "IRR")), Status.INVALID, Code.INVALID_MONEY);
+    }
+
+    private static void leadingPointAmounts() {
+        // Some banks print amounts below one unit with no integer part at all — "0.11 JOD" as
+        // ".11 JOD" — and their balances the same way. That is only money where a rule asks for
+        // it; everywhere else the missing integer part stays the loud failure it always was,
+        // because a capture that lost its integer digits must not quietly read as a fraction.
+        MoneyRule leading = new MoneyRule(AMOUNT, CurrencyRule.fixed(Currency.USD), '.', ',',
+                Grouping.WESTERN, Digits.ASCII, 1, Sign.LEADING, true);
+        equal(parse(withMoney(leading), row(".11", "USD")).facts().get(0).money().minorUnits(),
+                11L, "leading point, two-digit scale");
+        equal(parse(withMoney(leading), row(".1", "USD")).facts().get(0).money().minorUnits(),
+                10L, "leading point, short fraction");
+        equal(parse(withMoney(leading), row(".00", "USD")).facts().get(0).money().minorUnits(),
+                0L, "leading point, zero");
+        equal(parse(withMoney(leading), row("-.11", "USD")).facts().get(0).money().minorUnits(),
+                -11L, "leading point, leading sign");
+        equal(parse(withMoney(leading), row("1.11", "USD")).facts().get(0).money().minorUnits(),
+                111L, "leading point does not change ordinary amounts");
+        // The scale is the currency's, never the digit count: a fraction the currency cannot
+        // hold is refused exactly as it is for a written integer part, not rounded away.
+        MoneyRule dinar = new MoneyRule(AMOUNT, CurrencyRule.fixed(Currency.KWD), '.', ',',
+                Grouping.WESTERN, Digits.ASCII, 1, Sign.LEADING, true);
+        equal(parse(withMoney(dinar), row(".123", "KWD")).facts().get(0).money().minorUnits(),
+                123L, "leading point on a three-digit scale");
+        rejection(parse(withMoney(dinar), row(".1234", "KWD")), Status.INVALID, Code.INVALID_MONEY);
+        rejection(parse(withMoney(leading), row(".123", "USD")), Status.INVALID, Code.INVALID_MONEY);
+        for (String invalid : List.of(".", ".1a", ".a", ".-", "-.", ". 1", ".1.1.1", ",.11", "1,.11"))
+            rejection(parse(withMoney(leading), row(invalid, "USD")), Status.INVALID, Code.INVALID_MONEY);
+        // Without the opt-in the very same amount is refused, as it was before it existed.
+        rejection(parse(single(Currency.USD), row(".11", "USD")), Status.INVALID, Code.INVALID_MONEY);
+        rejection(parse(single(Currency.USD), row(".1", "USD")), Status.INVALID, Code.INVALID_MONEY);
     }
 
     private static void trailingSigns() {

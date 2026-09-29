@@ -20,6 +20,7 @@ public final class PackDocumentTest {
         validAndImmutable();
         structuralValidation();
         semanticValidation();
+        moneyFlags();
         numericValidation();
         boundsAndGraphs();
         System.out.println("PackDocumentTest: " + checks + " checks passed");
@@ -147,6 +148,33 @@ public final class PackDocumentTest {
         reject(p -> at(p, "templates", 0, "outputs", 1, "date").put("orders", List.of("YMD", "YMD")));
         reject(p -> at(p, "templates", 0, "outputs", 1, "date").put("orders", List.of("private-order")));
         reject(p -> at(p, "templates", 0, "outputs", 1, "date").put("separator", ":"));
+    }
+
+    private static void moneyFlags() {
+        // sign and leadingPoint are opt-in money flags: absent means the strict default, present
+        // means the declared widening. Both are booleans/enumerations only — a pack cannot smuggle
+        // a number or a string in where the typed boundary expects one of them.
+        Rules.MoneyRule plain = PackDocument.decode(pack()).templates().get(0)
+                .outputs().get(0).money();
+        equal(plain.sign(), Rules.Sign.LEADING);
+        equal(plain.leadingPoint(), false);
+        Map<String, Object> source = pack();
+        Map<String, Object> money = at(source, "templates", 0, "outputs", 0, "money");
+        money.put("sign", "TRAILING");
+        money.put("leadingPoint", true);
+        Rules.MoneyRule declared = PackDocument.decode(source).templates().get(0)
+                .outputs().get(0).money();
+        equal(declared.sign(), Rules.Sign.TRAILING);
+        equal(declared.leadingPoint(), true);
+        for (Map.Entry<String, List<Object>> e : Map.of(
+                "sign", List.of("", "true", "leading", 1, 1L, 0.0, new BigDecimal("1"), List.of(), Map.of()),
+                "leadingPoint", List.of("", "true", "LEADING", 1, 1L, 0.0, new BigDecimal("1"), List.of(), Map.of()))
+                    .entrySet())
+            for (Object value : e.getValue()) {
+                Map<String, Object> p = pack();
+                at(p, "templates", 0, "outputs", 0, "money").put(e.getKey(), value);
+                invalid(p);
+            }
     }
 
     private static void numericValidation() {

@@ -138,7 +138,9 @@
         "group": { "enum": ["", ".", ",", " ", "٬"] },
         "grouping": { "enum": ["NONE", "WESTERN", "INDIAN"] },
         "digits": { "$ref": "#/$defs/digits" },
-        "unitMultiplier": { "enum": [1, 10] }
+        "unitMultiplier": { "enum": [1, 10] },
+        "sign": { "enum": ["LEADING", "TRAILING"] },
+        "leadingPoint": { "type": "boolean" }
       }
     },
     "direction": {

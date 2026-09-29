@@ -48,7 +48,13 @@ Field normalization, numeric selection and line termination are opt-in. Region,
 amount (including original amount) and date selectors remain raw: normalization
 is omitted or `NONE`, and numeric selection is forbidden. Amount/date rules use
 their own `digits` policy. Currency/direction tokens permit only `NONE` or `TEXT`
-normalization and no numeric selection. Accounts and reason/channel selectors
+normalization and no numeric selection. `sign` defaults to `LEADING`; `TRAILING`
+declares the sign after the digits. `leadingPoint` defaults to false, and true is
+the only widening of the money contract: it reads a bank that prints amounts below
+one unit without an integer part (`.11`) as zero point one one. It is opt-in per
+money rule because a missing integer part is otherwise the loudest sign that a
+capture is misaligned, and a capture that lost its integer digits must keep
+failing rather than quietly become a fraction. Accounts and reason/channel selectors
 retain the full set of transforms. `accountOptional` defaults to false; only true permits an
 omitted account selector or unresolved reference. Optional properties must be
 omitted rather than set to JSON null in packs. Reason/channel rules map finite

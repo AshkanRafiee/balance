@@ -127,13 +127,22 @@ public final class Rules {
     /** One optional sign in the declared position only; group/decimal syntax is explicit.
      * Unit multiplier is 1, or 10 for explicitly declared toman-to-IRR conversion. The
      * amount field must be raw (NONE, no numeric selection); digits is the sole digit
-     * policy. This also applies to original-amount context. */
+     * policy. This also applies to original-amount context. LeadingPoint is the only
+     * widening of the money contract: it lets a bank that prints amounts below one
+     * unit — ".11" — be read as zero point one one instead of refused. It is opt-in
+     * per money rule, because an empty integer part is otherwise the loudest possible
+     * signal that a capture group is misaligned, and a silent 0.11 read from a
+     * misaligned capture is worse than no amount at all. */
     public record MoneyRule(Field amount, CurrencyRule currency, char decimal,
                             char group, Grouping grouping, Digits digits, int unitMultiplier,
-                            Sign sign) {
+                            Sign sign, boolean leadingPoint) {
         public MoneyRule(Field amount, CurrencyRule currency, char decimal, char group,
                          Grouping grouping, Digits digits, int unitMultiplier) {
-            this(amount, currency, decimal, group, grouping, digits, unitMultiplier, Sign.LEADING);
+            this(amount, currency, decimal, group, grouping, digits, unitMultiplier, Sign.LEADING, false);
+        }
+        public MoneyRule(Field amount, CurrencyRule currency, char decimal, char group,
+                         Grouping grouping, Digits digits, int unitMultiplier, Sign sign) {
+            this(amount, currency, decimal, group, grouping, digits, unitMultiplier, sign, false);
         }
         public MoneyRule {
             Objects.requireNonNull(amount); small(amount); rawField(amount);

@@ -488,8 +488,16 @@ public final class Parser {
         int decimal = text.indexOf(rule.decimal());
         String integer = decimal < 0 ? text : text.substring(0, decimal);
         String fraction = decimal < 0 ? "" : text.substring(decimal + 1);
-        if (integer.isEmpty() || decimal >= 0 && (fraction.isEmpty() || !asciiDigits(fraction)))
+        if (decimal >= 0 && (fraction.isEmpty() || !asciiDigits(fraction)))
             throw problem(Status.INVALID, Code.INVALID_MONEY, field);
+        if (integer.isEmpty()) {
+            // ".11" is an amount below one unit, but only where the rule asks for it: an empty
+            // integer part is otherwise a misaligned capture, and a capture that lost its integer
+            // digits must keep failing loudly rather than quietly reading as a fraction.
+            if (decimal < 0 || !rule.leadingPoint())
+                throw problem(Status.INVALID, Code.INVALID_MONEY, field);
+            integer = "0";
+        }
         List<String> groups = split(integer, rule.group());
         if (groups.size() > 1) {
             int middle = rule.grouping() == Grouping.INDIAN ? 2 : 3;
