@@ -10,11 +10,11 @@ final class BalanceScanPublication {
     private final byte[] balancesJson;
     private final byte[] recentMovementsJson;
     private final Long scannedThrough;
-    private final int rulesVersion;
+    private final Integer rulesVersion;
     private final int matched;
 
     private BalanceScanPublication(byte[] balancesJson, byte[] recentMovementsJson,
-            Long scannedThrough, int rulesVersion, int matched) {
+            Long scannedThrough, Integer rulesVersion, int matched) {
         if (balancesJson == null || matched < 0) throw new IllegalArgumentException("ARGUMENT");
         this.balancesJson = balancesJson.clone();
         this.recentMovementsJson = recentMovementsJson == null ? null : recentMovementsJson.clone();
@@ -26,7 +26,7 @@ final class BalanceScanPublication {
     static Builder builder() { return new Builder(); }
 
     static BalanceScanPublication prepare(byte[] balancesJson, byte[] recentMovementsJson,
-            Long scannedThrough, int rulesVersion, int matched) {
+            Long scannedThrough, Integer rulesVersion, int matched) {
         return new BalanceScanPublication(balancesJson, recentMovementsJson, scannedThrough,
                 rulesVersion, matched);
     }
@@ -38,7 +38,7 @@ final class BalanceScanPublication {
     }
 
     Long scannedThrough() { return scannedThrough; }
-    int rulesVersion() { return rulesVersion; }
+    Integer rulesVersion() { return rulesVersion; }
     int matched() { return matched; }
 
     /** Returns only the balance-owned components represented by this publication. */
@@ -50,7 +50,7 @@ final class BalanceScanPublication {
         if (scannedThrough != null)
             updates.put(FinancialSnapshotAdapter.SCANNED_THROUGH,
                     Long.toString(scannedThrough).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        updates.put(FinancialSnapshotAdapter.RULES_VERSION,
+        if (rulesVersion != null) updates.put(FinancialSnapshotAdapter.RULES_VERSION,
                 Integer.toString(rulesVersion).getBytes(java.nio.charset.StandardCharsets.UTF_8));
         return Collections.unmodifiableMap(updates);
     }
@@ -64,13 +64,13 @@ final class BalanceScanPublication {
         private byte[] balancesJson;
         private byte[] recentMovementsJson;
         private Long scannedThrough;
-        private int rulesVersion;
+        private Integer rulesVersion;
         private int matched;
 
         Builder balancesJson(byte[] value) { balancesJson = value; return this; }
         Builder recentMovementsJson(byte[] value) { recentMovementsJson = value; return this; }
         Builder scannedThrough(Long value) { scannedThrough = value; return this; }
-        Builder rulesVersion(int value) { rulesVersion = value; return this; }
+        Builder rulesVersion(Integer value) { rulesVersion = value; return this; }
         Builder matched(int value) { matched = value; return this; }
 
         BalanceScanPublication build() {

@@ -14,12 +14,12 @@ final class HistoryScanPublication {
     private final byte[] recentMovementsJson;
     private final byte[] historyLastBalanceJson;
     private final Long historyThrough;
-    private final int historyRulesVersion;
-    private final int historySchema;
+    private final Integer historyRulesVersion;
+    private final Integer historySchema;
 
     private HistoryScanPublication(byte[] transactionsJson, byte[] reasonsJson, byte[] channelsJson,
             byte[] recentMovementsJson, byte[] historyLastBalanceJson, Long historyThrough,
-            int historyRulesVersion, int historySchema) {
+            Integer historyRulesVersion, Integer historySchema) {
         if (transactionsJson == null) throw new IllegalArgumentException("ARGUMENT");
         this.transactionsJson = transactionsJson.clone();
         this.reasonsJson = clone(reasonsJson);
@@ -35,7 +35,7 @@ final class HistoryScanPublication {
 
     static HistoryScanPublication prepare(byte[] transactionsJson, byte[] reasonsJson,
             byte[] channelsJson, byte[] recentMovementsJson, byte[] historyLastBalanceJson,
-            Long historyThrough, int historyRulesVersion, int historySchema) {
+            Long historyThrough, Integer historyRulesVersion, Integer historySchema) {
         return new HistoryScanPublication(transactionsJson, reasonsJson, channelsJson,
                 recentMovementsJson, historyLastBalanceJson, historyThrough,
                 historyRulesVersion, historySchema);
@@ -47,8 +47,8 @@ final class HistoryScanPublication {
     byte[] recentMovementsJson() { return clone(recentMovementsJson); }
     byte[] historyLastBalanceJson() { return clone(historyLastBalanceJson); }
     Long historyThrough() { return historyThrough; }
-    int historyRulesVersion() { return historyRulesVersion; }
-    int historySchema() { return historySchema; }
+    Integer historyRulesVersion() { return historyRulesVersion; }
+    Integer historySchema() { return historySchema; }
 
     /** Returns only the history-owned components represented by this publication. */
     Map<String, byte[]> updates() {
@@ -64,9 +64,9 @@ final class HistoryScanPublication {
                 historyLastBalanceJson.clone());
         if (historyThrough != null) updates.put(FinancialSnapshotAdapter.HISTORY_THROUGH,
                 Long.toString(historyThrough).getBytes(StandardCharsets.UTF_8));
-        updates.put(FinancialSnapshotAdapter.HISTORY_RULES_VERSION,
+        if (historyRulesVersion != null) updates.put(FinancialSnapshotAdapter.HISTORY_RULES_VERSION,
                 Integer.toString(historyRulesVersion).getBytes(StandardCharsets.UTF_8));
-        updates.put(FinancialSnapshotAdapter.HISTORY_SCHEMA,
+        if (historySchema != null) updates.put(FinancialSnapshotAdapter.HISTORY_SCHEMA,
                 Integer.toString(historySchema).getBytes(StandardCharsets.UTF_8));
         return Collections.unmodifiableMap(updates);
     }
@@ -83,8 +83,8 @@ final class HistoryScanPublication {
         private byte[] recentMovementsJson;
         private byte[] historyLastBalanceJson;
         private Long historyThrough;
-        private int historyRulesVersion;
-        private int historySchema;
+        private Integer historyRulesVersion;
+        private Integer historySchema;
 
         Builder transactionsJson(byte[] value) { transactionsJson = value; return this; }
         Builder reasonsJson(byte[] value) { reasonsJson = value; return this; }
@@ -92,8 +92,8 @@ final class HistoryScanPublication {
         Builder recentMovementsJson(byte[] value) { recentMovementsJson = value; return this; }
         Builder historyLastBalanceJson(byte[] value) { historyLastBalanceJson = value; return this; }
         Builder historyThrough(Long value) { historyThrough = value; return this; }
-        Builder historyRulesVersion(int value) { historyRulesVersion = value; return this; }
-        Builder historySchema(int value) { historySchema = value; return this; }
+        Builder historyRulesVersion(Integer value) { historyRulesVersion = value; return this; }
+        Builder historySchema(Integer value) { historySchema = value; return this; }
 
         HistoryScanPublication build() {
             return new HistoryScanPublication(transactionsJson, reasonsJson, channelsJson,

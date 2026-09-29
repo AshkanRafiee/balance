@@ -41,7 +41,7 @@ public class BalanceScanPublicationTest {
         assertArrayEquals(bytes("{}"), publication.balancesJson());
         assertArrayEquals(bytes("[]"), publication.recentMovementsJson());
         assertEquals(Long.MAX_VALUE, publication.scannedThrough().longValue());
-        assertEquals(Integer.MIN_VALUE, publication.rulesVersion());
+        assertEquals(Integer.valueOf(Integer.MIN_VALUE), publication.rulesVersion());
         assertEquals(3, publication.matched());
         assertArrayEquals(bytes("{}"), publication.updates().get(FinancialSnapshotAdapter.BALANCES));
     }
