@@ -66,4 +66,31 @@ public class CurrencyHelperTest {
         CurrencyHelper.setCurrency(ctx, CurrencyHelper.CUSTOM_PREFIX + "KW");
         assertEquals(us.format(123450), CurrencyHelper.amount(ctx, 123450));
     }
+
+    @Test public void rialAmountsKeepTheChosenDenominationAndLabel() {
+        assertEquals(CurrencyHelper.amount(ctx, 123450), CurrencyHelper.amount(ctx, "IRR", 123450));
+        assertEquals(CurrencyHelper.amount(ctx, 123450), CurrencyHelper.amount(ctx, null, 123450));
+        assertEquals(CurrencyHelper.label(ctx), CurrencyHelper.label(ctx, "IRR"));
+        assertEquals(CurrencyHelper.label(ctx), CurrencyHelper.label(ctx, null));
+        // The toman is a rial denomination, so it never reaches a foreign currency.
+        assertEquals("USD", CurrencyHelper.label(ctx, "USD"));
+    }
+
+    @Test public void foreignAmountsAreShownAtTheirOwnScaleUnconverted() {
+        java.text.NumberFormat us = java.text.NumberFormat.getNumberInstance(java.util.Locale.US);
+        CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_TOMAN);
+        // 1234 minor units of USD is 12.34, and no rial/toman conversion may touch it.
+        assertEquals(us.format(new java.math.BigDecimal("12.34")),
+            CurrencyHelper.amount(ctx, "USD", 1234));
+        assertEquals(us.format(new java.math.BigDecimal("20")),
+            CurrencyHelper.amount(ctx, "USD", 2000));
+        // KWD carries three decimals; an unknown code is shown raw rather than guessed at.
+        assertEquals(us.format(new java.math.BigDecimal("1.234")),
+            CurrencyHelper.amount(ctx, "KWD", 1234));
+        assertEquals(us.format(7), CurrencyHelper.amount(ctx, "XYZ", 7));
+        assertEquals(2, CurrencyHelper.scaleOf("USD"));
+        assertEquals(3, CurrencyHelper.scaleOf("KWD"));
+        assertEquals(0, CurrencyHelper.scaleOf("IRR"));
+        assertEquals(0, CurrencyHelper.scaleOf("XYZ"));
+    }
 }

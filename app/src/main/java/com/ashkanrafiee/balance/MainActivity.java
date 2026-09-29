@@ -1275,7 +1275,7 @@ public class MainActivity extends Activity {
         final Runnable totalLongProbe = () -> {
             totalProbeFired = true;
             if (MainActivity.this.isFinishing() || MainActivity.this.isDestroyed()) return;
-            copyBalance(getString(R.string.total_label), this.total);
+            copyTotal(getString(R.string.total_label));
         };
         final Runnable bankLongProbe = () -> {
             bankProbeFired = true;
@@ -1285,7 +1285,7 @@ public class MainActivity extends Activity {
             String label = BankRules.displayName(MainActivity.this, row.bankName);
             if (row.bank != null && row.bank.account != null)
                 label += " " + faDigits(row.bank.account);
-            copyBalance(label, row.amount);
+            copyBalance(label, row.bank != null ? row.bank.currency : BalanceData.IRR, row.amount);
         };
         final Runnable refreshTicker = new Runnable() {
             long lastTick;
@@ -1330,7 +1330,7 @@ public class MainActivity extends Activity {
             }
         };
         String status = getString(R.string.status_reading_sms);
-        long total;
+        final CurrencyTotals total = new CurrencyTotals();
         float footerAboutStart, footerAboutEnd, footerLangStart, footerLangEnd,
             footerBackupStart, footerBackupEnd, footerReportStart, footerReportEnd, footerY;
         final int fg = resColor(R.color.fg);
@@ -1477,19 +1477,30 @@ public class MainActivity extends Activity {
         }
 
         /** Recomputes the total from included entries only. Exclusion is per account, matched on the
-         *  entry's own {@code bank|account} storage key. */
+         *  entry's own {@code bank|account} storage key. The total is kept per currency: two
+         *  currencies are not summable, so the card reports one line per currency rather than a
+         *  single number that means nothing. */
         void recalcTotal() {
-            total = 0;
+            total.clear();
             for (java.util.Map.Entry<String, Bank> e : banks.entrySet())
-                if (!excluded.contains(e.getKey())) total += e.getValue().amount;
+                if (!excluded.contains(e.getKey())) total.add(e.getValue().currency, e.getValue().amount);
+        }
+
+        /** The total as one line per currency, in display order, for a11y and the clipboard. */
+        private String totalText() {
+            StringBuilder sb = new StringBuilder();
+            for (java.util.Map.Entry<String, Long> e : total.entries().entrySet()) {
+                if (sb.length() > 0) sb.append('\n');
+                sb.append(CurrencyHelper.amount(MainActivity.this, e.getKey(), e.getValue()))
+                    .append(' ').append(CurrencyHelper.label(MainActivity.this, e.getKey()));
+            }
+            return sb.toString();
         }
 
         /** A short live summary of the dashboard for screen readers: the total (or its mask state)
          *  followed by the status line. Rebuilt every frame, but only announced on change. */
         String announce() {
-            String totalText = hidden ? getString(R.string.accessibility_total_masked)
-                : CurrencyHelper.amount(MainActivity.this, total) + " "
-                    + CurrencyHelper.label(MainActivity.this);
+            String totalText = hidden ? getString(R.string.accessibility_total_masked) : totalText();
             int staleCount = 0;
             for (java.util.Map.Entry<String, Bank> e : banks.entrySet())
                 if (!excluded.contains(e.getKey()) && BalanceData.isStale(MainActivity.this, e.getValue().date))
@@ -1652,17 +1663,33 @@ public class MainActivity extends Activity {
             text(c, CurrencyHelper.label(MainActivity.this), x, baseline + 19, 11, muted, align);
         }
 
-        void totalValue(Canvas c, long n, float x, float baseline, float width, boolean rtl) {
+        /** The total card's figures. A single-currency total draws exactly as it always has; when
+         *  included entries span currencies, one line is drawn per currency, stacked, so no currency
+         *  is hidden behind the sum of the others. */
+        void totalValues(Canvas c, float x, float baseline, float width, boolean rtl) {
             Paint.Align anchor = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
             if (hidden) {
                 text(c, "\u2022\u2022\u2022\u2022\u2022\u2022", x, baseline, 34, fg, anchor);
                 return;
             }
-            String number = CurrencyHelper.amount(MainActivity.this, n);
-            String unit = CurrencyHelper.label(MainActivity.this);
-            float unitSize = 13, unitGap = 10, unitWidth = measure(unit, unitSize);
-            float current = 34;
-            while (current > 16 && measure(number, current) + unitGap + unitWidth > width) current -= 1;
+            java.util.Map<String, Long> sums = total.entries();
+            if (sums.isEmpty()) return;
+            float y = baseline;
+            for (java.util.Map.Entry<String, Long> e : sums.entrySet()) {
+                totalLine(c, e.getKey(), e.getValue(), x, y, width, rtl, y == baseline ? 34 : 21);
+                y += 28;
+            }
+        }
+
+        private void totalLine(Canvas c, String currency, long value, float x, float baseline,
+                float width, boolean rtl, float size) {
+            Paint.Align anchor = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
+            String number = CurrencyHelper.amount(MainActivity.this, currency, value);
+            String unit = CurrencyHelper.label(MainActivity.this, currency);
+            float unitSize = Math.min(13, size * 0.4f), unitGap = 10;
+            float unitWidth = measure(unit, unitSize);
+            float current = size;
+            while (current > 12 && measure(number, current) + unitGap + unitWidth > width) current -= 1;
             float numberWidth = measure(number, current);
             text(c, number, x, baseline, current, fg, anchor);
             float unitX = rtl ? x - numberWidth - unitGap : x + numberWidth + unitGap;
@@ -1760,7 +1787,7 @@ public class MainActivity extends Activity {
                 // real zero-rial balance.
                 text(c, getString(R.string.total_empty_value), totalLabelX, 208, 34, fg, edgeAlign);
             } else {
-                totalValue(c, total, totalLabelX, 208, w - 150, rtl);
+                totalValues(c, totalLabelX, 208, w - 150, rtl);
             }
             text(c, getString(R.string.total_history_hint), w / 2f, 253, 11, muted, Paint.Align.CENTER);
             RectF eyeRect = rtl ? new RectF(45, 147, 75, 165) : new RectF(w - 75, 147, w - 45, 165);
@@ -2107,15 +2134,32 @@ public class MainActivity extends Activity {
                 .create());
         }
 
-        void copyBalance(String label, long value) {
+        void copyBalance(String label, String currency, long value) {
             if (hidden) {
                 Toast.makeText(MainActivity.this, getString(R.string.toast_unmask_to_copy), Toast.LENGTH_SHORT).show();
                 return;
             }
+            // A rial is copied in the app's chosen denomination; any other currency is copied at
+            // its own scale, so the clipboard holds the number the card showed.
+            String amount = BalanceData.IRR.equals(currency)
+                ? Long.toString(CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(MainActivity.this))
+                        ? value / 10 : value)
+                : CurrencyHelper.amount(MainActivity.this, currency, value);
+            copyToClipboard(label, amount);
+        }
+
+        /** Copies the whole total, one line per currency, so a mixed-currency total is copied whole
+         *  instead of as one arbitrary part of it. */
+        void copyTotal(String label) {
+            if (hidden) {
+                Toast.makeText(MainActivity.this, getString(R.string.toast_unmask_to_copy), Toast.LENGTH_SHORT).show();
+                return;
+            }
+            copyToClipboard(label, totalText());
+        }
+
+        private void copyToClipboard(String label, String amount) {
             ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-            long shown = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(MainActivity.this))
-                ? value / 10 : value;
-            String amount = Long.toString(shown);
             clipboard.setPrimaryClip(ClipData.newPlainText(label, amount));
             Toast.makeText(MainActivity.this, getString(R.string.toast_copied_balance, label), Toast.LENGTH_SHORT).show();
             // Sensitive numbers must not linger in the system clipboard (other apps can read it):
@@ -2144,7 +2188,7 @@ public class MainActivity extends Activity {
 
         /** Opens the row menu for one entry. {@code key} is that entry's {@code bank|account} storage
          *  key, so exclude/include affects only the tapped account, never its siblings. */
-        void showBankMenu(String key, String bankName, long amount) {
+        void showBankMenu(String key, String bankName, String currency, long amount) {
             String displayName = BankRules.displayName(MainActivity.this, bankName);
             boolean isExcluded = excluded.contains(key);
             String[] options = {
@@ -2166,7 +2210,7 @@ public class MainActivity extends Activity {
                                 ? R.string.toast_excluded : R.string.toast_included),
                             Toast.LENGTH_SHORT).show();
                     } else {
-                        copyBalance(displayName, amount);
+                        copyBalance(displayName, currency, amount);
                     }
                 })
                 .create());
@@ -2329,7 +2373,8 @@ public class MainActivity extends Activity {
                         ? x >= 16 && x <= 56
                         : x >= getWidth() / d - 56 && x <= getWidth() / d - 16;
                     if (onMenu) {
-                        showBankMenu(row.key, row.bankName, row.amount);
+                        showBankMenu(row.key, row.bankName,
+                            row.bank != null ? row.bank.currency : BalanceData.IRR, row.amount);
                     } else {
                         Intent history = new Intent(MainActivity.this, HistoryActivity.class);
                         history.putExtra(HistoryActivity.EXTRA_BANK, row.bankName);

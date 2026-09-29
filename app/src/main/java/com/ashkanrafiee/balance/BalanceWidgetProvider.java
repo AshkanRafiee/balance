@@ -117,13 +117,34 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         for (int id : ids) manager.updateAppWidget(id, views);
     }
 
+    private static final String DOTS = "\u2022\u2022\u2022\u2022\u2022\u2022";
+
     static RemoteViews buildViews(Context context) {
         Context c = WidgetTheme.context(context);
         if (LockManager.isEnabled(c)) return lockedViews(c);
         boolean hidden = BalanceData.isWidgetHidden(c);
-        long total = 0;
+        // Per currency, never one number: two currencies are not summable, so a mixed total is
+        // reported as one self-labelled line each.
+        CurrencyTotals totals = new CurrencyTotals();
         for (java.util.Map.Entry<String, Bank> e : BalanceData.read(c).entrySet())
-            if (!BalanceData.isExcluded(c, e.getKey())) total += e.getValue().amount;
+            if (!BalanceData.isExcluded(c, e.getKey()))
+                totals.add(e.getValue().currency, e.getValue().amount);
+        String only = totals.only();
+        String totalText;
+        String unitText;
+        if (only != null) {
+            totalText = hidden ? DOTS : CurrencyHelper.amount(c, only, totals.get(only));
+            unitText = CurrencyHelper.label(c, only);
+        } else {
+            StringBuilder lines = new StringBuilder();
+            for (java.util.Map.Entry<String, Long> e : totals.entries().entrySet()) {
+                if (lines.length() > 0) lines.append('\n');
+                lines.append(CurrencyHelper.amount(c, e.getKey(), e.getValue()))
+                    .append(' ').append(CurrencyHelper.label(c, e.getKey()));
+            }
+            totalText = hidden ? DOTS : lines.toString();
+            unitText = "";
+        }
         RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance);
         views.setRemoteAdapter(R.id.widget_list, new Intent(c, BalanceWidgetService.class));
         views.setInt(R.id.widget_root, "setLayoutDirection",
@@ -139,9 +160,8 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         views.setViewVisibility(R.id.widget_hint, smsAllowed ? View.GONE : View.VISIBLE);
         if (!smsAllowed) views.setTextViewText(R.id.widget_hint,
             c.getString(R.string.widget_permission_hint));
-        views.setTextViewText(R.id.widget_total,
-            hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : CurrencyHelper.amount(c, total));
-        views.setTextViewText(R.id.widget_unit, CurrencyHelper.label(c));
+        views.setTextViewText(R.id.widget_total, totalText);
+        views.setTextViewText(R.id.widget_unit, unitText);
         views.setImageViewResource(R.id.widget_mask,
             hidden ? R.drawable.ic_visibility_off : R.drawable.ic_visibility);
         views.setContentDescription(R.id.widget_mask, c.getString(R.string.widget_action_mask));

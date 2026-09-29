@@ -2,6 +2,10 @@ package com.ashkanrafiee.balance;
 
 import android.content.Context;
 
+import com.ashkanrafiee.balance.parser.Rules;
+
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.text.NumberFormat;
 import java.util.Locale;
 
@@ -54,15 +58,51 @@ public final class CurrencyHelper {
         return display(context, n);
     }
 
+    /** Formats a stored amount denominated in {@code currency}, in that currency's minor units. A
+     *  rial amount follows the app's chosen denomination exactly as before; every other currency is
+     *  shown at its own scale with no conversion of any kind, because none exists offline. */
+    public static String amount(Context context, String currency, long minorUnits) {
+        if (currency == null || BalanceData.IRR.equals(currency)) return amount(context, minorUnits);
+        int scale = scaleOf(currency);
+        if (scale == 0) return display(context, minorUnits);
+        return display(context, new BigDecimal(BigInteger.valueOf(minorUnits), scale));
+    }
+
+    /** The unit shown beside an amount in {@code currency}: the app's chosen rial denomination for
+     *  a rial amount, the ISO code itself for every other currency. The toman is an IRR display
+     *  denomination and is never applied to another currency. */
+    public static String label(Context context, String currency) {
+        if (currency == null || BalanceData.IRR.equals(currency)) return label(context);
+        return currency;
+    }
+
+    /** The canonical number of decimal places a currency's minor units carry, as the engine's
+     *  versioned currency registry defines it. Zero for a code the registry does not know: an
+     *  unrecognised currency is shown raw rather than guessed at. */
+    static int scaleOf(String currency) {
+        if (currency == null) return 0;
+        for (Rules.Currency known : Rules.Currency.values())
+            if (known.name().equals(currency)) return known.scale;
+        return 0;
+    }
+
     /** A number written the way this app writes numbers, in the chosen language. */
     static String display(Context context, long n) {
+        return formatter(context).format(n);
+    }
+
+    private static String display(Context context, BigDecimal n) {
+        return formatter(context).format(n);
+    }
+
+    private static NumberFormat formatter(Context context) {
         Locale locale = LocaleHelper.isPersian(context) ? FA : Locale.US;
         Numbers c = NUMBERS.get();
         if (!locale.equals(c.locale)) {
             c.format = NumberFormat.getNumberInstance(locale);
             c.locale = locale;
         }
-        return c.format.format(n);
+        return c.format;
     }
 
     /** One formatter, belonging to the thread that asked for it and rebuilt when the language
