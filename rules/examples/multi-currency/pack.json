@@ -2,7 +2,7 @@
   "schema": "prototype-1",
   "id": "example.multi-currency",
   "revision": "r1",
-  "bank": { "id": "example.bank", "country": "GB", "name": "Synthetic Example Bank" },
+  "bank": { "id": "example.bank", "country": "GB", "name": "Synthetic Example Bank", "provenance": "OFFICIAL" },
   "templates": [
     {
       "id": "two-balances",

@@ -5,7 +5,8 @@
   "bank": {
     "id": "example.international",
     "country": "US",
-    "name": "International Example"
+    "name": "International Example",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {
