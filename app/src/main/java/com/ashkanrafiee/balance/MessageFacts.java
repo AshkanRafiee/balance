@@ -34,15 +34,24 @@ final class MessageFacts {
     final Long movement;
     /** When the money moved, in epoch millis. */
     final long time;
+    /** The ISO-style code of the currency the balance and movement are denominated in, never null;
+     *  {@link BalanceData#IRR} for the legacy path and for every pack enabled so far. */
+    final String currency;
 
     static final long NO_BALANCE = -1;
 
     private MessageFacts(String bank, String account, long balance, Long movement, long time) {
+        this(bank, account, balance, movement, time, BalanceData.IRR);
+    }
+
+    private MessageFacts(String bank, String account, long balance, Long movement, long time,
+            String currency) {
         this.bank = bank;
         this.account = account;
         this.balance = balance;
         this.movement = movement;
         this.time = time;
+        this.currency = currency == null ? BalanceData.IRR : currency;
     }
 
     /** The arrival-independent reduction: stated balance, settled movement, and the account the
@@ -74,7 +83,8 @@ final class MessageFacts {
             MessageFacts packed = engineFacts(engine, sender, body);
             if (packed != null)
                 return new MessageFacts(packed.bank, packed.account, packed.balance, packed.movement,
-                    MessageDate.eventTime(body, arrival, BankRules.calendar(packed.bank)));
+                    MessageDate.eventTime(body, arrival, BankRules.calendar(packed.bank)),
+                    packed.currency);
         }
         String bank = BankRules.resolve(sender);
         if (bank == null) return new MessageFacts(null, null, NO_BALANCE, null, 0);
@@ -104,15 +114,22 @@ final class MessageFacts {
         Long movement = null;
         String account = null;
         String bank = null;
+        String currency = BalanceData.IRR;
         for (Parser.Fact fact : result.facts()) {
             if (bank == null) bank = fact.bankId();
             if (fact.account() != null) account = fact.account();
             switch (fact.kind()) {
                 case BOOKED_BALANCE:
-                    if (fact.money().scale() == 0) balance = fact.money().minorUnits();
+                    if (fact.money().scale() == 0) {
+                        balance = fact.money().minorUnits();
+                        currency = fact.money().currency().name();
+                    }
                     break;
                 case POSTED_MOVEMENT:
-                    if (fact.money().scale() == 0) movement = fact.money().minorUnits();
+                    if (fact.money().scale() == 0) {
+                        movement = fact.money().minorUnits();
+                        currency = fact.money().currency().name();
+                    }
                     break;
                 default:
                     break;
@@ -124,7 +141,7 @@ final class MessageFacts {
         // for a bank the app does not know yet falls back to the legacy path rather than writing a
         // balance under a name the UI cannot show.
         if (name == null || !BankRules.supportedNames().contains(name)) return null;
-        return new MessageFacts(name, account, balance, movement, 0);
+        return new MessageFacts(name, account, balance, movement, 0, currency);
     }
 
     /** The engine only ever sees this synthetic source id: the seam identifies a message by its

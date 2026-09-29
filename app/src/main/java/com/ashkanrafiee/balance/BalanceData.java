@@ -63,6 +63,13 @@ final class BalanceData {
      *  schema change never masquerades as a change of parsing rules. */
     static final int HISTORY_SCHEMA = 1;
 
+    /** The currency of the rial every legacy and currently-packed message is denominated in. It is
+     *  the default on every stored row, and it is the one currency whose presence is implied rather
+     *  than written: an IRR ledger key and an IRR JSON row stay byte-identical to the pre-currency
+     *  format, so every stored balance, transaction, backup and exclusion written before currencies
+     *  existed reads back unchanged. A non-IRR row is explicit in both. */
+    static final String IRR = "IRR";
+
     private static final long RECENT_WINDOW_MS = 5 * 60 * 1000;
     private static final int MAX_RECENT_ENTRIES = 16;
 
@@ -157,8 +164,10 @@ final class BalanceData {
                 String account = entry.has("account") && !entry.isNull("account")
                     ? entry.getString("account") : null;
                 if (account == null) account = accountOfKey(key);
+                String currency = entry.has("cur") && !entry.isNull("cur")
+                    ? entry.getString("cur") : currencyOfKey(key);
                 map.put(key, new Bank(bankOfKey(key), entry.getLong("amount"),
-                    entry.getLong("date"), entry.getString("sender"), account));
+                    entry.getLong("date"), entry.getString("sender"), account, currency));
             }
         } catch (Exception e) {
             Log.w(TAG, "stored balances unreadable; starting empty", e);
@@ -176,6 +185,7 @@ final class BalanceData {
             entry.put("date", b.date);
             entry.put("sender", b.sender);
             if (b.account != null) entry.put("account", b.account);
+            if (b.currency != null && !IRR.equals(b.currency)) entry.put("cur", b.currency);
             obj.put(e.getKey(), entry);
         }
         return obj.toString();
@@ -192,7 +202,18 @@ final class BalanceData {
      *  message carries no account number, or {@code bank|account} when it does. Bank names never
      *  contain '|', and neither do account numbers. */
     static String storageKey(String bank, String account) {
-        return account == null ? bank : bank + "|" + account;
+        return storageKey(bank, account, IRR);
+    }
+
+    /** The ledger identity: {@code bank}, {@code bank|account}, or — for a currency other than the
+     *  rial default — {@code bank|account|currency} with an empty account when the message states
+     *  none ({@code bank||currency}). The pre-currency form is exactly the IRR form, so every key
+     *  written before currencies existed is unchanged and still parses; a non-IRR ledger only ever
+     *  appears once a message actually states that currency. */
+    static String storageKey(String bank, String account, String currency) {
+        if (currency == null || IRR.equals(currency))
+            return account == null ? bank : bank + "|" + account;
+        return bank + "|" + (account == null ? "" : account) + "|" + currency;
     }
 
     /** The canonical bank name embedded in a composite storage key. */
@@ -201,10 +222,23 @@ final class BalanceData {
         return i < 0 ? key : key.substring(0, i);
     }
 
-    /** The account number embedded in a composite storage key, or null for a plain bank key. */
+    /** The account number embedded in a composite storage key, or null for a plain bank key or an
+     *  account-less three-part (non-IRR) key. */
     private static String accountOfKey(String key) {
-        int i = key.indexOf('|');
-        return i < 0 ? null : key.substring(i + 1);
+        int first = key.indexOf('|');
+        if (first < 0) return null;
+        int second = key.indexOf('|', first + 1);
+        String account = second < 0 ? key.substring(first + 1) : key.substring(first + 1, second);
+        return account.isEmpty() ? null : account;
+    }
+
+    /** The currency embedded in a composite storage key, {@link #IRR} for the one- and two-part
+     *  legacy forms. */
+    static String currencyOfKey(String key) {
+        int first = key.indexOf('|');
+        if (first < 0) return IRR;
+        int second = key.indexOf('|', first + 1);
+        return second < 0 ? IRR : key.substring(second + 1);
     }
 
     /** Reads all saved transactions, newest first, the order in which they were appended. */
@@ -227,6 +261,7 @@ final class BalanceData {
             if (t.balance != null) e.put("bal", t.balance.longValue());
             if (t.sig != null) e.put("sig", t.sig);
             if (t.content != null) e.put("content", t.content);
+            if (t.currency != null && !IRR.equals(t.currency)) e.put("cur", t.currency);
             arr.put(e);
         }
         return new JSONObject().put(FinancialSnapshotAdapter.TRANSACTIONS, arr).toString();
@@ -249,8 +284,9 @@ final class BalanceData {
                 String account = e.has("account") && !e.isNull("account") ? e.getString("account") : null;
                 String content = e.has("content") && !e.isNull("content") ? e.getString("content") : null;
                 Long balance = e.has("bal") && !e.isNull("bal") ? e.getLong("bal") : null;
+                String currency = e.has("cur") && !e.isNull("cur") ? e.getString("cur") : IRR;
                 list.add(new Transaction(e.getString("bank"), account, e.getLong("date"),
-                    e.getLong("amount"), balance, sig, content));
+                    e.getLong("amount"), balance, sig, content, currency));
             }
         } catch (Exception ex) {
             Log.w(TAG, "parseTransactions failed");
@@ -506,7 +542,7 @@ final class BalanceData {
         List<Bank> included = new ArrayList<>();
         List<Bank> excludedBanks = new ArrayList<>();
         for (Bank b : banks.values()) {
-            if (excluded.contains(storageKey(b.name, b.account))) excludedBanks.add(b);
+            if (excluded.contains(storageKey(b.name, b.account, b.currency))) excludedBanks.add(b);
             else included.add(b);
         }
         sortBanks(included, sort);
@@ -542,7 +578,7 @@ final class BalanceData {
         List<Bank> included = new ArrayList<>();
         List<Bank> excludedBanks = new ArrayList<>();
         for (Bank b : banks.values()) {
-            if (excluded.contains(storageKey(b.name, b.account))) excludedBanks.add(b);
+            if (excluded.contains(storageKey(b.name, b.account, b.currency))) excludedBanks.add(b);
             else included.add(b);
         }
         sortBanks(included, sort);
@@ -669,7 +705,7 @@ final class BalanceData {
                 MessageFacts facts = MessageFacts.of(sender, cursor.getString(1), arrival);
                 if (facts.bank == null) continue;
                 if (facts.balance < 0) continue;
-                String key = storageKey(facts.bank, facts.account);
+                String key = storageKey(facts.bank, facts.account, facts.currency);
                 rowsByKey.computeIfAbsent(key, k -> new ArrayList<>())
                     .add(new Object[]{sender, cursor.getString(1), facts.time});
             }
@@ -732,7 +768,7 @@ final class BalanceData {
                     matched++;
                     current.put(key, new Bank(bank, chosen.balance, chosen.date,
                         chosenSender != null ? chosenSender : (existing != null ? existing.sender : null),
-                        accountOfKey(key)));
+                        accountOfKey(key), currencyOfKey(key)));
                 }
             }
             windows.put(key, pruneWindow(merged));
@@ -856,7 +892,7 @@ final class BalanceData {
                     String body = cursor.getString(1);
                     MessageFacts facts = MessageFacts.of(sender, body, arrival);
                     if (facts.bank == null) continue;
-                    rows.add(new Object[]{facts.bank, sender, body, facts.time});
+                    rows.add(new Object[]{facts.bank, sender, body, facts.time, facts.currency});
                 }
                 // Oldest first, so the balance-delta fallback chain below follows time. On a full scan
                 // the chain starts from the oldest kept message; on an incremental scan it is seeded
@@ -1252,25 +1288,30 @@ final class BalanceData {
     static String txIdentityKey(Transaction t) {
         if (t.sig != null) return "s:" + t.sig;
         String base = t.bank + "|" + t.date + "|" + t.amount;
-        return t.account == null ? base : base + "|" + t.account;
+        if (t.account != null) base += "|" + t.account;
+        if (t.currency != null && !IRR.equals(t.currency)) base += "|" + t.currency;
+        return base;
     }
 
     /** The composite storage key for a transaction's own bank slot. */
     private static String transactionCompositeKey(Transaction t) {
-        return storageKey(t.bank, t.account);
+        return storageKey(t.bank, t.account, t.currency);
     }
 
-    /** The composite storage key a [bank, sender, body, date] history row belongs to. */
+    /** The composite storage key a [bank, sender, body, date, currency] history row belongs to. */
     private static String rowCompositeKey(Object[] row) {
         String bank = (String) row[0];
-        return storageKey(bank, BankRules.extractAccount(bank, (String) row[2]));
+        String currency = row.length > 4 ? (String) row[4] : IRR;
+        return storageKey(bank, BankRules.extractAccount(bank, (String) row[2]), currency);
     }
 
     /** The legacy no-fingerprint dedup key of a transaction (bank/date/amount, plus account when
      *  stated), mirroring {@link #txIdentityKey}. */
     private static String legacyEntryKey(Transaction t) {
         String base = t.bank + "|" + t.date + "|" + t.amount;
-        return t.account == null ? base : base + "|" + t.account;
+        if (t.account != null) base += "|" + t.account;
+        if (t.currency != null && !IRR.equals(t.currency)) base += "|" + t.currency;
+        return base;
     }
 
     static long extract(String raw) {
@@ -1317,7 +1358,8 @@ final class BalanceData {
         // The balance the message reported travels with the movement, so the history can prove a
         // missing message later without ever touching the inbox again (see Residual).
         return new Transaction(bank, account, date, txn,
-            stated < 0 ? null : stated, messageSig(sender, body, account), contentHash(sender, body));
+            stated < 0 ? null : stated, messageSig(sender, body, account), contentHash(sender, body),
+            facts.currency);
     }
 
     // ============================================================
@@ -1354,8 +1396,8 @@ final class BalanceData {
         return merged;
     }
 
-    /** Rebinds history-scan rows [bank, sender, body, date] into the [sender, body, date] layout the
-     *  window merger consumes. */
+    /** Rebinds history-scan rows [bank, sender, body, date, currency] into the [sender, body, date]
+     *  layout the window merger consumes. */
     private static List<Object[]> senderBodyDate(List<Object[]> rows) {
         List<Object[]> out = new ArrayList<>(rows.size());
         for (Object[] r : rows) out.add(new Object[]{r[1], r[2], r[3]});

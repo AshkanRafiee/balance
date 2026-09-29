@@ -35,6 +35,9 @@ final class Residual {
 
     /** Canonical bank name, the same key {@link BalanceData#storageKey} uses. */
     final String bank;
+    /** ISO-style code of the currency the bracketed statements are denominated in, never null; the
+     *  rial default for every row stored so far. */
+    final String currency;
     /** Account number this residual belongs to, or null when the bank stated none. */
     final String account;
     /** Date of the earlier statement that starts the bracketed window. */
@@ -49,7 +52,13 @@ final class Residual {
     final int movements;
 
     Residual(String bank, String account, long fromDate, long toDate, long amount, int movements) {
+        this(bank, account, fromDate, toDate, amount, movements, BalanceData.IRR);
+    }
+
+    Residual(String bank, String account, long fromDate, long toDate, long amount, int movements,
+            String currency) {
         this.bank = bank;
+        this.currency = currency == null ? BalanceData.IRR : currency;
         this.account = account;
         this.fromDate = fromDate;
         this.toDate = toDate;
@@ -59,7 +68,7 @@ final class Residual {
 
     /** The slot this residual belongs to, matching the balance and movement stores. */
     String key() {
-        return BalanceData.storageKey(bank, account);
+        return BalanceData.storageKey(bank, account, currency);
     }
 
     /**
@@ -87,8 +96,8 @@ final class Residual {
         Map<String, List<Transaction>> bySlot = new LinkedHashMap<>();
         for (Transaction t : txs) {
             if (t == null) continue;
-            bySlot.computeIfAbsent(BalanceData.storageKey(t.bank, t.account), k -> new ArrayList<>())
-                .add(t);
+            bySlot.computeIfAbsent(BalanceData.storageKey(t.bank, t.account, t.currency),
+                    k -> new ArrayList<>()).add(t);
         }
         List<Residual> found = new ArrayList<>();
         for (List<Transaction> slot : bySlot.values()) {
@@ -162,7 +171,7 @@ final class Residual {
                     gap = 0;
                 }
                 if (gap != 0) {
-                    out.add(new Residual(t.bank, t.account, open.date, t.date, gap, count));
+                    out.add(new Residual(t.bank, t.account, open.date, t.date, gap, count, t.currency));
                 }
             }
             open = t;

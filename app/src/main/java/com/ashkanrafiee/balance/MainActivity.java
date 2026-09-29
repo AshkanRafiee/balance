@@ -2001,7 +2001,7 @@ public class MainActivity extends Activity {
             float cursor = top;
             for (java.util.List<Bank> block : BalanceData.groupedForDisplay(banks, excluded, sortMode)) {
                 for (Bank b : block) {
-                    String key = BalanceData.storageKey(b.name, b.account);
+                    String key = BalanceData.storageKey(b.name, b.account, b.currency);
                     out.add(new BankRow(BankRow.SINGLE, b, b.name, key, b.amount,
                         excluded.contains(key), cursor, 82));
                     cursor += 96;

@@ -28,6 +28,9 @@ final class Transaction {
      *  scan uses it to reconcile stored entries with their re-parsed messages after a rules update.
      *  Null for entries written before this identity existed. */
     final String content;
+    /** ISO-style code of the currency {@link #amount} and {@link #balance} are denominated in, never
+     *  null; the rial default for every message the app parses today. */
+    final String currency;
 
     Transaction(String bank, long date, long amount) {
         this(bank, date, amount, null);
@@ -47,6 +50,11 @@ final class Transaction {
 
     Transaction(String bank, String account, long date, long amount, Long balance, String sig,
             String content) {
+        this(bank, account, date, amount, balance, sig, content, BalanceData.IRR);
+    }
+
+    Transaction(String bank, String account, long date, long amount, Long balance, String sig,
+            String content, String currency) {
         this.bank = bank;
         this.account = account;
         this.date = date;
@@ -54,5 +62,6 @@ final class Transaction {
         this.balance = balance;
         this.sig = sig;
         this.content = content;
+        this.currency = currency == null ? BalanceData.IRR : currency;
     }
 }
