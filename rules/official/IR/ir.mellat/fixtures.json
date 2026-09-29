@@ -1,0 +1,143 @@
+{
+  "schema": "prototype-fixtures-1",
+  "pack": "official.ir.mellat",
+  "cases": [
+    {
+      "id": "mellat-transfer",
+      "sourceId": "mellat-real-001",
+      "sender": "+9815560001",
+      "arrival": "2026-08-30T06:00:00Z",
+      "zone": "Asia/Tehran",
+      "body": "\u0628\u0631\u062f\u0627\u0634\u062a100,000,000 \u0645\u0627\u0646\u062f\u0647 77,222,945",
+      "legacy": {
+        "status": "PARSED",
+        "bank": "ir.mellat",
+        "account": null,
+        "reason": null,
+        "channel": null,
+        "balance": 77222945,
+        "txn": -100000000,
+        "time": 1788069600000,
+        "timeArrival": true
+      },
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "id": "mellat-balance",
+            "account": null,
+            "currency": "IRR",
+            "minorUnits": "77222945",
+            "scale": 0,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Tehran",
+              "fallback": true
+            }
+          },
+          {
+            "id": "mellat-movement",
+            "account": null,
+            "currency": "IRR",
+            "minorUnits": "-100000000",
+            "scale": 0,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Tehran",
+              "fallback": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "mellat-fee",
+      "sourceId": "mellat-real-002",
+      "sender": "+9815560001",
+      "arrival": "2026-08-30T06:00:00Z",
+      "zone": "Asia/Tehran",
+      "body": "\u0628\u0631\u062f\u0627\u0634\u062a10,000 \u0645\u0627\u0646\u062f\u0647 177,222,945",
+      "legacy": {
+        "status": "PARSED",
+        "bank": "ir.mellat",
+        "account": null,
+        "reason": null,
+        "channel": null,
+        "balance": 177222945,
+        "txn": -10000,
+        "time": 1788069600000,
+        "timeArrival": true
+      },
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "id": "mellat-balance",
+            "account": null,
+            "currency": "IRR",
+            "minorUnits": "177222945",
+            "scale": 0,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Tehran",
+              "fallback": true
+            }
+          },
+          {
+            "id": "mellat-movement",
+            "account": null,
+            "currency": "IRR",
+            "minorUnits": "-10000",
+            "scale": 0,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Tehran",
+              "fallback": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "mellat-delta",
+      "sourceId": "mellat-real-003",
+      "sender": "+9815560001",
+      "arrival": "2026-08-30T06:00:00Z",
+      "zone": "Asia/Tehran",
+      "body": "\u067e\u0631\u062f\u0627\u062e\u062a \u0627\u0646\u062c\u0627\u0645 \u0634\u062f\u060c \u0645\u0627\u0646\u062f\u0647 \u062d\u0633\u0627\u0628: 72,222,945",
+      "legacy": {
+        "status": "PARSED",
+        "bank": "ir.mellat",
+        "account": null,
+        "reason": null,
+        "channel": null,
+        "balance": 72222945,
+        "txn": null,
+        "time": 1788069600000,
+        "timeArrival": true
+      },
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "id": "mellat-delta-balance",
+            "account": null,
+            "currency": "IRR",
+            "minorUnits": "72222945",
+            "scale": 0,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Tehran",
+              "fallback": true
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
