@@ -24,8 +24,15 @@ public final class Rules {
     public static final int MAX_MAP = 16;
     public static final int MAX_WORK = 1_000_000; // shared literal, scope and opt-in operation budget
 
+    /** The versioned currency registry, `prototype-currencies-1`. A member is an ISO 4217 code
+     * whose scale is that standard's minor-unit exponent, so a pack can state an amount exactly
+     * and the app can draw it back without guessing. A code is added only alongside a reviewed
+     * pack that needs it, and the scale is fixed at that point: stored amounts are plain minor
+     * units under a currency code, so changing a scale later would silently revalue every
+     * already-stored amount, and dropping a code would orphan them. Nothing here implies a rate;
+     * the registry says how to write and read an amount, never what it is worth. */
     public enum Currency {
-        IRR(0), USD(2), EUR(2), GBP(2), JPY(0), KWD(3);
+        IRR(0), USD(2), EUR(2), GBP(2), JPY(0), KWD(3), JOD(3);
         public final int scale;
         Currency(int scale) { this.scale = scale; }
     }

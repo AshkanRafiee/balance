@@ -129,9 +129,9 @@ optional text is omitted with diagnostics. Resource exhaustion remains fatal.
 
 ## Exact money
 
-Registry `prototype-currencies-1`: IRR/JPY scale 0, USD/EUR/GBP scale 2, KWD scale 3.
-`Money(currency, minorUnits, scale)` rejects a noncanonical scale. No FX conversion
-or totals are performed. Negative balances and zero balances are valid.
+Registry `prototype-currencies-1`: IRR/JPY scale 0, USD/EUR/GBP scale 2, KWD/JOD
+scale 3. `Money(currency, minorUnits, scale)` rejects a noncanonical scale. No FX
+conversion or totals are performed. Negative balances and zero balances are valid.
 
 `CurrencyRule(fixed, token, mapping)` supports fixed currency, finite extracted
 token mapping, or both (mapped token must agree with fixed currency). Tokens match
@@ -139,13 +139,18 @@ exactly; `$` has no implicit meaning. A token/mapping must be declared together.
 Unknown tokens and conflicting fixed/mapped currency are distinct diagnostic codes.
 Uncaptured text is not currency evidence: declare token validation wherever needed.
 
-`MoneyRule(amount, currency, decimal, group, grouping, digits, unitMultiplier)`
-allows an optional single leading `+`/`-`, at least one integer digit, and an
-optional decimal separator followed by digits. The allowed decimal separators
-are `.`, `,`, U+066B. Groups can be disabled or use `.`, `,`, space, U+066C.
-Decimal and group characters differ. Western grouping is 1–3 digits then groups
-of 3; Indian grouping is 1–2 digits, middle groups of 2, final group of 3.
-Ungrouped integers are accepted with either grouping policy.
+`MoneyRule(amount, currency, decimal, group, grouping, digits, unitMultiplier,
+sign, leadingPoint)` allows an optional single `+`/`-` in the declared position
+(`sign`, LEADING by default, TRAILING after the digits) and, by default, at least
+one integer digit before an optional decimal separator followed by digits.
+`leadingPoint` (false by default) is the only widening: true reads an empty
+integer part as zero, so a bank that prints amounts below one unit as `.11` is
+readable. It is opt-in because a missing integer part otherwise signals a
+misaligned capture, which must keep failing rather than become a fraction. The
+allowed decimal separators are `.`, `,`, U+066B. Groups can be disabled or use
+`.`, `,`, space, U+066C. Decimal and group characters differ. Western grouping is
+1–3 digits then groups of 3; Indian grouping is 1–2 digits, middle groups of 2,
+final group of 3. Ungrouped integers are accepted with either grouping policy.
 
 Currency precision is a hard limit, including excess trailing zero digits.
 No exponent, parentheses, trailing signs, implicit markers, rounding, or arbitrary

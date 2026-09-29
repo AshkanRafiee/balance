@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -9,6 +10,8 @@ import unittest
 from pathlib import Path
 
 import read_official_pack as reader
+
+REPOSITORY = Path(__file__).resolve().parent.parent
 
 
 def write_document(path, value):
@@ -125,6 +128,32 @@ class OfficialReaderTest(unittest.TestCase):
             self.load('{"a":' + '[' * 16 + '0' + ']' * 16 + '}')
         with self.assertRaises(ValueError):
             self.load('{"a":"' + 'x' * reader.MAX_BYTES + '"}')
+
+    def test_published_currency_registry_matches_the_engine(self):
+        """The published schema and the engine's registry must name the same currencies.
+
+        A code the engine knows but the schema does not is an amount a contributor
+        cannot express; a code the schema names but the engine does not is a pack that
+        decodes to a currency the app would then draw at the wrong scale, or refuse.
+        Either way the two lists are only useful together, so they are checked together.
+        """
+        schema = json.loads((REPOSITORY / "rules/schema/bank-pack-prototype-1.schema.json").read_text(
+            encoding="utf-8"))
+        published = schema["$defs"]["currencyCode"]["enum"]
+        source = (REPOSITORY / "parser-core/src/main/java/com/ashkanrafiee/balance/parser/Rules.java"
+                  ).read_text(encoding="utf-8")
+        declared = re.search(r"enum Currency \{(.*?);", source, re.S)
+        self.assertIsNotNone(declared, "Rules.Currency is no longer a one-line enum; update this check")
+        engine = re.findall(r"\b([A-Z]{3})\((\d)\)", declared.group(1))
+        self.assertEqual([code for code, _ in engine], published)
+        # The ISO 4217 minor-unit exponents are asserted where the registry is defined, in
+        # CurrencyHelperTest; here only the two name lists are compared, so this check can
+        # never become a third place where a scale is written down.
+        for _, scale in engine:
+            self.assertIn(scale, ("0", "2", "3"))
+        contract = (REPOSITORY / "parser-core/CONTRACT.md").read_text(encoding="utf-8")
+        for code in published:
+            self.assertIn(code, contract, f"{code} is missing from the documented registry")
 
 
 if __name__ == "__main__":

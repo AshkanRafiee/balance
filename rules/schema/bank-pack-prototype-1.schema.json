@@ -26,7 +26,7 @@
   },
   "$defs": {
     "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9._-]+$" },
-    "currencyCode": { "enum": ["IRR", "USD", "EUR", "GBP", "JPY", "KWD"] },
+    "currencyCode": { "enum": ["IRR", "USD", "EUR", "GBP", "JPY", "KWD", "JOD"] },
     "digits": { "enum": ["ASCII", "ASCII_PERSIAN_ARABIC"] },
     "selector": {
       "type": "object", "additionalProperties": false,

@@ -9,6 +9,8 @@ import android.content.Context;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 
+import com.ashkanrafiee.balance.parser.Rules;
+
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -92,5 +94,22 @@ public class CurrencyHelperTest {
         assertEquals(3, CurrencyHelper.scaleOf("KWD"));
         assertEquals(0, CurrencyHelper.scaleOf("IRR"));
         assertEquals(0, CurrencyHelper.scaleOf("XYZ"));
+    }
+
+    /** The currency registry is the one place a code's scale is defined, and the app reads it from
+     *  there rather than keeping its own copy, so a new code can never be drawn at a scale the
+     *  engine would not have stored it at. */
+    @Test public void everyRegistryCurrencyHasTheScaleItsStandardFixes() {
+        assertEquals(0, Rules.Currency.IRR.scale);
+        assertEquals(0, Rules.Currency.JPY.scale);
+        assertEquals(2, Rules.Currency.USD.scale);
+        assertEquals(2, Rules.Currency.EUR.scale);
+        assertEquals(2, Rules.Currency.GBP.scale);
+        assertEquals(3, Rules.Currency.KWD.scale);
+        assertEquals(3, Rules.Currency.JOD.scale);
+        for (Rules.Currency known : Rules.Currency.values()) {
+            assertEquals("scale of " + known, known.scale, CurrencyHelper.scaleOf(known.name()));
+            assertEquals(known.name(), CurrencyHelper.code(known.name()));
+        }
     }
 }
