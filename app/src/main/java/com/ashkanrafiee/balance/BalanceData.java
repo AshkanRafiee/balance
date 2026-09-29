@@ -626,6 +626,7 @@ final class BalanceData {
     static synchronized int scanSms(Context context, LinkedHashMap<String, Bank> saved) {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
             return 0;
+        EngineRules.activate(context);
         FinancialAuthority authority = authority(context);
         if (authority == null) return 0;
         FinancialSnapshotAdapter.Snapshot snapshot;
@@ -791,6 +792,7 @@ final class BalanceData {
         if (HISTORY_SCANNING) return 0;
         HISTORY_SCANNING = true;
         try {
+            EngineRules.activate(context);
             FinancialAuthority authority = authority(context);
             if (authority == null) return 0;
             FinancialSnapshotAdapter.Snapshot snapshot;

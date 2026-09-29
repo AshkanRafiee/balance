@@ -65,6 +65,26 @@ final class EngineRules {
         }
     }
 
+    /** Production activation: loads the bundled packs once and turns the seam on, so every message
+     *  the engine covers is parsed by the engine. Called from every entry point that can trigger a
+     *  scan (main activity, history refresh, widget), so the behavior does not depend on how the
+     *  process was started. A load failure is logged and leaves the seam off and the legacy path in
+     *  place — an unreadable pack must never make a bank message unreadable. */
+    static EngineRules activate(Context context) {
+        EngineRules current = instance;
+        if (current != null) return current;
+        try {
+            current = load(context.getApplicationContext());
+        } catch (IOException unavailable) {
+            android.util.Log.w(TAG, "engine packs unavailable, keeping the legacy parser", unavailable);
+            return null;
+        }
+        current.active = true;
+        return current;
+    }
+
+    private static final String TAG = "EngineRules";
+
     private EngineRules(Context context) throws IOException {
         Map<String, Object> catalog;
         try (InputStream input = context.getAssets().open("catalog.json")) {

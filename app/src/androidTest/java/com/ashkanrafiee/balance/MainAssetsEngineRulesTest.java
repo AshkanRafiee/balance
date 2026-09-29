@@ -19,16 +19,20 @@ import java.util.Map;
 /** F1.c: the production loader. Verifies the official packs are bundled into the app's own main
  *  assets, that EngineRules indexes every catalog sender exactly once, and that the whole
  *  112-fixture corpus parses through the packaged index to the same statuses the on-device corpus
- *  test asserts. Also pins the seam's inert default: activation is off until the seam flips it. */
+ *  test asserts. Also pins the production activation contract: the app's scan path activates the
+ *  seam once per process, and activation is idempotent. */
 @RunWith(AndroidJUnit4.class)
 public class MainAssetsEngineRulesTest {
 
     @Test public void loadedPackagesIndexAndParseTheWholeCorpus() throws Exception {
-        EngineRules rules = EngineRules.load(
+        EngineRules rules = EngineRules.activate(
                 InstrumentationRegistry.getInstrumentation().getTargetContext());
+        assertNotNull("production activation must load the bundled packs", rules);
+        assertTrue("production activation turns the seam on", rules.active());
+        assertEquals("activation is idempotent", rules,
+                EngineRules.activate(InstrumentationRegistry.getInstrumentation().getTargetContext()));
         assertEquals("Every non-collision bank is packed", 42, rules.bankCount());
         assertTrue("Sender index is populated", rules.senderAliasCount() > 0);
-        assertFalse("Seam stays inert until activated", rules.active());
 
         Map<String, Object> catalog = asset("catalog.json");
         List<?> banks = (List<?>) catalog.get("banks");
