@@ -1,0 +1,129 @@
+{
+  "schema": "prototype-1",
+  "id": "official.ir.parsian",
+  "revision": "ir-1",
+  "bank": {
+    "id": "ir.parsian",
+    "country": "IR",
+    "name": "Parsian"
+  },
+  "templates": [
+    {
+      "id": "statement",
+      "senders": [
+        "ParsianBank",
+        "Parsian",
+        "Bank Parsian",
+        "99902318",
+        "99992318",
+        "+98200082",
+        "+98300054",
+        "+98500024",
+        "+9850002318",
+        "+9850001099",
+        "50001099",
+        "300071",
+        "9830007171",
+        "9810005403",
+        "9899902318"
+      ],
+      "guards": [
+        {
+          "line": 1,
+          "literal": "\u0645\u0628\u0644\u063a",
+          "excluded": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "statement-movement",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "account": {
+            "line": 0,
+            "after": "",
+            "before": "",
+            "maxLength": 32,
+            "normalization": "ACCOUNT",
+            "numeric": {
+              "segments": [
+                {
+                  "min": 10,
+                  "max": 24
+                }
+              ],
+              "mode": "EXACT"
+            }
+          },
+          "kind": "POSTED_MOVEMENT",
+          "direction": {
+            "fixed": "DEBIT"
+          },
+          "money": {
+            "amount": {
+              "line": 1,
+              "after": "\u0645\u0628\u0644\u063a:",
+              "before": "",
+              "maxLength": 32
+            },
+            "currency": {
+              "fixed": "IRR"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII_PERSIAN_ARABIC",
+            "unitMultiplier": 1,
+            "sign": "TRAILING"
+          }
+        },
+        {
+          "id": "statement-balance",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "account": {
+            "line": 0,
+            "after": "",
+            "before": "",
+            "maxLength": 32,
+            "normalization": "ACCOUNT",
+            "numeric": {
+              "segments": [
+                {
+                  "min": 10,
+                  "max": 24
+                }
+              ],
+              "mode": "EXACT"
+            }
+          },
+          "kind": "BOOKED_BALANCE",
+          "money": {
+            "amount": {
+              "line": 2,
+              "after": "\u0645\u0627\u0646\u062f\u0647:",
+              "before": "",
+              "maxLength": 32
+            },
+            "currency": {
+              "fixed": "IRR"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII_PERSIAN_ARABIC",
+            "unitMultiplier": 1
+          }
+        }
+      ]
+    }
+  ]
+}
