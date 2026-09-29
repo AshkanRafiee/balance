@@ -1,0 +1,106 @@
+{
+  "schema": "prototype-fixtures-1",
+  "pack": "official.ir.melli",
+  "cases": [
+    {
+      "id": "melli-debit",
+      "sourceId": "melli-real-001",
+      "sender": "98700717",
+      "arrival": "2026-08-30T06:00:00Z",
+      "zone": "Asia/Tehran",
+      "body": "\u062d\u0633\u0627\u0628: 00123\n\u0645\u0628\u0644\u063a:100-\n\u0645\u0627\u0646\u062f\u0647:\u06f9\u06f0\u06f0",
+      "legacy": {
+        "status": "PARSED",
+        "bank": "ir.melli",
+        "account": "00123",
+        "reason": null,
+        "channel": null,
+        "balance": 900,
+        "txn": -100,
+        "time": 1788069600000,
+        "timeArrival": true
+      },
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "id": "statement-balance",
+            "account": "00123",
+            "currency": "IRR",
+            "minorUnits": "900",
+            "scale": 0,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Tehran",
+              "fallback": true
+            }
+          },
+          {
+            "id": "statement-movement",
+            "account": "00123",
+            "currency": "IRR",
+            "minorUnits": "-100",
+            "scale": 0,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Tehran",
+              "fallback": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "melli-credit",
+      "sourceId": "melli-real-002",
+      "sender": "98700717",
+      "arrival": "2026-08-30T06:00:00Z",
+      "zone": "Asia/Tehran",
+      "body": "\u062d\u0633\u0627\u0628: 00123\n\u0648\u0627\u0631\u06cc\u0632:100+\n\u0645\u0627\u0646\u062f\u0647:\u06f9\u06f0\u06f0",
+      "legacy": {
+        "status": "PARSED",
+        "bank": "ir.melli",
+        "account": "00123",
+        "reason": null,
+        "channel": null,
+        "balance": 900,
+        "txn": 100,
+        "time": 1788069600000,
+        "timeArrival": true
+      },
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "id": "statement-balance",
+            "account": "00123",
+            "currency": "IRR",
+            "minorUnits": "900",
+            "scale": 0,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Tehran",
+              "fallback": true
+            }
+          },
+          {
+            "id": "statement-movement",
+            "account": "00123",
+            "currency": "IRR",
+            "minorUnits": "100",
+            "scale": 0,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Tehran",
+              "fallback": true
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

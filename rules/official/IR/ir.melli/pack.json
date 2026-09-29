@@ -1,0 +1,248 @@
+{
+  "schema": "prototype-1",
+  "id": "official.ir.melli",
+  "revision": "ir-1",
+  "bank": {
+    "id": "ir.melli",
+    "country": "IR",
+    "name": "Melli"
+  },
+  "templates": [
+    {
+      "id": "statement-debit",
+      "senders": [
+        "Bank Melli",
+        "BankMelli",
+        "Melli Iran",
+        "+987007170",
+        "98500043087",
+        "300084731",
+        "+989032229936",
+        "+98700717",
+        "+98200044",
+        "+9820004000",
+        "98700717",
+        "700717",
+        "9830009417",
+        "+9830009417",
+        "30009417",
+        "983000941001"
+      ],
+      "guards": [
+        {
+          "line": 1,
+          "literal": "\u0645\u0628\u0644\u063a",
+          "excluded": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "statement-movement",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "account": {
+            "line": 0,
+            "after": "\u062d\u0633\u0627\u0628:",
+            "before": "",
+            "maxLength": 32,
+            "normalization": "ACCOUNT",
+            "numeric": {
+              "segments": [
+                {
+                  "min": 3,
+                  "max": 12
+                }
+              ],
+              "mode": "EXACT"
+            }
+          },
+          "kind": "POSTED_MOVEMENT",
+          "direction": {
+            "fixed": "DEBIT"
+          },
+          "money": {
+            "amount": {
+              "line": 1,
+              "after": "\u0645\u0628\u0644\u063a:",
+              "before": "",
+              "maxLength": 32
+            },
+            "currency": {
+              "fixed": "IRR"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII_PERSIAN_ARABIC",
+            "unitMultiplier": 1,
+            "sign": "TRAILING"
+          }
+        },
+        {
+          "id": "statement-balance",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "account": {
+            "line": 0,
+            "after": "\u062d\u0633\u0627\u0628:",
+            "before": "",
+            "maxLength": 32,
+            "normalization": "ACCOUNT",
+            "numeric": {
+              "segments": [
+                {
+                  "min": 3,
+                  "max": 12
+                }
+              ],
+              "mode": "EXACT"
+            }
+          },
+          "kind": "BOOKED_BALANCE",
+          "money": {
+            "amount": {
+              "line": 2,
+              "after": "\u0645\u0627\u0646\u062f\u0647:",
+              "before": "",
+              "maxLength": 32
+            },
+            "currency": {
+              "fixed": "IRR"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII_PERSIAN_ARABIC",
+            "unitMultiplier": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "statement-credit",
+      "senders": [
+        "Bank Melli",
+        "BankMelli",
+        "Melli Iran",
+        "+987007170",
+        "98500043087",
+        "300084731",
+        "+989032229936",
+        "+98700717",
+        "+98200044",
+        "+9820004000",
+        "98700717",
+        "700717",
+        "9830009417",
+        "+9830009417",
+        "30009417",
+        "983000941001"
+      ],
+      "guards": [
+        {
+          "line": 1,
+          "literal": "\u0648\u0627\u0631\u06cc\u0632",
+          "excluded": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "statement-movement",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "account": {
+            "line": 0,
+            "after": "\u062d\u0633\u0627\u0628:",
+            "before": "",
+            "maxLength": 32,
+            "normalization": "ACCOUNT",
+            "numeric": {
+              "segments": [
+                {
+                  "min": 3,
+                  "max": 12
+                }
+              ],
+              "mode": "EXACT"
+            }
+          },
+          "kind": "POSTED_MOVEMENT",
+          "direction": {
+            "fixed": "CREDIT"
+          },
+          "money": {
+            "amount": {
+              "line": 1,
+              "after": "\u0648\u0627\u0631\u06cc\u0632:",
+              "before": "",
+              "maxLength": 32
+            },
+            "currency": {
+              "fixed": "IRR"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII_PERSIAN_ARABIC",
+            "unitMultiplier": 1,
+            "sign": "TRAILING"
+          }
+        },
+        {
+          "id": "statement-balance",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "account": {
+            "line": 0,
+            "after": "\u062d\u0633\u0627\u0628:",
+            "before": "",
+            "maxLength": 32,
+            "normalization": "ACCOUNT",
+            "numeric": {
+              "segments": [
+                {
+                  "min": 3,
+                  "max": 12
+                }
+              ],
+              "mode": "EXACT"
+            }
+          },
+          "kind": "BOOKED_BALANCE",
+          "money": {
+            "amount": {
+              "line": 2,
+              "after": "\u0645\u0627\u0646\u062f\u0647:",
+              "before": "",
+              "maxLength": 32
+            },
+            "currency": {
+              "fixed": "IRR"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII_PERSIAN_ARABIC",
+            "unitMultiplier": 1
+          }
+        }
+      ]
+    }
+  ]
+}
