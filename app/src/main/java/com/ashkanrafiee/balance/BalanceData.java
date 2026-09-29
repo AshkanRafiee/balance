@@ -665,14 +665,12 @@ final class BalanceData {
                 long arrival = Math.min(cursor.getLong(2), now);
                 if (newest < arrival) newest = arrival;
                 String sender = cursor.getString(0);
-                String bank = BankRules.resolve(sender);
-                if (bank == null) continue;
-                long value = extract(cursor.getString(1));
-                if (value < 0) continue;
-                String key = storageKey(bank, BankRules.extractAccount(bank, cursor.getString(1)));
+                MessageFacts facts = MessageFacts.of(sender, cursor.getString(1), arrival);
+                if (facts.bank == null) continue;
+                if (facts.balance < 0) continue;
+                String key = storageKey(facts.bank, facts.account);
                 rowsByKey.computeIfAbsent(key, k -> new ArrayList<>())
-                    .add(new Object[]{sender, cursor.getString(1),
-                        MessageDate.eventTime(cursor.getString(1), arrival, BankRules.calendar(bank))});
+                    .add(new Object[]{sender, cursor.getString(1), facts.time});
             }
         } catch (Exception e) {
             Log.w(TAG, "scan failed", e);
@@ -853,11 +851,10 @@ final class BalanceData {
                     long arrival = Math.min(cursor.getLong(2), now);
                     if (arrival > newest) newest = arrival;
                     String sender = cursor.getString(0);
-                    String bank = BankRules.resolve(sender);
-                    if (bank == null) continue;
                     String body = cursor.getString(1);
-                    rows.add(new Object[]{bank, sender, body,
-                        MessageDate.eventTime(body, arrival, BankRules.calendar(bank))});
+                    MessageFacts facts = MessageFacts.of(sender, body, arrival);
+                    if (facts.bank == null) continue;
+                    rows.add(new Object[]{facts.bank, sender, body, facts.time});
                 }
                 // Oldest first, so the balance-delta fallback chain below follows time. On a full scan
                 // the chain starts from the oldest kept message; on an incremental scan it is seeded
@@ -1307,13 +1304,14 @@ final class BalanceData {
     static Transaction parseMovement(String bank, String sender, String body, long date,
                                      boolean hasPrev, long prevBalance) {
         if (body == null) return null;
-        long stated = extract(body);
-        Long txn = extractTransaction(body);
+        MessageFacts facts = MessageFacts.amounts(sender, body, bank);
+        long stated = facts.balance;
+        Long txn = facts.movement;
         if (txn == null) {
             txn = LegacyMoney.inferMovement(body, hasPrev, prevBalance);
             if (txn == null) return null;
         }
-        String account = BankRules.extractAccount(bank, body);
+        String account = facts.account;
         // The balance the message reported travels with the movement, so the history can prove a
         // missing message later without ever touching the inbox again (see Residual).
         return new Transaction(bank, account, date, txn,
@@ -1342,11 +1340,11 @@ final class BalanceData {
         for (Object[] row : rows) {
             String sender = (String) row[0];
             String body = (String) row[1];
-            Long txn = extractTransaction(body);
-            long bal = extract(body);
+            MessageFacts facts = MessageFacts.amounts(sender, body, bank);
+            Long txn = facts.movement;
+            long bal = facts.balance;
             if (txn == null || bal < 0) continue;
-            String sig = messageSig(sender, body,
-                bank == null ? null : BankRules.extractAccount(bank, body));
+            String sig = messageSig(sender, body, bank == null ? null : facts.account);
             if (sig == null || !sigs.add(sig)) continue;
             if (sigSender != null) sigSender.put(sig, sender);
             merged.add(new Reconcile.Entry((Long) row[2], txn, bal, sig));
