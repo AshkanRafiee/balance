@@ -45,6 +45,151 @@ tasks.register('catalogParityTest', JavaExec) {
     mainClass = 'com.ashkanrafiee.balance.parser.catalog.CatalogParityTest'
 }
 
+tasks.register('officialPackToolTest', Exec) {
+    commandLine 'python3', '-B', new File(projectDir.parentFile, 'tools/test_read_official_pack.py')
+}
+
+// The committed official Iranian packs must reproduce the frozen legacy pipeline.
+// Python's strict frontend cross-checks every pack against the catalog first; the
+// JVM then decodes each pack, runs its fixtures against the packed parser and,
+// for each one, reruns the deprecated app pipeline (LegacyReference) and requires
+// the same bank, account, money, resulting balance and times. Declared time
+// divergences must be real and precise: the engine must honestly fall back to
+// arrival while legacy resolved a stated event time. Malformed or drifted official
+// packs must fail the build.
+tasks.register('officialPackTest') {
+    dependsOn classes, testClasses
+    inputs.dir(new File(projectDir.parentFile, 'rules/official/IR'))
+    doLast {
+        def repository = projectDir.parentFile
+        def catalogDir = new File(repository, 'rules/official/IR')
+        def input = providers.exec {
+            commandLine 'python3', '-B', new File(repository, 'tools/read_official_pack.py'), catalogDir
+        }
+        def documents = new groovy.json.JsonSlurper().parseText(input.standardOutput.asText.get())
+        def urls = (sourceSets.main.output.classesDirs + sourceSets.test.output.classesDirs)
+            .files.collect { it.toURI().toURL() } as URL[]
+        def loader = new URLClassLoader(urls, (ClassLoader) null)
+        try {
+            def packClass = loader.loadClass('com.ashkanrafiee.balance.parser.PackDocument')
+            def parserClass = loader.loadClass('com.ashkanrafiee.balance.parser.Parser')
+            def messageClass = loader.loadClass('com.ashkanrafiee.balance.parser.Parser$Message')
+            def legacyClass = loader.loadClass('com.ashkanrafiee.balance.parser.legacy.LegacyReference')
+            def reference = legacyClass.getMethod('reference', String, String, long, String)
+            int cases = 0
+            documents.each { document ->
+                def pack = packClass.getMethod('decode', Map).invoke(null, document.pack)
+                if (document.fixtures.schema != 'prototype-fixtures-1' || document.fixtures.pack != pack.id())
+                    throw new GradleException('Invalid official fixture metadata')
+                def parser = parserClass.getConstructor(List).newInstance(pack.templates())
+                document.fixtures.cases.each { fixture ->
+                    def message = messageClass.getConstructor(String, String, String,
+                        java.time.Instant, java.time.ZoneId).newInstance(
+                            fixture.sourceId, fixture.sender, fixture.body,
+                            java.time.Instant.parse(fixture.arrival), java.time.ZoneId.of(fixture.zone))
+                    def result = parserClass.getMethod('parse', messageClass).invoke(parser, message)
+                    if (result.status().name() != fixture.expected.status) {
+                        def info = result.diagnostics().collect { "${it.templateKey()}/${it.outputId()}/${it.field()}:${it.code()}" }
+                        throw new GradleException('Official status mismatch for ' + fixture.id + ' -> engine ' + result.status() + ' diags=' + info + ' facts=' + result.facts().size())
+                    }
+                    def facts = result.facts() as List
+                    if (fixture.expected.status == 'PARSED' && facts.size() != fixture.expected.outputs.size())
+                        throw new GradleException('Official output count mismatch for ' + fixture.id)
+                    facts.each { fact ->
+                        def exp = fixture.expected.outputs.find { it.id == fact.provenance().outputId() }
+                        if (exp == null) throw new GradleException('Unexpected official output for ' + fixture.id)
+                        if (exp.account != fact.account()
+                                || exp.currency != fact.money().currency().name()
+                                || exp.minorUnits != Long.toString(fact.money().minorUnits())
+                                || exp.scale != fact.money().scale())
+                            throw new GradleException('Official output mismatch for ' + fixture.id)
+                        if (exp.containsKey('time')) {
+                            if (exp.time.instant != fact.time().instant().toString()
+                                    || exp.time.precision != fact.time().precision().name()
+                                    || exp.time.zone != fact.time().zone().getId()
+                                    || exp.time.fallback != fact.time().fallback())
+                                throw new GradleException('Official time mismatch for ' + fixture.id)
+                        }
+                        ['reason', 'channel'].each { field ->
+                            if (exp.containsKey(field)) {
+                                def value = field == 'reason' ? fact.reason() : fact.channel()
+                                def projected = value == null ? null : [id: value.id(), text: value.text()]
+                                if (projected != exp[field])
+                                    throw new GradleException('Official metadata mismatch for ' + fixture.id)
+                            }
+                        }
+                    }
+                    long arrivalMs = java.time.Instant.parse(fixture.arrival).toEpochMilli()
+                    def legacy = reference.invoke(null, fixture.sender, fixture.body, arrivalMs, fixture.zone)
+                    if (fixture.containsKey('legacy')) {
+                        def pins = fixture.legacy
+                        def matched = pins.status == legacy.status
+                            && pins.bank == legacy.bank
+                            && ((pins.account == null ? null : pins.account) == legacy.account)
+                            && ((pins.reason == null ? null : pins.reason) == legacy.reason)
+                            && ((pins.channel == null ? null : pins.channel) == legacy.channel)
+                            && (pins.txn == null ? null : (pins.txn as long)) == (legacy.txn == null ? null : (legacy.txn as long))
+                            && (pins.balance == null ? null : (pins.balance as long)) == (legacy.balance == null ? null : (legacy.balance as long))
+                            && (pins.time as long) == (legacy.time as long)
+                            && pins.timeArrival == legacy.timeArrival
+                        if (!matched)
+                            throw new GradleException('Fixtures legacy pins drifted from the oracle for ' + fixture.id)
+                    }
+                    def engineStatus = result.status().name()
+                    def legacyStatus = legacy.status
+                    boolean statusOk = engineStatus == legacyStatus
+                        || (legacyStatus == 'NO_MATCH'
+                            && engineStatus != 'PARSED' && engineStatus != 'UNKNOWN_SENDER')
+                    if (!statusOk)
+                        throw new GradleException('Legacy status divergence for ' + fixture.id
+                            + ': engine ' + engineStatus + ' vs legacy ' + legacyStatus)
+                    if (engineStatus == 'PARSED') {
+                        if (legacy.bank != document.pack.bank.id)
+                            throw new GradleException('Legacy bank divergence for ' + fixture.id)
+                        def moves = facts.findAll { it.kind().name() == 'POSTED_MOVEMENT' }
+                        def balances = facts.findAll { it.kind().name() == 'BOOKED_BALANCE' }
+                        if ((legacy.txn == null ? 0 : 1) != moves.size()
+                                || (legacy.balance == null ? 0 : 1) != balances.size())
+                            throw new GradleException('Legacy money-cardinality divergence for ' + fixture.id)
+                        if (legacy.txn != null && (moves[0].money().minorUnits() as long) != legacy.txn)
+                            throw new GradleException('Legacy movement mismatch for ' + fixture.id)
+                        if (legacy.balance != null && (balances[0].money().minorUnits() as long) != legacy.balance)
+                            throw new GradleException('Legacy balance mismatch for ' + fixture.id)
+                        facts.each { fact ->
+                            if (fact.account() != legacy.account)
+                                throw new GradleException('Legacy account divergence for ' + fixture.id)
+                        }
+                        def movements = facts.findAll { it.kind().name() == 'POSTED_MOVEMENT' }
+                        def txnMoves = movements.findAll { it.channel() != null }
+                        if (legacy.channel == null ? !txnMoves.isEmpty()
+                                : txnMoves.size() != 1 || txnMoves[0].channel().text() != legacy.channel)
+                            throw new GradleException('Legacy channel divergence for ' + fixture.id)
+                        def reasonMoves = movements.findAll { it.reason() != null }
+                        if (legacy.reason == null ? !reasonMoves.isEmpty()
+                                : reasonMoves.size() != 1 || reasonMoves[0].reason().text() != legacy.reason)
+                            throw new GradleException('Legacy reason divergence for ' + fixture.id)
+                        boolean divergent = fixture.containsKey('divergentTime') && fixture.divergentTime
+                        facts.each { fact ->
+                            if (divergent) {
+                                if (!fact.time().fallback()
+                                        || fact.time().instant().toEpochMilli() != arrivalMs
+                                        || legacy.timeArrival || legacy.time == arrivalMs)
+                                    throw new GradleException('Divergent-time fixture must fall back to arrival while legacy resolves for ' + fixture.id)
+                            } else if (fact.time().instant().toEpochMilli() != legacy.time
+                                    || fact.time().fallback() != legacy.timeArrival)
+                                throw new GradleException('Legacy time divergence for ' + fixture.id)
+                        }
+                    }
+                    cases++
+                }
+            }
+            logger.lifecycle("Official Iranian packs: ${cases} fixtures passed against the legacy oracle")
+        } finally {
+            loader.close()
+        }
+    }
+}
+
 tasks.register('identityTest', JavaExec) {
     dependsOn testClasses
     classpath = sourceSets.test.runtimeClasspath
@@ -241,5 +386,6 @@ tasks.named('test') {
 tasks.named('check') {
     dependsOn prototypeTest, packDocumentTest, jsonLexicalGuardTest, ruleExampleTest, ruleToolTest,
         iranianPrototypeTest, iranianDocumentTest, jalaliParityTest, legacyCompatibilityTest, identityTest,
-        catalogParityTest, catalogToolTest, catalogDocumentTest
+        catalogParityTest, catalogToolTest, catalogDocumentTest,
+        officialPackToolTest, officialPackTest
 }
