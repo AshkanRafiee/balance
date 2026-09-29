@@ -1,0 +1,235 @@
+{
+  "schema": "prototype-1",
+  "id": "official.ir.refah",
+  "revision": "ir-1",
+  "bank": {
+    "id": "ir.refah",
+    "country": "IR",
+    "name": "Refah"
+  },
+  "templates": [
+    {
+      "id": "balance",
+      "senders": [
+        "Refah",
+        "REFAH",
+        "REFAH BANK",
+        "Refah Bank",
+        "RefahBank"
+      ],
+      "guards": [
+        {
+          "line": 0,
+          "literal": "\u0645\u0648\u062c\u0648\u062f\u06cc",
+          "excluded": false
+        },
+        {
+          "line": 1,
+          "literal": "\u0645\u0628\u0644\u063a",
+          "excluded": true
+        },
+        {
+          "line": 1,
+          "literal": "\u0648\u0627\u0631\u06cc\u0632",
+          "excluded": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "balance",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "kind": "BOOKED_BALANCE",
+          "money": {
+            "amount": {
+              "line": 0,
+              "after": "\u0645\u0648\u062c\u0648\u062f\u06cc:",
+              "before": "",
+              "maxLength": 64
+            },
+            "currency": {
+              "fixed": "IRR"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII_PERSIAN_ARABIC",
+            "unitMultiplier": 1,
+            "sign": "TRAILING"
+          },
+          "accountOptional": true
+        }
+      ]
+    },
+    {
+      "id": "debit",
+      "senders": [
+        "Refah",
+        "REFAH",
+        "REFAH BANK",
+        "Refah Bank",
+        "RefahBank"
+      ],
+      "guards": [
+        {
+          "line": 0,
+          "literal": "\u0645\u0648\u062c\u0648\u062f\u06cc",
+          "excluded": false
+        },
+        {
+          "line": 1,
+          "literal": "\u0645\u0628\u0644\u063a",
+          "excluded": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "balance",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "kind": "BOOKED_BALANCE",
+          "money": {
+            "amount": {
+              "line": 0,
+              "after": "\u0645\u0648\u062c\u0648\u062f\u06cc:",
+              "before": "",
+              "maxLength": 64
+            },
+            "currency": {
+              "fixed": "IRR"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII_PERSIAN_ARABIC",
+            "unitMultiplier": 1,
+            "sign": "TRAILING"
+          },
+          "accountOptional": true
+        },
+        {
+          "id": "debit",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "kind": "POSTED_MOVEMENT",
+          "money": {
+            "amount": {
+              "line": 1,
+              "after": "\u0645\u0628\u0644\u063a:",
+              "before": "",
+              "maxLength": 64
+            },
+            "currency": {
+              "fixed": "IRR"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII_PERSIAN_ARABIC",
+            "unitMultiplier": 1,
+            "sign": "TRAILING"
+          },
+          "direction": {
+            "fixed": "DEBIT"
+          },
+          "accountOptional": true
+        }
+      ]
+    },
+    {
+      "id": "credit",
+      "senders": [
+        "Refah",
+        "REFAH",
+        "REFAH BANK",
+        "Refah Bank",
+        "RefahBank"
+      ],
+      "guards": [
+        {
+          "line": 0,
+          "literal": "\u0645\u0648\u062c\u0648\u062f\u06cc",
+          "excluded": false
+        },
+        {
+          "line": 1,
+          "literal": "\u0648\u0627\u0631\u06cc\u0632",
+          "excluded": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "balance",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "kind": "BOOKED_BALANCE",
+          "money": {
+            "amount": {
+              "line": 0,
+              "after": "\u0645\u0648\u062c\u0648\u062f\u06cc:",
+              "before": "",
+              "maxLength": 64
+            },
+            "currency": {
+              "fixed": "IRR"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII_PERSIAN_ARABIC",
+            "unitMultiplier": 1,
+            "sign": "TRAILING"
+          },
+          "accountOptional": true
+        },
+        {
+          "id": "credit",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "kind": "POSTED_MOVEMENT",
+          "money": {
+            "amount": {
+              "line": 1,
+              "after": "\u0648\u0627\u0631\u06cc\u0632:",
+              "before": "",
+              "maxLength": 64
+            },
+            "currency": {
+              "fixed": "IRR"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII_PERSIAN_ARABIC",
+            "unitMultiplier": 1,
+            "sign": "TRAILING"
+          },
+          "direction": {
+            "fixed": "CREDIT"
+          },
+          "accountOptional": true
+        }
+      ]
+    }
+  ]
+}
