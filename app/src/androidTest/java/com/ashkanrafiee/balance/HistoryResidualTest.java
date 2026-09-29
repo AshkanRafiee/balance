@@ -78,8 +78,8 @@ public class HistoryResidualTest {
         HistoryActivity.Lists lists = HistoryActivity.buildLists(
             Arrays.asList(t(MELLAT, "1", d, 1_000_000L)),
             Arrays.asList(r(MELLAT, "1", d, -2_500_000L)), true);
-        assertEquals(1_000_000L - 2_500_000L, lists.total);
-        assertEquals(-1_500_000L, onlyDay(lists).sum);
+        assertEquals(1_000_000L - 2_500_000L, lists.total.get("IRR"));
+        assertEquals(-1_500_000L, onlyDay(lists).sum.get("IRR"));
     }
 
     @Test public void buildLists_residual_landsOnTheLaterStatementsDay() {
@@ -102,7 +102,7 @@ public class HistoryResidualTest {
             Arrays.asList(r(MELLAT, "1", d, -700_000L)), true));
         assertEquals(2, day.txs.size());
         assertEquals(1, day.residuals.size());
-        assertEquals(1_000_000L - 300_000L - 700_000L, day.sum);
+        assertEquals(1_000_000L - 300_000L - 700_000L, day.sum.get("IRR"));
     }
 
     @Test public void buildLists_residual_makesItsOwnDayWhenAlone() {
@@ -111,7 +111,7 @@ public class HistoryResidualTest {
             Arrays.asList(r(MELLAT, "1", epoch(2026, 9, 10), -2_000_000L)), true));
         assertTrue(day.txs.isEmpty());
         assertEquals(1, day.residuals.size());
-        assertEquals(-2_000_000L, day.sum);
+        assertEquals(-2_000_000L, day.sum.get("IRR"));
     }
 
     @Test public void buildLists_residual_splitsTheDepositAndWithdrawalSubtotals() {
@@ -121,9 +121,9 @@ public class HistoryResidualTest {
         HistoryActivity.Lists lists = HistoryActivity.buildLists(
             Arrays.asList(t(MELLAT, "1", d, 1_000_000L)),
             Arrays.asList(r(MELLAT, "1", d, -2_000_000L), r(MELLAT, "1", d, 500_000L)), true);
-        assertEquals(-500_000L, lists.total);
-        assertEquals(1_500_000L, lists.years.get(0).dep);
-        assertEquals(-2_000_000L, lists.years.get(0).wit);
+        assertEquals(-500_000L, lists.total.get("IRR"));
+        assertEquals(1_500_000L, lists.years.get(0).dep.get("IRR"));
+        assertEquals(-2_000_000L, lists.years.get(0).wit.get("IRR"));
     }
 
     // -----------------------------------------------------------------------
@@ -182,10 +182,10 @@ public class HistoryResidualTest {
             Arrays.asList(r(MELLAT, "1", epoch(2026, 9, 2), -4_000_000L)), true);
         assertEquals(2, lists.years.get(0).months.size());
         HistoryActivity.MonthGroup sep = lists.years.get(0).months.get(0);
-        assertEquals(-4_000_000L, sep.sum);
+        assertEquals(-4_000_000L, sep.sum.get("IRR"));
         assertEquals(0, sep.n);
         HistoryActivity.MonthGroup aug = lists.years.get(0).months.get(1);
-        assertEquals(1_000_000L, aug.sum);
+        assertEquals(1_000_000L, aug.sum.get("IRR"));
     }
 
     @Test public void buildLists_residualOnAYearBoundary_joinsItsOwnYear() {
@@ -193,8 +193,8 @@ public class HistoryResidualTest {
             Arrays.asList(t(MELLAT, "1", epoch(2026, 3, 10), 1_000_000L)),
             Arrays.asList(r(MELLAT, "1", epoch(2026, 4, 2), -4_000_000L)), true);
         assertEquals(2, lists.years.size());
-        assertEquals(-4_000_000L, lists.years.get(0).sum);
-        assertEquals(1_000_000L, lists.years.get(1).sum);
+        assertEquals(-4_000_000L, lists.years.get(0).sum.get("IRR"));
+        assertEquals(1_000_000L, lists.years.get(1).sum.get("IRR"));
     }
 
     @Test public void buildLists_residualOnlyOnAMisorderedInput_comesOutOrdered() {
@@ -220,7 +220,7 @@ public class HistoryResidualTest {
             new ArrayList<Transaction>(),
             Arrays.asList(r(MELLAT, "1", d, -2_000_000L), r(MELLAT, "2", d, -1_000_000L)), true));
         assertEquals(2, day.residuals.size());
-        assertEquals(-3_000_000L, day.sum);
+        assertEquals(-3_000_000L, day.sum.get("IRR"));
     }
 
     // -----------------------------------------------------------------------
@@ -236,10 +236,10 @@ public class HistoryResidualTest {
         HistoryActivity.Lists withEmpty = HistoryActivity.buildLists(txs, null, true);
         HistoryActivity.Lists withNone = HistoryActivity.buildLists(txs,
             new ArrayList<Residual>(), true);
-        assertEquals(plain.total, withEmpty.total);
-        assertEquals(plain.total, withNone.total);
+        assertEquals(plain.total.get("IRR"), withEmpty.total.get("IRR"));
+        assertEquals(plain.total.get("IRR"), withNone.total.get("IRR"));
         assertEquals(plain.years.get(0).n, withEmpty.years.get(0).n);
-        assertEquals(plain.years.get(0).sum, withNone.years.get(0).sum);
+        assertEquals(plain.years.get(0).sum.get("IRR"), withNone.years.get(0).sum.get("IRR"));
         assertEquals(plain.years.get(0).months.get(0).days.size(),
             withNone.years.get(0).months.get(0).days.size());
     }
@@ -251,7 +251,7 @@ public class HistoryResidualTest {
 
     @Test public void buildLists_nullTransactionsAndResiduals_isEmpty() {
         assertTrue(HistoryActivity.buildLists(null, null, true).years.isEmpty());
-        assertEquals(0L, HistoryActivity.buildLists(null, null, true).total);
+        assertEquals(0L, HistoryActivity.buildLists(null, null, true).total.get("IRR"));
     }
 
     @Test public void buildLists_doesNotMutateItsInputs() {
@@ -392,7 +392,7 @@ public class HistoryResidualTest {
         assertEquals(-2_000_000L, residuals.get(0).amount);
         HistoryActivity.Lists lists = HistoryActivity.buildLists(
             HistoryActivity.applyFilters(stored, all, true), residuals, true);
-        assertEquals(-35_000_000L - 2_000_000L, lists.total);
+        assertEquals(-35_000_000L - 2_000_000L, lists.total.get("IRR"));
         assertEquals(-2_000_000L, dayOf(lists, -2_000_000L).residuals.get(0).amount);
         // It sits on the later statement's own day, not on the day the money probably moved.
         assertEquals(CalDate.fromGregorian(2026, 9, 12, true).key(),

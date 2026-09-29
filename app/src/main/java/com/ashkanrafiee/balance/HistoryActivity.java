@@ -46,6 +46,7 @@ import java.util.Calendar;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -1478,10 +1479,7 @@ public final class HistoryActivity extends Activity {
         hero.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
         // The lifetime total.
-        TextView total = bold(signedAmount(lists.total), 32, valueColor(lists.total));
-        total.setGravity(Gravity.START);
-        fitToWidth(total, 32, 12, 0);
-        hero.addView(total, margin(0, 2, 0, 0));
+        hero.addView(sumView(lists.total, 32, 12, Gravity.START), margin(0, 2, 0, 0));
 
         // Hairline divider.
         View hair = new View(this);
@@ -1516,7 +1514,7 @@ public final class HistoryActivity extends Activity {
     /** One period stat: colored label over the signed net value, auto-sized to its column. The
      *  label and value shrink to the available column width (also covering system font scale),
      *  and grow up to their maximum only where room allows, so sums stay legible on every screen. */
-    private LinearLayout statsCell(String label, long value, int color) {
+    private LinearLayout statsCell(String label, CurrencyTotals totals, int color) {
         LinearLayout cell = new LinearLayout(this);
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -1524,9 +1522,7 @@ public final class HistoryActivity extends Activity {
         l.setGravity(Gravity.CENTER_HORIZONTAL);
         fitToWidth(l, 12, 9, 0);
         cell.addView(l, new LinearLayout.LayoutParams(-1, -2));
-        TextView v = bold(signedAmount(value), 20, color);
-        v.setGravity(Gravity.CENTER_HORIZONTAL);
-        fitToWidth(v, 20, 8, 0);
+        View v = sumView(totals, 20, 8, Gravity.CENTER_HORIZONTAL);
         LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(-1, -2);
         vp.topMargin = dp(5);
         cell.addView(v, vp);
@@ -1788,28 +1784,12 @@ public final class HistoryActivity extends Activity {
         head.addView(countChip(y.n), chipsOnHead);
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
-        TextView sum = bold(signedAmount(y.sum), 16, valueColor(y.sum));
-        fitToWidth(sum, 16, 11, 0);
-        head.addView(sum, sumParams);
+        head.addView(sumView(y.sum, 16, 11, Gravity.START), sumParams);
         head.setContentDescription(state(yTitle, y.sum, open));
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
 
-        if (y.dep > 0 || y.wit < 0) {
-            LinearLayout chips = chipsRow(y.dep, y.wit);
-            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1, -2);
-            cp.setMarginStart(dp(30));
-            box.addView(chips, cp);
-
-            View track = depWitTrack(y.dep, y.wit);
-            if (track != null) {
-                LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, dp(6));
-                tp.setMarginStart(dp(30));
-                tp.setMarginEnd(dp(30));
-                tp.bottomMargin = dp(10);
-                tp.topMargin = dp(6);
-                box.addView(track, tp);
-            }
-        }
+        View flow = depWitView(y.dep, y.wit, 30);
+        if (flow != null) box.addView(flow, new LinearLayout.LayoutParams(-1, -2));
 
         if (open) {
             LinearLayout monthsHost = new LinearLayout(this);
@@ -1875,18 +1855,15 @@ public final class HistoryActivity extends Activity {
         head.addView(count);
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
-        TextView sum = bold(signedAmount(m.sum), 14, valueColor(m.sum));
-        fitToWidth(sum, 14, 10, 0);
-        head.addView(sum, sumParams);
+        head.addView(sumView(m.sum, 14, 10, Gravity.START), sumParams);
         head.setContentDescription(state(monthName(m.month), m.sum, open));
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
 
-        if (m.dep > 0 || m.wit < 0) {
-            LinearLayout chips = chipsRow(m.dep, m.wit);
-            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1, -2);
-            cp.setMarginStart(dp(26));
-            cp.topMargin = dp(2);
-            box.addView(chips, cp);
+        View flow = depWitView(m.dep, m.wit, 26);
+        if (flow != null) {
+            LinearLayout.LayoutParams fp = new LinearLayout.LayoutParams(-1, -2);
+            fp.topMargin = dp(2);
+            box.addView(flow, fp);
         }
 
         if (open) {
@@ -2116,9 +2093,7 @@ public final class HistoryActivity extends Activity {
         if (g.txs.size() > 1) head.addView(countChip(g.txs.size()));
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
-        TextView sum = bold(signedAmount(g.sum), 13, valueColor(g.sum));
-        fitToWidth(sum, 13, 10, 0);
-        head.addView(sum, sumParams);
+        head.addView(sumView(g.sum, 13, 10, Gravity.START), sumParams);
         head.setContentDescription(state(dateText(g.date), g.sum, open));
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
 
@@ -2174,11 +2149,15 @@ public final class HistoryActivity extends Activity {
         final long date;
         final Transaction tx;
         final Residual residual;
+        /** The currency the amount is denominated in, so every sum this line is folded into knows
+         *  which pot the money belongs in. */
+        final String currency;
 
         Line(long date, Transaction tx, Residual residual) {
             this.date = date;
             this.tx = tx;
             this.residual = residual;
+            this.currency = tx != null ? tx.currency : residual.currency;
         }
     }
 
@@ -2471,21 +2450,144 @@ public final class HistoryActivity extends Activity {
     }
 
     /** Content description for a collapsible group header also states its current expansion. */
-    private String state(String title, long sum, boolean open) {
-        return title + ", " + signedAmount(sum) + ", "
-            + getString(open ? R.string.history_expanded : R.string.history_collapsed);
+    /** The header's spoken summary. One currency — every rial-only history, and the only kind the
+     *  app can produce today — reads exactly as it always has; a group spanning currencies speaks
+     *  each figure with its own code, because there is no total to speak of. */
+    private String state(String title, CurrencyTotals totals, boolean open) {
+        StringBuilder spoken = new StringBuilder(title);
+        String only = totals.only();
+        if (only != null) {
+            spoken.append(", ").append(signedAmountCurrency(totals.get(only), only));
+        } else {
+            for (Map.Entry<String, Long> e : totals.entries().entrySet())
+                spoken.append(", ")
+                    .append(signedAmountLabelled(e.getValue(), e.getKey()));
+        }
+        return spoken.append(", ")
+            .append(getString(open ? R.string.history_expanded : R.string.history_collapsed))
+            .toString();
     }
 
-    /** Deposit and withdrawal subtotals as compact colored pills; sign is shown by the arrow. */
-    private LinearLayout chipsRow(long deposits, long withdrawals) {
+    /** The net figure of a group, as a view. A group whose rows all share one currency shows the
+     *  single signed amount this screen has always shown, in the colour its sign implies. A group
+     *  spanning currencies shows one labelled line per currency instead, because adding them would
+     *  be a figure no bank ever stated and no spreadsheet could reproduce. */
+    private View sumView(CurrencyTotals totals, int sp, int minSp, int gravity) {
+        String only = totals.only();
+        if (only != null) {
+            TextView single = bold(signedAmount(totals.get(only)), sp, valueColor(totals.get(only)));
+            single.setGravity(gravity);
+            fitToWidth(single, sp, minSp, 0);
+            return single;
+        }
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        for (Map.Entry<String, Long> e : totals.entries().entrySet()) {
+            TextView line = bold(signedAmountLabelled(e.getValue(), e.getKey()), sp, muted);
+            line.setGravity(gravity);
+            fitToWidth(line, sp, minSp, 0);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            box.addView(line, lp);
+        }
+        return box;
+    }
+
+    /** A signed amount carrying the currency it is denominated in. Rial amounts are drawn exactly
+     *  as they always were — the unit is already in the app's chosen denomination, and this screen
+     *  has never printed one — so a line is only labelled when it is not a rial, or when its group
+     *  holds more than one currency and an unlabelled figure would be ambiguous. */
+    private String signedAmountCurrency(long n, String currency) {
+        return BalanceData.IRR.equals(currency) ? signedAmountCurrencyMinor(n, currency)
+            : signedAmountCurrencyMinor(n, currency) + " " + currency;
+    }
+
+    /** As above, but naming the currency even when it is the rial: used wherever a group holds
+     *  more than one currency, so no line can be read as another one's money. */
+    private String signedAmountLabelled(long n, String currency) {
+        return signedAmountCurrencyMinor(n, currency) + " " + currency;
+    }
+
+    private String signedAmountCurrencyMinor(long n, String currency) {
+        String mag = CurrencyHelper.amount(this, currency, Math.abs(n));
+        if (n == 0) return mag;
+        String sign = (n < 0 ? "\u2212" : "+");
+        if (!LocaleHelper.isPersian(this)) return sign + mag;
+        return "\u2066" + sign + mag + "\u2069";
+    }
+
+    /** The deposit/withdrawal pills, and the proportion track beneath them, for a group. A group
+     *  spanning currencies gets one pair per currency, each labelled with its own code: two
+     *  currencies' flows are not shares of a single quantity, so they are never drawn as one bar
+     *  or added into one pill row. Returns null when no currency in the group moved money either
+     *  way, which is the only case the screen drew nothing for before. */
+    private View depWitView(CurrencyTotals deposits, CurrencyTotals withdrawals, int startDp) {
+        String only = deposits.only() != null ? deposits.only() : withdrawals.only();
+        if (only != null && deposits.size() <= 1 && withdrawals.size() <= 1) {
+            // Every rial-only history, and the only kind the app can produce today, is one block of
+            // pills and one bar, laid out exactly as it always was.
+            return depWitBlock(deposits, withdrawals, null, startDp);
+        }
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        LinkedHashSet<String> codes = new LinkedHashSet<>();
+        codes.addAll(deposits.entries().keySet());
+        codes.addAll(withdrawals.entries().keySet());
+        for (String code : codes) {
+            View block = depWitBlock(deposits, withdrawals, code, startDp);
+            if (block == null) continue;
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            if (box.getChildCount() > 0) lp.topMargin = dp(4);
+            box.addView(block, lp);
+        }
+        return box.getChildCount() == 0 ? null : box;
+    }
+
+    /** One currency's pills and track inside a group's flow block. {@code code} is null for a
+     *  group whose rows all share one currency, which then reads exactly as it always did. */
+    private View depWitBlock(CurrencyTotals deposits, CurrencyTotals withdrawals, String code,
+            int startDp) {
+        long d = code == null ? deposits.get(sole(deposits)) : deposits.get(code);
+        long w = code == null ? withdrawals.get(sole(withdrawals)) : withdrawals.get(code);
+        if (d <= 0 && w >= 0) return null;
+        LinearLayout block = new LinearLayout(this);
+        block.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout chips = chipsRow(code, d, w);
+        if (chips != null) {
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1, -2);
+            cp.setMarginStart(dp(startDp));
+            block.addView(chips, cp);
+        }
+        View track = depWitTrack(d, w);
+        if (track != null) {
+            LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, dp(6));
+            tp.setMarginStart(dp(30));
+            tp.setMarginEnd(dp(30));
+            tp.bottomMargin = dp(10);
+            tp.topMargin = dp(6);
+            block.addView(track, tp);
+        }
+        return block;
+    }
+
+    /** The one currency a single-currency total belongs to, never null: a total holding nothing
+     *  reads as the rial, so an empty group contributes nothing rather than failing. */
+    private static String sole(CurrencyTotals totals) {
+        String only = totals.only();
+        return only == null ? BalanceData.IRR : only;
+    }
+
+    /** Deposit and withdrawal subtotals as compact colored pills; sign is shown by the arrow. The
+     *  code is drawn first when a group holds more than one currency, so each pill says whose
+     *  money it counts. */
+    private LinearLayout chipsRow(String code, long deposits, long withdrawals) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         if (deposits > 0) {
-            row.addView(chip("\u2191 " + CurrencyHelper.amount(this, deposits), depBg, depFg,
+            row.addView(chip("\u2191 " + CurrencyHelper.amount(this, code, deposits), depBg, depFg,
                 getString(R.string.history_deposit)));
         }
         if (withdrawals < 0) {
-            row.addView(chip("\u2193 " + CurrencyHelper.amount(this, -withdrawals), witBg, witFg,
+            row.addView(chip("\u2193 " + CurrencyHelper.amount(this, code, -withdrawals), witBg, witFg,
                 getString(R.string.history_withdrawal)));
         }
         return row;
@@ -2554,17 +2656,28 @@ public final class HistoryActivity extends Activity {
     // ====================================================================
 
     /** Aggregated history data: today/month/year net sums plus deposit/withdrawal subtotals
-     *  and the year-by-year breakdown (each year holds its months, each month its days). */
+     *  and the year-by-year breakdown (each year holds its months, each month its days).
+     *
+     *  <p>Every figure is a {@link CurrencyTotals}, one sum per currency, because an account can
+     *  hold more than one and two currencies are not summable. The movement <em>count</em> stays a
+     *  plain int: counting messages is the same act whichever currency they moved. */
     static final class Lists {
-        long today, month, year, total;
-        long todayDep, monthDep, yearDep;
-        long todayWit, monthWit, yearWit;
+        final CurrencyTotals total = new CurrencyTotals();
+        final CurrencyTotals today = new CurrencyTotals();
+        final CurrencyTotals month = new CurrencyTotals();
+        final CurrencyTotals year = new CurrencyTotals();
+        final CurrencyTotals todayDep = new CurrencyTotals();
+        final CurrencyTotals monthDep = new CurrencyTotals();
+        final CurrencyTotals yearDep = new CurrencyTotals();
+        final CurrencyTotals todayWit = new CurrencyTotals();
+        final CurrencyTotals monthWit = new CurrencyTotals();
+        final CurrencyTotals yearWit = new CurrencyTotals();
         final List<YearGroup> years = new ArrayList<>();
     }
 
     static final class DayGroup {
         final CalDate date;
-        long sum;
+        final CurrencyTotals sum = new CurrencyTotals();
         final List<Transaction> txs = new ArrayList<>();
         /** Unaccounted money detected on this day, shown beside the movements rather than among
          *  them: it is proven by the day's own balance statements, not read off a message. */
@@ -2581,7 +2694,9 @@ public final class HistoryActivity extends Activity {
      *  and its day-by-day groups, kept in descending date order. */
     static final class MonthGroup {
         final int year, month;
-        long sum, dep, wit;
+        final CurrencyTotals sum = new CurrencyTotals();
+        final CurrencyTotals dep = new CurrencyTotals();
+        final CurrencyTotals wit = new CurrencyTotals();
         int n;
         final List<DayGroup> days = new ArrayList<>();
         MonthGroup(int year, int month) {
@@ -2597,7 +2712,9 @@ public final class HistoryActivity extends Activity {
      *  and its months, kept in descending date order. */
     static final class YearGroup {
         final int year;
-        long sum, dep, wit;
+        final CurrencyTotals sum = new CurrencyTotals();
+        final CurrencyTotals dep = new CurrencyTotals();
+        final CurrencyTotals wit = new CurrencyTotals();
         int n;
         final List<MonthGroup> months = new ArrayList<>();
         YearGroup(int year) {
@@ -2763,8 +2880,8 @@ public final class HistoryActivity extends Activity {
         for (Line l : lines) {
             boolean isResidual = l.residual != null;
             long amount = isResidual ? l.residual.amount : l.tx.amount;
-            DayGroup day = accumulate(lists, yearIndex, monthIndex, calOf(l.date, iran), amount,
-                !isResidual, today);
+            DayGroup day = accumulate(lists, yearIndex, monthIndex, calOf(l.date, iran),
+                l.currency, amount, !isResidual, today);
             if (isResidual) day.residuals.add(l.residual); else day.txs.add(l.tx);
         }
         return lists;
@@ -2777,25 +2894,27 @@ public final class HistoryActivity extends Activity {
     }
 
     /** Folds one signed amount into every summary, year, month and day that shares its date, and
-     *  returns the day group it landed in. {@code count} is false for unaccounted money, which moves
-     *  every total but is not a movement. */
+     *  returns the day group it landed in. Each total is kept per currency, so an account holding
+     *  more than one never has them added together. {@code count} is false for unaccounted money,
+     *  which moves every total but is not a movement. */
     private static DayGroup accumulate(Lists lists, Map<String, YearGroup> yearIndex,
-            Map<String, MonthGroup> monthIndex, CalDate jc, long amount, boolean count, CalDate today) {
-        lists.total += amount;
+            Map<String, MonthGroup> monthIndex, CalDate jc, String currency, long amount,
+            boolean count, CalDate today) {
+        lists.total.add(currency, amount);
         boolean todayMatch = jc.sameDay(today);
         boolean monthMatch = jc.year == today.year && jc.month == today.month;
         boolean yearMatch = jc.year == today.year;
         if (todayMatch) {
-            lists.today += amount;
-            if (amount > 0) lists.todayDep += amount; else lists.todayWit += amount;
+            lists.today.add(currency, amount);
+            if (amount > 0) lists.todayDep.add(currency, amount); else lists.todayWit.add(currency, amount);
         }
         if (monthMatch) {
-            lists.month += amount;
-            if (amount > 0) lists.monthDep += amount; else lists.monthWit += amount;
+            lists.month.add(currency, amount);
+            if (amount > 0) lists.monthDep.add(currency, amount); else lists.monthWit.add(currency, amount);
         }
         if (yearMatch) {
-            lists.year += amount;
-            if (amount > 0) lists.yearDep += amount; else lists.yearWit += amount;
+            lists.year.add(currency, amount);
+            if (amount > 0) lists.yearDep.add(currency, amount); else lists.yearWit.add(currency, amount);
         }
 
         YearGroup year = yearIndex.get(String.valueOf(jc.year));
@@ -2804,9 +2923,9 @@ public final class HistoryActivity extends Activity {
             yearIndex.put(String.valueOf(jc.year), year);
             lists.years.add(year);
         }
-        year.sum += amount;
+        year.sum.add(currency, amount);
         if (count) year.n++;
-        if (amount > 0) year.dep += amount; else year.wit += amount;
+        if (amount > 0) year.dep.add(currency, amount); else year.wit.add(currency, amount);
 
         String monthKey = jc.year + "/" + jc.month;
         MonthGroup month = monthIndex.get(monthKey);
@@ -2815,16 +2934,16 @@ public final class HistoryActivity extends Activity {
             monthIndex.put(monthKey, month);
             year.months.add(month);
         }
-        month.sum += amount;
+        month.sum.add(currency, amount);
         if (count) month.n++;
-        if (amount > 0) month.dep += amount; else month.wit += amount;
+        if (amount > 0) month.dep.add(currency, amount); else month.wit.add(currency, amount);
 
         DayGroup day = month.days.isEmpty() ? null : month.days.get(month.days.size() - 1);
         if (day == null || day.date.day != jc.day) {
             day = new DayGroup(jc);
             month.days.add(day);
         }
-        day.sum += amount;
+        day.sum.add(currency, amount);
         return day;
     }
 
