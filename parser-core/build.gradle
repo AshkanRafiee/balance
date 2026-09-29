@@ -78,7 +78,13 @@ tasks.register('officialPackTest') {
             def reference = legacyClass.getMethod('reference', String, String, long, String)
             int cases = 0
             documents.each { document ->
-                def pack = packClass.getMethod('decode', Map).invoke(null, document.pack)
+                def pack
+                try {
+                    pack = packClass.getMethod('decode', Map).invoke(null, document.pack)
+                } catch (Exception e) {
+                    throw new GradleException('Invalid official pack ' + document.pack.id + ': ' +
+                            (e.cause != null ? e.cause.message : e.message))
+                }
                 if (document.fixtures.schema != 'prototype-fixtures-1' || document.fixtures.pack != pack.id())
                     throw new GradleException('Invalid official fixture metadata')
                 def parser = parserClass.getConstructor(List).newInstance(pack.templates())
