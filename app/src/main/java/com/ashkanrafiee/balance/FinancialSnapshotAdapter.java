@@ -212,8 +212,15 @@ final class FinancialSnapshotAdapter {
 
     /** Publishes prepared scan components as one generation, leaving omitted components untouched. */
     void publish(Map<String, byte[]> updates) throws IOException {
-        if (updates == null) throw new IllegalArgumentException("ARGUMENT");
+        publish(updates, Collections.emptySet());
+    }
+
+    void publish(Map<String, byte[]> updates, Set<String> removals) throws IOException {
+        if (updates == null || removals == null) throw new IllegalArgumentException("ARGUMENT");
+        for (String name : removals)
+            if (name == null || updates.containsKey(name)) throw new IllegalArgumentException("ARGUMENT");
         transaction(draft -> {
+            for (String name : removals) draft.remove(name);
             for (Map.Entry<String, byte[]> entry : updates.entrySet())
                 draft.put(entry.getKey(), entry.getValue());
             return null;
@@ -222,19 +229,32 @@ final class FinancialSnapshotAdapter {
 
     /** Publishes history-owned components as one generation, leaving other components untouched. */
     void publishHistory(Map<String, byte[]> updates) throws IOException {
-        publishRestricted(updates, HISTORY_COMPONENTS);
+        publishHistory(updates, Collections.emptySet());
+    }
+
+    void publishHistory(Map<String, byte[]> updates, Set<String> removals) throws IOException {
+        publishRestricted(updates, removals, HISTORY_COMPONENTS);
     }
 
     /** Publishes balance-owned components as one generation, leaving other components untouched. */
     void publishBalance(Map<String, byte[]> updates) throws IOException {
-        publishRestricted(updates, BALANCE_COMPONENTS);
+        publishBalance(updates, Collections.emptySet());
     }
 
-    private void publishRestricted(Map<String, byte[]> updates, Set<String> allowed) throws IOException {
-        if (updates == null) throw new IllegalArgumentException("ARGUMENT");
+    void publishBalance(Map<String, byte[]> updates, Set<String> removals) throws IOException {
+        publishRestricted(updates, removals, BALANCE_COMPONENTS);
+    }
+
+    private void publishRestricted(Map<String, byte[]> updates, Set<String> removals,
+            Set<String> allowed) throws IOException {
+        if (updates == null || removals == null) throw new IllegalArgumentException("ARGUMENT");
         for (String name : updates.keySet())
             if (name == null || !allowed.contains(name)) throw new IllegalArgumentException("ARGUMENT");
+        for (String name : removals)
+            if (name == null || !allowed.contains(name) || updates.containsKey(name))
+                throw new IllegalArgumentException("ARGUMENT");
         transaction(draft -> {
+            for (String name : removals) draft.remove(name);
             for (Map.Entry<String, byte[]> entry : updates.entrySet())
                 draft.put(entry.getKey(), entry.getValue());
             return null;

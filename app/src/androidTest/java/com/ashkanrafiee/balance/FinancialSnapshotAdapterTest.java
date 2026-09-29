@@ -258,6 +258,22 @@ public class FinancialSnapshotAdapterTest {
         assertFalse(adapter.snapshot().contains(FinancialSnapshotAdapter.TRANSACTION_NOTES));
     }
 
+    @Test public void restrictedPublicationCanRemoveOwnedComponentsAtomically() throws Exception {
+        Fake fake = new Fake();
+        FinancialSnapshotAdapter adapter = new FinancialSnapshotAdapter(new FinancialRepository(fake));
+        adapter.publishBalance(new LinkedHashMap<String, byte[]>() {{
+            put(FinancialSnapshotAdapter.BALANCES, bytes("{}"));
+            put(FinancialSnapshotAdapter.SCANNED_THROUGH, bytes("4"));
+            put(FinancialSnapshotAdapter.RULES_VERSION, bytes("1"));
+        }});
+        int before = fake.commits;
+        adapter.publishBalance(Collections.singletonMap(FinancialSnapshotAdapter.BALANCES, bytes("{}")),
+                Collections.singleton(FinancialSnapshotAdapter.SCANNED_THROUGH));
+        assertEquals(before + 1, fake.commits);
+        assertFalse(adapter.snapshot().contains(FinancialSnapshotAdapter.SCANNED_THROUGH));
+        assertTrue(adapter.snapshot().contains(FinancialSnapshotAdapter.BALANCES));
+    }
+
     @Test public void worksWithEncryptedGenerationStore() throws Exception {
         File root = new File(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
                 .getTargetContext().getCacheDir(), "financial-adapter-" + UUID.randomUUID());
