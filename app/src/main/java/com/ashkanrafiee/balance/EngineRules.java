@@ -135,6 +135,13 @@ final class EngineRules {
         return banks.size();
     }
 
+    /** The canonical bank name a packed catalog id maps to, or null when no pack carries it. This
+     *  is the bridge from the engine's catalog ids to the bank name the app keys storage by. */
+    String bankNameOf(String bankId) {
+        Bank bank = banks.get(bankId);
+        return bank == null ? null : bank.name;
+    }
+
     int senderAliasCount() {
         return bankOfSender.size();
     }
