@@ -5,7 +5,10 @@ android { namespace 'com.ashkanrafiee.balance'; compileSdk 36
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
-    sourceSets { androidTest.assets.srcDirs += rootProject.file('rules/examples') }
+    sourceSets {
+        androidTest.assets.srcDirs += rootProject.file('rules/examples')
+        androidTest.assets.srcDirs += rootProject.file('rules/official/IR')
+    }
     dependenciesInfo { includeInApk = false; includeInBundle = false }
     def signingFile = rootProject.file('signing.properties')
     def signingValues = new Properties()
