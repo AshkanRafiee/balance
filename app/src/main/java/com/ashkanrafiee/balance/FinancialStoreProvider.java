@@ -88,6 +88,17 @@ final class FinancialStoreProvider {
         return new FinancialStoreProvider(parent, keys, source, limits);
     }
 
+    /** The directory holding the store and its migration journal — everything {@link #open} reads.
+     *  Only for tests that need to put the device back to a fresh-install state. */
+    static File directory(Context context) throws IOException {
+        if (context == null) throw new IllegalArgumentException("ARGUMENT");
+        synchronized (BalanceData.class) {
+            File noBackup = context.getNoBackupFilesDir();
+            if (noBackup == null) throw failure("NO_BACKUP_STORAGE");
+            return new File(noBackup.getCanonicalFile(), DIRECTORY);
+        }
+    }
+
     EncryptedGenerationStore open() throws IOException {
         synchronized (BalanceData.class) {
             prepareDirectory();

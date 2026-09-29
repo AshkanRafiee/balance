@@ -34,6 +34,12 @@ final class FinancialAuthority {
         }
     }
 
+    /** Drops the cached authority so the next {@link #open} re-reads the store from disk. Only for
+     *  tests that replace the store underneath a running process. */
+    static void forget() {
+        synchronized (BalanceData.class) { processAuthority = null; }
+    }
+
     /** Package-level constructor for adapters and tests using an already selected backend. */
     static FinancialAuthority fromRepository(FinancialRepository repository) {
         return new FinancialAuthority(repository);
