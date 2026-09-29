@@ -119,7 +119,12 @@ final class MessageFacts {
             }
         }
         if (bank == null) return null;
-        return new MessageFacts(engine.bankNameOf(bank), account, balance, movement, 0);
+        String name = engine.bankNameOf(bank);
+        // Only a bank the app can already name, resolve and display may own a stored row. A pack
+        // for a bank the app does not know yet falls back to the legacy path rather than writing a
+        // balance under a name the UI cannot show.
+        if (name == null || !BankRules.supportedNames().contains(name)) return null;
+        return new MessageFacts(name, account, balance, movement, 0);
     }
 
     /** The engine only ever sees this synthetic source id: the seam identifies a message by its
