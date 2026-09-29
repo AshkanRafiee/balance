@@ -20,6 +20,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -68,6 +69,12 @@ public class PackedLegacyDifferentialTest {
         TreeMap<String, String> legacyOnlyMovement = new TreeMap<>();
         TreeMap<String, String> conflicts = new TreeMap<>();
         TreeMap<String, String> accountDivergence = new TreeMap<>();
+        // Banks the frozen legacy table can reach, which is every Iranian bank it was built for
+        // and no other. A pack for a bank outside it is new coverage, not a change in behaviour
+        // to compare against.
+        Set<String> reachable = BankRules.reachableBanks();
+        Set<String> packed = new HashSet<>();
+        Set<String> parsed = new HashSet<>();
         int engineParsed = 0, compared = 0;
 
         for (Object item : banks) {
@@ -93,6 +100,16 @@ public class PackedLegacyDifferentialTest {
                 Parser.Result result = new Parser(pack.templates()).parse(message);
                 if (result.status() != Parser.Status.PARSED) continue;
                 engineParsed++;
+                parsed.add(id);
+                if (!reachable.contains(idToName.get(id))) {
+                    // The legacy app has no opinion at all about a bank outside its own table, so
+                    // there is nothing to differ from. Comparing the two anyway would call new
+                    // coverage a divergence, and pinning every such case as an allowed exception
+                    // would quietly turn "the two agree everywhere" into "the two agree except for
+                    // whatever we remembered to list". Foreign packs are held instead by their own
+                    // fixtures, which the pack frontend checks case by case.
+                    continue;
+                }
 
                 Reduced engine = reduce(result.facts());
                 String legacyBank = BankRules.resolve(sender);
@@ -133,6 +150,10 @@ public class PackedLegacyDifferentialTest {
         assertDivergences("amount conflicts", conflicts, CONFLICTS);
         assertDivergences("account divergences", accountDivergence, ACCOUNT_DIVERGENCE);
         assertTrue("corpus exercised the engine and the legacy reducers", engineParsed > 0 && compared > 0);
+        // A pack whose fixtures the engine parses none of would pass by being skipped above, so
+        // every packed bank must have earned at least one parsed case, reachable or not.
+        packed.removeAll(parsed);
+        assertTrue("every packed bank parsed at least one of its own fixtures: " + packed, packed.isEmpty());
     }
 
     private static Reduced reduce(List<Parser.Fact> facts) {
