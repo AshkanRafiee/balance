@@ -331,6 +331,12 @@ public final class Parser {
                 || c >= '\u2066' && c <= '\u2069';
     }
     private static boolean accountEdge(char c) { return c == ' ' || c == '\t' || bidi(c); }
+    private static String trimBidi(String text) {
+        int start = 0, end = text.length();
+        while (start < end && bidi(text.charAt(start))) start++;
+        while (end > start && bidi(text.charAt(end - 1))) end--;
+        return text.substring(start, end);
+    }
     private static boolean numericChar(int c) { return Character.isDigit(c) || c == '.' || c == ','; }
 
     private static String numeric(String text, NumericShape shape, String name, Work work) {
@@ -463,7 +469,19 @@ public final class Parser {
         Capture captured = capture(body, region, rule.amount(), field, work);
         String text = normalizeDigits(captured.text(), rule.digits());
         int sign = 0;
-        if (!text.isEmpty() && (text.charAt(0) == '-' || text.charAt(0) == '+')) {
+        if (rule.sign() == Rules.Sign.TRAILING) {
+            // Enclosing bidi marks are layout noise, never digits; TRAILING amounts
+            // may also separate the digits and the sign with spaces.
+            text = trimBidi(text.trim());
+            int end = text.length();
+            while (end > 0 && text.charAt(end - 1) == ' ') end--;
+            if (end > 0 && (text.charAt(end - 1) == '-' || text.charAt(end - 1) == '+')) {
+                sign = text.charAt(end - 1) == '-' ? -1 : 1;
+                end--;
+            }
+            while (end > 0 && text.charAt(end - 1) == ' ') end--;
+            text = text.substring(0, end).trim();
+        } else if (!text.isEmpty() && (text.charAt(0) == '-' || text.charAt(0) == '+')) {
             sign = text.charAt(0) == '-' ? -1 : 1;
             text = text.substring(1);
         }

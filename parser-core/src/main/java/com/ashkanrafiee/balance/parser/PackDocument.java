@@ -146,11 +146,12 @@ public final class PackDocument {
     }
 
     private static MoneyRule money(Object value) {
-        Map<?, ?> map = object(value, "amount currency decimal group grouping digits unitMultiplier", "");
+        Map<?, ?> map = object(value, "amount currency decimal group grouping digits unitMultiplier", "sign");
         return new MoneyRule(field(map.get("amount"), MAX_FIELD), currency(map.get("currency")),
                 separator(map.get("decimal"), false), separator(map.get("group"), true),
                 enumeration(map.get("grouping"), Grouping.class), enumeration(map.get("digits"), Digits.class),
-                integer(map.get("unitMultiplier"), 1, 10));
+                integer(map.get("unitMultiplier"), 1, 10),
+                map.containsKey("sign") ? enumeration(map.get("sign"), Sign.class) : Sign.LEADING);
     }
 
     private static CurrencyRule currency(Object value) {

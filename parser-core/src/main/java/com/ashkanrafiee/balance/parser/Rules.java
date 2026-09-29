@@ -34,6 +34,10 @@ public final class Rules {
     public enum Order { YMD, DMY, MDY, YDM, MD, DM }
     public enum Digits { ASCII, ASCII_PERSIAN_ARABIC }
     public enum Grouping { NONE, WESTERN, INDIAN }
+    /** Where the optional plus/minus sits relative to the digits. Enclosing bidi marks
+     * around the amount are layout noise in both modes; TRAILING also tolerates spaces
+     * between the digits and the sign. */
+    public enum Sign { LEADING, TRAILING }
     public enum Calendar { GREGORIAN, JALALI }
     public enum Year { FULL, TWO_DIGIT, NEIGHBOR }
     public enum DateLayout { SEPARATED, COMPACT }
@@ -120,16 +124,21 @@ public final class Rules {
         }
     }
 
-    /** One optional leading sign only; group/decimal syntax is explicit. Unit multiplier
-     * is 1, or 10 for explicitly declared toman-to-IRR conversion. The amount field
-     * must be raw (NONE, no numeric selection); digits is the sole digit policy.
-     * This also applies to original-amount context. */
+    /** One optional sign in the declared position only; group/decimal syntax is explicit.
+     * Unit multiplier is 1, or 10 for explicitly declared toman-to-IRR conversion. The
+     * amount field must be raw (NONE, no numeric selection); digits is the sole digit
+     * policy. This also applies to original-amount context. */
     public record MoneyRule(Field amount, CurrencyRule currency, char decimal,
-                            char group, Grouping grouping, Digits digits, int unitMultiplier) {
+                            char group, Grouping grouping, Digits digits, int unitMultiplier,
+                            Sign sign) {
+        public MoneyRule(Field amount, CurrencyRule currency, char decimal, char group,
+                         Grouping grouping, Digits digits, int unitMultiplier) {
+            this(amount, currency, decimal, group, grouping, digits, unitMultiplier, Sign.LEADING);
+        }
         public MoneyRule {
             Objects.requireNonNull(amount); small(amount); rawField(amount);
             Objects.requireNonNull(currency); Objects.requireNonNull(grouping);
-            Objects.requireNonNull(digits);
+            Objects.requireNonNull(digits); Objects.requireNonNull(sign);
             require(decimal == '.' || decimal == ',' || decimal == '\u066b', "decimal separator");
             require(group == 0 || group == '.' || group == ',' || group == ' ' || group == '\u066c',
                     "group separator");

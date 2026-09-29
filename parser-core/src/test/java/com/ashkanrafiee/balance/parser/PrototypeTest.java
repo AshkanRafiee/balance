@@ -27,6 +27,7 @@ public final class PrototypeTest {
         purchaseContext();
         independentOutputs();
         exactMoney();
+        trailingSigns();
         directions();
         conflicts();
         multisetConflicts();
@@ -132,6 +133,27 @@ public final class PrototypeTest {
         equal(parse(withMoney(toman), row("١٢٣", "IRR")).facts().get(0).money().minorUnits(), 1230L, "Arabic digits");
         rejection(parse(withMoney(toman), row("922337203685477581", "IRR")), Status.OVERFLOW, Code.MONEY_OVERFLOW);
         rejection(parse(withMoney(toman), row("1.01", "IRR")), Status.INVALID, Code.INVALID_MONEY);
+    }
+
+    private static void trailingSigns() {
+        // The legacy corpus's trailing-sign shapes: مبلغ:100- → -100, مبلغ:100+ → +100,
+        // \u202B100-\u202C → -100. TRAILING is an explicit sign position; LEADING stays strict.
+        MoneyRule debit = new MoneyRule(AMOUNT, CurrencyRule.fixed(Currency.IRR), '.', ',',
+                Grouping.WESTERN, Digits.ASCII_PERSIAN_ARABIC, 1, Sign.TRAILING);
+        MoneyRule credit = new MoneyRule(AMOUNT, CurrencyRule.fixed(Currency.IRR), '.', ',',
+                Grouping.WESTERN, Digits.ASCII_PERSIAN_ARABIC, 1, Sign.TRAILING);
+        Parser debitParser = parser(new Output("movement", WHOLE, ACCOUNT, Kind.POSTED_MOVEMENT, debit,
+                DirectionRule.fixed(Direction.DEBIT), null, null));
+        Parser creditParser = parser(new Output("movement", WHOLE, ACCOUNT, Kind.POSTED_MOVEMENT, credit,
+                DirectionRule.fixed(Direction.CREDIT), null, null));
+        equal(parse(debitParser, row("100-", "IRR")).facts().get(0).money().minorUnits(), -100L, "trailing debit");
+        equal(parse(creditParser, row("100+", "IRR")).facts().get(0).money().minorUnits(), 100L, "trailing credit");
+        equal(parse(debitParser, row("100", "IRR")).facts().get(0).money().minorUnits(), -100L, "unsigned trailing");
+        equal(parse(debitParser, row("100 -", "IRR")).facts().get(0).money().minorUnits(), -100L, "spaced trailing sign");
+        equal(parse(debitParser, row("\u202B100-\u202C", "IRR")).facts().get(0).money().minorUnits(), -100L,
+                "bidi-wrapped trailing sign");
+        rejection(parse(creditParser, row("100-", "IRR")), Status.INVALID, Code.DIRECTION_CONFLICT);
+        rejection(parse(single(Currency.USD), row("1-", "USD")), Status.INVALID, Code.INVALID_MONEY);
     }
 
     private static void directions() {
