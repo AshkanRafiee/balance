@@ -39,6 +39,12 @@ tasks.register('legacyCompatibilityTest', JavaExec) {
     mainClass = 'com.ashkanrafiee.balance.parser.legacy.LegacyCompatibilityTest'
 }
 
+tasks.register('catalogParityTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.ashkanrafiee.balance.parser.catalog.CatalogParityTest'
+}
+
 tasks.register('identityTest', JavaExec) {
     dependsOn testClasses
     classpath = sourceSets.test.runtimeClasspath
@@ -145,5 +151,6 @@ tasks.named('test') {
 
 tasks.named('check') {
     dependsOn prototypeTest, packDocumentTest, jsonLexicalGuardTest, ruleExampleTest, ruleToolTest,
-        iranianPrototypeTest, iranianDocumentTest, jalaliParityTest, legacyCompatibilityTest, identityTest
+        iranianPrototypeTest, iranianDocumentTest, jalaliParityTest, legacyCompatibilityTest, identityTest,
+        catalogParityTest
 }
