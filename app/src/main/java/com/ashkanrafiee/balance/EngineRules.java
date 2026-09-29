@@ -36,13 +36,19 @@ final class EngineRules {
         final String id;
         final String name;
         final String country;
+        /** Who asked for this bank's coverage. Purely descriptive: it decides what the settings
+         *  screen labels a pack and which of them it offers a switch for, never whether the pack
+         *  is loaded or how well it parses. */
+        final PackDocument.Bank.Provenance provenance;
         final Parser parser;
         final List<Rules.Template> templates;
 
-        Bank(String id, String name, String country, Parser parser, List<Rules.Template> templates) {
+        Bank(String id, String name, String country,
+             PackDocument.Bank.Provenance provenance, Parser parser, List<Rules.Template> templates) {
             this.id = id;
             this.name = name;
             this.country = country;
+            this.provenance = provenance;
             this.parser = parser;
             this.templates = templates;
         }
@@ -105,7 +111,7 @@ final class EngineRules {
                 throw unpacked;
             }
             Bank bank = new Bank(id, pack.bank().name(), pack.bank().country(),
-                    new Parser(pack.templates()), pack.templates());
+                    pack.bank().provenance(), new Parser(pack.templates()), pack.templates());
             banks.put(id, bank);
             byName.put(bank.name, bank);
         }

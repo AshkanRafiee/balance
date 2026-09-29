@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.sanat-madan",
     "country": "IR",
-    "name": "Sanat Madan"
+    "name": "Sanat Madan",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

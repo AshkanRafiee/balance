@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.mellat",
     "country": "IR",
-    "name": "Mellat"
+    "name": "Mellat",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

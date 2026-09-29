@@ -32,7 +32,8 @@ public final class PackDocumentTest {
         equal(document.schema(), "prototype-1");
         equal(document.id(), "synthetic.pack");
         equal(document.revision(), "r1");
-        equal(document.bank(), new PackDocument.Bank("synthetic.bank", "US", "Synthetic Bank"));
+        equal(document.bank(), new PackDocument.Bank("synthetic.bank", "US", "Synthetic Bank",
+                PackDocument.Bank.Provenance.OFFICIAL));
         Rules.Template template = document.templates().get(0);
         equal(template.packId(), document.id());
         equal(template.revision(), document.revision());
@@ -129,6 +130,19 @@ public final class PackDocumentTest {
             reject(p -> at(p, "bank").put("country", country));
         for (String name : List.of("", "x".repeat(129), "bad\u0000", "bad\ud800"))
             reject(p -> at(p, "bank").put("name", name));
+        // Provenance is required and is exactly the two declared values. It is a label the app
+        // shows, never a quality claim, so nothing else about the pack changes with it -- but a
+        // contributed pack that defaulted to looking official would be a trust failure, not a
+        // cosmetic one, so absence is refused outright.
+        for (String provenance : List.of("", "official", "Official", "UNKNOWN", "0", "true", "1"))
+            reject(p -> at(p, "bank").put("provenance", provenance));
+        reject(p -> at(p, "bank").remove("provenance"));
+        Map<String, Object> community = pack();
+        at(community, "bank").put("provenance", "COMMUNITY");
+        equal(PackDocument.decode(community).bank().provenance(),
+                PackDocument.Bank.Provenance.COMMUNITY);
+        equal(PackDocument.decode(pack()).bank().provenance(),
+                PackDocument.Bank.Provenance.OFFICIAL);
         reject(p -> p.put("templates", List.of(at(p, "templates", 0), at(p, "templates", 0))));
         reject(p -> at(p, "templates", 0, "outputs", 1).put("id", "balance"));
         reject(p -> at(p, "templates", 0).put("senders", List.of("SYNTHETIC", "SYNTHETIC")));
@@ -254,7 +268,8 @@ public final class PackDocumentTest {
         movement.put("date", obj("calendar", "GREGORIAN", "field", field("Date="), "orders", List.of("YMD", "DMY"),
                 "separator", "/", "withTime", false, "digits", "ASCII", "maxPastSeconds", 31622400, "maxFutureSeconds", 172800));
         return obj("schema", "prototype-1", "id", "synthetic.pack", "revision", "r1",
-                "bank", obj("id", "synthetic.bank", "country", "US", "name", "Synthetic Bank"),
+                "bank", obj("id", "synthetic.bank", "country", "US", "name", "Synthetic Bank",
+                        "provenance", "OFFICIAL"),
                 "templates", List.of(obj("id", "statement", "senders", List.of("SYNTHETIC"),
                         "guards", List.of(obj("line", -1, "literal", "Statement", "excluded", false)),
                         "outputs", List.of(output("balance", "BOOKED_BALANCE", "Balance="), movement))));

@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.middle-east",
     "country": "IR",
-    "name": "Middle East"
+    "name": "Middle East",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

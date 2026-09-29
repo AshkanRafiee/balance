@@ -31,7 +31,7 @@ def minimal_tree(root, overrides=None):
         "schema": "prototype-1",
         "id": "official.ir.synthetic",
         "revision": "t1",
-        "bank": {"id": "ir.synthetic", "country": "IR", "name": "Synthetic"},
+        "bank": {"id": "ir.synthetic", "country": "IR", "name": "Synthetic", "provenance": "OFFICIAL"},
         "templates": [{"id": "t", "senders": ["SynthBank"], "guards": [], "outputs": [
             {"id": "out", "region": {"line": -1, "after": "", "before": "", "maxLength": 1024},
              "kind": "BOOKED_BALANCE",
@@ -98,6 +98,10 @@ class OfficialReaderTest(unittest.TestCase):
             write_document(synthetic / "pack.json", pack)
             self.assertNotEqual(run_frontend(root).returncode, 0)
             pack["bank"]["country"] = "IR"
+            pack["bank"]["provenance"] = "COMMUNITY"
+            write_document(synthetic / "pack.json", pack)
+            self.assertNotEqual(run_frontend(root).returncode, 0)
+            pack["bank"]["provenance"] = "OFFICIAL"
             pack["bank"]["id"] = "ir.other"
             write_document(synthetic / "pack.json", pack)
             self.assertNotEqual(run_frontend(root).returncode, 0)
@@ -154,6 +158,26 @@ class OfficialReaderTest(unittest.TestCase):
         contract = (REPOSITORY / "parser-core/CONTRACT.md").read_text(encoding="utf-8")
         for code in published:
             self.assertIn(code, contract, f"{code} is missing from the documented registry")
+
+    def test_every_shipped_pack_declares_its_provenance(self):
+        """A pack must say who asked for it, and must be readable without saying.
+
+        Provenance is what the app offers a switch for, so an undeclared pack would
+        be one the settings screen cannot label. Decoding without it must still fail:
+        a required field that quietly defaulted would let a contributed pack ship
+        looking official.
+        """
+        schema = json.loads((REPOSITORY / "rules/schema/bank-pack-prototype-1.schema.json").read_text(
+            encoding="utf-8"))
+        self.assertIn("provenance", schema["properties"]["bank"]["required"])
+        for pack_path in sorted((REPOSITORY / "rules/official").glob("*/pack.json")):
+            pack = json.loads(pack_path.read_text(encoding="utf-8"))
+            self.assertIn("provenance", pack["bank"], f"{pack_path} declares no provenance")
+            self.assertIn(pack["bank"]["provenance"],
+                          schema["properties"]["bank"]["properties"]["provenance"]["enum"])
+        for pack_path in sorted((REPOSITORY / "rules/official/IR").glob("*/pack.json")):
+            pack = json.loads(pack_path.read_text(encoding="utf-8"))
+            self.assertEqual(pack["bank"]["provenance"], "OFFICIAL", f"{pack_path} is not official")
 
 
 if __name__ == "__main__":

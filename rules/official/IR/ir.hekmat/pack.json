@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.hekmat",
     "country": "IR",
-    "name": "Hekmat"
+    "name": "Hekmat",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

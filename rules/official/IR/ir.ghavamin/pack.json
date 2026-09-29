@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.ghavamin",
     "country": "IR",
-    "name": "Ghavamin"
+    "name": "Ghavamin",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

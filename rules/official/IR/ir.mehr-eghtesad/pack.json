@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.mehr-eghtesad",
     "country": "IR",
-    "name": "Mehr Eghtesad"
+    "name": "Mehr Eghtesad",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

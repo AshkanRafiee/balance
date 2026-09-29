@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.karafarin",
     "country": "IR",
-    "name": "Karafarin"
+    "name": "Karafarin",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.eghtesad-novin",
     "country": "IR",
-    "name": "Eghtesad Novin"
+    "name": "Eghtesad Novin",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

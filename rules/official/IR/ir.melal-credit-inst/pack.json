@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.melal-credit-inst",
     "country": "IR",
-    "name": "Melal Credit Inst."
+    "name": "Melal Credit Inst.",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

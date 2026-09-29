@@ -220,9 +220,12 @@ def main():
         if not isinstance(pack, dict) or pack.get("schema") != "prototype-1":
             fail()
         bank = pack.get("bank")
-        if not isinstance(bank, dict) or not {"id", "country", "name"}.issubset(bank):
+        if not isinstance(bank, dict) or not {"id", "country", "name", "provenance"}.issubset(bank):
             fail()
-        if bank["country"] != "IR" or bank["id"] not in banks:
+        # This tree is the Iranian market we ship coverage for on our own account, so a pack here
+        # claiming to be community-contributed is a mistake in the provenance itself, not a
+        # judgement about the pack: the two are independent, and neither may be inferred.
+        if bank["country"] != "IR" or bank["id"] not in banks or bank["provenance"] != "OFFICIAL":
             fail()
         templates = pack.get("templates")
         if not isinstance(templates, list) or not templates:

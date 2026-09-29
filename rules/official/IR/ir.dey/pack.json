@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.dey",
     "country": "IR",
-    "name": "Dey"
+    "name": "Dey",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

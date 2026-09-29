@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -35,14 +36,22 @@ import java.util.Set;
 public final class PackDocument {
     public static final String SCHEMA = "prototype-1";
 
-    public record Bank(String id, String country, String name) {
+    public record Bank(String id, String country, String name, Provenance provenance) {
         public Bank {
             Rules.id(id);
             Rules.require(country != null && country.length() == 2
                     && country.charAt(0) >= 'A' && country.charAt(0) <= 'Z'
                     && country.charAt(1) >= 'A' && country.charAt(1) <= 'Z', "bank country");
             Rules.text(name, 128, false);
+            Objects.requireNonNull(provenance, "bank provenance");
         }
+
+        /** Who asked for this bank's messages to be understood, which is not the same question as
+         *  whether they were reviewed. OFFICIAL is a bank or market we ship coverage for on our
+         *  own account; COMMUNITY is a format a user reported and we published, which is why the
+         *  app can offer a switch for it. Provenance says nothing about how well a pack parses:
+         *  every pack, whoever asked for it, is held to the same fixtures and the same gates. */
+        public enum Provenance { OFFICIAL, COMMUNITY }
     }
 
     private final String id;
@@ -72,9 +81,10 @@ public final class PackDocument {
             String revision = string(root.get("revision"));
             Rules.id(id);
             Rules.id(revision);
-            Map<?, ?> metadata = object(root.get("bank"), "id country name", "");
+            Map<?, ?> metadata = object(root.get("bank"), "id country name provenance", "");
             Bank bank = new Bank(string(metadata.get("id")), string(metadata.get("country")),
-                    string(metadata.get("name")));
+                    string(metadata.get("name")),
+                    enumeration(metadata.get("provenance"), Bank.Provenance.class));
             List<Template> templates = new ArrayList<>();
             for (Object value : list(root.get("templates"), MAX_TEMPLATES)) {
                 Map<?, ?> template = object(value, "id senders guards outputs", "");

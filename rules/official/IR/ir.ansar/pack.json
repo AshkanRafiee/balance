@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.ansar",
     "country": "IR",
-    "name": "Ansar"
+    "name": "Ansar",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

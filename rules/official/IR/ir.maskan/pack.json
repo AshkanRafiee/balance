@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.maskan",
     "country": "IR",
-    "name": "Maskan"
+    "name": "Maskan",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

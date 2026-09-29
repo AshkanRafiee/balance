@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.saman",
     "country": "IR",
-    "name": "Saman"
+    "name": "Saman",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

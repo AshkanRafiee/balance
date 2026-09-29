@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.noor-credit-inst",
     "country": "IR",
-    "name": "Noor Credit Inst."
+    "name": "Noor Credit Inst.",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

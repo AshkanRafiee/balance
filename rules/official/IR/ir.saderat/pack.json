@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.saderat",
     "country": "IR",
-    "name": "Saderat"
+    "name": "Saderat",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

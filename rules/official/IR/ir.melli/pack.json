@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.melli",
     "country": "IR",
-    "name": "Melli"
+    "name": "Melli",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

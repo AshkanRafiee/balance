@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.blu",
     "country": "IR",
-    "name": "Blu"
+    "name": "Blu",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

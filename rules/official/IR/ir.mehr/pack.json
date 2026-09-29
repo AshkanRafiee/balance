@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.mehr",
     "country": "IR",
-    "name": "Mehr"
+    "name": "Mehr",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

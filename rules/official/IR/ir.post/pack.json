@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.post",
     "country": "IR",
-    "name": "Post"
+    "name": "Post",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.tosee",
     "country": "IR",
-    "name": "Tosee"
+    "name": "Tosee",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

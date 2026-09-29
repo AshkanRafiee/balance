@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.tosee-saderat",
     "country": "IR",
-    "name": "Tosee Saderat"
+    "name": "Tosee Saderat",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

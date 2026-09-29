@@ -28,6 +28,14 @@ computed content digest. There is no enabled flag: callers supply the active set
 `Output(id, region, account, kind, money, direction, originalAmount, date)` declares
 an independently scoped event. Kinds are `BOOKED_BALANCE`, `AVAILABLE_BALANCE`, and
 `POSTED_MOVEMENT`. Each has exactly one required ledger amount and currency.
+
+`Bank(id, country, name, provenance)` is the pack's own account of the bank it
+covers. `country` is an ISO 3166-1 alpha-2 code and is descriptive metadata: it
+never implies a currency, a sender prefix, a calendar or a timezone. `provenance`
+is `OFFICIAL` for coverage the project ships on its own account and `COMMUNITY`
+for a format a user reported and we published, and it is required so the app can
+label a pack and offer a switch for the contributed ones. It is not a quality
+claim and never changes how a pack is parsed, loaded or validated.
 Movements require a direction rule. The optional original-amount declaration, if
 present, is required to parse and is context on that movement, never another fact.
 The date declaration is optional and has diagnostic arrival fallback.

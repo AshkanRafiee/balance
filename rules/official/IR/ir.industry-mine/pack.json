@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.industry-mine",
     "country": "IR",
-    "name": "Industry & Mine"
+    "name": "Industry & Mine",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

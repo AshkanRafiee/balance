@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.gardeshgari",
     "country": "IR",
-    "name": "Gardeshgari"
+    "name": "Gardeshgari",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

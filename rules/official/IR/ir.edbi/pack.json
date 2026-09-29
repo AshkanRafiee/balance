@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.edbi",
     "country": "IR",
-    "name": "EDBI"
+    "name": "EDBI",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.pasargad",
     "country": "IR",
-    "name": "Pasargad"
+    "name": "Pasargad",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {

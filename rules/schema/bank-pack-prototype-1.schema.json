@@ -12,11 +12,12 @@
     "bank": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "country", "name"],
+      "required": ["id", "country", "name", "provenance"],
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "country": { "type": "string", "pattern": "^[A-Z]{2}$" },
-        "name": { "type": "string", "minLength": 1, "maxLength": 128 }
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "provenance": { "enum": ["OFFICIAL", "COMMUNITY"] }
       }
     },
     "templates": {

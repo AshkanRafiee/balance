@@ -5,7 +5,8 @@
   "bank": {
     "id": "ir.bankino",
     "country": "IR",
-    "name": "Bankino"
+    "name": "Bankino",
+    "provenance": "OFFICIAL"
   },
   "templates": [
     {
