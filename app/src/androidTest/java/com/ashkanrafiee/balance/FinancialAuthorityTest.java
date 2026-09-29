@@ -53,6 +53,24 @@ public class FinancialAuthorityTest {
         assertTrue(authority.repository().snapshot().components().isEmpty());
     }
 
+    @Test public void directAuthorityOperationsUseTheSamePinnedRepository() throws Exception {
+        Fake fake = new Fake();
+        FinancialAuthority authority = FinancialAuthority.fromRepository(
+                new FinancialRepository(fake));
+
+        authority.transaction(draft -> {
+            draft.put(FinancialSnapshotAdapter.BALANCES, bytes("{}"));
+            draft.put(FinancialSnapshotAdapter.RULES_VERSION, bytes("3"));
+            assertArrayEquals(bytes("{}"), authority.snapshot()
+                    .get(FinancialSnapshotAdapter.BALANCES));
+            return null;
+        });
+
+        assertEquals(1, fake.commits);
+        assertArrayEquals(bytes("3"), authority.snapshots().snapshot()
+                .get(FinancialSnapshotAdapter.RULES_VERSION));
+    }
+
     private static Map<String, byte[]> updates(String balances, String scannedThrough) {
         Map<String, byte[]> updates = new LinkedHashMap<>();
         updates.put(FinancialSnapshotAdapter.BALANCES, bytes(balances));

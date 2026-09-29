@@ -41,4 +41,12 @@ final class FinancialAuthority {
     FinancialRepository repository() { return repository; }
     FinancialSnapshotAdapter snapshots() { return snapshots; }
     FinancialOperations operations() { return operations; }
+
+    /** Reads one repository snapshot; callers should keep related decisions within one transaction. */
+    FinancialRepository.Snapshot snapshot() throws IOException { return repository.snapshot(); }
+
+    /** Runs one atomic financial operation against this authority. */
+    <T> T transaction(FinancialRepository.Work<T> work) throws IOException {
+        return repository.transaction(work);
+    }
 }
