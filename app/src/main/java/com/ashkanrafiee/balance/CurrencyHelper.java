@@ -76,6 +76,12 @@ public final class CurrencyHelper {
         return currency;
     }
 
+    /** The ISO 4217 code a row's amounts are denominated in, with an absent code read as the rial,
+     *  the only currency the app could store before foreign banks were recognised. */
+    public static String code(String currency) {
+        return currency == null || currency.isEmpty() ? BalanceData.IRR : currency;
+    }
+
     /** The canonical number of decimal places a currency's minor units carry, as the engine's
      *  versioned currency registry defines it. Zero for a code the registry does not know: an
      *  unrecognised currency is shown raw rather than guessed at. */

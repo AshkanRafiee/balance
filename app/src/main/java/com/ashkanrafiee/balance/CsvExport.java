@@ -2,6 +2,8 @@ package com.ashkanrafiee.balance;
 
 import android.content.Context;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -14,11 +16,21 @@ import java.util.TimeZone;
 
 /**
  * Builds the UTF-8 CSV export of the transaction history. The columns stay machine-readable — an
- * ISO-8601 UTC timestamp and the raw signed rial figure — while extra human-friendly columns carry
- * the date in the active calendar, the time of day and the amount exactly as the app displays it
- * (including the chosen currency's unit label), plus the per-transaction note and whatever the bank
- * stated about the movement. Only RFC-4180 quoting is applied; the caller writes the text through the
- * Storage Access Framework, so nothing leaves the device until the user picks a location.
+ * ISO-8601 UTC timestamp, the signed amount as a plain decimal, and the ISO 4217 code of the
+ * currency those minor units belong to — while extra human-friendly columns carry the date in the
+ * active calendar, the time of day, the amount exactly as the app displays it and the unit label
+ * drawn beside it, plus the per-transaction note and whatever the bank stated about the movement.
+ * Only RFC-4180 quoting is applied; the caller writes the text through the Storage Access Framework,
+ * so nothing leaves the device until the user picks a location.
+ *
+ * <p>Amounts are never converted between currencies, and no column ever adds two of them up: an
+ * account can hold more than one currency, and rials and dollars are not summable. The {@code
+ * currency} code is therefore the column that gives an {@code amount} its meaning, and a reader
+ * sums the file within a code — which is why {@code amount} is a bare decimal rather than the raw
+ * minor-unit integer: at the scale {@code currency} defines, the two are the same number, so the
+ * file stays lossless without asking a spreadsheet to do arithmetic before it can compare anything.
+ * A currency the registry does not know has no scale to write, so its {@code amount} is the raw
+ * integer, exactly as stored.
  *
  * <p>The {@code note} column carries the user's own words, the {@code reason} and {@code channel}
  * columns the bank's: they are separate stores, so a movement that has any combination shows all of
@@ -40,8 +52,8 @@ final class CsvExport {
     /** The fixed, unlocalized column set: spreadsheet tools and scripts must agree on the shape of
      *  the file regardless of the app's language. */
     static final String[] HEADER = {
-        "bank", "account", "date", "date_local", "time", "amount_rial", "amount_display", "currency",
-        "note", "reason", "channel", "kind"
+        "bank", "account", "date", "date_local", "time", "amount", "amount_display", "currency",
+        "unit", "note", "reason", "channel", "kind"
     };
 
     /** {@code kind} value for a row parsed from one bank message. */
@@ -142,9 +154,10 @@ final class CsvExport {
             iso.format(new Date(r.toDate)),
             local.year + "/" + local.month + "/" + local.day,
             time.format(new Date(r.toDate)),
-            String.valueOf(r.amount),
-            CurrencyHelper.amount(context, r.amount),
-            CurrencyHelper.label(context),
+            amount(r.currency, r.amount),
+            CurrencyHelper.amount(context, r.currency, r.amount),
+            CurrencyHelper.code(r.currency),
+            CurrencyHelper.label(context, r.currency),
             "",
             "",
             "",
@@ -172,14 +185,26 @@ final class CsvExport {
             iso.format(new Date(t.date)),
             local.year + "/" + local.month + "/" + local.day,
             time.format(new Date(t.date)),
-            String.valueOf(t.amount),
-            CurrencyHelper.amount(context, t.amount),
-            CurrencyHelper.label(context),
+            amount(t.currency, t.amount),
+            CurrencyHelper.amount(context, t.currency, t.amount),
+            CurrencyHelper.code(t.currency),
+            CurrencyHelper.label(context, t.currency),
             note == null ? "" : note,
             reason == null ? "" : reason,
             channel == null ? "" : channel,
             KIND_MOVEMENT
         };
+    }
+
+    /** The row's amount as a bare decimal in its own currency, ungrouped and undisplayed, so a
+     *  spreadsheet reads it as the number it is. The {@code currency} column carries the code that
+     *  gives it its scale; a code the registry does not know has none, so its minor units are
+     *  written as they are stored rather than at an invented scale. */
+    static String amount(String currency, long minorUnits) {
+        int scale = CurrencyHelper.scaleOf(currency);
+        if (scale == 0) return String.valueOf(minorUnits);
+        BigDecimal n = new BigDecimal(BigInteger.valueOf(minorUnits), scale);
+        return n.stripTrailingZeros().toPlainString();
     }
 
     /** RFC-4180 escaping: a field containing a comma, quote or line break is wrapped in quotes with
