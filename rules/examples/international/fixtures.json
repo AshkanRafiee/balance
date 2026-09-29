@@ -155,6 +155,69 @@
           }
         ]
       }
+    },
+    {
+      "id": "zero-and-three-decimal-currencies",
+      "sourceId": "synthetic-occurrence-7",
+      "sender": "EXAMPLE-BANK",
+      "arrival": "2026-08-30T06:00:00Z",
+      "zone": "America/New_York",
+      "body": "Scale statement\nAccount=0002;JPY=9223372036854775807;KWD=1.234;",
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "id": "balance-jpy",
+            "account": null,
+            "currency": "JPY",
+            "minorUnits": "9223372036854775807",
+            "scale": 0,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "America/New_York",
+              "fallback": true
+            }
+          },
+          {
+            "id": "balance-kwd",
+            "account": null,
+            "currency": "KWD",
+            "minorUnits": "1234",
+            "scale": 3,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "America/New_York",
+              "fallback": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "unsupported-fractional-precision",
+      "sourceId": "synthetic-occurrence-8",
+      "sender": "EXAMPLE-BANK",
+      "arrival": "2026-08-30T06:00:00Z",
+      "zone": "America/New_York",
+      "body": "Scale statement\nAccount=0002;JPY=123;KWD=1.2345;",
+      "expected": {
+        "status": "INVALID",
+        "outputs": []
+      }
+    },
+    {
+      "id": "money-overflow",
+      "sourceId": "synthetic-occurrence-9",
+      "sender": "EXAMPLE-BANK",
+      "arrival": "2026-08-30T06:00:00Z",
+      "zone": "America/New_York",
+      "body": "Scale statement\nAccount=0002;JPY=9223372036854775808;KWD=1.234;",
+      "expected": {
+        "status": "OVERFLOW",
+        "outputs": []
+      }
     }
   ]
 }

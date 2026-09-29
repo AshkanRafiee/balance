@@ -252,6 +252,75 @@
       ]
     },
     {
+      "id": "scale-currencies",
+      "senders": [
+        "EXAMPLE-BANK"
+      ],
+      "guards": [
+        {
+          "line": 0,
+          "literal": "Scale statement",
+          "excluded": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "balance-jpy",
+          "region": {
+            "line": 1,
+            "after": "",
+            "before": "",
+            "maxLength": 256
+          },
+          "kind": "BOOKED_BALANCE",
+          "accountOptional": true,
+          "money": {
+            "amount": {
+              "line": -1,
+              "after": "JPY=",
+              "before": ";",
+              "maxLength": 22
+            },
+            "currency": {
+              "fixed": "JPY"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII",
+            "unitMultiplier": 1
+          }
+        },
+        {
+          "id": "balance-kwd",
+          "region": {
+            "line": 1,
+            "after": "",
+            "before": "",
+            "maxLength": 256
+          },
+          "kind": "BOOKED_BALANCE",
+          "accountOptional": true,
+          "money": {
+            "amount": {
+              "line": -1,
+              "after": "KWD=",
+              "before": ";",
+              "maxLength": 10
+            },
+            "currency": {
+              "fixed": "KWD"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII",
+            "unitMultiplier": 1
+          }
+        }
+      ]
+    },
+    {
       "id": "short-date",
       "senders": [
         "EXAMPLE-BANK"
