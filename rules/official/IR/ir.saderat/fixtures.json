@@ -1,0 +1,56 @@
+{
+  "schema": "prototype-fixtures-1",
+  "pack": "official.ir.saderat",
+  "cases": [
+    {
+      "id": "ir.saderat-statement",
+      "sourceId": "ir.saderat-real-001",
+      "sender": "30009419",
+      "arrival": "2026-08-30T06:00:00Z",
+      "zone": "Asia/Tehran",
+      "body": "\u0645\u0642\u0635\u062f \u062d\u0633\u0627\u0628:9999\n \u062d\u0633\u0627\u0628:01234\n\u0645\u0628\u0644\u063a:100-\n\u0645\u0627\u0646\u062f\u0647:900",
+      "legacy": {
+        "status": "PARSED",
+        "bank": "ir.saderat",
+        "account": "01234",
+        "reason": null,
+        "channel": null,
+        "balance": 900,
+        "txn": -100,
+        "time": 1788069600000,
+        "timeArrival": true
+      },
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "id": "statement-movement",
+            "account": "01234",
+            "currency": "IRR",
+            "minorUnits": "-100",
+            "scale": 0,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Tehran",
+              "fallback": true
+            }
+          },
+          {
+            "id": "statement-balance",
+            "account": "01234",
+            "currency": "IRR",
+            "minorUnits": "900",
+            "scale": 0,
+            "time": {
+              "instant": "2026-08-30T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Tehran",
+              "fallback": true
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
