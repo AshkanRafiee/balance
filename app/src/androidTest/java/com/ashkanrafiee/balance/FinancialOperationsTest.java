@@ -135,6 +135,28 @@ public class FinancialOperationsTest {
         }
     }
 
+    @Test public void resetRecoversFromMalformedOptionalComponentsAndPreservesUnknownData() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.repo.transaction(draft -> {
+                draft.put("transaction_notes", bytes("not-json"));
+                draft.put("excluded_banks", bytes("not-an-array"));
+                draft.put("future_private", bytes("opaque"));
+                return null;
+            });
+
+            f.ops.reset(false);
+            FinancialRepository.Snapshot recovered = f.reopen();
+            assertArrayEquals(bytes("not-json"), recovered.get("transaction_notes"));
+            assertNull(recovered.get("excluded_banks"));
+            assertArrayEquals(bytes("opaque"), recovered.get("future_private"));
+
+            f.ops.reset(true);
+            FinancialRepository.Snapshot cleared = f.reopen();
+            assertNull(cleared.get("transaction_notes"));
+            assertArrayEquals(bytes("opaque"), cleared.get("future_private"));
+        }
+    }
+
     @Test public void failuresBeforeActivePublicationLeaveEveryComponentUntouched() throws Exception {
         try (Fixture f = new Fixture()) {
             f.ops.setNote(TX, "original");
