@@ -249,10 +249,12 @@ tasks.register('ruleExampleTest') {
                             java.time.Instant.parse(fixture.arrival), java.time.ZoneId.of(fixture.zone))
                     def result = parserClass.getMethod('parse', messageClass).invoke(parser, message)
                     if (result.status().name() != fixture.expected.status) {
-                        throw new GradleException('Example status mismatch')
+                        throw new GradleException("Invalid example ${pack.id()}/${fixture.id}: " +
+                            "expected status ${fixture.expected.status}, got ${result.status().name()}")
                     }
                     if (fixture.expected.status != 'PARSED' && !result.matchedProvenance().isEmpty()) {
-                        throw new GradleException('Rejected example retained provenance')
+                        throw new GradleException("Invalid example ${pack.id()}/${fixture.id}: " +
+                            'rejected example retained provenance')
                     }
                     def actual = result.facts().collect { fact ->
                         def expected = fixture.expected.outputs.find { it.id == fact.provenance().outputId() }
@@ -273,7 +275,13 @@ tasks.register('ruleExampleTest') {
                         projection
                     }.sort { it.id }
                     if (actual != fixture.expected.outputs.sort { it.id }) {
-                        throw new GradleException('Example output mismatch')
+                        def problems = result.diagnostics().collect {
+                            [template: it.templateKey(), output: it.outputId(), field: it.field(),
+                             code: it.code().name()]
+                        }
+                        throw new GradleException("Invalid example ${pack.id()}/${fixture.id}: " +
+                            'output mismatch, expected=' + (fixture.expected.outputs.sort { it.id }) +
+                            ' actual=' + actual + ' diagnostics=' + problems)
                     }
                     cases++
                 }
