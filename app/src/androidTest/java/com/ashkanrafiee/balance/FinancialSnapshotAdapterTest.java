@@ -8,6 +8,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.Collections;
+import java.util.ArrayList;
+import java.util.List;
 
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
@@ -200,6 +202,60 @@ public class FinancialSnapshotAdapterTest {
         adapter.publishHistory(Collections.emptyMap());
         assertEquals(0, fake.commits);
         assertTrue(adapter.snapshot().components().isEmpty());
+    }
+
+    @Test public void typedComponentCodecsRoundTripThroughOneDraft() throws Exception {
+        Fake fake = new Fake();
+        FinancialSnapshotAdapter adapter = new FinancialSnapshotAdapter(new FinancialRepository(fake));
+        adapter.transaction(draft -> {
+            LinkedHashMap<String, Bank> balances = new LinkedHashMap<>();
+            balances.put("Bank|001", new Bank("Bank", 123L, 456L, "sender", "001"));
+            draft.putBalances(balances);
+            List<Transaction> transactions = new ArrayList<>();
+            transactions.add(new Transaction("Bank", "001", 456L, -10L, 113L, "sig", "content"));
+            draft.putTransactions(transactions);
+            Map<String, String> notes = new LinkedHashMap<>();
+            notes.put("c:content", "note");
+            draft.putTransactionNotes(notes);
+            Map<String, List<Reconcile.Entry>> movements = new LinkedHashMap<>();
+            List<Reconcile.Entry> entries = new ArrayList<>();
+            entries.add(new Reconcile.Entry(456L, -10L, 113L, "sig"));
+            movements.put("Bank|001", entries);
+            draft.putRecentMovements(movements);
+            Map<String, Long> last = new LinkedHashMap<>();
+            last.put("Bank|001", 113L);
+            draft.putHistoryLastBalances(last);
+            draft.putScannedThrough(9L);
+            draft.putRulesVersion(3);
+            return null;
+        });
+
+        FinancialSnapshotAdapter.Snapshot snapshot = adapter.snapshot();
+        assertEquals(123L, snapshot.balances().get("Bank|001").amount);
+        assertEquals(1, snapshot.transactions().size());
+        assertEquals("note", snapshot.transactionNotes().get("c:content"));
+        assertEquals(1, snapshot.recentMovements().get("Bank|001").size());
+        assertEquals(Long.valueOf(113L), snapshot.historyLastBalances().get("Bank|001"));
+        assertEquals(9L, snapshot.scannedThrough());
+        assertEquals(3, snapshot.rulesVersion());
+        assertEquals(1, fake.commits);
+    }
+
+    @Test public void typedEmptyWritesRemoveLegacyEmptyComponents() throws Exception {
+        Fake fake = new Fake();
+        FinancialSnapshotAdapter adapter = new FinancialSnapshotAdapter(new FinancialRepository(fake));
+        adapter.transaction(draft -> {
+            draft.put(FinancialSnapshotAdapter.TRANSACTIONS, bytes("{\"transactions\":[]}"));
+            draft.put(FinancialSnapshotAdapter.TRANSACTION_NOTES, bytes("{}"));
+            return null;
+        });
+        adapter.transaction(draft -> {
+            draft.putTransactions(Collections.emptyList());
+            draft.putTransactionNotes(Collections.emptyMap());
+            return null;
+        });
+        assertFalse(adapter.snapshot().contains(FinancialSnapshotAdapter.TRANSACTIONS));
+        assertFalse(adapter.snapshot().contains(FinancialSnapshotAdapter.TRANSACTION_NOTES));
     }
 
     @Test public void worksWithEncryptedGenerationStore() throws Exception {

@@ -1653,24 +1653,44 @@ final class BalanceData {
                 .getString(KEY_RECENT_MOVEMENTS, null);
             if (raw == null) return map;
             String json = raw.indexOf('{') == 0 ? raw : decrypt(raw);
+            map = deserializeRecentMovements(json);
+        } catch (Exception e) {
+            Log.w(TAG, "loadRecentMovements failed", e);
+        }
+        return map;
+    }
+
+    static String serializeRecentMovements(Map<String, List<Reconcile.Entry>> map) throws Exception {
+        JSONObject obj = new JSONObject();
+        for (Map.Entry<String, List<Reconcile.Entry>> e : map.entrySet()) {
+            JSONArray arr = new JSONArray();
+            for (Reconcile.Entry en : e.getValue()) {
+                arr.put(new JSONObject().put("d", en.date).put("a", en.amount)
+                        .put("b", en.balance).put("s", en.sig != null ? en.sig : JSONObject.NULL));
+            }
+            obj.put(e.getKey(), arr);
+        }
+        return obj.toString();
+    }
+
+    static Map<String, List<Reconcile.Entry>> deserializeRecentMovements(String json) {
+        Map<String, List<Reconcile.Entry>> map = new HashMap<>();
+        try {
             JSONObject obj = new JSONObject(json);
             Iterator<String> it = obj.keys();
             while (it.hasNext()) {
                 String bank = it.next();
                 JSONArray arr = obj.optJSONArray(bank);
+                if (arr == null) continue;
                 List<Reconcile.Entry> list = new ArrayList<>();
-                if (arr != null) {
-                    for (int i = 0; i < arr.length(); i++) {
-                        JSONObject e = arr.getJSONObject(i);
-                        list.add(new Reconcile.Entry(e.getLong("d"), e.getLong("a"), e.getLong("b"),
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONObject e = arr.getJSONObject(i);
+                    list.add(new Reconcile.Entry(e.getLong("d"), e.getLong("a"), e.getLong("b"),
                             e.isNull("s") ? null : e.optString("s", null)));
-                    }
                 }
                 map.put(bank, list);
             }
-        } catch (Exception e) {
-            Log.w(TAG, "loadRecentMovements failed", e);
-        }
+        } catch (Exception ignored) { }
         return map;
     }
 
@@ -1708,15 +1728,29 @@ final class BalanceData {
                 .getString(KEY_HISTORY_LAST_BALANCE, null);
             if (raw == null) return map;
             String json = raw.indexOf('{') == 0 ? raw : decrypt(raw);
-            JSONObject obj = new JSONObject(json);
-            Iterator<String> it = obj.keys();
-            while (it.hasNext()) {
-                String b = it.next();
-                map.put(b, obj.getLong(b));
-            }
+            map = deserializeLastBalances(json);
         } catch (Exception e) {
             Log.w(TAG, "loadLastBalances failed", e);
         }
+        return map;
+    }
+
+    static String serializeLastBalances(Map<String, Long> map) throws Exception {
+        JSONObject obj = new JSONObject();
+        for (Map.Entry<String, Long> e : map.entrySet()) obj.put(e.getKey(), e.getValue().longValue());
+        return obj.toString();
+    }
+
+    static Map<String, Long> deserializeLastBalances(String json) {
+        Map<String, Long> map = new HashMap<>();
+        try {
+            JSONObject obj = new JSONObject(json);
+            Iterator<String> it = obj.keys();
+            while (it.hasNext()) {
+                String key = it.next();
+                map.put(key, obj.getLong(key));
+            }
+        } catch (Exception ignored) { }
         return map;
     }
 

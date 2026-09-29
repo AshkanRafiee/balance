@@ -11,6 +11,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.HashSet;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -59,6 +62,65 @@ final class FinancialSnapshotAdapter {
         boolean contains(String name) { return values.containsKey(name); }
         byte[] get(String name) { return FinancialSnapshotAdapter.clone(values.get(name)); }
         Map<String, byte[]> components() { return copy(values); }
+
+        LinkedHashMap<String, Bank> balances() {
+            byte[] bytes = get(BALANCES);
+            return bytes == null ? new LinkedHashMap<>()
+                    : BalanceData.deserialize(new String(bytes, StandardCharsets.UTF_8));
+        }
+
+        List<Transaction> transactions() {
+            byte[] bytes = get(TRANSACTIONS);
+            return bytes == null ? new ArrayList<>()
+                    : BalanceData.deserializeTransactions(new String(bytes, StandardCharsets.UTF_8));
+        }
+
+        Map<String, String> transactionNotes() { return text(TRANSACTION_NOTES); }
+        Map<String, String> transactionReasons() { return text(TRANSACTION_REASONS); }
+        Map<String, String> transactionChannels() { return text(TRANSACTION_CHANNELS); }
+
+        Map<String, List<Reconcile.Entry>> recentMovements() {
+            byte[] bytes = get(RECENT_MOVEMENTS);
+            return bytes == null ? new LinkedHashMap<>()
+                    : BalanceData.deserializeRecentMovements(new String(bytes, StandardCharsets.UTF_8));
+        }
+
+        Map<String, Long> historyLastBalances() {
+            byte[] bytes = get(HISTORY_LAST_BALANCE);
+            return bytes == null ? new LinkedHashMap<>()
+                    : BalanceData.deserializeLastBalances(new String(bytes, StandardCharsets.UTF_8));
+        }
+
+        long scannedThrough() { return number(SCANNED_THROUGH, 0L); }
+        int rulesVersion() { return (int) number(RULES_VERSION, -1L); }
+        long historyThrough() { return number(HISTORY_THROUGH, 0L); }
+        int historyRulesVersion() { return (int) number(HISTORY_RULES_VERSION, -1L); }
+        int historySchema() { return (int) number(HISTORY_SCHEMA, -1L); }
+
+        Set<String> excludedBanks() {
+            byte[] bytes = get(EXCLUDED_BANKS);
+            if (bytes == null) return new LinkedHashSet<>();
+            try {
+                org.json.JSONArray array = new org.json.JSONArray(new String(bytes, StandardCharsets.UTF_8));
+                Set<String> result = new LinkedHashSet<>();
+                for (int i = 0; i < array.length(); i++) result.add(array.getString(i));
+                return result;
+            } catch (Exception ignored) { return new LinkedHashSet<>(); }
+        }
+
+        private Map<String, String> text(String name) {
+            byte[] bytes = get(name);
+            return bytes == null ? new LinkedHashMap<>()
+                    : new LinkedHashMap<>(BalanceData.deserializeTextMap(
+                            new String(bytes, StandardCharsets.UTF_8)));
+        }
+
+        private long number(String name, long fallback) {
+            byte[] bytes = get(name);
+            if (bytes == null) return fallback;
+            try { return Long.parseLong(new String(bytes, StandardCharsets.UTF_8)); }
+            catch (RuntimeException ignored) { return fallback; }
+        }
     }
 
     static final class MutableSnapshot {
@@ -74,6 +136,58 @@ final class FinancialSnapshotAdapter {
         }
         void remove(String name) { draft.remove(name); }
         Map<String, byte[]> components() { return draft.components(); }
+
+        void putBalances(Map<String, Bank> value) throws IOException {
+            putJson(BALANCES, serialize(() -> BalanceData.serialize(new LinkedHashMap<>(value))));
+        }
+        void putTransactions(List<Transaction> value) throws IOException {
+            if (value == null || value.isEmpty()) { remove(TRANSACTIONS); return; }
+            putJson(TRANSACTIONS, serialize(() -> BalanceData.serializeTransactions(value)));
+        }
+        void putTransactionNotes(Map<String, String> value) throws IOException {
+            putText(TRANSACTION_NOTES, value);
+        }
+        void putTransactionReasons(Map<String, String> value) throws IOException {
+            putText(TRANSACTION_REASONS, value);
+        }
+        void putTransactionChannels(Map<String, String> value) throws IOException {
+            putText(TRANSACTION_CHANNELS, value);
+        }
+        void putRecentMovements(Map<String, List<Reconcile.Entry>> value) throws IOException {
+            if (value == null || value.isEmpty()) { remove(RECENT_MOVEMENTS); return; }
+            putJson(RECENT_MOVEMENTS, serialize(() -> BalanceData.serializeRecentMovements(value)));
+        }
+        void putHistoryLastBalances(Map<String, Long> value) throws IOException {
+            if (value == null || value.isEmpty()) { remove(HISTORY_LAST_BALANCE); return; }
+            putJson(HISTORY_LAST_BALANCE, serialize(() -> BalanceData.serializeLastBalances(value)));
+        }
+        void putScannedThrough(long value) throws IOException { putNumber(SCANNED_THROUGH, value); }
+        void putRulesVersion(int value) throws IOException { putNumber(RULES_VERSION, value); }
+        void putHistoryThrough(long value) throws IOException { putNumber(HISTORY_THROUGH, value); }
+        void putHistoryRulesVersion(int value) throws IOException { putNumber(HISTORY_RULES_VERSION, value); }
+        void putHistorySchema(int value) throws IOException { putNumber(HISTORY_SCHEMA, value); }
+        void putExcludedBanks(Set<String> value) throws IOException {
+            if (value == null) throw new IllegalArgumentException("ARGUMENT");
+            org.json.JSONArray array = new org.json.JSONArray();
+            for (String item : value) array.put(item);
+            put(EXCLUDED_BANKS, array.toString().getBytes(StandardCharsets.UTF_8));
+        }
+
+        private void putText(String name, Map<String, String> value) throws IOException {
+            if (value == null || value.isEmpty()) { remove(name); return; }
+            putJson(name, serialize(() -> BalanceData.serializeTextMap(value)));
+        }
+        private void putNumber(String name, long value) throws IOException {
+            put(name, Long.toString(value).getBytes(StandardCharsets.UTF_8));
+        }
+        private void putJson(String name, String value) throws IOException {
+            put(name, value.getBytes(StandardCharsets.UTF_8));
+        }
+        private interface Serializer { String run() throws Exception; }
+        private static String serialize(Serializer serializer) throws IOException {
+            try { return serializer.run(); }
+            catch (Exception failure) { throw new IOException("INVALID_FINANCIAL_DATA", failure); }
+        }
     }
 
     private final FinancialRepository repository;
