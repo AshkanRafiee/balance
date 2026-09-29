@@ -1,0 +1,262 @@
+{
+  "schema": "prototype-1",
+  "id": "official.ir.tejarat",
+  "revision": "ir-1",
+  "bank": {
+    "id": "ir.tejarat",
+    "country": "IR",
+    "name": "Tejarat"
+  },
+  "templates": [
+    {
+      "id": "tejarat-withdrawal",
+      "senders": [
+        "5000973189",
+        "985000973189",
+        "tejaratbank",
+        "TejaratBank"
+      ],
+      "guards": [
+        {
+          "line": 0,
+          "literal": "*\u0628\u0627\u0646\u06a9 \u062a\u062c\u0627\u0631\u062a*",
+          "excluded": false
+        },
+        {
+          "line": 2,
+          "literal": "\u0628\u0631\u062f\u0627\u0634\u062a",
+          "excluded": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "tejarat-withdraw-movement",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "account": {
+            "line": 1,
+            "after": "\u062d\u0633\u0627\u0628: ",
+            "before": " ",
+            "maxLength": 32,
+            "normalization": "ACCOUNT",
+            "numeric": {
+              "segments": [
+                {
+                  "min": 14,
+                  "max": 14
+                }
+              ],
+              "mode": "EXACT"
+            }
+          },
+          "kind": "POSTED_MOVEMENT",
+          "direction": {
+            "fixed": "DEBIT"
+          },
+          "money": {
+            "amount": {
+              "line": 2,
+              "after": "\u0628\u0631\u062f\u0627\u0634\u062a: ",
+              "before": " \u0631\u06cc\u0627\u0644",
+              "maxLength": 32
+            },
+            "currency": {
+              "fixed": "IRR"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII_PERSIAN_ARABIC",
+            "unitMultiplier": 1
+          },
+          "channel": {
+            "field": {
+              "line": 3,
+              "after": "\u0627\u0632 \u0637\u0631\u06cc\u0642: ",
+              "before": "",
+              "maxLength": 64,
+              "normalization": "CHANNEL"
+            },
+            "mapping": {
+              "\u0633\u0627\u0645\u0627\u0646\u0647 \u067e\u0644 (\u067e\u0631\u062f\u0627\u062e\u062a \u0644\u062d\u0638\u0647 \u0627\u06cc)": "sep"
+            },
+            "minLength": 2,
+            "maxLength": 64,
+            "digitFree": true
+          }
+        },
+        {
+          "id": "tejarat-balance",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "account": {
+            "line": 1,
+            "after": "\u062d\u0633\u0627\u0628: ",
+            "before": " ",
+            "maxLength": 32,
+            "normalization": "ACCOUNT",
+            "numeric": {
+              "segments": [
+                {
+                  "min": 14,
+                  "max": 14
+                }
+              ],
+              "mode": "EXACT"
+            }
+          },
+          "kind": "BOOKED_BALANCE",
+          "money": {
+            "amount": {
+              "line": 4,
+              "after": "\u0645\u0627\u0646\u062f\u0647: ",
+              "before": " \u0631\u06cc\u0627\u0644",
+              "maxLength": 32
+            },
+            "currency": {
+              "fixed": "IRR"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII_PERSIAN_ARABIC",
+            "unitMultiplier": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "tejarat-deposit",
+      "senders": [
+        "5000973189",
+        "985000973189",
+        "tejaratbank",
+        "TejaratBank"
+      ],
+      "guards": [
+        {
+          "line": 0,
+          "literal": "*\u0628\u0627\u0646\u06a9 \u062a\u062c\u0627\u0631\u062a*",
+          "excluded": false
+        },
+        {
+          "line": 2,
+          "literal": "\u0648\u0627\u0631\u06cc\u0632",
+          "excluded": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "tejarat-deposit-movement",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "account": {
+            "line": 1,
+            "after": "\u062d\u0633\u0627\u0628: ",
+            "before": " ",
+            "maxLength": 32,
+            "normalization": "ACCOUNT",
+            "numeric": {
+              "segments": [
+                {
+                  "min": 14,
+                  "max": 14
+                }
+              ],
+              "mode": "EXACT"
+            }
+          },
+          "kind": "POSTED_MOVEMENT",
+          "direction": {
+            "fixed": "CREDIT"
+          },
+          "money": {
+            "amount": {
+              "line": 2,
+              "after": "\u0648\u0627\u0631\u06cc\u0632: ",
+              "before": " \u0631\u06cc\u0627\u0644",
+              "maxLength": 32
+            },
+            "currency": {
+              "fixed": "IRR"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII_PERSIAN_ARABIC",
+            "unitMultiplier": 1
+          },
+          "channel": {
+            "field": {
+              "line": 3,
+              "after": "\u0627\u0632 \u0637\u0631\u06cc\u0642: ",
+              "before": "",
+              "maxLength": 64,
+              "normalization": "CHANNEL"
+            },
+            "mapping": {
+              "\u0633\u0627\u0645\u0627\u0646\u0647 \u067e\u0644 (\u067e\u0631\u062f\u0627\u062e\u062a \u0644\u062d\u0638\u0647 \u0627\u06cc)": "sep"
+            },
+            "minLength": 2,
+            "maxLength": 64,
+            "digitFree": true
+          }
+        },
+        {
+          "id": "tejarat-balance",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "account": {
+            "line": 1,
+            "after": "\u062d\u0633\u0627\u0628: ",
+            "before": " ",
+            "maxLength": 32,
+            "normalization": "ACCOUNT",
+            "numeric": {
+              "segments": [
+                {
+                  "min": 14,
+                  "max": 14
+                }
+              ],
+              "mode": "EXACT"
+            }
+          },
+          "kind": "BOOKED_BALANCE",
+          "money": {
+            "amount": {
+              "line": 4,
+              "after": "\u0645\u0627\u0646\u062f\u0647: ",
+              "before": " \u0631\u06cc\u0627\u0644",
+              "maxLength": 32
+            },
+            "currency": {
+              "fixed": "IRR"
+            },
+            "decimal": ".",
+            "group": ",",
+            "grouping": "WESTERN",
+            "digits": "ASCII_PERSIAN_ARABIC",
+            "unitMultiplier": 1
+          }
+        }
+      ]
+    }
+  ]
+}
