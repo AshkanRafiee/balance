@@ -138,6 +138,95 @@ tasks.register('ruleToolTest', Exec) {
     commandLine 'python3', '-B', new File(projectDir.parentFile, 'tools/test_read_rule_examples.py')
 }
 
+tasks.register('catalogToolTest', Exec) {
+    commandLine 'python3', '-B', new File(projectDir.parentFile, 'tools/test_generate_ir_catalog.py')
+}
+
+// The committed official catalog must compile into the same snapshot as the
+// frozen legacy tables. Python's strict frontend rejects malformed/duplicate
+// JSON first; the JVM then compiles the document with its own profile and
+// allowlist and compares the effective digests, which cover declaration order,
+// every alias and the pinned collision allowlist. Malformed or drifted official
+// packs must fail the build.
+tasks.register('catalogDocumentTest') {
+    dependsOn classes
+    def catalog = new File(projectDir.parentFile, 'rules/official/IR/catalog.json')
+    inputs.file(catalog)
+    doLast {
+        def repository = projectDir.parentFile
+        def input = providers.exec {
+            commandLine 'python3', '-B', new File(repository, 'tools/read_catalog.py'), catalog
+        }
+        def document = new groovy.json.JsonSlurper().parseText(input.standardOutput.asText.get())
+        def urls = sourceSets.main.output.classesDirs.files.collect { it.toURI().toURL() } as URL[]
+        def loader = new URLClassLoader(urls, (ClassLoader) null)
+        try {
+            def profileClass = loader.loadClass('com.ashkanrafiee.balance.parser.catalog.SenderProfile')
+            def idsClass = loader.loadClass('com.ashkanrafiee.balance.parser.catalog.CatalogIds')
+            def allowlistClass = loader.loadClass('com.ashkanrafiee.balance.parser.catalog.CollisionAllowlist')
+            def compiledClass = loader.loadClass('com.ashkanrafiee.balance.parser.catalog.CompiledCatalog')
+            def bankEntryClass = Class.forName('com.ashkanrafiee.balance.parser.catalog.CompiledCatalog$BankEntry', true, loader)
+            def parserClass = loader.loadClass('com.ashkanrafiee.balance.parser.Parser')
+            def legacyClass = loader.loadClass('com.ashkanrafiee.balance.parser.legacy.LegacyBankRules')
+
+            if (document.engine != parserClass.getField('ENGINE').get(null))
+                throw new GradleException('Official catalog targets the wrong engine')
+            def profile = profileClass.getMethod('of', String).invoke(null, document.profile)
+            if (profile == null)
+                throw new GradleException('Unknown sender profile ' + document.profile)
+            def allowlist = allowlistClass.getMethod('of', Map).invoke(null, new LinkedHashMap(document.allowlist))
+            def frozen = allowlistClass.getField('IR_LEGACY_S1').get(null)
+            def pins = allowlistClass.getMethod('pins')
+            if (!pins.invoke(allowlist).equals(pins.invoke(frozen)))
+                throw new GradleException('Official catalog allowlist differs from ir-legacy-s1')
+
+            def ctor = bankEntryClass.getConstructor(String, String, String, List)
+            def rows = []
+            def ids = new HashSet()
+            def names = new HashSet()
+            document.banks.each { bank ->
+                if (bank.calendar != 'jalali')
+                    throw new GradleException('Unexpected calendar for ' + bank.id)
+                def expectedId = idsClass.getMethod('bankId', String, String)
+                    .invoke(null, document.market.toLowerCase(), bank.name)
+                if (expectedId != bank.id)
+                    throw new GradleException('Bank id drift for ' + bank.name)
+                if (!ids.add(bank.id) || !names.add(bank.name))
+                    throw new GradleException('Duplicate bank ' + bank.name)
+                rows.add(ctor.newInstance(bank.id, bank.name, bank.calendar, new ArrayList(bank.senders)))
+            }
+
+            def compile = compiledClass.getMethod('compile', profileClass, List, allowlistClass)
+            def compiled = compile.invoke(null, profile, rows, allowlist)
+            if (compiled.banks().size() != document.counts.banks
+                    || compiled.reachableBanks().size() != 42
+                    || compiled.collisions().size() != document.allowlist.size())
+                throw new GradleException('Official catalog cardinality drift')
+
+            // Baseline compiled from the frozen legacy tables under the same
+            // profile and allowlist: effective-digest identity is the strongest
+            // parity short of an exhaustive resolution sweep.
+            def legacy = legacyClass.getMethod('rulesTestOnly').invoke(null)
+            def merged = new LinkedHashMap()
+            for (def row : legacy) {
+                if (!merged.containsKey(row[0])) merged.put(row[0], new ArrayList())
+                ((List) merged.get(row[0])).addAll(((String) row[1]).split('\\|').toList())
+            }
+            def baseline = []
+            def idOf = idsClass.getMethod('bankId', String, String)
+            merged.each { name, aliases ->
+                baseline.add(ctor.newInstance(idOf.invoke(null, 'ir', name), name, 'jalali', aliases))
+            }
+            def reference = compile.invoke(null, profile, baseline, frozen)
+            if (!compiled.digest().equals(reference.digest()))
+                throw new GradleException('Official catalog drifted from the frozen legacy contract')
+            logger.lifecycle("Official catalog: ${compiled.banks().size()} banks, digest ${compiled.digest()}")
+        } finally {
+            loader.close()
+        }
+    }
+}
+
 tasks.register('prototypeBenchmark', JavaExec) {
     dependsOn testClasses
     classpath = sourceSets.test.runtimeClasspath
@@ -152,5 +241,5 @@ tasks.named('test') {
 tasks.named('check') {
     dependsOn prototypeTest, packDocumentTest, jsonLexicalGuardTest, ruleExampleTest, ruleToolTest,
         iranianPrototypeTest, iranianDocumentTest, jalaliParityTest, legacyCompatibilityTest, identityTest,
-        catalogParityTest
+        catalogParityTest, catalogToolTest, catalogDocumentTest
 }
