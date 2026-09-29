@@ -20,11 +20,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Investigation only: dependency-free Android codec, with no schema mapping or app wiring.
- * Requires the parser-core test dependency when this prototype is wired for instrumentation.
- * Limits: 256 KiB UTF-8, 65,536 lexical tokens, 256 chars per number, 16 containers deep
- * (root object counts as one). Strings share the document cap. Numbers are exact BigDecimal;
- * syntactically valid exponents outside BigDecimal's scale range are rejected.
+ * Dependency-free Android JSON codec used by the packaged engine path (main assets) and the
+ * instrumentation tests. Limits: 256 KiB UTF-8, 65,536 lexical tokens, 256 chars per number,
+ * 16 containers deep (root object counts as one). Strings share the document cap. Numbers are
+ * exact BigDecimal; syntactically valid exponents outside BigDecimal's scale range are rejected.
  */
 public final class PlatformRuleJson {
     public static final int MAX_DEPTH = 16;
