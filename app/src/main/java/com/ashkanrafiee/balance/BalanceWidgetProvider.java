@@ -127,7 +127,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         // reported as one self-labelled line each.
         CurrencyTotals totals = new CurrencyTotals();
         for (java.util.Map.Entry<String, Bank> e : BalanceData.read(c).entrySet())
-            if (!BalanceData.isExcluded(c, e.getKey()))
+            if (!BalanceData.isExcluded(c, e.getKey()) && !e.getValue().movementOnly())
                 totals.add(e.getValue().currency, e.getValue().amount);
         String only = totals.only();
         String totalText;

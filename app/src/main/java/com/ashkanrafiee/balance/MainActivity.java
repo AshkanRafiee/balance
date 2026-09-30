@@ -1285,6 +1285,10 @@ public class MainActivity extends Activity {
             String label = BankRules.displayName(MainActivity.this, row.bankName);
             if (row.bank != null && row.bank.account != null)
                 label += " " + faDigits(row.bank.account);
+            if (row.bank != null && row.bank.movementOnly()) {
+                copyMovement(label, row.bank);
+                return;
+            }
             copyBalance(label, row.bank != null ? row.bank.currency : BalanceData.IRR, row.amount);
         };
         final Runnable refreshTicker = new Runnable() {
@@ -1482,8 +1486,14 @@ public class MainActivity extends Activity {
          *  single number that means nothing. */
         void recalcTotal() {
             total.clear();
-            for (java.util.Map.Entry<String, Bank> e : banks.entrySet())
-                if (!excluded.contains(e.getKey())) total.add(e.getValue().currency, e.getValue().amount);
+            for (java.util.Map.Entry<String, Bank> e : banks.entrySet()) {
+                if (excluded.contains(e.getKey())) continue;
+                // A bank that never states a balance has no balance to total. Its movements are
+                // money that moved, not money that is held, so adding them would make the total
+                // mean one thing with those banks and another without them.
+                if (e.getValue().movementOnly()) continue;
+                total.add(e.getValue().currency, e.getValue().amount);
+            }
         }
 
         /** The total as one line per currency, in display order, for a11y and the clipboard. */
@@ -1503,7 +1513,8 @@ public class MainActivity extends Activity {
             String totalText = hidden ? getString(R.string.accessibility_total_masked) : totalText();
             int staleCount = 0;
             for (java.util.Map.Entry<String, Bank> e : banks.entrySet())
-                if (!excluded.contains(e.getKey()) && BalanceData.isStale(MainActivity.this, e.getValue().date))
+                if (!excluded.contains(e.getKey()) && !e.getValue().movementOnly()
+                    && BalanceData.isStale(MainActivity.this, e.getValue().date))
                     staleCount++;
             String note = staleCount > 0
                 ? " " + getResources().getQuantityString(
@@ -1646,6 +1657,27 @@ public class MainActivity extends Activity {
         void value(Canvas c, long n, float x, float baseline, float width,
                    float size, Paint.Align align) {
             value(c, n, x, baseline, width, size, align, accent);
+        }
+
+        /** The value slot of a bank that states no balance: a dash where the figure would be, with
+         *  the same sizing and masking as a figure, so the card reads as "not reported" rather than
+         *  as a number we could not render. The movement it did report goes under the dash, in the
+         *  slot a currency unit would occupy, so the two never crowd each other. */
+        void noBalance(Canvas c, Bank bank, float x, float baseline, float width, float size,
+                       Paint.Align align) {
+            if (hidden) {
+                text(c, "\u2022\u2022\u2022\u2022\u2022\u2022", x, baseline, size, fg, align);
+                text(c, "\u2022\u2022\u2022\u2022\u2022", x, baseline + 19, 11, muted, align);
+                return;
+            }
+            String dash = "\u2014";
+            float current = size;
+            while (current > 10 && measure(dash, current) > width) current -= 1;
+            text(c, dash, x, baseline, current, muted, align);
+            String movement = bank.movement == null ? getString(R.string.no_movement_reported)
+                : CurrencyHelper.amount(MainActivity.this, bank.movementCurrency, bank.movement)
+                    + " " + CurrencyHelper.label(MainActivity.this, bank.movementCurrency);
+            text(c, fit(movement, 11, width), x, baseline + 19, 11, muted, align);
         }
 
         /** Same as {@link #value(Canvas, long, float, float, float, float, Paint.Align)} but with the
@@ -1837,7 +1869,7 @@ public class MainActivity extends Activity {
                     float yy = row.top - scrollY;
                     String displayName = BankRules.displayName(MainActivity.this, row.bankName);
                     String nameShown = fit(displayName, 17, Math.max(40, valueLeft - 100));
-                    boolean stale = !row.excluded
+                    boolean stale = !row.excluded && !row.bank.movementOnly()
                         && BalanceData.isStale(MainActivity.this, row.bank.date);
                     round(c, 24, yy, w - 24, yy + 82, 20, row.excluded ? bg : panel);
                     if (stale) roundStroke(c, 24, yy, w - 24, yy + 82, 20, 1.8f, warn);
@@ -1850,7 +1882,21 @@ public class MainActivity extends Activity {
                         drawStaleBadge(c, nameShown, nameX, yy, nameAlign,
                             BalanceData.staleDays(MainActivity.this, row.bank.date),
                             rtl ? w - valueLeft + 4 : valueLeft - 4);
-                    if (row.excluded) {
+                    if (row.bank.movementOnly()) {
+                        // The bank told us what it did, never what we have. The value slot says so
+                        // with a dash rather than a zero, and the movement it did report is shown
+                        // under the dash as the movement it is, so no screen anywhere claims a
+                        // balance we were never told. The account line is kept as it is, so two
+                        // accounts of the same bank still read as two different cards.
+                        noBalance(c, row.bank, valueX, yy + 35, valueWidth, 17, valueAlign);
+                        if (row.bank.account != null) {
+                            String accountText = hidden
+                                ? "\u2022\u2022\u2022\u2022\u2022\u2022"
+                                : getString(R.string.account_label) + " " + faDigits(row.bank.account);
+                            text(c, fit(accountText, 12, Math.max(40, valueLeft - 100)), nameX,
+                                yy + 60, 12, muted, nameAlign);
+                        }
+                    } else if (row.excluded) {
                         value(c, row.amount, valueX, yy + 35, valueWidth, 17, valueAlign, true);
                         String exLabel = getString(R.string.excluded_label);
                         text(c, exLabel, nameX, yy + 68, 11, muted, nameAlign);
@@ -2134,6 +2180,18 @@ public class MainActivity extends Activity {
                 .create());
         }
 
+        /** Copies the last movement of a bank that states no balance. A bank with no balance has
+         *  nothing to copy as one, and copying a zero would be a figure the bank never sent. */
+        void copyMovement(String label, Bank bank) {
+            if (hidden) {
+                Toast.makeText(MainActivity.this, getString(R.string.toast_unmask_to_copy),
+                    Toast.LENGTH_SHORT).show();
+                return;
+            }
+            copyToClipboard(label, CurrencyHelper.amount(MainActivity.this, bank.movementCurrency,
+                bank.movement));
+        }
+
         void copyBalance(String label, String currency, long value) {
             if (hidden) {
                 Toast.makeText(MainActivity.this, getString(R.string.toast_unmask_to_copy), Toast.LENGTH_SHORT).show();
@@ -2189,15 +2247,30 @@ public class MainActivity extends Activity {
         /** Opens the row menu for one entry. {@code key} is that entry's {@code bank|account} storage
          *  key, so exclude/include affects only the tapped account, never its siblings. */
         void showBankMenu(String key, String bankName, String currency, long amount) {
+            showBankMenu(key, bankName, currency, amount, null);
+        }
+
+        void showBankMenu(String key, String bankName, String currency, long amount, Bank row) {
             String displayName = BankRules.displayName(MainActivity.this, bankName);
             boolean isExcluded = excluded.contains(key);
-            String[] options = {
-                getString(isExcluded ? R.string.action_include : R.string.action_exclude),
-                getString(R.string.action_copy_balance)
-            };
+            // A bank that states no balance has no balance to copy, so the menu offers the movement
+            // it did report under a name that says which of the two it is.
+            boolean movementOnly = row != null && row.movementOnly();
+            // There is nothing to exclude a movement-only bank from: it was never in the total, and
+            // offering to remove it would claim a membership it does not have.
+            String[] options = movementOnly
+                ? new String[]{getString(R.string.action_copy_movement)}
+                : new String[]{
+                    getString(isExcluded ? R.string.action_include : R.string.action_exclude),
+                    getString(R.string.action_copy_balance)
+                };
             showDialog(new android.app.AlertDialog.Builder(MainActivity.this)
                 .setTitle(displayName)
                 .setItems(options, (d, which) -> {
+                    if (movementOnly) {
+                        copyMovement(displayName, row);
+                        return;
+                    }
                     if (which == 0) {
                         BalanceData.toggleExcluded(MainActivity.this, key);
                         excluded.clear();
@@ -2374,7 +2447,8 @@ public class MainActivity extends Activity {
                         : x >= getWidth() / d - 56 && x <= getWidth() / d - 16;
                     if (onMenu) {
                         showBankMenu(row.key, row.bankName,
-                            row.bank != null ? row.bank.currency : BalanceData.IRR, row.amount);
+                            row.bank != null ? row.bank.currency : BalanceData.IRR, row.amount,
+                            row.bank);
                     } else {
                         Intent history = new Intent(MainActivity.this, HistoryActivity.class);
                         history.putExtra(HistoryActivity.EXTRA_BANK, row.bankName);

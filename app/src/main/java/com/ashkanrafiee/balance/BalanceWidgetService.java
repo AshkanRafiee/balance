@@ -28,6 +28,10 @@ public class BalanceWidgetService extends RemoteViewsService {
                 BalanceData.read(c), excluded, BalanceData.getSort(c))) {
             for (Bank b : block) {
                 if (excluded.contains(BalanceData.storageKey(b.name, b.account, b.currency))) continue;
+                // The widget is a glance at balances. A bank that reports movements alone has no
+                // balance to glance at, and a row of zeros would read as money the user does not
+                // have, so it is left out rather than faked.
+                if (b.movementOnly()) continue;
                 included.add(new Bank(b.name, b.amount, b.date, b.sender, b.account, b.currency));
             }
         }

@@ -79,6 +79,38 @@ public class CurrencyLedgerTest {
         assertEquals("910251846", b.account);
     }
 
+    @Test public void balanceSerialization_writesNoMovementFieldsForABalanceRow() throws Exception {
+        // A row that states a balance is written exactly as it always was, so an Iranian install
+        // sees the same bytes it always has; the movement-only fields exist only where they are
+        // true, and a reader that knows neither still reads a balance.
+        LinkedHashMap<String, Bank> irr = new LinkedHashMap<>();
+        irr.put("BankMelli|910251846", new Bank("BankMelli", 10, 1, "s", "910251846"));
+        String json = BalanceData.serialize(irr);
+        assertEquals("{\"BankMelli|910251846\":{\"amount\":10,\"date\":1,\"sender\":\"s\","
+            + "\"account\":\"910251846\"}}", json);
+        assertFalse(BalanceData.deserialize(json).get("BankMelli|910251846").movementOnly());
+    }
+
+    @Test public void balanceSerialization_saysSoWhenTheRowHoldsAMovementInstead() throws Exception {
+        LinkedHashMap<String, Bank> rows = new LinkedHashMap<>();
+        Bank row = new Bank("CartaBCC", 0, 1, "s", null, "EUR");
+        row.balanceReported = false;
+        row.movement = -1234L;
+        rows.put("CartaBCC", row);
+
+        Bank back = BalanceData.deserialize(BalanceData.serialize(rows)).get("CartaBCC");
+        assertTrue(back.movementOnly());
+        assertEquals(Long.valueOf(-1234L), back.movement);
+        assertEquals("EUR", back.movementCurrency);
+
+        // A row written before the movement-only state existed is always a balance row, which is
+        // what every row on an Iranian device is.
+        Bank legacy = BalanceData.deserialize(
+            "{\"CartaBCC\":{\"amount\":0,\"date\":1,\"sender\":\"s\",\"cur\":\"EUR\"}}")
+            .get("CartaBCC");
+        assertFalse(legacy.movementOnly());
+    }
+
     @Test public void transactionSerialization_omitsCurForIrrAndWritesItOtherwise() throws Exception {
         String irrJson = BalanceData.serializeTransactions(
             List.of(new Transaction("BankMelli", "910251846", 1, 100, 50L, "sig", "content")));

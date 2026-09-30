@@ -166,8 +166,19 @@ final class BalanceData {
                 if (account == null) account = accountOfKey(key);
                 String currency = entry.has("cur") && !entry.isNull("cur")
                     ? entry.getString("cur") : currencyOfKey(key);
-                map.put(key, new Bank(bankOfKey(key), entry.getLong("amount"),
-                    entry.getLong("date"), entry.getString("sender"), account, currency));
+                Bank bank = new Bank(bankOfKey(key), entry.getLong("amount"),
+                    entry.getLong("date"), entry.getString("sender"), account, currency);
+                // A row that predates the movement-only state always states a balance, which is
+                // what every row written before it did.
+                if (entry.optBoolean("nob", false)) {
+                    bank.balanceReported = false;
+                    // A row with no balance is keyed, and therefore denominated, by the currency of
+                    // its one movement, so the row's currency is that movement's currency and needs
+                    // no second field to say so.
+                    bank.movementCurrency = currency;
+                    if (entry.has("mv") && !entry.isNull("mv")) bank.movement = entry.getLong("mv");
+                }
+                map.put(key, bank);
             }
         } catch (Exception e) {
             Log.w(TAG, "stored balances unreadable; starting empty", e);
@@ -186,6 +197,14 @@ final class BalanceData {
             entry.put("sender", b.sender);
             if (b.account != null) entry.put("account", b.account);
             if (b.currency != null && !IRR.equals(b.currency)) entry.put("cur", b.currency);
+            // A row that holds a movement instead of a balance says so, because a reader that does
+            // not know would take the amount for a balance and the date for its freshness. Both
+            // fields are absent for every bank that reports a balance, which is every bank on an
+            // Iranian install.
+            if (!b.balanceReported) {
+                entry.put("nob", true);
+                if (b.movement != null) entry.put("mv", b.movement);
+            }
             obj.put(e.getKey(), entry);
         }
         return obj.toString();
@@ -560,10 +579,18 @@ final class BalanceData {
     private static void sortBanks(List<Bank> banks, int sort) {
         switch (sort) {
             case SORT_BALANCE_HIGH:
-                banks.sort((a, b) -> Long.compare(b.amount, a.amount));
+                banks.sort((a, b) -> {
+                    // A row with no balance has no place among balances, in either direction, so
+                    // it always ranks after them instead of sorting as the zero it is not.
+                    if (a.movementOnly() != b.movementOnly()) return a.movementOnly() ? 1 : -1;
+                    return Long.compare(b.amount, a.amount);
+                });
                 break;
             case SORT_BALANCE_LOW:
-                banks.sort((a, b) -> Long.compare(a.amount, b.amount));
+                banks.sort((a, b) -> {
+                    if (a.movementOnly() != b.movementOnly()) return a.movementOnly() ? 1 : -1;
+                    return Long.compare(a.amount, b.amount);
+                });
                 break;
             case SORT_DATE_RECENT:
                 banks.sort((a, b) -> Long.compare(b.date, a.date));
@@ -710,11 +737,15 @@ final class BalanceData {
                 String sender = cursor.getString(0);
                 MessageFacts facts = MessageFacts.of(sender, cursor.getString(1), arrival);
                 if (facts.bank == null) continue;
-                if (facts.balance < 0) continue;
+                // A bank that states no balance is not skipped: a card or transfer service that
+                // only ever reports what it did is still telling us about money, and dropping it
+                // would make the app look blind to a bank it actually understands. A message with
+                // neither a balance nor a movement says nothing at all and is dropped here.
+                if (facts.balance < 0 && facts.movement == null) continue;
                 String key = storageKey(facts.bank, facts.account, facts.balanceCurrency);
                 rowsByKey.computeIfAbsent(key, k -> new ArrayList<>())
                     .add(new Object[]{sender, cursor.getString(1), facts.time,
-                        facts.balanceCurrency, facts.movementCurrency});
+                        facts.balanceCurrency, facts.movementCurrency, facts.movement});
             }
         } catch (Exception e) {
             Log.w(TAG, "scan failed", e);
@@ -779,6 +810,24 @@ final class BalanceData {
                     current.put(key, new Bank(bank, chosen.balance, chosen.date,
                         chosenSender != null ? chosenSender : (existing != null ? existing.sender : null),
                         accountOfKey(key), currencyOfKey(key)));
+                }
+            } else if (!statesAnyBalance(rows)) {
+                // Nothing for this account ever stated a balance, so there is no balance to store
+                // and none to invent: the row keeps the newest movement instead, and every screen
+                // that would put a balance here shows the movement labelled as a movement.
+                Object[] lastMovement = newestMovementRow(rows);
+                Long movement = lastMovement == null ? null : (Long) lastMovement[5];
+                if (movement != null) {
+                    long when = (Long) lastMovement[2];
+                    Bank existing = current.get(key);
+                    if (existing == null || when > existing.date) {
+                        matched++;
+                        Bank movementOnly = new Bank(bank, 0, when, (String) lastMovement[0],
+                            accountOfKey(key), (String) lastMovement[4]);
+                        movementOnly.balanceReported = false;
+                        movementOnly.movement = movement;
+                        current.put(key, movementOnly);
+                    }
                 }
             }
             windows.put(key, pruneWindow(merged));
@@ -1491,6 +1540,23 @@ final class BalanceData {
     private static Object[] newestRow(List<Object[]> rows) {
         Object[] best = null;
         for (Object[] r : rows) {
+            if (best == null || (Long) r[2] > (Long) best[2]) best = r;
+        }
+        return best;
+    }
+
+    /** Whether any message of this account stated a balance, which is what separates a bank that
+     *  reports what you have from one that only reports what it did. */
+    private static boolean statesAnyBalance(List<Object[]> rows) {
+        for (Object[] r : rows) if (extract((String) r[1]) >= 0) return true;
+        return false;
+    }
+
+    /** The newest row of this account that reported a movement, or null when it reported none. */
+    private static Object[] newestMovementRow(List<Object[]> rows) {
+        Object[] best = null;
+        for (Object[] r : rows) {
+            if (r.length < 6 || r[5] == null) continue;
             if (best == null || (Long) r[2] > (Long) best[2]) best = r;
         }
         return best;
