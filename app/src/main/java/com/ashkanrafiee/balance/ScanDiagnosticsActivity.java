@@ -186,13 +186,30 @@ public final class ScanDiagnosticsActivity extends Activity {
     private void render(ScanDiagnostics.Summary s) {
         summaryCard(s);
         recognizedCard(s);
-        if (s.unparsedSenders.isEmpty() && s.unknownSenders.isEmpty()) {
+        if (s.unparsedSenders.isEmpty() && s.unknownSenders.isEmpty())
             body.addView(section(getString(R.string.scan_diag_none_skipped)), margin(0, 12, 0, 0));
-            return;
+        else {
+            unparsedCard(s);
+            unknownCard(s);
         }
-        unparsedCard(s);
-        unknownCard(s);
+        // Reading a message is not understanding all of it, so a sender that is missing from the two
+        // lists above is not a sender with nothing to report -- the picker reaches every sender in
+        // the inbox, and it is offered even when the funnel is empty, which is exactly when a user
+        // with something to report needs it most.
+        body.addView(pickerEntry(), margin(0, 18, 0, 0));
         body.addView(privacyNote(), margin(18, 14, 18, 0));
+    }
+
+    /** The way out of the funnel into the sender picker. */
+    private View pickerEntry() {
+        LinearLayout box = cardBox();
+        box.addView(section(getString(R.string.sender_picker_entry_hint)), margin(2, 0, 2, 10));
+        box.addView(button(getString(R.string.sender_picker_entry), this::openPicker));
+        return box;
+    }
+
+    private void openPicker() {
+        startActivity(new Intent(this, SenderPickerActivity.class));
     }
 
     /** The banks Balance parsed successfully and how many of their messages — the workload that is

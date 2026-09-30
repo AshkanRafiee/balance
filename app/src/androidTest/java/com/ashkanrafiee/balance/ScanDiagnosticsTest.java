@@ -662,6 +662,160 @@ public class ScanDiagnosticsTest {
         }
     }
 
+    // ---- The sender picker: every sender reachable, whatever the app makes of it ----
+
+    /** Launches the picker and returns it. */
+    private SenderPickerActivity launchPicker() {
+        android.content.Intent i = new android.content.Intent(ctx, SenderPickerActivity.class)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+        return (SenderPickerActivity) InstrumentationRegistry.getInstrumentation()
+                .startActivitySync(i);
+    }
+
+    @Test public void picker_listsEverySenderAndFiltersBySearch() throws Exception {
+        seed(CARTABCC, cartabccSpend(System.currentTimeMillis()), System.currentTimeMillis());
+        seed(UNKNOWN_1, "card purchase 45,000 T", System.currentTimeMillis());
+        SenderPickerActivity act = launchPicker();
+        try {
+            String all = waitFor(act, UNKNOWN_1);
+            assertTrue("a sender the app reads is listed: " + all, all.contains(CARTABCC));
+            assertTrue("so is one it does not", all.contains(UNKNOWN_1));
+            assertTrue("the screen explains that it lists everything",
+                all.contains(ctx.getString(R.string.sender_picker_title)));
+            // Filtering to one sender must leave the other out -- the point of the search is that
+            // a large inbox stays navigable.
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                List<android.widget.EditText> fields = new ArrayList<>();
+                findFields(act.getWindow().getDecorView(), fields);
+                assertEquals(1, fields.size());
+                fields.get(0).setText(UNKNOWN_1);
+            });
+            String filtered = waitFor(act, UNKNOWN_1);
+            assertTrue(!filtered.contains(CARTABCC));
+            assertTrue(filtered.contains(UNKNOWN_1));
+        } finally {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(act::finish);
+        }
+    }
+
+    @Test public void picker_noMatchSaysSo() throws Exception {
+        seed(UNKNOWN_1, "card purchase 45,000 T", System.currentTimeMillis());
+        SenderPickerActivity act = launchPicker();
+        try {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                List<android.widget.EditText> fields = new ArrayList<>();
+                findFields(act.getWindow().getDecorView(), fields);
+                fields.get(0).setText("zzz-no-such-sender");
+            });
+            String filtered = waitFor(act, ctx.getString(R.string.sender_picker_none));
+            assertTrue(!filtered.contains(UNKNOWN_1));
+        } finally {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(act::finish);
+        }
+    }
+
+    /** A message the app reads, from a sender it never lists in the funnel, must still open the
+     *  chooser -- the whole reason this screen exists. */
+    @Test public void picker_opensTheChooserForASenderTheAppAlreadyReads() throws Exception {
+        String spend = cartabccSpend(System.currentTimeMillis());
+        seed(CARTABCC, spend, System.currentTimeMillis());
+        SenderPickerActivity act = launchPicker();
+        try {
+            waitFor(act, CARTABCC);
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                for (android.view.View v : describedRows(act.getWindow().getDecorView())) {
+                    if (v.getContentDescription().toString().contains(CARTABCC)) {
+                        v.performClick();
+                        return;
+                    }
+                }
+            });
+            SenderShareActivity chooser = waitForResumed(SenderShareActivity.class);
+            assertNotNull("the chooser must open for a sender the funnel never lists", chooser);
+            try {
+                String all = screenText(chooser);
+                assertTrue(all, all.contains(CARTABCC));
+                assertTrue("and carries the message to share", all.contains("66,80"));
+                // Every detection is offered, not just the ones that happen to fail today.
+                for (ScanDiagnostics.Issue issue : ScanDiagnostics.ISSUES)
+                    assertTrue(issue.tag, all.contains(ctx.getString(issue.label)));
+                // One row per category, on top of the select-all control for messages.
+                assertEquals("one row per category", ScanDiagnostics.ISSUES.length + 1,
+                    countChecks(chooser.findViewById(android.R.id.content)));
+            } finally {
+                InstrumentationRegistry.getInstrumentation().runOnMainSync(chooser::finish);
+            }
+        } finally {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(act::finish);
+        }
+    }
+
+    /** The diagnostics screen offers the picker even when its funnel is empty: that is exactly when
+     *  a user who has something to report needs it. */
+    @Test public void screen_offersThePickerWhenNothingIsFlagged() throws Exception {
+        seed(CARTABCC, cartabccSpend(System.currentTimeMillis()), System.currentTimeMillis());
+        ScanDiagnosticsActivity act = launch();
+        try {
+            String all = waitFor(act, ctx.getString(R.string.sender_picker_entry));
+            assertTrue(all.contains(ctx.getString(R.string.scan_diag_none_skipped)));
+            assertTrue(all.contains(ctx.getString(R.string.sender_picker_entry_hint)));
+        } finally {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(act::finish);
+        }
+    }
+
+    /** The resumed activity of the given class, or null when it is not on screen. Read through the
+     *  lifecycle monitor rather than started from here: this test is about what a tap opens, so
+     *  starting the screen itself would prove nothing. */
+    private <T extends android.app.Activity> T waitForResumed(Class<T> type) throws Exception {
+        long deadline = System.currentTimeMillis() + 15_000;
+        while (System.currentTimeMillis() < deadline) {
+            final android.app.Activity[] found = new android.app.Activity[1];
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                for (android.app.Activity a
+                        : androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                            .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED)) {
+                    if (type.isInstance(a)) found[0] = a;
+                }
+            });
+            if (found[0] != null) return type.cast(found[0]);
+            Thread.sleep(150);
+        }
+        return null;
+    }
+
+    /** Every clickable view that carries a content description, which is how both screens label a
+     *  tappable row for a screen reader. */
+    private List<android.view.View> describedRows(android.view.View root) {
+        List<android.view.View> out = new ArrayList<>();
+        collectDescribed(root, out);
+        return out;
+    }
+
+    private void collectDescribed(android.view.View v, List<android.view.View> out) {
+        if (v.isClickable() && v.getContentDescription() != null
+                && v.getContentDescription().length() > 0) out.add(v);
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) collectDescribed(g.getChildAt(i), out);
+        }
+    }
+
+    /** The search field, not the lock overlay's PIN entry: only fields on screen count. */
+    private void findFields(android.view.View v, List<android.widget.EditText> out) {
+        if (v instanceof android.widget.EditText && v.isShown()) out.add((android.widget.EditText) v);
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) findFields(g.getChildAt(i), out);
+        }
+    }
+
+    private int countChecks(android.view.View v) {
+        List<android.widget.CheckBox> checks = new ArrayList<>();
+        findChecks(v, checks);
+        return checks.size();
+    }
+
     private void findChecks(android.view.View v, List<android.widget.CheckBox> out) {
         if (v instanceof android.widget.CheckBox && v.isShown()) out.add((android.widget.CheckBox) v);
         if (v instanceof android.view.ViewGroup) {

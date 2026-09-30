@@ -17,6 +17,7 @@
         <activity android:name=".AboutActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity android:name=".OnboardingActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity android:name=".ScanDiagnosticsActivity" android:screenOrientation="portrait" android:exported="false" />
+        <activity android:name=".SenderPickerActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity android:name=".SenderShareActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity android:name=".HistoryActivity" android:screenOrientation="portrait" android:exported="false" />
         <receiver android:name=".BalanceWidgetProvider" android:exported="false">
