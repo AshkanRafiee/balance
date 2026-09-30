@@ -53,15 +53,14 @@ public class PackedLegacyDifferentialTest {
     }
 
     @Test public void packedEngineAgreesWithLegacyAppReductions() throws Exception {
-        Map<String, Object> catalog = asset("catalog.json");
-        List<?> banks = (List<?>) catalog.get("banks");
+        // Every shipped bank, in every region. A bank outside the legacy table is new coverage
+        // rather than a change in behaviour, and is held by its own fixtures below instead.
+        List<EngineRules.Bank> banks = EngineRules.load(
+                InstrumentationRegistry.getInstrumentation().getTargetContext()).banksInOrder();
         assertNotNull(banks);
 
         Map<String, String> idToName = new HashMap<>();
-        for (Object item : banks) {
-            Map<?, ?> bank = (Map<?, ?>) item;
-            idToName.put((String) bank.get("id"), (String) bank.get("name"));
-        }
+        for (EngineRules.Bank bank : banks) idToName.put(bank.id, bank.name);
 
         TreeMap<String, String> engineOnlyBalance = new TreeMap<>();
         TreeMap<String, String> engineOnlyMovement = new TreeMap<>();
@@ -77,16 +76,16 @@ public class PackedLegacyDifferentialTest {
         Set<String> parsed = new HashSet<>();
         int engineParsed = 0, compared = 0;
 
-        for (Object item : banks) {
-            Map<?, ?> bank = (Map<?, ?>) item;
-            String id = (String) bank.get("id");
+        for (EngineRules.Bank bank : banks) {
+            String id = bank.id;
+            String path = bank.region + "/" + id;
             PackDocument pack;
             try {
-                pack = PackDocument.decode(asset(id + "/pack.json"));
+                pack = PackDocument.decode(asset(path + "/pack.json"));
             } catch (IOException notPacked) {
                 continue;
             }
-            List<?> cases = (List<?>) asset(id + "/fixtures.json").get("cases");
+            List<?> cases = (List<?>) asset(path + "/fixtures.json").get("cases");
             for (Object f : cases) {
                 Map<?, ?> fixture = (Map<?, ?>) f;
                 String caseId = id + "/" + fixture.get("id");

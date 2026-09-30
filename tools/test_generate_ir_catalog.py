@@ -8,7 +8,7 @@ import generate_ir_catalog as generator
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 LEGACY = REPOSITORY / "parser-core/src/main/java/com/ashkanrafiee/balance/parser/legacy/LegacyBankRules.java"
-COMMITTED = REPOSITORY / "rules/official/IR/catalog.json"
+COMMITTED = REPOSITORY / "rules/app/ir-official/catalog.json"
 
 
 class GeneratorTest(unittest.TestCase):

@@ -6,9 +6,9 @@ android { namespace 'com.ashkanrafiee.balance'; compileSdk 36
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     sourceSets {
-        main.assets.srcDirs += rootProject.file('rules/official/IR')
+        main.assets.srcDirs += rootProject.file('rules/app')
         androidTest.assets.srcDirs += rootProject.file('rules/examples')
-        androidTest.assets.srcDirs += rootProject.file('rules/official/IR')
+        androidTest.assets.srcDirs += rootProject.file('rules/app')
     }
     dependenciesInfo { includeInApk = false; includeInBundle = false }
     def signingFile = rootProject.file('signing.properties')

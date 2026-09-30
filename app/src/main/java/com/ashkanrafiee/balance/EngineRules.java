@@ -8,18 +8,28 @@ import com.ashkanrafiee.balance.parser.Rules;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Loads the official bank packs bundled as main assets (rules/official/IR) and indexes them by
+/** Loads the bank packs bundled as main assets, region by region, and indexes them by
  *  sender, so the production path can dispatch a message to the pack engine exactly
  *  where the engine covers it. {@link #activate(Context)} is called from every scan entry
  *  point, so the engine owns a covered message; anything it does not cover, or any message
  *  it does not parse, still goes through {@link BankRules} and the legacy reducers, and
  *  {@link #active()} is the single kill switch for the whole seam.
+ *
+ *  <p>The shipped asset root holds one directory per region, each with its own catalog and
+ *  one directory per bank, because two regions cannot both put a catalog at the asset root.
+ *  The index at that root lists the regions in the order they are registered: a sender that
+ *  two regions claim belongs to the region listed first, and a sender the legacy Iranian
+ *  table claims belongs to that table's bank however late its region is listed. Each pack
+ *  states its own country and provenance, so a region is a grouping for the settings screen
+ *  and nothing more: nothing here treats an official pack as more trusted than a community
+ *  one, and both are read the same way.
  *
  *  <p>The sender index uses the same normalization as {@code BankRules.resolve}, so an inbox
  *  sender that differs from the alias only in whitespace, case, or an IR mobile prefix still finds
@@ -33,6 +43,9 @@ final class EngineRules {
     private static volatile EngineRules instance;
 
     static final class Bank {
+        /** The shipped region this pack came from, which is also how the settings screen groups
+         *  banks: a region is one country covered by one kind of provenance. */
+        final String region;
         final String id;
         final String name;
         final String country;
@@ -43,8 +56,9 @@ final class EngineRules {
         final Parser parser;
         final List<Rules.Template> templates;
 
-        Bank(String id, String name, String country,
+        Bank(String region, String id, String name, String country,
              PackDocument.Bank.Provenance provenance, Parser parser, List<Rules.Template> templates) {
+            this.region = region;
             this.id = id;
             this.name = name;
             this.country = country;
@@ -54,8 +68,14 @@ final class EngineRules {
         }
     }
 
+    private static final String INDEX = "index.json";
+
     private final Map<String, Bank> bankOfSender = new HashMap<>();
     private final Map<String, Bank> banks = new HashMap<>();
+    /** Every loaded bank in the order its region's catalog lists it, so registration does not
+     *  depend on the iteration order of a hash map: two regions claiming one sender must always
+     *  resolve to the same bank. */
+    private final List<Bank> ordered = new ArrayList<>();
     private volatile boolean active;
 
     static EngineRules get() {
@@ -94,37 +114,55 @@ final class EngineRules {
     private static final String TAG = "EngineRules";
 
     private EngineRules(Context context) throws IOException {
-        Map<String, Object> catalog;
-        try (InputStream input = context.getAssets().open("catalog.json")) {
-            catalog = PlatformRuleJson.read(input);
-        }
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> entries = (List<Map<String, Object>>) catalog.get("banks");
         Map<String, Bank> byName = new HashMap<>();
-        for (Map<String, Object> entry : entries) {
-            String id = (String) entry.get("id");
-            PackDocument pack;
-            try (InputStream input = context.getAssets().open(id + "/pack.json")) {
-                pack = PackDocument.decode(PlatformRuleJson.read(input));
-            } catch (IOException unpacked) {
-                if (UNPACKED_COLLISION_BANK.equals(id)) continue;
-                throw unpacked;
+        for (String region : regions(context)) {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> entries =
+                    (List<Map<String, Object>>) asset(context, region + "/catalog.json").get("banks");
+            for (Map<String, Object> entry : entries) {
+                String id = (String) entry.get("id");
+                PackDocument pack;
+                try (InputStream input = context.getAssets().open(region + "/" + id + "/pack.json")) {
+                    pack = PackDocument.decode(PlatformRuleJson.read(input));
+                } catch (IOException unpacked) {
+                    if (UNPACKED_COLLISION_BANK.equals(id)) continue;
+                    throw unpacked;
+                }
+                // Two regions shipping one bank id would leave the sender index and the id lookup
+                // disagreeing about which pack is which, so it fails the load instead: a catalog
+                // mistake must not become half of one bank's messages read one way and half another.
+                if (banks.containsKey(id)) throw new IOException("two regions ship a bank with the id " + id);
+                Bank bank = new Bank(region, id, pack.bank().name(), pack.bank().country(),
+                        pack.bank().provenance(), new Parser(pack.templates()), pack.templates());
+                banks.put(id, bank);
+                ordered.add(bank);
+                byName.put(bank.name, bank);
             }
-            Bank bank = new Bank(id, pack.bank().name(), pack.bank().country(),
-                    pack.bank().provenance(), new Parser(pack.templates()), pack.templates());
-            banks.put(id, bank);
-            byName.put(bank.name, bank);
         }
         // A sender can legitimately belong to two banks (e.g. 98700717 is a Bank Melli and a Post
         // Bank alias), and the legacy resolve() picks the first bank in table order. Register the
         // packs in exactly that order, first wins, so the engine dispatches a shared sender to the
         // same bank resolve() would; the two then agree on the message by construction. Any pack
-        // unreachable from the legacy table is registered afterwards.
+        // unreachable from the legacy table is registered afterwards, in catalog order.
         for (String[] row : BankRules.rulesTestOnly()) {
             Bank bank = byName.get(row[0]);
             if (bank != null) register(bank);
         }
-        for (Bank bank : banks.values()) register(bank);
+        for (Bank bank : ordered) register(bank);
+    }
+
+    /** The shipped regions, in the order the index lists them. */
+    private static List<String> regions(Context context) throws IOException {
+        @SuppressWarnings("unchecked")
+        List<String> regions = (List<String>) asset(context, INDEX).get("regions");
+        if (regions == null || regions.isEmpty()) throw new IOException(INDEX + " lists no region");
+        return regions;
+    }
+
+    private static Map<String, Object> asset(Context context, String path) throws IOException {
+        try (InputStream input = context.getAssets().open(path)) {
+            return PlatformRuleJson.read(input);
+        }
     }
 
     /** Registers every packed alias under both its raw form (the engine matches senders exactly,
@@ -161,6 +199,11 @@ final class EngineRules {
 
     int bankCount() {
         return banks.size();
+    }
+
+    /** Every shipped bank, in the order the index registers its regions. */
+    List<Bank> banksInOrder() {
+        return java.util.Collections.unmodifiableList(ordered);
     }
 
     /** The canonical bank name a packed catalog id maps to, or null when no pack carries it. This

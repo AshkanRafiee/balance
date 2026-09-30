@@ -170,12 +170,12 @@ class OfficialReaderTest(unittest.TestCase):
         schema = json.loads((REPOSITORY / "rules/schema/bank-pack-prototype-1.schema.json").read_text(
             encoding="utf-8"))
         self.assertIn("provenance", schema["properties"]["bank"]["required"])
-        for pack_path in sorted((REPOSITORY / "rules/official").glob("*/pack.json")):
+        for pack_path in sorted((REPOSITORY / "rules/app").glob("*/*/pack.json")):
             pack = json.loads(pack_path.read_text(encoding="utf-8"))
             self.assertIn("provenance", pack["bank"], f"{pack_path} declares no provenance")
             self.assertIn(pack["bank"]["provenance"],
                           schema["properties"]["bank"]["properties"]["provenance"]["enum"])
-        for pack_path in sorted((REPOSITORY / "rules/official/IR").glob("*/pack.json")):
+        for pack_path in sorted((REPOSITORY / "rules/app/ir-official").glob("*/pack.json")):
             pack = json.loads(pack_path.read_text(encoding="utf-8"))
             self.assertEqual(pack["bank"]["provenance"], "OFFICIAL", f"{pack_path} is not official")
 

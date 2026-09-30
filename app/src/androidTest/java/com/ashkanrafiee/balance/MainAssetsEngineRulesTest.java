@@ -31,18 +31,20 @@ public class MainAssetsEngineRulesTest {
         assertTrue("production activation turns the seam on", rules.active());
         assertEquals("activation is idempotent", rules,
                 EngineRules.activate(InstrumentationRegistry.getInstrumentation().getTargetContext()));
-        assertEquals("Every non-collision bank is packed", 42, rules.bankCount());
+        assertEquals("Every non-collision bank in every shipped region is packed",
+                43, rules.bankCount());
         assertTrue("Sender index is populated", rules.senderAliasCount() > 0);
 
-        Map<String, Object> catalog = asset("catalog.json");
-        List<?> banks = (List<?>) catalog.get("banks");
+        // The whole shipped corpus, region by region as the index registers it: the loader's own
+        // bank list is the only place that knows which region a pack lives in.
+        List<EngineRules.Bank> banks = rules.banksInOrder();
         int fixtures = 0;
-        for (Object item : banks) {
-            Map<?, ?> bank = (Map<?, ?>) item;
-            String id = (String) bank.get("id");
+        for (EngineRules.Bank bank : banks) {
+            String id = bank.id;
             List<?> cases;
             try (InputStream input = InstrumentationRegistry.getInstrumentation()
-                    .getTargetContext().getAssets().open(id + "/fixtures.json")) {
+                    .getTargetContext().getAssets()
+                    .open(bank.region + "/" + id + "/fixtures.json")) {
                 cases = (List<?>) PlatformRuleJson.read(input).get("cases");
             } catch (java.io.IOException notPacked) {
                 continue;
@@ -66,7 +68,7 @@ public class MainAssetsEngineRulesTest {
                 fixtures++;
             }
         }
-        assertEquals("The full corpus was exercised", 112, fixtures);
+        assertEquals("The full corpus was exercised", 114, fixtures);
     }
 
     private static Map<String, Object> asset(String path) throws Exception {
