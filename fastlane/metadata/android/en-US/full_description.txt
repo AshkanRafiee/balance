@@ -22,7 +22,7 @@ Features:
 - Password-encrypted backup and restore of balances, history, notes, reasons and channels
 - Optional in-app lock with PIN, password or fingerprint, covering the app, the widget and screenshots/recents
 - English and Persian interface, Persian (Jalali) or Gregorian calendar, and a light or dark theme that follows the device
-- Report (Scan diagnostics): see which bank messages parse and which do not, and send or copy exactly the ones you pick
+- Report (Scan diagnostics): see which bank messages parse and which do not, and send or copy exactly the ones you pick — from any sender, not only the ones it misses
 - A full reset in the data menu, confirmed twice, with the option to delete your notes as well
 
 Free and open source. If your bank's messages are not recognized, or a balance or account looks wrong, telling us — through the issue tracker, the Report screen or email — is the fastest way to get it added.
