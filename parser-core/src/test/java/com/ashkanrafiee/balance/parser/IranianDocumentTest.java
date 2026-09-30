@@ -241,7 +241,8 @@ public final class IranianDocumentTest {
                         "options", obj("year", "TWO_DIGIT", "yearBase", 1400, "variableWidth", true, "layout", "SEPARATED",
                                 "timeSeparator", "-", "seconds", false, "zone", "Asia/Tehran")));
         return obj("schema", "prototype-1", "id", "synthetic.ir", "revision", "r1",
-                "bank", obj("id", "synthetic.bank", "country", "IR", "name", "Synthetic bank"),
+                "bank", obj("id", "synthetic.bank", "country", "IR", "name", "Synthetic bank",
+                        "provenance", "OFFICIAL"),
                 "templates", List.of(obj("id", "example", "senders", List.of("SYNTHETIC"),
                         "guards", List.of(obj("line", 0, "literal", "Synthetic", "excluded", false)), "outputs", List.of(output))));
     }
