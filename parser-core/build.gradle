@@ -33,6 +33,16 @@ tasks.register('jsonLexicalGuardTest', JavaExec) {
     }
 }
 
+// Every pack that ships in the app, in both regions, must decode and compile, and the
+// community pack's reported messages must produce exactly the facts claimed for them. The
+// shipped Iranian packs are held to the frozen legacy pipeline by officialPackTest below;
+// this is the gate the other regions have.
+tasks.register('shippedPacksTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.ashkanrafiee.balance.parser.ShippedPacksTest'
+}
+
 tasks.register('legacyCompatibilityTest', JavaExec) {
     dependsOn testClasses
     classpath = sourceSets.test.runtimeClasspath
@@ -59,10 +69,10 @@ tasks.register('officialPackToolTest', Exec) {
 // packs must fail the build.
 tasks.register('officialPackTest') {
     dependsOn classes, testClasses
-    inputs.dir(new File(projectDir.parentFile, 'rules/official/IR'))
+    inputs.dir(new File(projectDir.parentFile, 'rules/app/ir-official'))
     doLast {
         def repository = projectDir.parentFile
-        def catalogDir = new File(repository, 'rules/official/IR')
+        def catalogDir = new File(repository, 'rules/app/ir-official')
         def input = providers.exec {
             commandLine 'python3', '-B', new File(repository, 'tools/read_official_pack.py'), catalogDir
         }
@@ -309,7 +319,7 @@ tasks.register('catalogToolTest', Exec) {
 // packs must fail the build.
 tasks.register('catalogDocumentTest') {
     dependsOn classes
-    def catalog = new File(projectDir.parentFile, 'rules/official/IR/catalog.json')
+    def catalog = new File(projectDir.parentFile, 'rules/app/ir-official/catalog.json')
     inputs.file(catalog)
     doLast {
         def repository = projectDir.parentFile
@@ -401,5 +411,5 @@ tasks.named('check') {
     dependsOn prototypeTest, packDocumentTest, jsonLexicalGuardTest, ruleExampleTest, ruleToolTest,
         iranianPrototypeTest, iranianDocumentTest, jalaliParityTest, legacyCompatibilityTest, identityTest,
         catalogParityTest, catalogToolTest, catalogDocumentTest,
-        officialPackToolTest, officialPackTest
+        officialPackToolTest, officialPackTest, shippedPacksTest
 }

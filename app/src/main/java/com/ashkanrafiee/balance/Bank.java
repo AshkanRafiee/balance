@@ -28,6 +28,22 @@ final class Bank {
         this(n, a, d, s, ac);
         if (cur != null) currency = cur;
     }
+    /** A row for a bank that reports movements and never a balance.
+     *
+     *  <p>Every such row is built here rather than at its two construction sites -- the scan that
+     *  finds one and the reader that restores one -- because the row has to say three things
+     *  together to mean anything: that it holds no balance, which movement it holds, and the
+     *  currency that movement is in. A row that says two of the three reads as a balance of zero
+     *  rials, which is worse than no row at all. */
+    static Bank movementOnly(String name, String account, String sender, long date, long movement,
+            String currency) {
+        Bank bank = new Bank(name, 0, date, sender, account, currency);
+        bank.balanceReported = false;
+        bank.movement = movement;
+        bank.movementCurrency = currency == null ? BalanceData.IRR : currency;
+        return bank;
+    }
+
     /** Whether this row is a movement with no balance behind it, which is the only kind of row that
      *  may never be summed, sorted by, or shown as a balance. */
     boolean movementOnly() {

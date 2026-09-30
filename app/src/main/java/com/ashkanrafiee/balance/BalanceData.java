@@ -170,11 +170,11 @@ final class BalanceData {
                     entry.getLong("date"), entry.getString("sender"), account, currency);
                 // A row that predates the movement-only state always states a balance, which is
                 // what every row written before it did.
+                // A row with no balance is keyed, and therefore denominated, by the currency of
+                // its one movement, so the row's currency is that movement's currency and needs
+                // no second field to say so.
                 if (entry.optBoolean("nob", false)) {
                     bank.balanceReported = false;
-                    // A row with no balance is keyed, and therefore denominated, by the currency of
-                    // its one movement, so the row's currency is that movement's currency and needs
-                    // no second field to say so.
                     bank.movementCurrency = currency;
                     if (entry.has("mv") && !entry.isNull("mv")) bank.movement = entry.getLong("mv");
                 }
@@ -823,11 +823,8 @@ final class BalanceData {
                     Bank existing = current.get(key);
                     if (existing == null || when > existing.date) {
                         matched++;
-                        Bank movementOnly = new Bank(bank, 0, when, (String) lastMovement[0],
-                            accountOfKey(key), (String) lastMovement[4]);
-                        movementOnly.balanceReported = false;
-                        movementOnly.movement = movement;
-                        current.put(key, movementOnly);
+                        current.put(key, Bank.movementOnly(bank, accountOfKey(key),
+                            (String) lastMovement[0], when, movement, (String) lastMovement[4]));
                     }
                 }
             }

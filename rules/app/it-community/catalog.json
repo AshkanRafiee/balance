@@ -1,0 +1,22 @@
+{
+  "allowlist": {},
+  "banks": [
+    {
+      "calendar": "gregorian",
+      "id": "it.cartabcc",
+      "name": "CartaBCC",
+      "senders": [
+        "CartaBCC"
+      ]
+    }
+  ],
+  "catalog": "sender-catalog-1",
+  "counts": {
+    "aliases": 1,
+    "banks": 1
+  },
+  "engine": "prototype-1",
+  "market": "IT",
+  "profile": "exact-s1",
+  "source": "app user report via the in-app unrecognized-sender form: 2 of 13 messages from sender alias CartaBCC, sample pair attached. No official bank documentation or spec was consulted; sender string as reported, matched exactly with no normalization."
+}

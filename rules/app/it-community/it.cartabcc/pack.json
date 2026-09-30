@@ -1,0 +1,165 @@
+{
+  "schema": "prototype-1",
+  "id": "community.it.cartabcc",
+  "revision": "it-1",
+  "bank": {
+    "id": "it.cartabcc",
+    "country": "IT",
+    "name": "CartaBCC",
+    "provenance": "COMMUNITY"
+  },
+  "templates": [
+    {
+      "id": "spend",
+      "senders": [
+        "CartaBCC"
+      ],
+      "guards": [
+        {
+          "line": -1,
+          "literal": "Hai richiesto una spesa di ",
+          "excluded": false
+        },
+        {
+          "line": -1,
+          "literal": "CartaBCC *",
+          "excluded": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "movement",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "kind": "POSTED_MOVEMENT",
+          "money": {
+            "amount": {
+              "line": -1,
+              "after": "una spesa di EUR ",
+              "before": " alle",
+              "maxLength": 64
+            },
+            "currency": {
+              "fixed": "EUR"
+            },
+            "decimal": ",",
+            "group": "",
+            "grouping": "NONE",
+            "digits": "ASCII",
+            "unitMultiplier": 1
+          },
+          "direction": {
+            "fixed": "DEBIT"
+          },
+          "accountOptional": true,
+          "date": {
+            "calendar": "GREGORIAN",
+            "field": {
+              "line": -1,
+              "after": " del giorno ",
+              "before": " con CartaBCC",
+              "maxLength": 16
+            },
+            "orders": [
+              "DM"
+            ],
+            "separator": "/",
+            "withTime": false,
+            "digits": "ASCII",
+            "maxPastSeconds": 2592000,
+            "maxFutureSeconds": 172800,
+            "options": {
+              "year": "NEIGHBOR",
+              "yearBase": 0,
+              "variableWidth": false,
+              "layout": "SEPARATED",
+              "timeSeparator": " ",
+              "seconds": false,
+              "zone": "Europe/Rome"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "payment",
+      "senders": [
+        "CartaBCC"
+      ],
+      "guards": [
+        {
+          "line": -1,
+          "literal": "Confermiamo il tuo pagamento di ",
+          "excluded": false
+        },
+        {
+          "line": -1,
+          "literal": "CartaBCC *",
+          "excluded": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "movement",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "kind": "POSTED_MOVEMENT",
+          "money": {
+            "amount": {
+              "line": -1,
+              "after": "il tuo pagamento di ",
+              "before": " EUR del",
+              "maxLength": 64
+            },
+            "currency": {
+              "fixed": "EUR"
+            },
+            "decimal": ",",
+            "group": "",
+            "grouping": "NONE",
+            "digits": "ASCII",
+            "unitMultiplier": 1
+          },
+          "direction": {
+            "fixed": "DEBIT"
+          },
+          "accountOptional": true,
+          "date": {
+            "calendar": "GREGORIAN",
+            "field": {
+              "line": -1,
+              "after": " del ",
+              "before": " alle",
+              "maxLength": 16
+            },
+            "orders": [
+              "DM"
+            ],
+            "separator": "/",
+            "withTime": false,
+            "digits": "ASCII",
+            "maxPastSeconds": 2592000,
+            "maxFutureSeconds": 172800,
+            "options": {
+              "year": "NEIGHBOR",
+              "yearBase": 0,
+              "variableWidth": false,
+              "layout": "SEPARATED",
+              "timeSeparator": " ",
+              "seconds": false,
+              "zone": "Europe/Rome"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
