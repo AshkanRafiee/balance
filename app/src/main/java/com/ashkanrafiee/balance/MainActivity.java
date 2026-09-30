@@ -508,7 +508,30 @@ public class MainActivity extends Activity {
         box.addView(staleLabel, staleLp);
         box.addView(staleSpin);
 
-        showDialog(new android.app.AlertDialog.Builder(this)
+        // The banks row is the one entry here that is not a single choice, so it does not pretend to
+        // be one: it names what it is and opens a screen of switches. Tapping it dismisses this
+        // dialog first, because leaving it up behind the new screen would leave two dialogs' worth
+        // of back button to unwind.
+        TextView banksLabel = new TextView(this);
+        banksLabel.setText(getString(R.string.recognition_entry));
+        banksLabel.setTextSize(14);
+        TextView banksHint = new TextView(this);
+        banksHint.setText(getString(R.string.recognition_entry_hint));
+        banksHint.setTextSize(12);
+        banksHint.setTextColor(resColor(R.color.subtitle));
+        banksHint.setLineSpacing(2, 1.05f);
+        LinearLayout banksRow = new LinearLayout(this);
+        banksRow.setOrientation(LinearLayout.VERTICAL);
+        banksRow.setClickable(true);
+        banksRow.setBackground(rowBackground());
+        banksRow.setPadding(dp(12), dp(10), dp(12), dp(10));
+        banksRow.addView(banksLabel);
+        banksRow.addView(banksHint);
+        LinearLayout.LayoutParams banksLp = new LinearLayout.LayoutParams(-1, -2);
+        banksLp.topMargin = dp(20);
+        box.addView(banksRow, banksLp);
+
+        android.app.AlertDialog display = new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.footer_display))
             .setView(box)
             .setPositiveButton(android.R.string.ok, (d, w) -> {
@@ -525,7 +548,21 @@ public class MainActivity extends Activity {
                 }
             })
             .setNegativeButton(getString(R.string.lock_cancel), null)
-            .create());
+            .create();
+        banksRow.setOnClickListener(v -> {
+            display.dismiss();
+            startActivity(new android.content.Intent(this, BankRecognitionActivity.class));
+        });
+        showDialog(display);
+    }
+
+    /** A faint rounded plate behind the banks row, so it reads as something to tap rather than as
+     *  another two lines of the dialog. */
+    private android.graphics.drawable.Drawable rowBackground() {
+        android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+        g.setColor(resColor(R.color.panel));
+        g.setCornerRadius(dp(12));
+        return g;
     }
 
     void hardRefreshDialog() {

@@ -179,6 +179,7 @@
     <string name="scan_diag_skipped_hint">Tap a sender to open its messages and tick the ones to share — nothing is sent until you confirm.</string>
     <string name="scan_diag_none_skipped">Every message is recognized — nothing to report.</string>
     <string name="scan_diag_turned_off">%1$d messages are from banks you turned off. Turn one back on any time.</string>
+
     <string name="scan_diag_open_sender">Report sender %1$s</string>
     <string name="scan_diag_privacy">Nothing leaves this device unless you copy it or send it yourself.</string>
     <string name="sender_picker_entry">Choose any sender</string>
@@ -188,6 +189,16 @@
     <string name="sender_picker_hint">Every sender in your inbox, whether or not Balance recognizes it. Tap one to choose which messages to share — nothing is sent until you confirm.</string>
     <string name="sender_picker_none">No sender matches that search.</string>
     <string name="sender_picker_no_messages">There are no messages on this device.</string>
+
+    <string name="recognition_entry">Banks Balance reads</string>
+    <string name="recognition_entry_hint">Turn off a bank you don\'t use. Balance stops reading its messages; your recorded balances and history stay.</string>
+    <string name="recognition_title">Banks Balance reads</string>
+    <string name="recognition_note">Balance reads messages from every bank below. Turn one off and it stops reading that bank\'s messages — nothing you already recorded is deleted.</string>
+    <string name="recognition_group_official">%1$s · official</string>
+    <string name="recognition_group_community">%1$s · added from user reports</string>
+    <string name="recognition_unavailable">The list of banks is unavailable right now.</string>
+    <string name="recognition_on">%1$s — Balance reads this bank</string>
+    <string name="recognition_off">%1$s — Balance does not read this bank</string>
 
     <string name="sender_share_note">%1$d SMS from this sender — tick the samples to include.</string>
     <string name="sender_share_known_bank">Known bank: %1$s</string>

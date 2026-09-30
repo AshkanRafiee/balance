@@ -189,6 +189,16 @@
     <string name="sender_picker_none">هیچ فرستنده‌ای با این جست‌وجو پیدا نشد.</string>
     <string name="sender_picker_no_messages">روی این دستگاه پیامی وجود ندارد.</string>
 
+    <string name="recognition_entry">بانک‌هایی که موجودی می‌خواند</string>
+    <string name="recognition_entry_hint">بانکی را که استفاده نمی‌کنید خاموش کنید. موجودی دیگر پیام‌های آن بانک را نمی‌خواند؛ اما موجودی‌ها و سوابقی که قبلاً ثبت شده‌اند پاک نمی‌شوند.</string>
+    <string name="recognition_title">بانک‌هایی که موجودی می‌خواند</string>
+    <string name="recognition_note">موجودی از پیام‌های همهٔ بانک‌های زیر می‌خواند. با خاموش کردن هر بانک، دیگر پیام‌های آن را نمی‌خواند — هیچ‌کدام از اطلاعاتی که قبلاً ثبت شده پاک نمی‌شود.</string>
+    <string name="recognition_group_official">%1$s · رسمی</string>
+    <string name="recognition_group_community">%1$s · افزوده‌شده با گزارش کاربران</string>
+    <string name="recognition_unavailable">فهرست بانک‌ها در حال حاضر در دسترس نیست.</string>
+    <string name="recognition_on">%1$s — موجودی این بانک را می‌خواند</string>
+    <string name="recognition_off">%1$s — موجودی این بانک را نمی‌خواند</string>
+
     <string name="sender_share_note">%1$d پیامک از این فرستنده — نمونه‌هایی را که می‌خواهید در گزارش باشند علامت بزنید.</string>
     <string name="sender_share_known_bank">بانک شناخته‌شده: %1$s</string>
     <string name="sender_share_select_all">انتخاب همه</string>

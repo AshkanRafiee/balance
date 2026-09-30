@@ -288,6 +288,58 @@ public class BankRecognitionTest {
         assertEquals(0, senders.get(0).read);
     }
 
+    @Test public void screen_groupsTheBanksAndSaysWhereEachFormatCameFrom() throws Exception {
+        BankRecognitionActivity act = launch();
+        try {
+            String all = waitFor(act, ctx.getString(R.string.recognition_group_official, "Iran"));
+            assertTrue("the screen says what the switches do", all.contains(ctx.getString(R.string.recognition_note)));
+            assertTrue("official formats are labelled as such", all.contains(ctx.getString(R.string.recognition_group_official, "Iran")));
+            assertTrue("community formats are labelled as such", all.contains(ctx.getString(R.string.recognition_group_community, "Italy")));
+            assertTrue(all.contains(MELLAT));
+            assertTrue(all.contains(CARTABCC));
+            // One switch per bank, all on, and nothing carrying a verdict about how well a bank is
+            // read -- this screen is a choice, not a diagnosis.
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                List<android.widget.Switch> switches = new ArrayList<>();
+                findSwitches(act.getWindow().getDecorView(), switches);
+                EngineRules loaded = EngineRules.get();
+                assertEquals("one switch per bank Balance knows",
+                    loaded == null ? 0 : loaded.banksInOrder().size(), switches.size());
+                for (android.widget.Switch s : switches) {
+                    assertTrue("every bank starts on", s.isChecked());
+                }
+            });
+        } finally {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(act::finish);
+        }
+    }
+
+    @Test public void screen_tappingABankTurnsItOffForTheScanToo() throws Exception {
+        BankRecognitionActivity act = launch();
+        try {
+            waitFor(act, MELLAT);
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
+                tapBankRow(act.getWindow().getDecorView(), MELLAT));
+            assertFalse("the choice is stored by the tap itself",
+                RecognitionHelper.isEnabled(MELLAT));
+            assertTrue(recognitionPrefs().getStringSet(RecognitionHelper.KEY_DISABLED,
+                java.util.Collections.emptySet()).contains(MELLAT));
+            // The in-memory snapshot is what the next message is classified by, so it has to have
+            // moved with the tap rather than waiting for the next scan to reload it.
+            assertNull(MessageFacts.of(MELLAT_SENDER, MELLAT_TRANSFER, T + 1000).bank);
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                android.view.View row = findRow(act.getWindow().getDecorView(), MELLAT);
+                android.widget.Switch toggle = (android.widget.Switch) ((android.view.ViewGroup) row)
+                    .getChildAt(1);
+                assertTrue("the row says so", !toggle.isChecked());
+                assertEquals(ctx.getString(R.string.recognition_off, MELLAT),
+                    row.getContentDescription());
+            });
+        } finally {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(act::finish);
+        }
+    }
+
     // ---- helpers ----
 
     private static Bank find(LinkedHashMap<String, Bank> banks, String bank) {
