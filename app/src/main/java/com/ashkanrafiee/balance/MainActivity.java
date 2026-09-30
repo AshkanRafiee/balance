@@ -304,7 +304,7 @@ public class MainActivity extends Activity {
      *  changed region or the history toggle apply on the next history open, a changed theme or
      *  language recreates the screen, a changed currency re-renders the dashboard and the widget —
      *  so only a typed custom currency name waits for the OK button. */
-    private void displayDialog() {
+    void displayDialog() {
         int pad = dp(14);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -655,6 +655,12 @@ public class MainActivity extends Activity {
         });
         dlg.show();
         return dlg;
+    }
+
+    /** The dialog on screen right now, which is how a test reads what a menu offers without
+     *  driving a finger across a custom-drawn footer to find it. */
+    android.app.AlertDialog activeDialog() {
+        return activeDialog;
     }
 
     /** Dismisses the tracked dialog and any progress dialog. Safe to call when nothing is up. */

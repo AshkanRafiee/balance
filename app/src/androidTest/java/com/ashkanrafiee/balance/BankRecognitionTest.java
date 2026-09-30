@@ -21,6 +21,7 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * The reader's switch over which banks Balance reads, end to end on a real device: the real inbox,
@@ -365,7 +366,59 @@ public class BankRecognitionTest {
         }
     }
 
+    @Test public void theBanksRowInTheDisplayDialogOpensTheBanksScreen() throws Exception {
+        // A switch nothing leads to is not a setting, so the way in is walked the way a reader walks
+        // it: the Display dialog on the dashboard, the row in it, and the screen that row opens.
+        android.app.Instrumentation ins = InstrumentationRegistry.getInstrumentation();
+        AtomicReference<android.view.View> row = new AtomicReference<>();
+        try (androidx.test.core.app.ActivityScenario<MainActivity> dashboard =
+                androidx.test.core.app.ActivityScenario.launch(MainActivity.class)) {
+            dashboard.onActivity(m -> {
+                m.displayDialog();
+                android.app.AlertDialog dialog = m.activeDialog();
+                assertNotNull("the Display dialog is up", dialog);
+                assertTrue("and it is showing", dialog.isShowing());
+                row.set(findBanksRow(dialog.getWindow().getDecorView()));
+            });
+            assertNotNull("the dialog offers the banks row", row.get());
+
+            android.app.Instrumentation.ActivityMonitor monitor = ins.addMonitor(
+                BankRecognitionActivity.class.getName(), null, false);
+            android.app.Activity opened;
+            try {
+                dashboard.onActivity(m -> row.get().performClick());
+                opened = monitor.waitForActivityWithTimeout(15_000);
+            } finally {
+                ins.removeMonitor(monitor);
+            }
+            assertNotNull("tapping the row opens the banks screen", opened);
+            try {
+                String all = waitFor(opened, ctx.getString(R.string.recognition_note));
+                assertTrue("and it is the screen with the switches",
+                    all.contains(ctx.getString(R.string.recognition_entry)));
+            } finally {
+                InstrumentationRegistry.getInstrumentation().runOnMainSync(opened::finish);
+            }
+        }
+    }
+
     // ---- helpers ----
+
+    /** The dialog row that names the banks, found by the label a reader would be reading. */
+    private android.view.View findBanksRow(android.view.View v) {
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            if (g.getChildCount() > 0 && g.getChildAt(0) instanceof android.widget.TextView
+                    && ctx.getString(R.string.recognition_entry)
+                        .equals(((android.widget.TextView) g.getChildAt(0)).getText().toString()))
+                return g;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                android.view.View found = findBanksRow(g.getChildAt(i));
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
 
     private static Bank find(LinkedHashMap<String, Bank> banks, String bank) {
         for (Bank b : banks.values()) if (bank.equals(b.name)) return b;
