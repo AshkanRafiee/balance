@@ -192,6 +192,7 @@ public final class ScanDiagnosticsActivity extends Activity {
             unparsedCard(s);
             unknownCard(s);
         }
+        turnedOffLine(s);
         // Reading a message is not understanding all of it, so a sender that is missing from the two
         // lists above is not a sender with nothing to report -- the picker reaches every sender in
         // the inbox, and it is offered even when the funnel is empty, which is exactly when a user
@@ -210,6 +211,17 @@ public final class ScanDiagnosticsActivity extends Activity {
 
     private void openPicker() {
         startActivity(new Intent(this, SenderPickerActivity.class));
+    }
+
+    /** What the reader decided not to have read, said once and left out of the funnel. It is a
+     *  sentence rather than a card because there is nothing to act on here but the reader's own
+     *  choice, and a list of those senders under a heading like "problems" would be the one thing
+     *  on this screen that is not true. */
+    private void turnedOffLine(ScanDiagnostics.Summary s) {
+        if (s.turnedOffMessages == 0) return;
+        TextView v = text(getString(R.string.scan_diag_turned_off, s.turnedOffMessages), 12, muted);
+        v.setLineSpacing(2, 1.05f);
+        body.addView(v, margin(2, 14, 2, 0));
     }
 
     /** The banks Balance parsed successfully and how many of their messages — the workload that is

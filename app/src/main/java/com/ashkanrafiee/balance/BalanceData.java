@@ -44,6 +44,11 @@ final class BalanceData {
     static final String KEY_STALE_DAYS = "stale_days";
     static final int DEFAULT_STALE_DAYS = 7;
     static final String KEY_ONBOARDING_SEEN = "onboarding_seen";
+    /** The banks the reader had turned off when the last balance scan was published, so a later
+     *  change of that choice re-reads the inbox instead of trusting the watermark. */
+    static final String KEY_RECOGNITION_SEEN = "recognition_revision";
+    /** The same for the history scan, which has its own watermark and its own rebuild. */
+    static final String KEY_HISTORY_RECOGNITION_SEEN = "history_recognition_revision";
 
     /** Sort modes for the bank list. Each pair (balance / update date) has a reverse variant so
      *  re-selecting the same sort flips its direction. The list is always sorted; fresh installs
@@ -696,6 +701,10 @@ final class BalanceData {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
             return 0;
         EngineRules.activate(context);
+        // Reload the banks the reader has turned off before the first message is classified, so a
+        // choice made in another screen (or restored from a backup in another process) governs this
+        // scan whatever route into it there was.
+        RecognitionHelper.refresh(context);
         FinancialAuthority authority = authority(context);
         if (authority == null) return 0;
         FinancialSnapshotAdapter.Snapshot snapshot;
@@ -711,8 +720,16 @@ final class BalanceData {
         // watermark, so a plain incremental read would skip every one of them. Treat that as a full
         // rescan, which re-reads the whole inbox and re-pins the watermark under the current clock.
         long now = System.currentTimeMillis();
+        // A change in which banks are read is a change in what this scan is for, exactly like a
+        // change in the rules: messages the previous choice did not read are still in the inbox and
+        // a watermark starts after them, so a re-enabled bank would otherwise stay empty until its
+        // bank happened to send something new. Re-reading the inbox also re-derives a bank the
+        // reader turned off, which is why that direction is covered too.
+        int recognition = RecognitionHelper.revision();
         boolean full = watermark == 0 || watermark > now
-            || snapshot.rulesVersion() != rulesVersion;
+            || snapshot.rulesVersion() != rulesVersion
+            || recognition != context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+                .getInt(KEY_RECOGNITION_SEEN, -1);
         if (full) watermark = 0;
         int matched = 0;
         long newest = 0;
@@ -851,6 +868,14 @@ final class BalanceData {
                     emptyFullScan ? null : rulesVersion,
                     matched,
                     removals).publish(authority.snapshots());
+            // Only now that the scan it describes is published, and only from a scan that actually
+            // advanced: a preference written by a failed publication -- or by the empty full scan
+            // above, which published nothing because it read no bank message at all -- would make
+            // the next scan trust a watermark past messages it never read.
+            if (!emptyFullScan) {
+                context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
+                        .putInt(KEY_RECOGNITION_SEEN, recognition).apply();
+            }
         } catch (Exception e) {
             Log.w(TAG, "balance publication failed", e);
             return 0;
@@ -886,6 +911,7 @@ final class BalanceData {
         HISTORY_SCANNING = true;
         try {
             EngineRules.activate(context);
+            RecognitionHelper.refresh(context);
             FinancialAuthority authority = authority(context);
             if (authority == null) return 0;
             FinancialSnapshotAdapter.Snapshot snapshot;
@@ -897,9 +923,17 @@ final class BalanceData {
             // moved backward since the last scan; fall back to a full rescan so messages dated after
             // the rollback are not skipped forever by the incremental "newer than watermark" read.
             long now = System.currentTimeMillis();
+            // As in scanSms, which banks are read is part of what this scan is for: a bank re-enabled
+            // after being turned off has messages in the inbox older than the history watermark, and
+            // the movements in them belong in the history the reader can see. Nothing already stored
+            // is at risk from the rebuild -- it keeps every entry no fresh parse claims -- so this
+            // adds the movements that were skipped, it does not rewrite the ones that were kept.
+            int recognition = RecognitionHelper.revision();
             boolean full = hwm == 0 || hwm > now
                 || snapshot.historyRulesVersion() != HISTORY_RULES_VERSION
-                || snapshot.historySchema() != HISTORY_SCHEMA;
+                || snapshot.historySchema() != HISTORY_SCHEMA
+                || recognition != context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+                    .getInt(KEY_HISTORY_RECOGNITION_SEEN, -1);
             if (full) hwm = 0;
             // On an incremental scan the stored history doubles as the dedup set: a message already
             // recorded (by fingerprint, or by the legacy bank|date|amount triple) is left alone. On a
@@ -1260,6 +1294,8 @@ final class BalanceData {
                         full ? HISTORY_SCHEMA : null,
                         removals(stored, windowsForSave, lastBalanceForSave))
                         .publish(authority.snapshots());
+                context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
+                        .putInt(KEY_HISTORY_RECOGNITION_SEEN, recognition).apply();
             } catch (Exception e) {
                 Log.w(TAG, "history publication failed", e);
                 return 0;

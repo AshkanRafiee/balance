@@ -178,6 +178,7 @@
     <string name="scan_diag_skipped_senders">فرستنده‌هایی که هنوز شناخته نشده‌اند</string>
     <string name="scan_diag_skipped_hint">روی هر فرستنده بزنید تا پیامک‌هایش باز شود و کدام‌ها برای گزارش باشند را علامت بزنید — تا وقتی تأیید نکنید، چیزی ارسال نمی‌شود.</string>
     <string name="scan_diag_none_skipped">همه‌ٔ پیامک‌ها شناخته‌شده‌اند — چیزی برای گزارش نیست.</string>
+    <string name="scan_diag_turned_off">%1$d پیامک از بانک‌هایی است که خاموش کرده‌اید. هر زمان می‌خواهید دوباره روشن دارید.</string>
     <string name="scan_diag_open_sender">گزارش فرستندهٔ %1$s</string>
     <string name="scan_diag_privacy">هیچ داده‌ای از این دستگاه خارج نمی‌شود، مگر اینکه خودتان آن را کپی یا ارسال کنید.</string>
     <string name="sender_picker_entry">انتخاب هر فرستنده</string>

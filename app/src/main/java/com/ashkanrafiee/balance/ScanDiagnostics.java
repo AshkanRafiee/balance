@@ -16,6 +16,9 @@ import java.util.Map;
  *        said nothing the app models. These are undetected structures from a bank we already know,
  *        and they count as format gaps exactly like an unknown sender.</li>
  *    <li><b>unknown sender</b> — the sender resolves to no bank at all.</li>
+ *    <li><b>bank turned off</b> — the sender belongs to a bank the reader chose not to read. Those
+ *        messages are counted and shown as one line, never listed as a gap: a format the reader
+ *        declined is not one Balance failed to read.</li>
  *  </ul>
  *  Reading a message is not a claim that all of it was understood: a pack may read the amount of a
  *  card statement and leave the merchant and the time unmodelled, and the app cannot tell that
@@ -107,6 +110,10 @@ final class ScanDiagnostics {
         int messages, parsedMessages;
         int unparsedMessages() { return unknownSendersMessages + unparsedSendersMessages; }
         int unknownSendersMessages, unparsedSendersMessages;
+        /** Messages from a bank the user turned off. Counted separately and never listed as a gap:
+         *  a format the reader chose not to read is not a format Balance failed to read, and calling
+         *  it a gap would ask them to report on a decision they just made. */
+        int turnedOffMessages;
         final List<BankHit> banks = new ArrayList<>();
         final List<SenderHit> unknownSenders = new ArrayList<>();
         final List<SenderHit> unparsedSenders = new ArrayList<>();
@@ -148,6 +155,11 @@ final class ScanDiagnostics {
             if (bank == null) {
                 s.unknownSendersMessages++;
                 add(unknown, sender, null, body, date);
+            } else if (!RecognitionHelper.isEnabled(bank)) {
+                // The reader asked not to read this bank, so this message is not evidence of
+                // anything the app got wrong. Naming the bank and leaving it out of both lists keeps
+                // the screen honest in both directions: not "unknown sender" either.
+                s.turnedOffMessages++;
             } else {
                 s.unparsedSendersMessages++;
                 add(unparsed, sender, bank, body, date);

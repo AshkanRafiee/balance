@@ -84,6 +84,10 @@ final class MessageFacts {
      *  to nothing). Used by the window merger and {@code parseMovement}, which already hold the
      *  resolved event time. */
     static MessageFacts amounts(String sender, String body, String bankHint) {
+        // Same rule as {@link #of}: a bank the user turned off is not read here either. This
+        // reduction is reached with a bank the caller already resolved, so the hint is the bank the
+        // choice is about.
+        if (!RecognitionHelper.isEnabled(bankHint)) return new MessageFacts(null, null, NO_BALANCE, null, 0);
         EngineRules engine = activeEngine();
         if (engine != null) {
             // The engine is told the epoch here because this reduction is the arrival-independent
@@ -115,7 +119,8 @@ final class MessageFacts {
                     packed.packedTime);
         }
         String bank = BankRules.resolve(sender);
-        if (bank == null) return new MessageFacts(null, null, NO_BALANCE, null, 0);
+        if (bank == null || !RecognitionHelper.isEnabled(bank))
+            return new MessageFacts(null, null, NO_BALANCE, null, 0);
         return new MessageFacts(bank, BankRules.extractAccount(bank, body),
             BalanceData.extract(body), BalanceData.extractTransaction(body),
             MessageDate.eventTime(body, arrival, BankRules.calendar(bank)));
@@ -209,6 +214,11 @@ final class MessageFacts {
         // catalog does not name at all, since a row under a nameless key could never be shown.
         String name = engine.bankNameOf(bank);
         if (name == null || name.isEmpty()) return null;
+        // A bank the user turned off is not read, whether a pack or the legacy tables would have
+        // read it. Answering null hands the message back to the caller, which routes it to the
+        // legacy path -- where the same choice is enforced again -- so a pack can never be the way
+        // around a bank the reader said not to read.
+        if (!RecognitionHelper.isEnabled(name)) return null;
         // A bank that reports only what it did states no balance, so its row is denominated in
         // the currency it spends in: there is no other currency in the row for the balance to be
         // in, and a rial there would file a euro movement under a rial account.
