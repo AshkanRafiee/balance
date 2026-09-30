@@ -72,11 +72,22 @@ public class CommunityScanTest {
             Long.valueOf(-6680L), card.movement);
         assertEquals("the currency is the one the message names", "EUR", card.movementCurrency);
         assertEquals("the card number masked in the message is not an account", null, card.account);
-        // The stated date is a day with no year, resolved to midnight in the sender's own zone, so
-        // the row carries the day the message named rather than the minute the message was sent.
-        long statedDay = java.time.LocalDate.of(2026, 9, 27)
-            .atStartOfDay(java.time.ZoneId.of("Europe/Rome")).toInstant().toEpochMilli();
-        assertEquals("the movement is dated the day the message states", statedDay, card.date);
+        // The stated date is a day with no year, so the pack resolves it against the moment the
+        // message arrived: whichever calendar year puts it closest to the arrival without putting
+        // it far in the past. The assertion therefore checks the day and the resolution it claims
+        // rather than a pinned year -- the day the message states, at midnight in the sender's own
+        // zone, and near enough to the arrival that no other day could have been chosen -- so the
+        // test says the same thing on any date it is run.
+        java.time.ZoneId rome = java.time.ZoneId.of("Europe/Rome");
+        java.time.ZonedDateTime dated = java.time.Instant.ofEpochMilli(card.date)
+            .atZone(rome);
+        assertEquals("the movement is dated the day the message states", 9, dated.getMonthValue());
+        assertEquals("the day the message states", 27, dated.getDayOfMonth());
+        assertEquals("resolved to the start of that day in the sender's own zone",
+            java.time.LocalTime.MIDNIGHT, dated.toLocalTime());
+        assertTrue("and to a day the arrival itself accounts for",
+            Math.abs(java.time.Duration.between(java.time.Instant.ofEpochMilli(arrival),
+                java.time.Instant.ofEpochMilli(card.date)).toDays()) <= 31);
     }
 
     @Test public void aReportedPaymentLandsTheSameWayWhenTheAmountFollowsTheCurrency() throws Exception {
