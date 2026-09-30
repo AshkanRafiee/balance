@@ -178,7 +178,10 @@
     <string name="scan_diag_skipped_senders">Senders not recognized yet</string>
     <string name="scan_diag_skipped_hint">Tap a sender to open its messages and tick the ones to share — nothing is sent until you confirm.</string>
     <string name="scan_diag_none_skipped">Every message is recognized — nothing to report.</string>
-    <string name="scan_diag_turned_off">%1$d messages are from banks you turned off. Turn one back on any time.</string>
+    <plurals name="scan_diag_turned_off">
+        <item quantity="one">%1$d message is from a bank you turned off. Turn it back on any time.</item>
+        <item quantity="other">%1$d messages are from banks you turned off. Turn one back on any time.</item>
+    </plurals>
 
     <string name="scan_diag_open_sender">Report sender %1$s</string>
     <string name="scan_diag_privacy">Nothing leaves this device unless you copy it or send it yourself.</string>

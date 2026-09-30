@@ -340,6 +340,31 @@ public class BankRecognitionTest {
         }
     }
 
+    @Test public void theDiagnosticsLineReadsAsASentenceAboutOneMessage() throws Exception {
+        // One message from a declined bank is a fact about a decision, and the line saying so has
+        // to fit the number it states: "1 messages are from banks you turned off" would undo the
+        // point of counting them apart from the funnel in the first place.
+        seed(MELLAT_SENDER, MELLAT_TRANSFER, T + 1000);
+        seed(STRANGER, "card purchase 45,000 T", T + 2000);
+        RecognitionHelper.setEnabled(ctx, MELLAT, false);
+
+        ScanDiagnosticsActivity act = (ScanDiagnosticsActivity) InstrumentationRegistry
+            .getInstrumentation().startActivitySync(
+                new android.content.Intent(ctx, ScanDiagnosticsActivity.class)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        try {
+            String one = ctx.getResources().getQuantityString(
+                R.plurals.scan_diag_turned_off, 1, 1);
+            String all = waitFor(act, one);
+            assertTrue("the line is shown, worded for a single message", all.contains(one));
+            assertFalse("and not worded for several",
+                all.contains(ctx.getResources().getQuantityString(
+                    R.plurals.scan_diag_turned_off, 2, 2)));
+        } finally {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(act::finish);
+        }
+    }
+
     // ---- helpers ----
 
     private static Bank find(LinkedHashMap<String, Bank> banks, String bank) {

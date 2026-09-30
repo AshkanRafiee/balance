@@ -219,7 +219,10 @@ public final class ScanDiagnosticsActivity extends Activity {
      *  on this screen that is not true. */
     private void turnedOffLine(ScanDiagnostics.Summary s) {
         if (s.turnedOffMessages == 0) return;
-        TextView v = text(getString(R.string.scan_diag_turned_off, s.turnedOffMessages), 12, muted);
+        TextView v = text(
+                getResources().getQuantityString(
+                        R.plurals.scan_diag_turned_off, s.turnedOffMessages, s.turnedOffMessages),
+                12, muted);
         v.setLineSpacing(2, 1.05f);
         body.addView(v, margin(2, 14, 2, 0));
     }
