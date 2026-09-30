@@ -743,9 +743,10 @@ final class BalanceData {
                 // neither a balance nor a movement says nothing at all and is dropped here.
                 if (facts.balance < 0 && facts.movement == null) continue;
                 String key = storageKey(facts.bank, facts.account, facts.balanceCurrency);
+                Long stated = facts.balance < 0 ? null : facts.balance;
                 rowsByKey.computeIfAbsent(key, k -> new ArrayList<>())
                     .add(new Object[]{sender, cursor.getString(1), facts.time,
-                        facts.balanceCurrency, facts.movementCurrency, facts.movement});
+                        facts.balanceCurrency, facts.movementCurrency, facts.movement, stated});
             }
         } catch (Exception e) {
             Log.w(TAG, "scan failed", e);
@@ -790,7 +791,7 @@ final class BalanceData {
                 chosen = last;
                 chosenSender = sigSender.get(last.sig);
             } else {
-                long bal = extract((String) newestArr[1]);
+                long bal = statedBalance(newestArr);
                 if (bal >= 0) {
                     // The whole loop walks one ledger at a time, so the newest row's balance is
                     // stated in this key's currency whether or not the message says which.
@@ -1545,10 +1546,23 @@ final class BalanceData {
         return best;
     }
 
+    /** The balance a scan row states: the figure the rules that read this bank read, and only the
+     *  legacy reading when those rules do not cover the message.
+     *
+     *  <p>The legacy reducer reads a balance as digits and thousands separators only, so it cannot
+     *  read a decimal at all: "1,234.56" comes back as 1,234 minor units and "1.234,56" is not
+     *  recognized as a figure. A bank that states its balance with decimals therefore has no
+     *  correct answer unless the rules that know its wording are the ones asked, and the value they
+     *  read is in the currency's own minor units, which is what the rest of the store holds. */
+    static long statedBalance(Object[] row) {
+        Long stated = row.length > 6 ? (Long) row[6] : null;
+        return stated != null ? stated : extract((String) row[1]);
+    }
+
     /** Whether any message of this account stated a balance, which is what separates a bank that
      *  reports what you have from one that only reports what it did. */
     private static boolean statesAnyBalance(List<Object[]> rows) {
-        for (Object[] r : rows) if (extract((String) r[1]) >= 0) return true;
+        for (Object[] r : rows) if (statedBalance(r) >= 0) return true;
         return false;
     }
 

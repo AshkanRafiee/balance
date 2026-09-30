@@ -421,6 +421,26 @@ public class BalanceScanTest {
     }
 
     // ============================================================
+    // Which reading of a balance the scan keeps
+    // ============================================================
+
+    @Test public void aBalanceTheRulesReadWinsOverTheLegacyReading() {
+        // The rules that know a bank's wording read its decimals, in the currency's own minor
+        // units. The legacy reducer cannot: it stops at the thousands separator, so asked about
+        // "1,234.56" it answers 1,234 -- a balance the bank never sent.
+        Object[] readByRules = {"sender", "Your balance is 1,234.56 EUR", T,
+            "EUR", "EUR", null, 123456L};
+        assertEquals(123456L, BalanceData.statedBalance(readByRules));
+    }
+
+    @Test public void aMessageTheRulesDoNotCoverKeepsTheLegacyReading() {
+        Object[] legacyRow = {"sender", "available balance 5,000,000", T, "IRR", "IRR", null, null};
+        assertEquals(5000000L, BalanceData.statedBalance(legacyRow));
+        assertEquals("a message with no figure at all is still no balance",
+            -1L, BalanceData.statedBalance(new Object[]{"sender", "hello", T, "IRR", "IRR"}));
+    }
+
+    // ============================================================
     // Incremental scans
     // ============================================================
 
