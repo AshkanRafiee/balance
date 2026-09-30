@@ -169,20 +169,19 @@ public final class SenderShareActivity extends Activity {
     }
 
     /** What the user believes is wrong with this sender, used to point the maintainer at the
-     *  failing stage of detection: the account, the balance, the sender number, or any mix. The
-     *  checks mirror the {@link ScanDiagnostics#ISSUE_*} constants one-to-one in order. */
+     *  failing stage of detection: every detection the app performs, so a message whose amount is
+     *  read but whose account or date is not can be reported as exactly that instead of as one
+     *  undifferentiated "unparsed". The rows come from {@link ScanDiagnostics#ISSUES}, which
+     *  {@link #issueTags()} maps them back through, so a label cannot exist without the tag it is
+     *  reported under. */
     private void issueCard() {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(16), dp(10), dp(16), dp(10));
         box.setBackground(rounded(card, 15));
         box.addView(section(getString(R.string.sender_share_issue_title)), margin(2, 0, 2, 6));
-        String[] labels = {
-            getString(R.string.sender_share_issue_account),
-            getString(R.string.sender_share_issue_balance),
-            getString(R.string.sender_share_issue_number)
-        };
-        for (String label : labels) box.addView(issueRow(label));
+        for (ScanDiagnostics.Issue issue : ScanDiagnostics.ISSUES)
+            box.addView(issueRow(getString(issue.label)));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
         lp.topMargin = dp(8);
         body.addView(box, lp);
@@ -204,11 +203,9 @@ public final class SenderShareActivity extends Activity {
 
     /** The picked issue categories as report tags, in the order the checkboxes show them. */
     private List<String> issueTags() {
-        String[] all = {ScanDiagnostics.ISSUE_ACCOUNT, ScanDiagnostics.ISSUE_BALANCE,
-            ScanDiagnostics.ISSUE_NUMBER};
         List<String> tags = new ArrayList<>();
-        for (int i = 0; i < issueChecks.size() && i < all.length; i++)
-            if (issueChecks.get(i).isChecked()) tags.add(all[i]);
+        for (int i = 0; i < issueChecks.size() && i < ScanDiagnostics.ISSUES.length; i++)
+            if (issueChecks.get(i).isChecked()) tags.add(ScanDiagnostics.ISSUES[i].tag);
         return tags;
     }
 
@@ -370,7 +367,7 @@ public final class SenderShareActivity extends Activity {
     /** Prefills a mail to the maintainer with the chosen messages. The system chooser is the user's
      *  final approval: nothing is sent until they pick an app and press send there. */
     private void sendMail(String report) {
-        final String subject = ScanDiagnostics.senderSubject(sender);
+        final String subject = ScanDiagnostics.senderSubject(sender, bank);
         try {
             Intent mail = new Intent(Intent.ACTION_SENDTO, Uri.parse(mailToUri(subject, report)));
             mail.putExtra(Intent.EXTRA_SUBJECT, subject);

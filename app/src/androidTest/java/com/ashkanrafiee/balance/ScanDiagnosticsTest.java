@@ -36,6 +36,122 @@ public class ScanDiagnosticsTest {
         return list;
     }
 
+    // ---- community-bank senders: the case the legacy sender table cannot see ----
+
+    private static final String CARTABCC = "CartaBCC";
+
+    /** A real reported card statement, with the day and month filled in from the clock so the
+     *  message always states the day it is read on. The pack resolves a yearless date against the
+     *  arrival, so a hard-coded date would stop anchoring once the clock moved past its lookback --
+     *  which is a property of the pack, not of this test. */
+    private static String cartabccSpend(long arrival) {
+        java.time.ZonedDateTime day = java.time.Instant.ofEpochMilli(arrival)
+            .atZone(java.time.ZoneId.of("Europe/Rome"));
+        return "Hai richiesto una spesa di EUR 66,80 alle ore 22:29 del giorno "
+            + String.format(java.util.Locale.ROOT, "%02d/%02d",
+                day.getDayOfMonth(), day.getMonthValue())
+            + " con CartaBCC *557 presso RAMEN BAR XXX LE.";
+    }
+
+    /** An advertisement from the same sender: no template guards it, so the app reads nothing from
+     *  it even though the sender itself is a supported bank. */
+    private static final String CARTABCC_AD = "CartaBCC: la tua carta e attiva.";
+
+    private static Object[] row(String sender, String body) {
+        return new Object[]{sender, body, System.currentTimeMillis()};
+    }
+
+    @Test public void analyze_aBankNoCommunityPackCoversBefore_isNotCalledUnrecognized() {
+        // The regression this screen would have shipped with: a pack-only bank resolved through the
+        // legacy Iranian sender table reads as no bank at all, so every one of its users was told
+        // to report a format the app already had.
+        ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
+            row(CARTABCC, cartabccSpend(System.currentTimeMillis()))));
+        assertEquals("a card statement the app reads is not a gap", 1, s.parsedMessages);
+        assertEquals(0, s.unparsedMessages());
+        assertTrue(s.unknownSenders.isEmpty());
+        assertTrue(s.unparsedSenders.isEmpty());
+        assertEquals(1, s.banks.size());
+        assertEquals(CARTABCC, s.banks.get(0).bank);
+    }
+
+    @Test public void analyze_aMessageFromAKnownBankItReadsNothingFrom_isStillAGap() {
+        // Reading a sender's statements does not mean every message from it is one.
+        ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
+            row(CARTABCC, CARTABCC_AD)));
+        assertEquals(0, s.parsedMessages);
+        assertEquals(1, s.unparsedSendersMessages);
+        ScanDiagnostics.SenderHit h = s.unparsedSenders.get(0);
+        assertEquals(CARTABCC, h.sender);
+        assertEquals("named by its bank, not as an unknown sender", CARTABCC, h.bank);
+        assertTrue(s.unknownSenders.isEmpty());
+    }
+
+    @Test public void inboxSenders_keepsSendersTheAppReadsSoTheyStayReportable() {
+        // The funnel cannot tell a message read whole from one read in part, so reachability cannot
+        // come from the funnel: every sender in the inbox has to be reachable from the picker.
+        ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
+            row(CARTABCC, cartabccSpend(System.currentTimeMillis()))));
+        assertTrue("a sender the app reads must leave the funnel",
+            ScanDiagnostics.problemSenders(s).isEmpty());
+        List<ScanDiagnostics.SenderHit> all = ScanDiagnostics.inboxSenders(rows(
+            row(CARTABCC, cartabccSpend(System.currentTimeMillis())),
+            row(CARTABCC, cartabccSpend(System.currentTimeMillis() - 1000)),
+            row(UNKNOWN_1, "card purchase 45,000 T")));
+        assertEquals("every sender, read or not", 2, all.size());
+        assertEquals("most messages first", CARTABCC, all.get(0).sender);
+        assertEquals(CARTABCC, all.get(0).bank);
+        assertEquals(2, all.get(0).messages);
+        assertEquals("how many of its messages the app reads", 2, all.get(0).read);
+        assertEquals(2, all.get(0).stored.size());
+        assertEquals(UNKNOWN_1, all.get(1).sender);
+        assertEquals("an unknown sender names no bank", null, all.get(1).bank);
+        assertEquals(0, all.get(1).read);
+    }
+
+    @Test public void inboxSenders_emptyInbox_isEmpty() {
+        assertTrue(ScanDiagnostics.inboxSenders(rows()).isEmpty());
+    }
+
+    @Test public void inboxSenders_senderWithoutAMessageNamingABankKeepsTheOneItHas() {
+        // A sender is one bank or none: an advertisement parsed first must not blank out the bank
+        // a later message from the same sender names.
+        List<ScanDiagnostics.SenderHit> all = ScanDiagnostics.inboxSenders(rows(
+            row(CARTABCC, CARTABCC_AD),
+            row(CARTABCC, cartabccSpend(System.currentTimeMillis()))));
+        assertEquals(1, all.size());
+        assertEquals(CARTABCC, all.get(0).bank);
+        assertEquals("one message read, one not", 1, all.get(0).read);
+    }
+
+    // ---- the issue taxonomy: one list, offered and reported through ----
+
+    @Test public void issues_coverEveryDetectionTheAppPerforms() {
+        java.util.Set<String> tags = new java.util.LinkedHashSet<>();
+        for (ScanDiagnostics.Issue i : ScanDiagnostics.ISSUES) {
+            assertNotNull(i.tag);
+            assertTrue("a duplicated category would report twice: " + i.tag, tags.add(i.tag));
+            assertTrue("an unlabelled category cannot be chosen: " + i.tag,
+                ctx.getString(i.label).trim().length() > 0);
+        }
+        assertEquals("every category is offered", ScanDiagnostics.ISSUES.length, tags.size());
+        // Each of these is a detection the app performs and can therefore get wrong, so each needs a
+        // way for a user to name it.
+        for (String required : new String[]{ScanDiagnostics.ISSUE_BALANCE,
+            ScanDiagnostics.ISSUE_MOVEMENT, ScanDiagnostics.ISSUE_ACCOUNT,
+            ScanDiagnostics.ISSUE_NUMBER, ScanDiagnostics.ISSUE_DATE,
+            ScanDiagnostics.ISSUE_DESCRIPTION, ScanDiagnostics.ISSUE_CHANNEL})
+            assertTrue("no category for " + required, tags.contains(required));
+    }
+
+    @Test public void senderSubject_namesAKnownBankInsteadOfCallingItUnrecognized() {
+        assertTrue(ScanDiagnostics.senderSubject("CartaBCC", CARTABCC).contains(CARTABCC));
+        assertTrue(ScanDiagnostics.senderSubject("CartaBCC", CARTABCC).contains("CartaBCC"));
+        assertTrue(!ScanDiagnostics.senderSubject(CARTABCC, CARTABCC)
+            .contains("unrecognized"));
+        assertTrue(ScanDiagnostics.senderSubject("+98x", null).contains("unrecognized"));
+    }
+
     // ---- analyze: counts and buckets ----
 
     @Test public void analyze_mixed_bucketsMessages() {
@@ -239,6 +355,28 @@ public class ScanDiagnosticsTest {
         assertTrue(!txt.contains("Balance detection"));
     }
 
+    @Test public void senderReport_statesWhatTheAppReadsFromTheSharedMessage() {
+        // The report carries the message text, and what the app made of it, so the maintainer can
+        // see the gap instead of re-deriving it. It is a reading, not a verdict: a statement whose
+        // amount and day are read while the merchant and time are not says exactly that.
+        List<ScanDiagnostics.Message> sel = new ArrayList<>();
+        sel.add(new ScanDiagnostics.Message(cartabccSpend(System.currentTimeMillis()),
+            System.currentTimeMillis()));
+        String txt = ScanDiagnostics.senderReport(CARTABCC, 1, sel,
+            java.util.Arrays.asList(ScanDiagnostics.ISSUE_MOVEMENT));
+        assertTrue(txt, txt.contains("Balance reads:"));
+        assertTrue("the amount the app took, at the currency's own scale", txt.contains("-66.80 EUR"));
+        assertTrue("and that it took no balance from it", txt.contains("no account number found"));
+        assertTrue("no balance is stated", !txt.contains("balance "));
+    }
+
+    @Test public void senderReport_saysNothingWhenTheSenderIsNotRecognized() {
+        List<ScanDiagnostics.Message> sel = new ArrayList<>();
+        sel.add(new ScanDiagnostics.Message("otp 123456", System.currentTimeMillis()));
+        String txt = ScanDiagnostics.senderReport("+98x", 1, sel);
+        assertTrue(txt, txt.contains("sender not recognized"));
+    }
+
     @Test public void senderReport_noIssues_omitsTheLine() {
         List<ScanDiagnostics.Message> sel = new ArrayList<>();
         sel.add(new ScanDiagnostics.Message("lay out 1,000 Toman", 1000L));
@@ -359,6 +497,9 @@ public class ScanDiagnosticsTest {
         InstrumentationRegistry.getInstrumentation().getUiAutomation()
                 .adoptShellPermissionIdentity(android.Manifest.permission.READ_SMS);
         exec("pm grant " + ctx.getPackageName() + " android.permission.READ_SMS");
+        // Both screens activate the engine before they read the inbox, so every classification here
+        // is made against the same rules the dashboard uses.
+        EngineRules.activate(ctx);
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, android.content.Context.MODE_PRIVATE).edit().clear().commit();
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, android.content.Context.MODE_PRIVATE).edit().clear().commit();
         clearInbox();
@@ -522,7 +663,7 @@ public class ScanDiagnosticsTest {
     }
 
     private void findChecks(android.view.View v, List<android.widget.CheckBox> out) {
-        if (v instanceof android.widget.CheckBox) out.add((android.widget.CheckBox) v);
+        if (v instanceof android.widget.CheckBox && v.isShown()) out.add((android.widget.CheckBox) v);
         if (v instanceof android.view.ViewGroup) {
             android.view.ViewGroup g = (android.view.ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) findChecks(g.getChildAt(i), out);

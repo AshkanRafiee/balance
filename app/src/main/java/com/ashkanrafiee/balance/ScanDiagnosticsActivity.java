@@ -155,6 +155,11 @@ public final class ScanDiagnosticsActivity extends Activity {
 
     private void readInBackground() {
         new Thread(() -> {
+            // The same activation the scan performs before it reads the inbox. Deciding what the
+            // app makes of a message must not depend on a scan having happened first: without this,
+            // a bank only a community pack covers looks unrecognized here while the dashboard
+            // already shows its balances.
+            EngineRules.activate(getApplicationContext());
             List<Object[]> rows = new ArrayList<>();
             try (android.database.Cursor cursor = getContentResolver().query(
                     Telephony.Sms.Inbox.CONTENT_URI,

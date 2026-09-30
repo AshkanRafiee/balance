@@ -180,6 +180,13 @@
     <string name="scan_diag_none_skipped">Every message is recognized — nothing to report.</string>
     <string name="scan_diag_open_sender">Report sender %1$s</string>
     <string name="scan_diag_privacy">Nothing leaves this device unless you copy it or send it yourself.</string>
+    <string name="sender_picker_entry">Choose any sender</string>
+    <string name="sender_picker_entry_hint">Balance reads some messages only in part — it may show the amount but not the payee, the date, or the account. If something in a message it already reads is wrong or missing, pick the sender here.</string>
+    <string name="sender_picker_title">Report a sender</string>
+    <string name="sender_picker_search">Search sender</string>
+    <string name="sender_picker_hint">Every sender in your inbox, whether or not Balance recognizes it. Tap one to choose which messages to share — nothing is sent until you confirm.</string>
+    <string name="sender_picker_none">No sender matches that search.</string>
+    <string name="sender_picker_no_messages">There are no messages on this device.</string>
 
     <string name="sender_share_note">%1$d SMS from this sender — tick the samples to include.</string>
     <string name="sender_share_known_bank">Known bank: %1$s</string>
@@ -196,6 +203,10 @@
     <string name="sender_share_issue_title">What\'s wrong with this sender? (choose at least one)</string>
     <string name="sender_share_issue_account">Account detection</string>
     <string name="sender_share_issue_balance">Balance detection</string>
+    <string name="sender_share_issue_movement">Movement detection</string>
+    <string name="sender_share_issue_date">Date detection</string>
+    <string name="sender_share_issue_description">Payee description detection</string>
+    <string name="sender_share_issue_channel">Channel detection</string>
     <string name="sender_share_issue_number">Sender number detection</string>
 
     <string name="history_title">History</string>

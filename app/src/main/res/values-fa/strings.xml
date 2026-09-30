@@ -180,6 +180,13 @@
     <string name="scan_diag_none_skipped">همه‌ٔ پیامک‌ها شناخته‌شده‌اند — چیزی برای گزارش نیست.</string>
     <string name="scan_diag_open_sender">گزارش فرستندهٔ %1$s</string>
     <string name="scan_diag_privacy">هیچ داده‌ای از این دستگاه خارج نمی‌شود، مگر اینکه خودتان آن را کپی یا ارسال کنید.</string>
+    <string name="sender_picker_entry">انتخاب هر فرستنده</string>
+    <string name="sender_picker_entry_hint">برنامه بعضی پیام‌ها را فقط بخشی می‌خواند — ممکن است مبلغ را نشان دهد اما عنوان پرداخت، تاریخ یا شمارهٔ حساب را نه. اگر چیزی در پیامی که همین حالا هم می‌خواند اشتباه یا ناقص است، فرستنده را از اینجا انتخاب کنید.</string>
+    <string name="sender_picker_title">گزارش یک فرستنده</string>
+    <string name="sender_picker_search">جست‌وجوی فرستنده</string>
+    <string name="sender_picker_hint">همهٔ فرستنده‌های صندوق پیام، چه شناخته‌شده چه ناشناخته. روی هرکدام بزنید تا پیام‌هایی را که می‌خواهید بفرستید انتخاب کنید — تا وقتی خودتان تأیید نکنید چیزی ارسال نمی‌شود.</string>
+    <string name="sender_picker_none">هیچ فرستنده‌ای با این جست‌وجو پیدا نشد.</string>
+    <string name="sender_picker_no_messages">روی این دستگاه پیامی وجود ندارد.</string>
 
     <string name="sender_share_note">%1$d پیامک از این فرستنده — نمونه‌هایی را که می‌خواهید در گزارش باشند علامت بزنید.</string>
     <string name="sender_share_known_bank">بانک شناخته‌شده: %1$s</string>
@@ -196,6 +203,10 @@
     <string name="sender_share_issue_title">مشکل این فرستنده چیست؟ (دست‌کم یکی را انتخاب کنید)</string>
     <string name="sender_share_issue_account">تشخیص حساب</string>
     <string name="sender_share_issue_balance">تشخیص موجودی</string>
+    <string name="sender_share_issue_movement">تشخیص تراکنش</string>
+    <string name="sender_share_issue_date">تشخیص تاریخ</string>
+    <string name="sender_share_issue_description">تشخیص عنوان پرداخت</string>
+    <string name="sender_share_issue_channel">تشخیص کانال</string>
     <string name="sender_share_issue_number">تشخیص شمارهٔ فرستنده</string>
 
     <string name="history_title">تاریخچه</string>
