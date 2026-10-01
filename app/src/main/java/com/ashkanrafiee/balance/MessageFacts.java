@@ -1,9 +1,11 @@
 package com.ashkanrafiee.balance;
 
 import com.ashkanrafiee.balance.parser.Parser;
+import com.ashkanrafiee.balance.parser.Rules;
 
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.List;
 
 /** One bank message reduced to exactly what storage needs: the bank, the account, the stated
  *  balance, the settled movement, and the event time. The scan and history paths used to call
@@ -55,6 +57,16 @@ final class MessageFacts {
      *  grouping and every Iranian screen have always been able to speak of one currency. */
     final String movementCurrency;
 
+    /** True when a pack read this message, which is the only place a per-field verdict exists at
+     *  all: the legacy reducers state no fields, so a message they read can only be said to have
+     *  been read, never in part. */
+    final boolean engineRead;
+    /** True when the pack that read this message asked for an account and could not resolve one,
+     *  so what the app published is money without the identity the bank states it belongs to. The
+     *  pack is the only thing that knows, and only it can say "asked for" — a message of a pack that
+     *  asks for no account is a whole read of a message that states none, not a partial one. */
+    final boolean accountUnresolved;
+
     static final long NO_BALANCE = -1;
 
     private MessageFacts(String bank, String account, long balance, Long movement, long time) {
@@ -68,6 +80,13 @@ final class MessageFacts {
 
     private MessageFacts(String bank, String account, long balance, Long movement, long time,
             String balanceCurrency, String movementCurrency, Long packedTime) {
+        this(bank, account, balance, movement, time, balanceCurrency, movementCurrency, packedTime,
+            false, false);
+    }
+
+    private MessageFacts(String bank, String account, long balance, Long movement, long time,
+            String balanceCurrency, String movementCurrency, Long packedTime, boolean engineRead,
+            boolean accountUnresolved) {
         this.bank = bank;
         this.account = account;
         this.balance = balance;
@@ -76,6 +95,8 @@ final class MessageFacts {
         this.balanceCurrency = balanceCurrency == null ? BalanceData.IRR : balanceCurrency;
         this.movementCurrency = movementCurrency == null ? BalanceData.IRR : movementCurrency;
         this.packedTime = packedTime;
+        this.engineRead = engineRead;
+        this.accountUnresolved = accountUnresolved;
     }
 
     /** The arrival-independent reduction: stated balance, settled movement, and the account the
@@ -116,7 +137,7 @@ final class MessageFacts {
             if (packed != null)
                 return new MessageFacts(packed.bank, packed.account, packed.balance, packed.movement,
                     eventTime(body, arrival, packed), packed.balanceCurrency, packed.movementCurrency,
-                    packed.packedTime);
+                    packed.packedTime, true, packed.accountUnresolved);
         }
         String bank = BankRules.resolve(sender);
         if (bank == null || !RecognitionHelper.isEnabled(bank))
@@ -224,7 +245,41 @@ final class MessageFacts {
         // in, and a rial there would file a euro movement under a rial account.
         if (balance == NO_BALANCE) balanceCurrency = movementCurrency;
         return new MessageFacts(name, account, balance, movement, 0, balanceCurrency, movementCurrency,
-            packedTime);
+            packedTime, true, accountLost(engine, sender, result));
+    }
+
+    /** Whether a fact's account went missing although the pack asked for one.
+     *
+     *  <p>A fact states no account in two different ways, and only one of them is something the
+     *  reader should be told about. An output that declares an account and could not read it lost
+     *  the identity its money belongs to. An output that declares no account at all read the
+     *  message whole -- a community card statement that simply carries no account number is not a
+     *  partial read -- so the declaration is asked of the rules rather than inferred from the null.
+     *  The fact names the template and output it came from, which is what makes the answer exact
+     *  instead of a guess about the pack as a whole. */
+    private static boolean accountLost(EngineRules engine, String sender, Parser.Result result) {
+        EngineRules.Bank covering = engine.covers(sender);
+        if (covering == null) return false;
+        for (Parser.Fact fact : result.facts())
+            if (fact.accountState() == Parser.AccountState.UNRESOLVED
+                    && accountLost(covering.templates, fact))
+                return true;
+        return false;
+    }
+
+    /** Whether this one fact's output declared an account and the fact states none.
+     *
+     *  <p>Package-private so the answer can be held against the packs' own declarations: a fact
+     *  naming a shipped output that asks for an account did lose one, and a fact naming an output
+     *  that asks for none -- a community card statement -- did not. */
+    static boolean accountLost(List<Rules.Template> templates, Parser.Fact fact) {
+        for (Rules.Template template : templates) {
+            if (!template.id().equals(fact.provenance().templateId())) continue;
+            for (Rules.Output output : template.outputs())
+                if (output.id().equals(fact.provenance().outputId()) && output.account() != null)
+                    return true;
+        }
+        return false;
     }
 
     /** The engine only ever sees this synthetic source id: the seam identifies a message by its

@@ -1,6 +1,7 @@
 package com.ashkanrafiee.balance;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,7 +29,14 @@ import java.util.Map;
  *  <p>
  *  The last two groups are the contribution funnel: the user picks which senders to include and
  *  copies or emails a report of the exact texts. Nothing is persisted — a summary is assembled on
- *  demand and leaves the device only through the user's own copy/send actions. */
+ *  demand and leaves the device only through the user's own copy/send actions.
+ *
+ *  <p>The {@link Outcome} tally answers the other half of that question, the one the funnel above
+ *  cannot: not whether a message reached the stored balances, but <em>why</em> it did or did not.
+ *  The funnel lumps "read whole" and "read in part" into one recognized count, and lumps a bank's
+ *  own advertisement in with a format nobody has seen yet; the five outcomes keep those apart, and
+ *  every message lands in exactly one of them. It is a second dimension alongside the funnel, not a
+ *  correction of it: the counts, buckets and samples above are decided exactly as they were. */
 final class ScanDiagnostics {
     private ScanDiagnostics() { }
 
@@ -106,6 +114,84 @@ final class ScanDiagnostics {
         }
     }
 
+    /** What the app made of one message, which is not the question the funnel above answers: a
+     *  message that yielded a balance and a message that yielded a balance without its account or
+     *  its merchant both count as "recognized" today. Exactly one outcome holds per message, and
+     *  the tally is derived from the engine's own verdict for it plus the reader's own bank
+     *  settings — never from the stored result, which cannot tell a whole read from a partial one.
+     *  <ul>
+     *    <li>{@link #PARSED} — the app read it. Either a pack reported {@code PARSED} and resolved
+     *        every declared field, or the legacy reducers read it, which state no fields at all and
+     *        so cannot be said to have left any of them out.</li>
+     *    <li>{@link #PARTIAL} — read, but in part: the pack's own rules ask for an account and it
+     *        published money without one, so the number the reader sees is there and the identity
+     *        the bank states it belongs to is not. Only that counts: a message of a pack that asks
+     *        for no account states none and is read whole, and a date the pack fell back to its
+     *        arrival is stated openly by the pack rather than lost by it.</li>
+     *    <li>{@link #UNSUPPORTED} — the app claims this sender for a bank, and this message's
+     *        layout is not one it reads: an advertisement, a new wording, a message the pack's
+     *        guards reject. A known bank, an unread message.</li>
+     *    <li>{@link #IGNORED} — a bank the reader turned off in the bank-recognition settings. A
+     *        format the reader declined is not a format the app failed to read, so this is never
+     *        counted as a gap.</li>
+     *    <li>{@link #UNKNOWN} — nothing in the app claims this sender at all.</li>
+     *  </ul> */
+    enum Outcome { PARSED, PARTIAL, UNSUPPORTED, IGNORED, UNKNOWN }
+
+    /** One name behind an outcome tally and how many messages carry that outcome under it: the
+     *  bank for every outcome but {@link Outcome#UNKNOWN}, which only the sender can name. Never a
+     *  message body — those stay with the sender that sent them, in the funnel's own samples. */
+    static final class NameCount {
+        final String name;
+        final int messages;
+        NameCount(String name, int messages) { this.name = name; this.messages = messages; }
+    }
+
+    /** One outcome's share of the inbox: how many messages carry it and which banks (or senders)
+     *  sit behind it, enough for a screen to draw a row per outcome without a second pass. The
+     *  names are counted while the inbox streams past and ordered once at the end, and a tally
+     *  exists only for an outcome the inbox actually produced. */
+    static final class Tally {
+        final Outcome outcome;
+        /** Messages with this outcome. */
+        int messages;
+        /** Distinct names behind them. */
+        int keys;
+        /** The names with their counts, most messages first, ties broken by name so the order does
+         *  not depend on the order the inbox happened to arrive in. */
+        final List<NameCount> names = new ArrayList<>();
+        private final Map<String, int[]> counts = new LinkedHashMap<>();
+
+        Tally(Outcome outcome) { this.outcome = outcome; }
+
+        /** One message, named by {@code name}: a bank for every outcome but
+         *  {@link Outcome#UNKNOWN}, which only the sender behind it can name. */
+        void add(String name) {
+            messages++;
+            if (name == null) return;
+            int[] c = counts.get(name);
+            if (c == null) counts.put(name, new int[]{1});
+            else c[0]++;
+        }
+
+        /** How many of this outcome's messages the named bank (or sender) holds. */
+        int messagesOf(String name) {
+            int[] c = counts.get(name);
+            return c == null ? 0 : c[0];
+        }
+
+        /** Orders the names for display. Called exactly once, after the whole inbox was classified. */
+        void sortNames() {
+            keys = counts.size();
+            List<Map.Entry<String, int[]>> sorted = new ArrayList<>(counts.entrySet());
+            sorted.sort((a, b) -> a.getValue()[0] != b.getValue()[0]
+                    ? Integer.compare(b.getValue()[0], a.getValue()[0])
+                    : a.getKey().compareTo(b.getKey()));
+            for (Map.Entry<String, int[]> e : sorted)
+                names.add(new NameCount(e.getKey(), e.getValue()[0]));
+        }
+    }
+
     static final class Summary {
         int messages, parsedMessages;
         int unparsedMessages() { return unknownSendersMessages + unparsedSendersMessages; }
@@ -117,12 +203,31 @@ final class ScanDiagnostics {
         final List<BankHit> banks = new ArrayList<>();
         final List<SenderHit> unknownSenders = new ArrayList<>();
         final List<SenderHit> unparsedSenders = new ArrayList<>();
+
+        /** One tally per outcome, indexed by {@link Outcome#ordinal()}, built on first use so an
+         *  outcome the inbox never produces costs nothing. */
+        private final Tally[] tallies = new Tally[Outcome.values().length];
+
+        /** The tally for one outcome; empty, never null, when no message carries it. */
+        Tally outcome(Outcome o) {
+            Tally t = tallies[o.ordinal()];
+            if (t == null) tallies[o.ordinal()] = t = new Tally(o);
+            return t;
+        }
+
+        /** Every outcome in declaration order, each with its count, so a screen can draw one row
+         *  per outcome whether or not the inbox holds a message of that kind. */
+        List<Tally> outcomes() {
+            for (Outcome o : Outcome.values()) outcome(o);
+            return Arrays.asList(tallies);
+        }
     }
 
     /** Splits inbox rows ({sender, body, date}) into parsed messages, known-bank senders with
      *  unparsed content, and wholly unknown senders — counting messages and keeping, for every
      *  problem sender, its newest messages (newest first, capped). All lists come back sorted by
-     *  message count, highest first. */
+     *  message count, highest first. Every message is also classified into one {@link Outcome} in
+     *  the same pass, so no inbox row is read twice. */
     static Summary analyze(List<Object[]> rows) {
         Summary s = new Summary();
         Map<String, int[]> banks = new LinkedHashMap<>();
@@ -136,13 +241,20 @@ final class ScanDiagnostics {
             String sender = row[0] == null ? "" : (String) row[0];
             String body = row[1] == null ? "" : (String) row[1];
             long date = row.length > 2 && row[2] != null ? (Long) row[2] : 0L;
+            long arrival = Math.min(date, now);
             // One reduction decides the sender and the content, so this screen can never claim a
             // message the scan would have read -- or the reverse. Going through the legacy tables
             // alone would have called every bank a community pack covers an unknown sender, because
             // the legacy sender table has only ever known Iranian banks.
-            MessageFacts facts = MessageFacts.of(sender, body, Math.min(date, now));
+            MessageFacts facts = MessageFacts.of(sender, body, arrival);
             String bank = facts == null ? null : facts.bank;
             boolean read = bank != null && (facts.balance >= 0 || facts.movement != null);
+            // Asked before the funnel is, so the outcome tally and the buckets below agree on who
+            // owns the message; it is the same question for both, and a pack that covers the sender
+            // is asked first exactly as senderBank() asks it.
+            if (!read && bank == null) bank = senderBank(sender);
+            boolean turnedOff = bank != null && !RecognitionHelper.isEnabled(bank);
+            classify(s, sender, facts, bank, turnedOff);
             if (read) {
                 s.parsedMessages++;
                 int[] c = banks.get(bank);
@@ -151,11 +263,10 @@ final class ScanDiagnostics {
             }
             // Nothing was read here, which is not the same as a sender the app has never heard of:
             // a pack can cover the sender and simply not match this wording.
-            if (bank == null) bank = senderBank(sender);
             if (bank == null) {
                 s.unknownSendersMessages++;
                 add(unknown, sender, null, body, date);
-            } else if (!RecognitionHelper.isEnabled(bank)) {
+            } else if (turnedOff) {
                 // The reader asked not to read this bank, so this message is not evidence of
                 // anything the app got wrong. Naming the bank and leaving it out of both lists keeps
                 // the screen honest in both directions: not "unknown sender" either.
@@ -170,7 +281,61 @@ final class ScanDiagnostics {
         for (Map.Entry<String, int[]> e : bl) s.banks.add(new BankHit(e.getKey(), e.getValue()[0]));
         s.unknownSenders.addAll(sortedHits(unknown));
         s.unparsedSenders.addAll(sortedHits(unparsed));
+        for (Tally t : s.outcomes()) t.sortNames();
         return s;
+    }
+
+    /** Adds one analyzed message to the single {@link Outcome} it belongs to. The questions are
+     *  asked in the only order that cannot contradict itself, and each is answered by the one
+     *  reduction the scan itself uses, so this screen can never call a message read that the scan
+     *  would not have read -- or the other way round:
+     *  <ol>
+     *    <li><b>Did the reader turn this bank off?</b> Then the message was never this app's to
+     *        read, whatever the engine would have made of it, and the answer is
+     *        {@link Outcome#IGNORED}. The bank is the one the funnel resolved through
+     *        {@link #senderBank} -- a loaded pack that covers the sender first, the legacy sender
+     *        table for the banks that shipped before packs -- which is the same name
+     *        {@link RecognitionHelper#isEnabled} is keyed by, so a packed bank and a legacy one are
+     *        held to the reader's choice alike.</li>
+     *    <li><b>Did a pack read it?</b> {@link MessageFacts#engineRead} is the engine's own verdict
+     *        on this message, and the only place a per-field one exists: the legacy reducers state
+     *        no fields. A pack's read is {@link Outcome#PARTIAL} when it published money without the
+     *        account its own rules asked for ({@link MessageFacts#accountUnresolved}) and
+     *        {@link Outcome#PARSED} otherwise.</li>
+     *    <li><b>Otherwise, what read it?</b> The legacy reducers state no fields, so a message they
+     *        read is {@link Outcome#PARSED} and nothing more. If nothing read it, a known bank makes
+     *        it {@link Outcome#UNSUPPORTED} -- a format the app has and this message is not -- and
+     *        no bank at all makes it {@link Outcome#UNKNOWN}.</li>
+     *  </ol>
+     *  A bank is known here exactly when {@link #senderBank} says so, which is what makes "a bank
+     *  Balance claims, a layout it does not read" reachable for a bank only a community pack ships
+     *  and not only for the ones in the legacy table.
+     *
+     *  <p>The verdict is read off the reduction rather than asked of the engine a second time: the
+     *  packs are the only record of what a message said, but they keep no record of it afterwards,
+     *  and a screen that re-parsed the inbox to answer a question the scan had already answered
+     *  would pay for every message twice. */
+    private static void classify(Summary s, String sender, MessageFacts facts, String bank,
+            boolean turnedOff) {
+        Outcome outcome = outcomeFor(turnedOff, facts.engineRead, facts.accountUnresolved,
+            facts.bank != null && (facts.balance >= 0 || facts.movement != null), bank != null);
+        s.outcome(outcome).add(bank == null ? sender : bank);
+    }
+
+    /** The one decision every message makes, taken apart so each answer can be held on its own:
+     *
+     *  @param turnedOff whether the reader turned this bank off, which outranks everything else: a
+     *      message nobody asked to be read was never unread
+     *  @param engineRead whether a pack read it, the only reading that says in part or not
+     *  @param accountUnresolved whether that pack asked for an account and published none
+     *  @param legacyRead whether the legacy reducers took something from it, which states no fields
+     *  @param bankKnown whether a loaded pack or the legacy table names a bank for the sender */
+    static Outcome outcomeFor(boolean turnedOff, boolean engineRead, boolean accountUnresolved,
+            boolean legacyRead, boolean bankKnown) {
+        if (turnedOff) return Outcome.IGNORED;
+        if (engineRead) return accountUnresolved ? Outcome.PARTIAL : Outcome.PARSED;
+        if (legacyRead) return Outcome.PARSED;
+        return bankKnown ? Outcome.UNSUPPORTED : Outcome.UNKNOWN;
     }
 
     /** Every sender the inbox holds, with the bank Balance attributes it to (null when none), how
