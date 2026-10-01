@@ -1,16 +1,23 @@
-# Portable rules — prototype format
+# Portable rules
 
-These documents explore the format for future bundled and local rules. They are
-**not loaded by the app**, and `prototype-1` is not a stable contribution/import
-API. No real bank support is claimed by the synthetic examples.
+A pack is one bank's reading rules as a single JSON file. `rules/app/**` is the
+asset root `app/build.gradle` adds to the APK, so those packs **are loaded by the
+app** — `EngineRules` reads every `rules/app/<region>/<bank-id>/pack.json` and
+answers from them — and `rules/examples/**` is the asset root the instrumented
+tests read the examples below from. The examples stay synthetic: no real bank
+support is claimed by them.
 
-- [Draft schema](schema/bank-pack-prototype-1.schema.json)
+Every pack, shipped or written on the device, declares `"schema": "prototype-1"`.
+
+- [Pack schema](schema/bank-pack-prototype-1.schema.json)
 - [Two-currency example](examples/multi-currency/pack.json)
 - [Synthetic expected outputs](examples/multi-currency/fixtures.json)
 - [Synthetic Iranian-style pack](examples/iranian-prototype/pack.json) and
   [fixtures](examples/iranian-prototype/fixtures.json)
+- [Synthetic international pack](examples/international/pack.json) and
+  [fixtures](examples/international/fixtures.json)
+- [Raw JSON acceptance corpus](examples/json-acceptance/cases.json)
 - [Executable core contract](../parser-core/CONTRACT.md)
-- [Iranian compatibility inventory](../docs/parser-compatibility-inventory.md)
 
 ## Reading the example
 
@@ -120,15 +127,48 @@ if real messages were seen. The current records say `legacy-tables` with both
 flags set for the Iranian packs, and `reported-messages` with no market reviewer
 for the Italian one, which is exactly how much is known about each.
 
-## Planned publication layout
+## Shipped layout
 
-Reviewed packs will live under `official/<COUNTRY>/<bank-id>/` or
-`community/<COUNTRY>/<bank-id>/`, with positive and negative synthetic fixtures.
-Maintenance source is assigned by the bundled catalog, not trusted from a field
-inside an imported document. Promotion must preserve stable IDs. Community packs
-will be opt-in. Local imports get private identities and cannot replace bundled
-authority merely by copying its IDs.
+```
+rules/app/index.json                      the shipped regions, in the order they register
+rules/app/<region>/catalog.json           that region's banks, their senders and review records
+rules/app/<region>/<bank-id>/pack.json    the pack itself
+rules/app/<region>/<bank-id>/fixtures.json
+```
 
-The next design checkpoint must resolve Iranian primitive/calendar compatibility,
-the strict codec, stable occurrence/output lineage, and measured storage budgets.
-Do not add production packs until those contracts are validated.
+Two regions cannot both put a catalog at the asset root, so the catalogs live one
+level down and the index at the root lists the regions instead. `EngineRules`
+reads that index, then loads each region's `catalog.json` and every bank pack
+under it, in catalog order — the order the sender index registers them in, so
+registration never depends on map iteration order.
+
+A region is a grouping for the settings screen and nothing more. Nothing here
+treats an official pack as more trusted than a community one: each pack states
+its own country and where it came from, and both are read the same way. Two
+regions ship today: `ir-official`, with 43 Iranian banks, and `it-community`,
+with one bank a reader contributed after reporting its messages.
+
+Adding a region is a new directory under `rules/app` plus its name in
+`index.json`, and nothing else.
+
+Two rules govern what a new pack may claim:
+
+- A bank id is unique across every region. Two regions shipping one id fail the
+  load instead of letting the sender index and the id lookup disagree about which
+  pack is which.
+- A sender two regions claim belongs to the region listed first in `index.json`,
+  and a sender the legacy Iranian table claims belongs to that table's bank
+  however late its region is listed.
+
+One catalog entry, `ir.tosee-credit-inst`, ships its files but is not loaded: the
+legacy unpacked tables already own that bank, so its messages are read once.
+
+## Packs on the device
+
+A pack you write in the app or bring in as a file is stored on the device, in
+app-private no-backup storage, so it never leaves the phone with a backup and
+never travels with one either. It is composed with the shipped packs under one
+rule: bundled packs register first, so an imported pack never takes a sender a
+shipped pack already claims, and among local packs the first in id order wins. A
+pack's stated origin only labels it — it decides what the settings screen calls
+it, never whether it is loaded or how well it parses.

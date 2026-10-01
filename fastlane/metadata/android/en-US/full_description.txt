@@ -1,11 +1,9 @@
 Balance reads your bank's balance SMS on the phone and shows the latest balance for every supported bank — split per account number when the bank states one — plus the combined total. No account, no cloud, no analytics and no internet permission: the parsing happens on your device, and your financial data stays there, encrypted.
 
-Iranian banks ship with the app; other banks are added from user reports.
+Iranian banks ship with the app, plus a rule other readers wrote for an Italian bank; others are added from user reports.
 
 Features:
-- A first-run introduction explaining what is read and why, asking for SMS access in context; skippable, and re-openable from About
-- Offline SMS parsing, with no network request made at any point
-- Latest balance per bank, split per account when stated, without counting the same message twice
+- If your bank isn't recognized, paste one of its messages, select the amount, balance and date inside it, and Balance writes the rule, tries it on that same message and shows what it read. It stays on your phone; nothing is sent anywhere unless you choose to send it for review
 - A combined total, with any account you like left out of it
 - The currency shown next to every amount: Toman (default), Rial as stored, or a custom name
 - Balances masked by default for privacy, hidden again on every open
@@ -26,6 +24,6 @@ Features:
 - Choose which banks Balance reads: turn one off and its messages are left alone, keeping every balance and history entry already recorded, and picking them back up when you switch it on
 - A full reset in the data menu, confirmed twice, with the option to delete your notes as well
 
-Free and open source. If your bank's messages are not recognized, or a balance or account looks wrong, telling us — through the issue tracker, the Report screen or email — is the fastest way to get it added.
+Free and open source. If a balance, account or history entry looks wrong, telling us — through the issue tracker, the Report screen or email — is the fastest way to get it right.
 
 If Balance is useful to you, you can support its development: donation options are in the project readme at https://github.com/AshkanRafiee/balance#donate

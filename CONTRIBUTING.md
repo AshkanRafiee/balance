@@ -58,11 +58,34 @@ We integrate reported bank formats into the next update either way.
 
 ## Contributing a rule for a bank we do not read yet
 
-If you can tell us what a bank's messages mean, you can skip the report route.
-**Banks and rules → your packs** on the main screen lists the packs you have
-added yourself, and each one can be exported as a file you attach to a GitHub
-issue or pull request. Balance has no internet permission: the file goes
-wherever you send it, and nowhere else.
+If you can tell us what a bank's messages mean, you can skip the report route
+entirely and write the rule yourself.
+
+**The easiest route needs no file at all: build the pack in the app.** Open
+**Display → Banks Balance reads → Your own packs** and tap
+**Write a rule for your bank**. Nothing leaves the phone while you do this: the
+message you paste, the rule you are writing and the test run all happen on the
+device, and the rule is stored there. The steps mirror the screen's own:
+
+1. **Paste one message** from the bank.
+2. **Who sent it** — the sender exactly as it appears in your messaging app,
+   plus the name you want the bank to have in Balance.
+3. **What the message says** — balance only, a deposit or a withdrawal, or both.
+   Choosing "Balance cannot read this message" is the way to say so in Balance's
+   own terms: no rule is built and nothing is installed.
+4. **Highlight the parts** — select the amount, the balance, the date (and the
+   account number, if the message carries one) in the pasted text and tap Set.
+5. **Which way the money moves**, whether the date is Persian or Gregorian and
+   whether it carries a time, and any whole line the rule must ignore.
+6. **Test this rule** — Balance reads that same message with the new rule and
+   tells you what it got, so a wrong reading is yours to fix first.
+7. **Install on this device**, or **Send it for review** — which first shows
+   you exactly what would be sent, and only then hands it to the app you pick.
+
+Everything you have written or imported is listed in that same **Your own packs**
+screen, and each pack can be exported as a file you attach to a GitHub issue or
+pull request. Balance has no internet permission: the file goes wherever you
+send it, and nowhere else.
 
 A pack that reads correctly is worth more than a description of a message, and
 what makes it reviewable is included in the pack itself: the sender, the layout,
@@ -164,6 +187,36 @@ Always include:
 - If the issue involves balances or history, try the data reset described in
   “Before you report: try resetting the data” above, and tell us whether the
   problem survived it.
+
+## Checks you can run yourself
+
+Every check the pull-request workflow runs also runs on your machine, and none
+of them downloads rules or needs a secret. The parser side needs a JDK (the
+workflow uses Temurin 21) and Python 3 on your PATH; the app checks also need an
+Android SDK with platform 36 and build-tools 36.0.0.
+
+- **`./gradlew :parser-core:check`** — the whole rule side in one command:
+  the executable parser suites, every pack and every example in the repository
+  decoded and run through them, and the Iranian catalog compared against the
+  behaviour it replaced. This is the gate any change to a rule, a catalog or an
+  example has to pass, and it already runs the Python tool tests below.
+- **`python3 -B tools/test_generate_ir_catalog.py`** — the generator that authors
+  the shipped Iranian bank list from the frozen tables behind it, so the list
+  cannot drift by transcription.
+- **`python3 -B tools/test_read_official_pack.py`** — the strict reader the
+  official-pack gate hands documents to: it rejects duplicate keys, malformed
+  and oversized documents, and any pack that disagrees with the shipped
+  catalog.
+- **`python3 -B tools/test_read_rule_examples.py`** — the same strict reading for
+  the repository's rule examples.
+
+The app side is built and linted the way the workflow builds it:
+
+- **`./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug`**
+
+**Instrumented Android tests need a connected device or emulator, so they are
+not part of CI** — they run on an emulator before a release. Everything above
+runs without a phone.
 
 ## What happens next
 
