@@ -92,6 +92,14 @@ public final class LocalPacksActivity extends ThemedScreenActivity {
             body.addView(broken, margin(2, dp(18), 2, dp(10)));
         }
 
+        // Writing a rule comes first: it is the route for a bank whose messages Balance does not
+        // read yet, and it needs no file at all -- just one message.
+        LinearLayout write = cardRow();
+        write.addView(text(getString(R.string.builder_entry), 15, accent),
+            new LinearLayout.LayoutParams(0, -2, 1));
+        body.addView(write, margin(0, dp(18), 0, 0));
+        write.setOnClickListener(v -> startActivity(new Intent(this, RuleBuilderActivity.class)));
+
         LinearLayout add = cardRow();
         add.addView(text(getString(R.string.local_packs_import), 15, accent),
             new LinearLayout.LayoutParams(0, -2, 1));

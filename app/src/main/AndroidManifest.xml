@@ -20,6 +20,7 @@
         <activity android:name=".SenderPickerActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity android:name=".BankRecognitionActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity android:name=".LocalPacksActivity" android:screenOrientation="portrait" android:exported="false" />
+        <activity android:name=".RuleBuilderActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity android:name=".SharePreviewActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity android:name=".SenderShareActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity android:name=".HistoryActivity" android:screenOrientation="portrait" android:exported="false" />
