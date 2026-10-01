@@ -72,6 +72,23 @@ public final class PackDocument {
     public Bank bank() { return bank; }
     public List<Template> templates() { return templates; }
 
+    /** Two documents are the same pack when they say the same things: the same id, revision, bank
+     *  and templates, member for member. Import needs this to answer "is this the pack I already
+     *  hold, unchanged, or a different one wearing its name" without comparing JSON text, and an
+     *  encoder needs it to claim that what it wrote is what it read. */
+    @Override
+    public boolean equals(Object other) {
+        if (this == other) return true;
+        return other instanceof PackDocument document && id.equals(document.id)
+                && revision.equals(document.revision) && bank.equals(document.bank)
+                && templates.equals(document.templates);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id, revision, bank, templates);
+    }
+
     /** All invalid documents fail without exposing values, keys, IDs or nested causes. */
     public static PackDocument decode(Map<String, Object> document) {
         try {
