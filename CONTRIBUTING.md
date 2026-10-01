@@ -56,6 +56,34 @@ copy it or send it yourself.
 
 We integrate reported bank formats into the next update either way.
 
+## Contributing a rule for a bank we do not read yet
+
+If you can tell us what a bank's messages mean, you can skip the report route.
+**Banks and rules → your packs** on the main screen lists the packs you have
+added yourself, and each one can be exported as a file you attach to a GitHub
+issue or pull request. Balance has no internet permission: the file goes
+wherever you send it, and nowhere else.
+
+A pack that reads correctly is worth more than a description of a message, and
+what makes it reviewable is included in the pack itself: the sender, the layout,
+and the examples it must read and the ones it must leave alone. To be useful in a
+review, please also say:
+
+- **The sender** exactly as it shows on your phone.
+- **What the message is**, in plain words: the balance line, the amount, the
+  currency, and the date — including how the date is written.
+- **One message it must read and one it must not** (a payment confirmation that
+  should not become a movement is the usual one).
+- **That the examples may be shared**, with the real numbers replaced as
+  described above, if you would rather not publish them.
+- **Someone who uses that bank**, if you know one, confirming the rule reads
+  their own messages. We cannot test this part ourselves, and we say so in the
+  catalog rather than implying otherwise.
+
+We mark each rule with how it was built and who has seen it work, and a rule with
+only reader reports behind it is labelled that way until someone who uses the
+bank has checked it. Being submitted is not the same as being supported.
+
 ## Before you report: try resetting the data
 
 Some balance and history problems — wrong, missing or duplicated entries, most
