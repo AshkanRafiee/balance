@@ -55,9 +55,17 @@ public class RuleBuilderScreenTest {
 
     private Context ctx;
     private RuleDraftStore store;
+    /** The instance this test opened. Finishing a builder is asynchronous, so for a moment after a
+     *  launch the outgoing activity is still resumed next to the new one; addressing the tree by
+     *  "whatever is resumed" would then let a helper type into the wrong draft. */
+    private RuleBuilderActivity screen;
 
     @Before public void empty() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        // Order matters: closing a builder writes its draft back on the way out, so the store can
+        // only be emptied once nothing is left to write into it. Otherwise a draft from the
+        // previous test is restored into this one and the reader starts from someone else's rule.
+        finishAnyResumedBuilder();
         EngineRules.localStore(ctx).clear();
         store = new RuleDraftStore(ctx);
         store.clear();
@@ -65,7 +73,6 @@ public class RuleBuilderScreenTest {
         // the overlay would sit over the builder and every tap would land on the keypad. These tests
         // are about the builder; the lock has its own tests.
         LockManager.disable(ctx);
-        finishAnyResumedBuilder();
     }
 
     @After public void tidy() {
@@ -82,11 +89,18 @@ public class RuleBuilderScreenTest {
     }
 
     private void launch() {
+        launch(BODY);
+    }
+
+    /** The same, with a message of the test's own -- used where the message itself is the thing
+     *  being wrong. */
+    private void launch(String body) {
         Intent i = new Intent(ctx, RuleBuilderActivity.class);
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        InstrumentationRegistry.getInstrumentation().startActivitySync(i);
+        screen = (RuleBuilderActivity)
+                InstrumentationRegistry.getInstrumentation().startActivitySync(i);
         await(() -> messageField() != null, 20_000);
-        type(messageField(), BODY);
+        type(messageField(), body);
     }
 
     @Test public void everyStepIsOnScreen() {
@@ -114,6 +128,23 @@ public class RuleBuilderScreenTest {
         assertEquals("message that was not finished", store.read().get("body"));
     }
 
+    @Test public void reopensTheHighlightsTheReaderChose() {
+        launch();
+        tap(ctx.getString(R.string.builder_shape_both));
+        select(RuleDraft.Role.AMOUNT, "۱۲۰,۰۰۰");
+        select(RuleDraft.Role.BALANCE, "4,500,000");
+        // Leaving the screen writes the draft back; opening it again must put the reader where they
+        // were, not at the start of a rule they had already partly built.
+        screen = null;
+        finishAnyResumedBuilder();
+        launch();
+        assertNotNull("the amount must still be chosen",
+                text(ctx.getString(R.string.builder_selected, "۱۲۰,۰۰۰")));
+        assertNotNull("the balance must still be chosen",
+                text(ctx.getString(R.string.builder_selected, "4,500,000")));
+    }
+
+
     @Test public void doesNotPutTheMessageInSavedInstanceState() {
         launch();
         type(messageField(), "a bank message with 120,000 in it");
@@ -131,23 +162,45 @@ public class RuleBuilderScreenTest {
         assertNull(text(ctx.getString(R.string.builder_install)));
     }
 
-    @Test public void aRuleThatDoesNotReadTheExampleIsSaysSoAndIsNotInstalled() throws Exception {
+    @Test public void anAmountThatIsNotANumberIsRefusedRatherThanInstalled() throws Exception {
+        // A marketing SMS from the same sender: the reader highlights the word they thought held
+        // the amount, and the builder has to say that is not something a rule can read.
+        launch("تخفیف ویژه به همکاران ما");
+        select(RuleDraft.Role.AMOUNT, "همکاران");
+        fillBankAndSender();
+        assertNotNull("the problem must be named before anything is offered",
+                textContaining(ctx.getString(R.string.builder_problem_not_numeric, "همکاران")));
+        tap(ctx.getString(R.string.builder_test));
+        // Nothing to test, so nothing is tested and nothing is installed.
+        assertEquals(0, EngineRules.localStore(ctx).snapshot().size());
+    }
+
+    @Test public void aRuleIsInstalledOnlyAsItWasTested() throws Exception {
         launch();
-        // The amount is highlighted but the message says nothing about a bank, and the guard cannot
-        // match what the reader did highlight, so the engine will not read it.
+        tap(ctx.getString(R.string.builder_shape_both));
         select(RuleDraft.Role.AMOUNT, "۱۲۰,۰۰۰");
+        select(RuleDraft.Role.BALANCE, "4,500,000");
         fillBankAndSender();
         tap(ctx.getString(R.string.builder_test));
         awaitVerdict();
-        assertNotNull("a failing rule must say so in words",
-                text(ctx.getString(R.string.builder_test_not_working)));
-        // Asking to install it anyway installs nothing: the store is never reached.
+        assertNotNull("the rule must read the example before it can be installed", worked());
+        // Changing the rule after testing it invalidates the reading: a verdict belongs to the rule
+        // it was taken from, and installing on the strength of one would put on the device a rule
+        // that was never run against anything.
+        tap(ctx.getString(R.string.builder_direction_credit));
+        assertFalse("a verdict must not outlive the rule it was taken from", worked());
+        assertFalse("and neither must the failure it replaced", notWorked());
         tap(ctx.getString(R.string.builder_install));
-        assertEquals(0, EngineRules.localStore(ctx).snapshot().size());
+        assertEquals("nothing may be installed on a stale reading",
+                0, EngineRules.localStore(ctx).snapshot().size());
+        assertTrue("the draft survives a refused install", store.present());
     }
 
     @Test public void installingPutsTheRuleOnTheDevice() throws Exception {
         launch();
+        // The builder only asks for the parts the chosen shape needs, so a balance is a question the
+        // screen must be asked before it shows a row to answer it in.
+        tap(ctx.getString(R.string.builder_shape_both));
         select(RuleDraft.Role.AMOUNT, "۱۲۰,۰۰۰");
         select(RuleDraft.Role.BALANCE, "4,500,000");
         select(RuleDraft.Role.DATE, "1405/07/09");
@@ -156,7 +209,7 @@ public class RuleBuilderScreenTest {
         awaitVerdict();
         assertNotNull("the rule must read the example before it can be installed", worked());
         tap(ctx.getString(R.string.builder_install));
-        await(() -> !resumed().isEmpty(), 10_000);
+        await(() -> !store.present(), 15_000);
         // The store now holds a pack, and the engine composed it.
         LocalPackStore local = EngineRules.localStore(ctx);
         assertEquals(1, local.snapshot().packs().size());
@@ -188,7 +241,15 @@ public class RuleBuilderScreenTest {
         return cut > 0 ? words.substring(0, cut + 1) : words;
     }
 
-    private static TextView textStartingWith(String prefix) {
+    private TextView textContaining(String needle) {
+        TextView found = null;
+        for (TextView t : texts()) {
+            if (t.getText().toString().contains(needle)) found = t;
+        }
+        return found;
+    }
+
+    private TextView textStartingWith(String prefix) {
         TextView found = null;
         for (TextView t : texts()) {
             if (t.getText().toString().startsWith(prefix)) found = t;
@@ -200,7 +261,7 @@ public class RuleBuilderScreenTest {
         return fieldWith(ctx.getString(R.string.builder_message_hint));
     }
 
-    private static EditText fieldWith(String hint) {
+    private EditText fieldWith(String hint) {
         EditText found = null;
         for (EditText e : edits()) {
             if (hint.equals(String.valueOf(e.getHint()))) found = e;
@@ -229,11 +290,13 @@ public class RuleBuilderScreenTest {
         throw new AssertionError("no verdict after testing; on screen: " + onScreen);
     }
 
-    /** Selects a substring of the message the way a reader does: choose it, then press Set. */
+    /** Selects a substring of the message the way a reader does: choose it, then press Set. The
+     *  word is located in whatever is on screen, so a test may work from a message of its own. */
     private void select(RuleDraft.Role role, String word) {
-        int start = BODY.indexOf(word);
         EditText field = messageField();
         assertNotNull("no message field to select in", field);
+        int start = field.getText().toString().indexOf(word);
+        assertTrue("the message on screen does not contain " + word, start >= 0);
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
             field.requestFocus();
             field.setSelection(start, start + word.length());
@@ -246,7 +309,7 @@ public class RuleBuilderScreenTest {
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
     }
 
-    private static View tagged(String tag) {
+    private View tagged(String tag) {
         final View[] found = new View[1];
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
             for (Activity a : resumed()) found[0] = findTag(a.getWindow().getDecorView(), tag);
@@ -278,13 +341,13 @@ public class RuleBuilderScreenTest {
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
     }
 
-    private static TextView text(String label) {
+    private TextView text(String label) {
         TextView found = null;
         for (TextView t : texts()) if (label.equals(t.getText().toString())) found = t;
         return found;
     }
 
-    private static List<TextView> texts() {
+    private List<TextView> texts() {
         List<TextView> out = new ArrayList<>();
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
             for (Activity a : resumed()) collect(a.getWindow().getDecorView(), out);
@@ -292,7 +355,7 @@ public class RuleBuilderScreenTest {
         return out;
     }
 
-    private static List<EditText> edits() {
+    private List<EditText> edits() {
         List<EditText> out = new ArrayList<>();
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
             for (Activity a : resumed()) collectEdits(a.getWindow().getDecorView(), out);
@@ -320,7 +383,7 @@ public class RuleBuilderScreenTest {
      *  than of the activity: this is the exact path a backgrounded screen's text takes, so the
      *  privacy claim is checked against what the platform does rather than against our own memory
      *  of having set a flag. */
-    private static String savedStateText(String needle) {
+    private String savedStateText(String needle) {
         final String[] found = new String[1];
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
             for (Activity a : resumed()) {
@@ -338,11 +401,17 @@ public class RuleBuilderScreenTest {
         return found[0];
     }
 
-    private static List<Activity> resumed() {
+    /** The builders this class currently cares about: the one it launched, or -- before the first
+     *  launch, and in the teardown helpers -- every resumed one. */
+    private List<Activity> resumed() {
         List<Activity> out = new ArrayList<>();
-        for (Activity a : ActivityLifecycleMonitorRegistry.getInstance()
-                .getActivitiesInStage(Stage.RESUMED)) {
-            if (a instanceof RuleBuilderActivity) out.add(a);
+        if (screen != null) {
+            out.add(screen);
+        } else {
+            for (Activity a : ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(Stage.RESUMED)) {
+                if (a instanceof RuleBuilderActivity) out.add(a);
+            }
         }
         return out;
     }

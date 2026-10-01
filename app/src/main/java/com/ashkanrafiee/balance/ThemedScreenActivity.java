@@ -147,10 +147,15 @@ abstract class ThemedScreenActivity extends Activity {
 
     /** A section heading: small, bold, and in caps, like the headings on the other screens. */
     final void sectionLabel(String label, int l, int t, int r, int b) {
+        sectionLabel(body, label, l, t, r, b);
+    }
+
+    /** The same heading inside a column a screen rebuilds on its own. */
+    final void sectionLabel(LinearLayout parent, String label, int l, int t, int r, int b) {
         TextView v = text(label, 12, muted);
         v.setTypeface(null, Typeface.BOLD);
         v.setAllCaps(true);
-        body.addView(v, margin(l, t, r, b));
+        parent.addView(v, margin(l, t, r, b));
     }
 
     /** A tappable card, which is how every row on every screen in this app is drawn. */

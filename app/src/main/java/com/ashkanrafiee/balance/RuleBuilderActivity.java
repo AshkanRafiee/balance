@@ -51,6 +51,10 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
     private RuleDraftStore store;
     private EngineRules engine;
     private EditText message;
+    /** The part of the column below the highlights: what is still missing, what the last test said,
+     *  and the two buttons. It is rebuilt on its own when the reader types, so the screen keeps
+     *  answering the question they are in the middle of asking. */
+    private LinearLayout tail;
     private final List<RuleDraftTester.Verdict> verdicts = new ArrayList<>();
 
     @Override
@@ -107,16 +111,35 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
         body.addView(typeBox(), margin(0, 0, 0, 12));
 
         if (draft.shape == RuleDraft.Shape.UNSUPPORTED) {
-            body.addView(note(getString(R.string.builder_unsupported_note)), margin(2, 0, 2, 16));
+            body.addView(note(getString(R.string.builder_unsupported_note)),
+                    margin(2, 0, 2, 16));
             return;
         }
         sectionLabel(getString(R.string.builder_section_highlights), 2, 0, 2, 6);
         body.addView(highlightsBox(), margin(0, 0, 0, 12));
         sectionLabel(getString(R.string.builder_section_direction), 2, 0, 2, 6);
         body.addView(directionBox(), margin(0, 0, 0, 12));
-        body.addView(problems(), margin(0, 0, 0, 12));
+        tail = new LinearLayout(this);
+        tail.setOrientation(LinearLayout.VERTICAL);
+        body.addView(tail, margin(0, 0, 0, 0));
+        renderTail();
+    }
+
+    /** Redraws the problems, the verdicts and the buttons. */
+    private void renderTail() {
+        tail.removeAllViews();
+        tail.addView(problems(), margin(0, 0, 0, 12));
         verdictsBox();
         actions();
+    }
+
+    /** Called whenever the draft itself changes. The verdicts are dropped as well: a reading taken
+     *  from a rule the reader has since edited says nothing about the rule in front of them, and
+     *  installing on the strength of it would put something on the device that was never tested. */
+    private void edited() {
+        verdicts.clear();
+        persist();
+        renderTail();
     }
 
     /** The message the reader is working on. Raw bank text, so it never enters saved state. */
@@ -139,7 +162,7 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
         message.setSaveEnabled(false);
         message.addTextChangedListener(watching(s -> {
             draft.body = s.toString();
-            persist();
+            edited();
         }));
         box.addView(message, new LinearLayout.LayoutParams(-1, dp(170)));
         return box;
@@ -153,11 +176,11 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
         box.addView(singleLine(getString(R.string.builder_bank_hint), draft.bankName,
                 value -> {
                     draft.bankName = value;
-                    persist();
+                    edited();
                 }), fieldParams());
         box.addView(singleLine(getString(R.string.builder_sender_hint), draft.sender, value -> {
             draft.sender = value;
-            persist();
+            edited();
         }), fieldParams());
         return box;
     }
@@ -174,6 +197,7 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
         parent.addView(view, margin(0, 4, 0, 4));
         view.setOnClickListener(v -> {
             onTap.run();
+            verdicts.clear();
             persist();
             redraw();
         });
@@ -239,6 +263,7 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
             int from = message.getSelectionStart();
             int to = message.getSelectionEnd();
             draft.highlight(Math.min(from, to), Math.max(from, to), role);
+            verdicts.clear();
             persist();
             redraw();
         });
@@ -247,6 +272,7 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
         clear.setTag(TAG_CLEAR + role.name());
         clear.setOnClickListener(v -> {
             draft.clear(role);
+            verdicts.clear();
             persist();
             redraw();
         });
@@ -274,7 +300,7 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
         column.setOrientation(LinearLayout.VERTICAL);
         List<RuleDraft.Problem> found = draft.problems();
         if (found.isEmpty()) return column;
-        sectionLabel(getString(R.string.builder_section_problems), 2, 0, 2, 6);
+        sectionLabel(column, getString(R.string.builder_section_problems), 2, 0, 2, 6);
         for (RuleDraft.Problem problem : found) {
             TextView line = text(problemText(problem), 13, muted);
             line.setLineSpacing(2, 1.05f);
@@ -286,9 +312,9 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
     /** Every test run in this session, most recent first, so a reader can see the verdict change as
      *  they correct the rule rather than only the last one. */
     private void verdictsBox() {
-        sectionLabel(getString(R.string.builder_section_test), 2, 0, 2, 6);
+        sectionLabel(tail, getString(R.string.builder_section_test), 2, 0, 2, 6);
         if (verdicts.isEmpty()) {
-            note(getString(R.string.builder_test_hint));
+            tail.addView(note(getString(R.string.builder_test_hint)), margin(0, 0, 0, 0));
         } else {
             for (RuleDraftTester.Verdict verdict : verdicts) {
                 LinearLayout card = new LinearLayout(this);
@@ -317,12 +343,12 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
                     claims.setLineSpacing(2, 1.05f);
                     card.addView(claims, margin(0, 4, 0, 0));
                 }
-                body.addView(card, margin(0, 0, 0, 8));
+                tail.addView(card, margin(0, 0, 0, 8));
             }
         }
         TextView test = button(getString(R.string.builder_test), accent, bg);
         test.setOnClickListener(v -> test());
-        body.addView(test, margin(0, 0, 0, 12));
+        tail.addView(test, margin(0, 0, 0, 12));
     }
 
     /** The reading the engine produced, in the currency the rule says, so a reader can see the
@@ -372,13 +398,13 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
     }
 
     private void actions() {
-        sectionLabel(getString(R.string.builder_section_install), 2, 0, 2, 6);
+        sectionLabel(tail, getString(R.string.builder_section_install), 2, 0, 2, 6);
         TextView install = button(getString(R.string.builder_install), accent, bg);
         install.setOnClickListener(v -> install());
-        body.addView(install, margin(0, 0, 0, 8));
+        tail.addView(install, margin(0, 0, 0, 8));
         TextView share = button(getString(R.string.builder_share), card, fg);
         share.setOnClickListener(v -> share());
-        body.addView(share, margin(0, 0, 0, 24));
+        tail.addView(share, margin(0, 0, 0, 24));
     }
 
     private void test() {
@@ -524,6 +550,7 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
 
     // ---- shared drawing ----
 
+    /** A quiet line of explanation, which the caller puts wherever it belongs. */
     private TextView note(String words) {
         TextView view = text(words, 12, muted);
         view.setLineSpacing(2, 1.05f);
