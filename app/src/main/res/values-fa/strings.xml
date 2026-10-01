@@ -272,7 +272,6 @@
     <string name="builder_test">این قاعده را بیازمایید</string>
     <string name="builder_test_hint">تا وقتی خودتان نخواهید چیزی نصب نمی‌شود. بیازمایی یعنی خواندن پیام نمونهٔ شما با این قاعده.</string>
     <string name="builder_test_working">موجودی پیام نمونهٔ شما را می‌خواند: %1$s</string>
-    <string name="builder_test_working_amount">%1$s</string>
     <string name="builder_test_no_amount">بدون مبلغ</string>
     <string name="builder_test_not_working">این قاعده هنوز پیام نمونهٔ شما را نمی‌خواند.</string>
     <string name="builder_test_not_working_reason">دلیل: %1$s</string>
@@ -285,7 +284,6 @@
     <string name="builder_test_reason_overflow">برای خواندن امن بیش از حد بزرگ است</string>
     <string name="builder_test_reason_limit_exceeded">فراتر از حدهای خواننده</string>
     <string name="builder_test_claims">موجودی برای این فرستنده از پیش قاعده‌ای دارد: %1$s. قاعدهٔ شما در کنار آن افزوده می‌شود.</string>
-    <string name="builder_test_issues">هنوز کم است: %1$s</string>
     <string name="builder_problem_no_message">اول یک پیام بچسبانید.</string>
     <string name="builder_problem_no_sender">شمارهٔ فرستنده را دقیقاً همان‌طور که در پیام آمده بنویسید.</string>
     <string name="builder_problem_no_bank">برای بانک یک نام بگذارید.</string>

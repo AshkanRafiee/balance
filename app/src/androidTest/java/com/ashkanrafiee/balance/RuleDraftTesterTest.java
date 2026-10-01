@@ -63,7 +63,8 @@ public class RuleDraftTesterTest {
                 RuleDraftTester.test(draft(SENDER), engine, SENDER, BODY, ARRIVAL);
         assertTrue(verdict.reason, verdict.parsed);
         assertEquals(Parser.Status.PARSED, verdict.status);
-        assertEquals(List.of(-120000L), verdict.amounts);
+        // The currency travels with the number: a screen cannot divide by a scale it was not told.
+        assertEquals(List.of(new RuleDraftTester.Amount("IRR", -120000L)), verdict.amounts);
         assertTrue(verdict.issues.toString(), verdict.issues.isEmpty());
     }
 
@@ -83,7 +84,6 @@ public class RuleDraftTesterTest {
         assertTrue(verdict.needsConfirming());
         assertFalse("claims are named once", verdict.claims.size() != new java.util.HashSet<>(
                 verdict.claims).size());
-        assertTrue("claims are not empty", !RuleDraftTester.claimCounts(verdict).isEmpty());
     }
 
     @Test

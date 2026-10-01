@@ -15,6 +15,7 @@ public final class Rules {
 
     public static final int MAX_INPUT = 16_384; // UTF-16 code units; never truncate
     public static final int MAX_SENDER = 128;
+    public static final int MAX_BANK_NAME = 128;
     public static final int MAX_TEMPLATES = 256;
     public static final int MAX_CANDIDATES = 32;
     public static final int MAX_OUTPUTS = 8;

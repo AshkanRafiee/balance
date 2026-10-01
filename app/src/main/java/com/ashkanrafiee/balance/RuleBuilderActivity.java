@@ -147,9 +147,11 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
         renderTail();
     }
 
-    /** Redraws the problems, the verdicts and the buttons. */
+    /** Whether the reader has already been told the draft could not be kept, so a rule that will
+     *  not persist says so once instead of on every keystroke. */
     private boolean warnedAboutDraft;
 
+    /** Redraws the problems, the verdicts and the buttons. */
     private void renderTail() {
         tail.removeAllViews();
         tail.addView(problems(), margin(0, 0, 0, 12));
@@ -454,14 +456,15 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
         tail.addView(test, margin(0, 0, 0, 12));
     }
 
-    /** The reading the engine produced, in the currency the rule says, so a reader can see the
-     *  number they care about without interpreting minor units. */
+    /** The reading the engine produced, shown the way every other balance in the app is shown: in
+     *  the currency the rule says, divided by that currency's scale. A bare minor-unit count would
+     *  show a reader of a two-decimal currency a number a hundred times too large. */
     private String amountText(RuleDraftTester.Verdict verdict) {
         if (verdict.amounts.isEmpty()) return getString(R.string.builder_test_no_amount);
         StringBuilder out = new StringBuilder();
-        for (Long amount : verdict.amounts) {
+        for (RuleDraftTester.Amount amount : verdict.amounts) {
             if (out.length() > 0) out.append(", ");
-            out.append(amount);
+            out.append(CurrencyHelper.amount(this, amount.currency(), amount.minorUnits()));
         }
         return out.toString();
     }
@@ -513,6 +516,9 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
         // rules compete for every message from that sender and only one can win.
         RuleDraftTester.Verdict last = verdicts.isEmpty() ? null : verdicts.get(0);
         if (last != null && last.needsConfirming()) {
+            TextView title = text(getString(R.string.builder_claim_title), 14, fg);
+            title.setTypeface(Typeface.DEFAULT_BOLD);
+            tail.addView(title, margin(0, 0, 0, 4));
             TextView warning = text(getString(R.string.builder_claim_message,
                     String.join(", ", last.claims)), 13, muted);
             warning.setLineSpacing(2, 1.05f);

@@ -16,7 +16,6 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -179,7 +178,6 @@ final class EngineRules {
     /** Every bundled bank, in catalog order, which is also the order the sender index registers
      *  them in after the legacy table's own order. */
     private static List<Bank> loadShipped(Context context) throws IOException {
-        Map<String, Bank> byName = new LinkedHashMap<>();
         List<Bank> ordered = new ArrayList<>();
         for (String region : regions(context)) {
             @SuppressWarnings("unchecked")
@@ -203,7 +201,6 @@ final class EngineRules {
                 Bank bank = new Bank(region, id, pack.bank().name(), pack.bank().country(),
                         pack.bank().provenance(), new Parser(pack.templates()), pack.templates());
                 ordered.add(bank);
-                byName.put(bank.name, bank);
             }
         }
         return ordered;

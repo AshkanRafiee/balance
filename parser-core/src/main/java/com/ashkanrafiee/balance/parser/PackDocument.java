@@ -42,7 +42,7 @@ public final class PackDocument {
             Rules.require(country != null && country.length() == 2
                     && country.charAt(0) >= 'A' && country.charAt(0) <= 'Z'
                     && country.charAt(1) >= 'A' && country.charAt(1) <= 'Z', "bank country");
-            Rules.text(name, 128, false);
+            Rules.text(name, Rules.MAX_BANK_NAME, false);
             Objects.requireNonNull(provenance, "bank provenance");
         }
 

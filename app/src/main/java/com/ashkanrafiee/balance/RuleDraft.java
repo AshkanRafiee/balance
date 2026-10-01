@@ -1,5 +1,7 @@
 package com.ashkanrafiee.balance;
 
+import com.ashkanrafiee.balance.parser.Rules;
+
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -26,16 +28,16 @@ final class RuleDraft {
     /** Anchors bound the text a reader recognizes. Long enough to identify a phrase, short
      *  enough that the core never spends time over a long literal. */
     static final int MAX_ANCHOR = 48;
-    static final int MAX_FIELD = 256;
+    static final int MAX_FIELD = Rules.MAX_FIELD;
     static final int MAX_REGION = 1024;
     /** Room for a value that is longer in another message ("1,000" against "1,000,000,000"). */
     private static final int SLACK = 12;
-    private static final int MAX_LITERAL = 128;
-    /** What the engine allows a bank name to be. Mirrors PackDocument's own bound. */
-    private static final int MAX_BANK_NAME = 128;
-    /** What the engine allows a sender to be, and how many lines a message may span. */
-    private static final int MAX_SENDER = 128;
-    private static final int MAX_LINES = 256;
+    // These are the core's own limits, named rather than copied: a copy here would drift the
+    // moment a limit moved, and the builder would start offering rules the core refuses.
+    private static final int MAX_LITERAL = Rules.MAX_LITERAL;
+    private static final int MAX_BANK_NAME = Rules.MAX_BANK_NAME;
+    private static final int MAX_SENDER = Rules.MAX_SENDER;
+    private static final int MAX_LINES = Rules.MAX_LINES;
     /** Iranian messages state amounts in rials or tomans, and a reader should not have to know
      *  which one their bank used. */
     private static final String TOMAN = "تومان";

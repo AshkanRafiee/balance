@@ -282,7 +282,6 @@
     <string name="builder_section_test">7. Test it</string>
     <string name="builder_test">Test this rule</string>
     <string name="builder_test_working">Balance reads your example: %1$s</string>
-    <string name="builder_test_working_amount">%1$s</string>
     <string name="builder_test_not_working">This rule does not read your example yet.</string>
     <string name="builder_test_not_working_reason">Why: %1$s</string>
     <string name="builder_test_reason_parsed">read in full</string>
@@ -294,7 +293,6 @@
     <string name="builder_test_reason_overflow">too large to read safely</string>
     <string name="builder_test_reason_limit_exceeded">beyond the reader\'s limits</string>
     <string name="builder_test_claims">Balance already has a rule for this sender: %1$s. Your rule will be added alongside it.</string>
-    <string name="builder_test_issues">Still missing: %1$s</string>
     <string name="builder_problem_no_message">Paste a message first.</string>
     <string name="builder_problem_no_sender">Type the sender number, exactly as it appears in the message.</string>
     <string name="builder_problem_no_bank">Give the bank a name.</string>

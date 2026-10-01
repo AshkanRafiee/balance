@@ -34,10 +34,10 @@ import javax.crypto.spec.GCMParameterSpec;
  * second draft is the first one's work being abandoned, and keeping both would keep a message the
  * reader thought they had thrown away.
  *
- * <p>A draft that cannot be read is dropped rather than reported. Unlike a saved pack, there is
- * nothing to recover and nobody waiting on it: the reader still has the message they pasted, and a
- * half-written rule is worth rebuilding from a fresh example rather than restoring from a
- * ciphertext the app can no longer open.
+ * <p>Only a draft that will not verify is dropped. A keystore that is momentarily unavailable
+ * leaves the draft alone: unlike a saved pack there is nothing to recover and nobody waiting on it,
+ * so a transient failure must not cost the reader a rule they cannot retype, because the plain text
+ * they built it from exists nowhere else.
  */
 final class RuleDraftStore {
     private static final String KEYSTORE = "AndroidKeyStore";

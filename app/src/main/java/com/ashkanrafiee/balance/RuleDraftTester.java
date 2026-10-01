@@ -38,26 +38,28 @@ final class RuleDraftTester {
 
     /** What testing found. Carries only identities and codes: no amount, account or fragment of the
      *  reader's message, so a verdict can be logged, saved or shown without leaking the message. */
+    /** A movement as the reader's engine produced it: a number and the currency it is counted in. */
+    record Amount(String currency, long minorUnits) { }
+
     static final class Verdict {
         final Parser.Status status;
         final boolean parsed;
-        final boolean covered;
         /** Catalog or local packs that already claim this sender, by pack id, catalog order. */
         final List<String> claims;
         /** Bank ids the reading came from, in the order the engine produced them. */
         final List<String> banks;
         /** Distinct {@code field → code} pairs, engine order, each named once. */
         final List<String> issues;
-        /** The reader's own movements, in minor units of the currency they are in. */
-        final List<Long> amounts;
+        /** The reader's own movements, with the currency each is in. The currency travels with the
+         *  number because a screen cannot divide minor units by a scale it was never told. */
+        final List<Amount> amounts;
         /** Why the verdict is what it is, for a screen that has to say it in a sentence. */
         final String reason;
 
-        Verdict(Parser.Status status, boolean parsed, boolean covered, List<String> claims,
-                List<String> banks, List<String> issues, List<Long> amounts, String reason) {
+        Verdict(Parser.Status status, boolean parsed, List<String> claims,
+                List<String> banks, List<String> issues, List<Amount> amounts, String reason) {
             this.status = status;
             this.parsed = parsed;
-            this.covered = covered;
             this.claims = List.copyOf(claims);
             this.banks = List.copyOf(banks);
             this.issues = List.copyOf(issues);
@@ -87,7 +89,7 @@ final class RuleDraftTester {
         } catch (RuntimeException rejected) {
             // The draft claimed to be buildable and its own document did not validate. That is a
             // builder bug, not the reader's message, and it is reported as such.
-            return new Verdict(Parser.Status.INVALID, false, false, List.of(), List.of(),
+            return new Verdict(Parser.Status.INVALID, false, List.of(), List.of(),
                     List.of("document → INVALID_FIELD"), List.of(), "document");
         }
         List<Rules.Template> templates = new ArrayList<>(document.templates());
@@ -108,7 +110,7 @@ final class RuleDraftTester {
         try {
             parser = new Parser(templates);
         } catch (RuntimeException tooMany) {
-            return new Verdict(Parser.Status.LIMIT_EXCEEDED, false, !claims.isEmpty(), claims,
+            return new Verdict(Parser.Status.LIMIT_EXCEEDED, false, claims,
                     List.of(), List.of("templates → CANDIDATE_LIMIT"), List.of(), "limit");
         }
         Parser.Result result;
@@ -116,15 +118,15 @@ final class RuleDraftTester {
             result = parser.parse(new Parser.Message("builder", sender, example,
                     Instant.ofEpochMilli(arrival), ZoneId.systemDefault()));
         } catch (RuntimeException unavailable) {
-            return new Verdict(Parser.Status.INVALID, false, !claims.isEmpty(), claims, List.of(),
+            return new Verdict(Parser.Status.INVALID, false, claims, List.of(),
                     List.of(), List.of(), "engine");
         }
         List<String> banks = new ArrayList<>();
-        List<Long> amounts = new ArrayList<>();
+        List<Amount> amounts = new ArrayList<>();
         for (Parser.Fact fact : result.facts()) {
             banks.add(fact.bankId());
             if (fact.kind() == Rules.Kind.POSTED_MOVEMENT && fact.money() != null) {
-                amounts.add(fact.money().minorUnits());
+                amounts.add(new Amount(fact.money().currency().name(), fact.money().minorUnits()));
             }
         }
         List<String> issues = new ArrayList<>();
@@ -134,7 +136,7 @@ final class RuleDraftTester {
         }
         issues.addAll(named);
         boolean parsed = result.status() == Parser.Status.PARSED;
-        return new Verdict(result.status(), parsed, !claims.isEmpty(), claims,
+        return new Verdict(result.status(), parsed, claims,
                 distinct(banks), issues, amounts, reason(result));
     }
 
@@ -159,9 +161,4 @@ final class RuleDraftTester {
 
     /** The claims list grouped for a screen that shows which packs already read this sender, kept
      *  here so the activity does not walk the engine's templates itself. */
-    static Map<String, Integer> claimCounts(Verdict verdict) {
-        Map<String, Integer> counts = new LinkedHashMap<>();
-        for (String claim : verdict.claims) counts.merge(claim, 1, Integer::sum);
-        return counts;
-    }
 }
