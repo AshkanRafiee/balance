@@ -1,6 +1,7 @@
 package com.ashkanrafiee.balance;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
@@ -379,6 +380,11 @@ public final class OnboardingActivity extends Activity {
         super.onStop();
     }
 
+    /** Lint asks for AndroidX's back dispatcher, which this app does not use: it carries no
+     *  dependencies at all. The platform still calls this callback because the manifest leaves
+     *  android:enableOnBackInvokedCallback off, so a back gesture arrives here like a back press
+     *  and the onboarding flow finishes as the reader expects. */
+    @SuppressLint("GestureBackNavigation")
     @Override
     public void onBackPressed() {
         if (lockOverlay.isShowing()) {
