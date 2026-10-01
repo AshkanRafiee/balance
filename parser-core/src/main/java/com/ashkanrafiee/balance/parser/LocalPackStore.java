@@ -250,25 +250,54 @@ public final class LocalPackStore {
         return install(staged, false);
     }
 
+    /** What installing this pack would do, asked without doing it: the outcome it would report, or
+     *  the refusal it would raise, against the directory as it is right now.
+     *
+     *  <p>This is what a screen shows before it asks, so the words on the confirmation and the
+     *  decision that follows it come from one implementation of the table rather than from a second
+     *  reading of it in a UI that could drift from the store. */
+    public Outcome preview(Pack staged, boolean revert) throws IOException {
+        return decide(staged, revert).outcome;
+    }
+
     /** As {@link #install(Pack)}, but a lower revision is taken as the explicit revert the import
      *  table asks for. Reverting is a person's decision, so the caller has to say so. */
     public synchronized Result install(Pack staged, boolean revert) throws IOException {
+        Decision decision = decide(staged, revert);
+        if (decision.outcome == Outcome.NO_OP) return new Result(Outcome.NO_OP, decision.held, null);
+        write(staged);
+        return new Result(decision.outcome, staged, decision.replaced);
+    }
+
+    /** The identity table itself, with no writing: what this pack is against the one already held. */
+    private Decision decide(Pack staged, boolean revert) throws IOException {
         Snapshot snapshot = snapshot();
         Pack held = snapshot.find(staged.packId());
         if (held == null) {
             if (snapshot.size() >= MAX_PACKS) throw new Failure(Code.FULL);
-            write(staged);
-            return new Result(Outcome.INSTALLED, staged, null);
+            return new Decision(Outcome.INSTALLED, null, null);
         }
-        if (held.digest().equals(staged.digest())) return new Result(Outcome.NO_OP, held, null);
+        if (held.digest().equals(staged.digest())) return new Decision(Outcome.NO_OP, held, null);
         if (held.revision().equals(staged.revision())) throw new Failure(Code.CONFLICT);
         int order = compareRevisions(staged.revision(), held.revision());
         // Two revisions neither of which is higher are not an update; they are two meanings for one
         // id, which is exactly what a new revision or a new id is for.
         if (order == 0) throw new Failure(Code.CONFLICT);
         if (order < 0 && !revert) throw new Failure(Code.DOWNGRADE);
-        write(staged);
-        return new Result(Outcome.UPDATED, staged, held.revision());
+        return new Decision(Outcome.UPDATED, held, held.revision());
+    }
+
+    /** What the table decided, before anything is written. */
+    private static final class Decision {
+        final Outcome outcome;
+        final Pack held;
+        final String replaced;
+
+        Decision(Outcome outcome, Pack held, String replaced) {
+            this.outcome = outcome;
+            this.held = held;
+            this.replaced = replaced;
+        }
     }
 
     /** Removes a pack, reporting whether one was there. Removing an absent pack is not an error:
