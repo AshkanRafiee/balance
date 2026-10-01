@@ -1,0 +1,71 @@
+name: Check Balance
+
+# PR checks. Everything here is a gate the repository already runs locally: the
+# executable parser-core suites, the Python catalog/pack tools, and a build of
+# the app. Nothing downloads rules, and no secret is needed, so a fork's pull
+# request runs the same checks a maintainer gets.
+#
+# Instrumented tests need a device and are not part of this workflow; they run on
+# an emulator before a release. See CONTRIBUTING.md.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Parser-core gates
+        run: bash ./gradlew --no-daemon --console=plain :parser-core:check
+
+      - name: Python tool tests
+        run: |
+          python3 -B tools/test_generate_ir_catalog.py
+          python3 -B tools/test_read_official_pack.py
+          python3 -B tools/test_read_rule_examples.py
+
+  app:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build and lint the debug app
+        run: bash ./gradlew --no-daemon --console=plain :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug
