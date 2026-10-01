@@ -17,6 +17,7 @@ import java.io.File;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -50,6 +51,10 @@ public class RuleDraftStoreTest {
         state.put("shape", "MOVEMENT");
         state.put("hasDate", true);
         state.put("exclusions", List.of("مانده حساب"));
+        Map<String, Object> selected = new LinkedHashMap<>();
+        selected.put("AMOUNT", List.of(6, 13));
+        selected.put("BALANCE", List.of(27, 36));
+        state.put("selected", selected);
         return state;
     }
 
@@ -147,6 +152,29 @@ public class RuleDraftStoreTest {
         // screen that reads them back does not have to know what a number decoded to.
         Map<String, Object> plain = RuleDraftStore.decode(decoded);
         assertEquals(true, plain.get("hasDate"));
+    }
+
+    @Test
+    public void keepsTheHighlightedSpans() {
+        assertTrue(store.write(state()));
+        Map<String, Object> read = store.read();
+        assertNotNull(read);
+        // The spans are a map of lists, which is deeper than the rest of the draft: written as
+        // nulls or zeroes they come back as nothing, and the reader reopens a rule whose parts they
+        // had already chosen.
+        Object selected = read.get("selected");
+        assertTrue("the anchors must survive as a map", selected instanceof Map);
+        Map<?, ?> spans = (Map<?, ?>) selected;
+        assertEquals("AMOUNT", List.of(6, 13), toList(spans.get("AMOUNT")));
+        assertEquals("BALANCE", List.of(27, 36), toList(spans.get("BALANCE")));
+    }
+
+    /** A span as a list of numbers, whatever concrete list the reader produced. */
+    private static List<?> toList(Object value) {
+        assertTrue("a span must come back as a list", value instanceof List);
+        List<Object> out = new ArrayList<>();
+        for (Object item : (List<?>) value) out.add(item);
+        return out;
     }
 
     @Test

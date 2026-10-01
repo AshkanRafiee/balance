@@ -67,7 +67,7 @@ final class RuleDraftStore {
             cipher.init(Cipher.DECRYPT_MODE, key(false),
                     new GCMParameterSpec(TAG_BITS, iv));
             byte[] plain = cipher.doFinal(blob, IV_BYTES, blob.length - IV_BYTES);
-            return PlatformRuleJson.read(new ByteArrayInputStream(plain));
+            return decode(PlatformRuleJson.read(new ByteArrayInputStream(plain)));
         } catch (Exception unusable) {
             clear();
             return null;
@@ -148,26 +148,41 @@ final class RuleDraftStore {
             if (!first) out.append(',');
             first = false;
             out.append(quote(entry.getKey())).append(':');
-            Object value = entry.getValue();
-            if (value instanceof String) out.append(quote((String) value));
-            else if (value instanceof Boolean) out.append(value.toString());
-            else if (value instanceof BigDecimal) out.append(((BigDecimal) value).toBigInteger()
-                    .toString());
-            else if (value instanceof List) {
-                out.append('[');
-                boolean inner = true;
-                for (Object item : (List<?>) value) {
-                    if (!inner) out.append(',');
-                    inner = false;
-                    if (item instanceof String) out.append(quote((String) item));
-                    else if (item instanceof BigDecimal) out.append(((BigDecimal) item)
-                            .toBigInteger().toString());
-                    else out.append("0");
-                }
-                out.append(']');
-            } else out.append("null");
+            append(out, entry.getValue());
         }
         return out.append('}').toString();
+    }
+
+    /** Writes one value. Numbers are written as integers because that is all the draft holds, and a
+     *  nested object is written as an object because the highlight anchors are a map of role to
+     *  span: writing either as null or as zero would lose the anchors and leave a restored draft
+     *  that looks filled in but reads nothing. */
+    private static void append(StringBuilder out, Object value) {
+        if (value instanceof String) out.append(quote((String) value));
+        else if (value instanceof Boolean) out.append(value.toString());
+        else if (value instanceof BigDecimal) out.append(((BigDecimal) value).toBigInteger()
+                .toString());
+        else if (value instanceof Integer) out.append(value.toString());
+        else if (value instanceof Map) {
+            out.append('{');
+            boolean first = true;
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                if (!first) out.append(',');
+                first = false;
+                out.append(quote(String.valueOf(entry.getKey()))).append(':');
+                append(out, entry.getValue());
+            }
+            out.append('}');
+        } else if (value instanceof List) {
+            out.append('[');
+            boolean inner = true;
+            for (Object item : (List<?>) value) {
+                if (!inner) out.append(',');
+                inner = false;
+                append(out, item);
+            }
+            out.append(']');
+        } else out.append("null");
     }
 
     /** A JSON string, escaped the way the platform reader's lexical guard requires: control
@@ -200,19 +215,35 @@ final class RuleDraftStore {
         Map<String, Object> out = new LinkedHashMap<>();
         if (state == null) return out;
         for (Map.Entry<String, Object> entry : state.entrySet()) {
-            Object value = entry.getValue();
-            if (value instanceof BigDecimal) out.put(entry.getKey(),
-                    ((BigDecimal) value).toBigInteger());
-            else if (value instanceof List) {
-                List<Object> items = new ArrayList<>();
-                for (Object item : (List<?>) value) {
-                    items.add(item instanceof BigDecimal ? ((BigDecimal) item).toBigInteger()
-                            : item);
-                }
-                out.put(entry.getKey(), items);
-            } else out.put(entry.getKey(), value);
+            out.put(entry.getKey(), plain(entry.getValue()));
         }
         return out;
+    }
+
+    /** One value with the JSON reader's numbers turned into integers, all the way down: the anchors
+     *  are a map of lists, and a span read as BigDecimal would not fit where a start and an end are
+     *  expected. */
+    private static Object plain(Object value) {
+        // Offsets and flags only ever hold small whole numbers, and a reader that compares what
+        // comes back against what it wrote should not have to know which numeric type it got.
+        if (value instanceof BigDecimal) {
+            java.math.BigInteger whole = ((BigDecimal) value).toBigIntegerExact();
+            return whole.bitLength() < 32 ? (Object) whole.intValue() : whole;
+        }
+        if (value instanceof Number) return value;
+        if (value instanceof List<?> list) {
+            List<Object> items = new ArrayList<>();
+            for (Object item : list) items.add(plain(item));
+            return items;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                out.put(String.valueOf(entry.getKey()), plain(entry.getValue()));
+            }
+            return out;
+        }
+        return value;
     }
 
     private byte[] readFile() throws IOException {
