@@ -3,6 +3,9 @@ package com.ashkanrafiee.balance;
 import android.content.Intent;
 import android.graphics.Typeface;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Gravity;
@@ -70,25 +73,41 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
         draft = new RuleDraft();
         store = new RuleDraftStore(this);
         engine = EngineRules.activate(this);
-        Map<String, Object> saved = store.present() ? store.read() : null;
-        if (saved != null) restore(saved);
         Intent incoming = getIntent();
-        if (incoming != null && incoming.hasExtra(EXTRA_BODY)) {
-            draft.body = String.valueOf(incoming.getStringExtra(EXTRA_BODY));
-            draft.sender = String.valueOf(incoming.getStringExtra(EXTRA_SENDER));
-            draft.bankName = String.valueOf(incoming.getStringExtra(EXTRA_BANK));
+        boolean opened = incoming != null && incoming.hasExtra(EXTRA_BODY);
+        // Highlights are offsets into one particular message, so they mean nothing at all in a
+        // different one. A stored draft is therefore only restored when this screen was opened for
+        // its own message: an incoming message starts a fresh draft rather than inheriting
+        // highlights that now point at whatever sits at those offsets.
+        if (!opened) {
+            Map<String, Object> saved = store.present() ? store.read() : null;
+            if (saved != null) restore(saved);
+        } else {
+            draft.body = text(incoming.getStringExtra(EXTRA_BODY));
+            draft.sender = text(incoming.getStringExtra(EXTRA_SENDER));
+            draft.bankName = text(incoming.getStringExtra(EXTRA_BANK));
         }
         super.onCreate(state);
     }
 
     @Override
     protected void onDestroy() {
+        // Anything still queued for the worker is dropped first, so it cannot land on top of the
+        // decision below.
+        if (background != null) background.removeCallbacks(sealing);
         // Leaving the builder after having saved or discarded is the only thing that forgets the
         // draft: the draft exists to survive a pause or a crash, not to keep a message the reader
         // has finished with on the device indefinitely.
         if (isFinishing()) {
             if (savedOrDiscarded) store.clear();
             else store.write(save());
+        }
+        // The draft is settled by now, so the thread that would have sealed it can go. Leaving it
+        // running would keep this screen's message alive in the heap after the screen is gone.
+        if (background != null) {
+            background.removeCallbacks(sealing);
+            background.getLooper().quit();
+            background = null;
         }
         super.onDestroy();
     }
@@ -129,11 +148,29 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
     }
 
     /** Redraws the problems, the verdicts and the buttons. */
+    private boolean warnedAboutDraft;
+
     private void renderTail() {
         tail.removeAllViews();
         tail.addView(problems(), margin(0, 0, 0, 12));
         verdictsBox();
         actions();
+    }
+
+    /** Where the coalesced draft write happens: a draft is sealed off the main thread, so neither
+     *  the keystore nor the disk can stall the reader while they type. Started on demand and torn
+     *  down with the screen, since a half-written rule is worth keeping but the thread holding it
+     *  up is not. */
+    private Handler background;
+
+    private Handler background() {
+        if (background == null) {
+            HandlerThread worker = new HandlerThread("rule-draft");
+            worker.setPriority(Thread.MIN_PRIORITY);
+            worker.start();
+            background = new Handler(worker.getLooper());
+        }
+        return background;
     }
 
     /** Called whenever the draft itself changes. The verdicts are dropped as well: a reading taken
@@ -332,7 +369,13 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
         add.setTag(TAG_EXCLUDE);
         add.setOnClickListener(v -> {
             String line = field.getText().toString().trim();
-            if (line.isEmpty() || draft.exclusions.contains(line)) return;
+            // An exclusion the rule cannot be written with would sit in the list looking like it
+            // stops a message the rule will in fact read, so it is refused here rather than quietly
+            // dropped later.
+            if (!draft.exclusionUsable(line) || draft.exclusions.contains(line)) {
+                toast(R.string.builder_exclusion_unusable);
+                return;
+            }
             draft.exclusions.add(line);
             edited();
         });
@@ -453,6 +496,12 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
             case DATE_NO_SEPARATOR: return getString(R.string.builder_problem_date_no_separator,
                     problem.detail);
             case DATE_YEAR: return getString(R.string.builder_problem_date_year, problem.detail);
+            case DATE_NO_TIME: return getString(R.string.builder_problem_date_no_time);
+            case SENDER_TOO_LONG: return getString(R.string.builder_problem_sender_too_long);
+            case BANK_TOO_LONG: return getString(R.string.builder_problem_bank_too_long);
+            case TOO_MANY_LINES: return getString(R.string.builder_problem_too_many_lines);
+            case EMPTY_AROUND: return getString(R.string.builder_problem_empty_around,
+                    problem.detail);
             default: return problem.code.name();
         }
     }
@@ -510,6 +559,13 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
 
     /** Puts the draft on the device by the same path an imported pack takes. */
     private void writePack() {
+        // Both ways onto this screen's install button end here, so the draft is checked here too:
+        // agreeing to install over a rule that already reads this sender is not the same as having
+        // finished building the rule.
+        if (!draft.ready()) {
+            toast(R.string.builder_not_ready);
+            return;
+        }
         try {
             LocalPackStore store = EngineRules.localStore(this);
             String json = PackWriter.write(PackDocument.decode(draft.document()));
@@ -521,7 +577,21 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
                     ? R.string.builder_already_installed : R.string.builder_installed);
             finish();
         } catch (LocalPackStore.Failure refused) {
-            toast(R.string.builder_install_conflict);
+            // Only a clash with an existing pack is a clash. Being told the rule "conflicts" when
+            // the real problem is that it is malformed, or that there is no room left for it, sends
+            // the reader looking for a conflict that does not exist.
+            switch (refused.code) {
+                case CONFLICT:
+                case DOWNGRADE:
+                    toast(R.string.builder_install_conflict);
+                    break;
+                case FULL:
+                    toast(R.string.builder_install_full);
+                    break;
+                default:
+                    toast(R.string.builder_install_failed);
+                    break;
+            }
         } catch (IOException | RuntimeException failure) {
             toast(R.string.builder_install_failed);
         }
@@ -554,7 +624,41 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
     // ---- draft persistence ----
 
     private void persist() {
-        store.write(save());
+        // Sealing a draft costs a keystore load, an fsync and a file rename. Doing that on every
+        // keystroke puts all three on the main thread and leaves the screen stuttering behind the
+        // reader's own typing, so edits are coalesced into a single trailing write instead: the
+        // draft is still saved a moment after the reader stops typing, and again whenever the
+        // screen is left.
+        background().removeCallbacks(sealing);
+        background().postDelayed(sealing, 600);
+    }
+
+    private final Runnable sealing = this::persistNow;
+
+    /** Writes the draft, off the main thread, and says so when it could not be kept. */
+    private boolean persistNow() {
+        // Once the rule is installed or thrown away, the draft is gone on purpose. A write already
+        // queued behind the reader's typing must not put it back: the draft exists to survive a
+        // pause, and this is the pause that was supposed to end it.
+        if (savedOrDiscarded) return true;
+        Map<String, Object> state = save();
+        boolean kept = store.write(state);
+        if (!kept && !warnedAboutDraft) {
+            warnedAboutDraft = true;
+            new Handler(Looper.getMainLooper()).post(() -> toast(R.string.builder_draft_not_kept));
+        }
+        return kept;
+    }
+
+    @Override
+    protected void onPause() {
+        // Leaving the foreground is the one moment the draft must be on disk rather than pending.
+        // This runs before the screen can be torn down or replaced, so a reader who walks away or
+        // comes straight back finds the rule they were in the middle of. Typing still only costs
+        // one trailing write, because the debounce above has already absorbed the keystrokes.
+        if (background != null) background.removeCallbacks(sealing);
+        persistNow();
+        super.onPause();
     }
 
     private Map<String, Object> save() {

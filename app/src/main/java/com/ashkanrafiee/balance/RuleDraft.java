@@ -31,6 +31,11 @@ final class RuleDraft {
     /** Room for a value that is longer in another message ("1,000" against "1,000,000,000"). */
     private static final int SLACK = 12;
     private static final int MAX_LITERAL = 128;
+    /** What the engine allows a bank name to be. Mirrors PackDocument's own bound. */
+    private static final int MAX_BANK_NAME = 128;
+    /** What the engine allows a sender to be, and how many lines a message may span. */
+    private static final int MAX_SENDER = 128;
+    private static final int MAX_LINES = 256;
     /** Iranian messages state amounts in rials or tomans, and a reader should not have to know
      *  which one their bank used. */
     private static final String TOMAN = "تومان";
@@ -49,7 +54,8 @@ final class RuleDraft {
      *  assert the code, so a wording change never breaks them. */
     enum Code {
         NO_MESSAGE, NO_SENDER, NO_BANK, MISSING_AMOUNT, MISSING_BALANCE, CROSSES_LINE,
-        OVERLAP, NO_PREFIX, NOT_NUMERIC, DATE_NO_SEPARATOR, DATE_YEAR, DATE_NO_TIME
+        OVERLAP, NO_PREFIX, NOT_NUMERIC, DATE_NO_SEPARATOR, DATE_YEAR, DATE_NO_TIME,
+        SENDER_TOO_LONG, BANK_TOO_LONG, TOO_MANY_LINES, EMPTY_AROUND
     }
 
     static final class Problem {
@@ -191,6 +197,25 @@ final class RuleDraft {
             // comes first.
             found.add(new Problem(Code.NO_PREFIX, anchor.text(this)));
         }
+        // The engine refuses these, and a rule the builder calls ready but the engine rejects is
+        // the worst outcome here: the reader sees "Install", presses it, and is told nothing more
+        // specific than that it failed. So the same bounds are checked before the offer is made.
+        if (sender.trim().length() > MAX_SENDER) {
+            found.add(new Problem(Code.SENDER_TOO_LONG, sender.trim()));
+        }
+        if (bankName.trim().length() > MAX_BANK_NAME) {
+            found.add(new Problem(Code.BANK_TOO_LONG, bankName.trim()));
+        }
+        if (lineCount(body) > MAX_LINES - 1) found.add(new Problem(Code.TOO_MANY_LINES, ""));
+        // Two anchors on either side of a value that come out identical describe a region with no
+        // width, which the engine rejects outright.
+        for (Anchor anchor : ordered()) {
+            Anchored region = anchored(anchor);
+            if (!region.after().isEmpty() && region.after().equals(region.before())) {
+                found.add(new Problem(Code.EMPTY_AROUND, anchor.text(this)));
+                break;
+            }
+        }
         Anchor date = anchor(Role.DATE);
         if (date != null) {
             String span = body.substring(date.start, date.end);
@@ -236,8 +261,11 @@ final class RuleDraft {
             if (word.isEmpty() || word.length() > MAX_LITERAL || body.indexOf(word) < 0) continue;
             guards.add(map("line", -1, "literal", word, "excluded", true));
         }
-        if (guards.isEmpty()) guards.add(map("line", -1, "literal", body.length() > MAX_LITERAL
-                ? body.substring(0, MAX_LITERAL) : body, "excluded", false));
+        // Short enough to stay inside the core's shared work budget on a long message: the literal
+        // scan charges its length at every position, so a 128-character catch-all would make a rule
+        // written from a big message give up (LIMIT_EXCEEDED) on perfectly ordinary ones after it.
+        if (guards.isEmpty()) guards.add(map("line", -1, "literal", body.length() > MAX_ANCHOR
+                ? body.substring(0, MAX_ANCHOR) : body, "excluded", false));
         return guards;
     }
 
@@ -397,6 +425,20 @@ final class RuleDraft {
      * it, and the region widens to the whole message, because the rule is still recognized by
      * something the reader chose rather than by a position that only held for this message.
      */
+    /** Whether an exclusion can be written at all: it has to be a stretch of the example, since a
+     *  guard the rule cannot be shown to hold would look like protection and be none. */
+    boolean exclusionUsable(String word) {
+        return word != null && !word.isEmpty() && word.length() <= MAX_LITERAL
+                && body.indexOf(word) >= 0;
+    }
+
+    /** How many lines a message spans. The engine caps this, so the builder has to know it too. */
+    private static int lineCount(String value) {
+        int lines = 1;
+        for (int i = 0; i < value.length(); i++) if (value.charAt(i) == '\n') lines++;
+        return lines;
+    }
+
     private Anchored anchored(Anchor anchor) {
         int lineStart = lineStart(anchor.start);
         String after = bounded(body.substring(Math.max(lineStart, anchor.start - MAX_ANCHOR),

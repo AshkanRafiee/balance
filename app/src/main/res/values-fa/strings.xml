@@ -265,6 +265,7 @@
     <string name="builder_date_with_time">تاریخ، ساعت هم دارد</string>
     <string name="builder_date_without_time">تاریخ، ساعت ندارد</string>
     <string name="builder_exclusion_hint">یک خط کامل که این قاعده نباید بخواند</string>
+    <string name="builder_exclusion_unusable">یک خط یا چند واژه را انتخاب کنید که واقعاً در پیام باشد. فقط چیزی که در پیام هست را می‌توان نادیده گرفت.</string>
     <string name="builder_exclusion_add">این خط را نادیده بگیر</string>
     <string name="builder_section_problems">هنوز باقی‌مانده</string>
     <string name="builder_section_test">۷. بیازمایید</string>
@@ -295,6 +296,10 @@
     <string name="builder_problem_no_prefix">%1$s سطر را شروع می‌کند، پس قاعده نمی‌دانست کدام عدد را بخواند. کلمهٔ پیش از آن را هم انتخاب کنید.</string>
     <string name="builder_problem_not_numeric">%1$s عدد نیست.</string>
     <string name="builder_problem_date_no_separator">بین بخش‌های %1$s علامت / یا - نیست.</string>
+    <string name="builder_problem_sender_too_long">این نام فرستنده برای یک قاعده خیلی بلند است. کوتاه‌ترش کنید.</string>
+    <string name="builder_problem_bank_too_long">این نام بانک برای یک قاعده خیلی بلند است. کوتاه‌ترش کنید.</string>
+    <string name="builder_problem_too_many_lines">این پیام خطهای زیادی دارد و نمی‌توان از آن قاعده نوشت.</string>
+    <string name="builder_problem_empty_around">پیام اطراف %1$s خیلی کم است و قاعده نمی‌تواند بفهمد عدد کجا تمام می‌شود.</string>
     <string name="builder_problem_date_year">%1$s برای یک تاریخ خیلی بلند است.</string>
     <string name="builder_problem_date_no_time">گفته‌اید ساعت هم هست، پس تاریخ و ساعت را با هم انتخاب کنید.</string>
     <string name="builder_section_install">۸. نگهش دارید</string>
@@ -307,6 +312,8 @@
     <string name="builder_claim_install">باز هم اضافه کن</string>
     <string name="builder_already_installed">همین قاعده را از پیش دارید.</string>
     <string name="builder_install_conflict">نسخهٔ دیگری از همین قاعده را دارید، پس چیزی تغییر نکرد.</string>
+    <string name="builder_install_full">گوشی‌تان از پیش به اندازهٔ کافی قاعده دارد، پس این یکی اضافه نشد.</string>
+    <string name="builder_draft_not_kept">این قاعده روی دستگاه ذخیره نشد. اگر از این صفحه خارج شوید، دوباره از پیام شروع می‌کنید.</string>
     <string name="builder_share">ارسال برای بازبینی</string>
     <string name="builder_share_subject">Balance: قاعده برای فرستندهٔ %1$s</string>
     <string name="builder_share_report">%1$s\nفرستنده: %2$s\n\nاین پیام نمونه را می‌خواند:\n%3$s\n\nقاعده:\n```json\n%4$s\n```\n</string>

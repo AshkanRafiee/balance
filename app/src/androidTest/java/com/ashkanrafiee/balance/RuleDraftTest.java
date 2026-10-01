@@ -164,6 +164,52 @@ public class RuleDraftTest {
         assertEquals(-120_000_000L, result.facts().get(0).money().minorUnits());
     }
 
+    /** Every bound the core enforces is checked here, because a rule the builder calls ready but
+     *  the core rejects leaves the reader pressing Install and being told only that it failed. */
+    @Test
+    public void aSenderTheCoreWouldRefuseStopsTheDraft() {
+        RuleDraft draft = movement();
+        draft.sender = "+98".repeat(Rules.MAX_SENDER);
+        assertTrue(draft.sender.length() > Rules.MAX_SENDER);
+        problem(draft, RuleDraft.Code.SENDER_TOO_LONG);
+    }
+
+    @Test
+    public void aBankNameTheCoreWouldRefuseStopsTheDraft() {
+        RuleDraft draft = movement();
+        draft.bankName = "B".repeat(Rules.MAX_SENDER + 1);
+        problem(draft, RuleDraft.Code.BANK_TOO_LONG);
+    }
+
+    @Test
+    public void aMessageWithTooManyLinesStopsTheDraft() {
+        RuleDraft draft = movement();
+        draft.body = "برداشت ۱۲۰,۰۰۰ ریال\nمانده حساب: 4,500,000 ریال\n1405/07/09 12:41\n"
+                + "خط\n".repeat(Rules.MAX_LINES);
+        problem(draft, RuleDraft.Code.TOO_MANY_LINES);
+    }
+
+    /** The screen refuses an exclusion the rule cannot be written with, so the list never shows a
+     *  guard that would sit there looking like protection while the rule read the message anyway. */
+    @Test
+    public void anExclusionThatIsNotInTheMessageIsRefused() {
+        RuleDraft draft = movement();
+        assertFalse(draft.exclusionUsable("این عبارت در پیام نیست"));
+        assertFalse(draft.exclusionUsable(""));
+        assertTrue(draft.exclusionUsable("مانده حساب"));
+    }
+
+    /** The catch-all guard must stay short enough for the core's work budget, or a rule written
+     *  from a big message gives up on ordinary ones after it. */
+    @Test
+    public void theCatchAllGuardStaysShort() {
+        RuleDraft draft = movement();
+        draft.exclusions.clear();
+        PackDocument document = PackDocument.decode(draft.document());
+        String literal = (String) document.templates().get(0).guards().get(0).literal();
+        assertTrue("guard was " + literal.length(), literal.length() <= 48);
+    }
+
     @Test
     public void missingSenderStopsTheDraft() {
         RuleDraft draft = movement();

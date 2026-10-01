@@ -10,11 +10,14 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.ProviderException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
@@ -47,6 +50,10 @@ final class RuleDraftStore {
     private static final int MAX_DRAFT = 64 * 1024;
 
     private final File file;
+    /** The keystore's key handle, kept for as long as this store is open. The key itself never
+     *  leaves the keystore; holding the handle saves a keystore load on every write, and the
+     *  builder writes on every edit the reader makes. */
+    private SecretKey held;
 
     RuleDraftStore(Context context) {
         this.file = new File(context.getNoBackupFilesDir(), FILE);
@@ -68,6 +75,18 @@ final class RuleDraftStore {
                     new GCMParameterSpec(TAG_BITS, iv));
             byte[] plain = cipher.doFinal(blob, IV_BYTES, blob.length - IV_BYTES);
             return decode(PlatformRuleJson.read(new ByteArrayInputStream(plain)));
+        } catch (javax.crypto.AEADBadTagException unreadable) {
+            // The bytes are not what this keystore sealed, so there is nothing to open and nothing
+            // worth keeping.
+            clear();
+            return null;
+        } catch (KeyStoreException | ProviderException | java.security.InvalidKeyException
+                | java.security.NoSuchAlgorithmException | BadPaddingException
+                | IllegalStateException temporarily) {
+            // The keystore itself was unavailable, not the draft. Dropping the reader's
+            // half-finished rule over a momentary failure would lose work they cannot retype,
+            // because the plain text exists nowhere else.
+            return null;
         } catch (Exception unusable) {
             clear();
             return null;
@@ -111,24 +130,10 @@ final class RuleDraftStore {
      *  a message the reader is done with should not stay on the device because a screen was left
      *  open. */
     void clear() {
-        // Overwrite first: on a filesystem that does not immediately release the blocks, a plain
-        // delete leaves the words recoverable from the device's own storage.
-        if (file.isFile()) {
-            try {
-                byte[] empty = new byte[(int) Math.min(file.length(), MAX_DRAFT)];
-                java.util.Arrays.fill(empty, (byte) 0);
-                java.io.FileOutputStream out = new java.io.FileOutputStream(file, false);
-                try {
-                    out.write(empty);
-                    out.flush();
-                    out.getFD().sync();
-                } finally {
-                    out.close();
-                }
-            } catch (IOException ignored) {
-                // The delete below is what matters; an unoverwritable file is still removed.
-            }
-        }
+        // The file holds ciphertext, so there is nothing in it to overwrite and nothing in it to
+        // recover: the words exist nowhere but in this process, under the key. Removal is the whole
+        // of forgetting it, and a partial write before it buys no protection and costs a chance to
+        // fail.
         file.delete();
         new File(file.getPath() + ".tmp").delete();
     }
@@ -257,10 +262,14 @@ final class RuleDraftStore {
         return blob;
     }
 
-    private static SecretKey key(boolean create) throws Exception {
+    private SecretKey key(boolean create) throws Exception {
+        if (held != null) return held;
         KeyStore store = KeyStore.getInstance(KEYSTORE);
         store.load(null);
-        if (store.containsAlias(ALIAS)) return (SecretKey) store.getKey(ALIAS, null);
+        if (store.containsAlias(ALIAS)) {
+            held = (SecretKey) store.getKey(ALIAS, null);
+            return held;
+        }
         if (!create) throw new IllegalStateException("no draft key");
         KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE);
         generator.init(new KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT
@@ -273,6 +282,7 @@ final class RuleDraftStore {
             .setUserAuthenticationRequired(false)
             .setRandomizedEncryptionRequired(true)
             .build());
-        return generator.generateKey();
+        held = generator.generateKey();
+        return held;
     }
 }

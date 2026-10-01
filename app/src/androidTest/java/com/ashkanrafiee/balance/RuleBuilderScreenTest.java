@@ -198,7 +198,9 @@ public class RuleBuilderScreenTest {
         tap(ctx.getString(R.string.builder_install));
         assertEquals("nothing may be installed on a stale reading",
                 0, EngineRules.localStore(ctx).snapshot().size());
-        assertTrue("the draft survives a refused install", store.present());
+        // The draft is sealed a moment after the reader stops typing, so it may not be on disk at
+        // the instant the install is refused; what matters is that it is never thrown away.
+        await(() -> store.present(), 15_000);
     }
 
     @Test public void aSenderAnotherRuleAlreadyReadsIsAskedAboutFirst() throws Exception {

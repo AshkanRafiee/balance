@@ -264,6 +264,8 @@
     <string name="builder_claim_install">Add it anyway</string>
     <string name="builder_already_installed">You already have exactly this rule.</string>
     <string name="builder_install_conflict">You already have a different version of this rule, so nothing changed.</string>
+    <string name="builder_install_full">Your device already holds as many rules as it can, so this one was not added.</string>
+    <string name="builder_draft_not_kept">This rule could not be saved on the device. If you leave, you will start again from the message.</string>
     <string name="builder_set_hint">Select the words in the message, then tap Set.</string>
     <string name="builder_selected">Selected: %1$s</string>
     <string name="builder_section_direction">5. Which way it moves</string>
@@ -275,6 +277,7 @@
     <string name="builder_date_with_time">The date also carries a time</string>
     <string name="builder_date_without_time">The date carries no time</string>
     <string name="builder_exclusion_hint">a whole line this rule must ignore</string>
+    <string name="builder_exclusion_unusable">Pick a line or a few words that actually appear in the message. Only what is in the message can be ignored.</string>
     <string name="builder_exclusion_add">Ignore this line</string>
     <string name="builder_section_test">7. Test it</string>
     <string name="builder_test">Test this rule</string>
@@ -302,6 +305,10 @@
     <string name="builder_problem_no_prefix">%1$s starts its line, so the rule would not know which number to read. Include the word before it.</string>
     <string name="builder_problem_not_numeric">%1$s is not a number.</string>
     <string name="builder_problem_date_no_separator">%1$s has no / or - between its parts.</string>
+    <string name="builder_problem_sender_too_long">That sender name is too long for a rule. Shorten it.</string>
+    <string name="builder_problem_bank_too_long">That bank name is too long for a rule. Shorten it.</string>
+    <string name="builder_problem_too_many_lines">This message has too many lines for a rule to be written from.</string>
+    <string name="builder_problem_empty_around">There is too little of the message around %1$s for the rule to tell where the number ends.</string>
     <string name="builder_problem_date_year">%1$s is too long to be a date.</string>
     <string name="builder_problem_date_no_time">%1$s says the time is there, so highlight the date and the time together.</string>
     <string name="builder_section_install">8. Keep it</string>
