@@ -188,6 +188,14 @@ public final class IranianPrototypeTest {
         failure(parse(optional, "Synthetic Account=" + "1".repeat(65) + ";Amount=100;", SEPTEMBER), Status.LIMIT_EXCEEDED, Code.FIELD_LIMIT);
         Output required = output("required", ACCOUNT, false, null, null, null, Kind.BOOKED_BALANCE);
         failure(parse(List.of(optional, required), "Synthetic Amount=100;", SEPTEMBER), Status.ABSENT, Code.REQUIRED_ABSENT);
+        // An output that asks for no account is a complete read of a message that states none: it
+        // resolves nothing, so it has nothing unresolved to report.
+        Output accountless = output("accountless", null, true, null, null, null, Kind.POSTED_MOVEMENT);
+        Result complete = parse(accountless, "Synthetic Amount=100;", SEPTEMBER);
+        equal(complete.status(), Status.PARSED);
+        equal(complete.facts().get(0).account(), null);
+        equal(complete.facts().get(0).accountState(), AccountState.UNRESOLVED);
+        noDiagnostic(complete);
         Result r = parse(optional, "Synthetic Account=0001;Amount=100;", SEPTEMBER);
         equal(r.facts().get(0).account(), "0001");
         equal(r.facts().get(0).accountState(), AccountState.REFERENCED);
@@ -541,6 +549,11 @@ public final class IranianPrototypeTest {
     }
     private static void diagnostic(Result r, Code code) {
         equal(r.diagnostics().stream().anyMatch(d -> d.code() == code), true);
+    }
+    private static void noDiagnostic(Result r) {
+        if (!r.diagnostics().isEmpty())
+            throw new AssertionError("Expected no diagnostics, got " + r.diagnostics());
+        checks++;
     }
     private static void invalid(Runnable action) {
         try { action.run(); throw new AssertionError("Expected invalid declaration"); }

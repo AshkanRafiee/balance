@@ -372,8 +372,13 @@ public final class Parser {
 
     private static String account(String body, Span region, Output output, String template,
                                   List<Diagnostic> diagnostics, Work work) {
+        // An output that asks for no account is not a message whose account went missing: there was
+        // never one to resolve, so there is nothing to report and the fact simply states none.
+        // Reporting an unresolved account here would put a diagnostic on every message of every
+        // pack that legitimately reads no account -- a community card statement, say -- and a
+        // diagnostic that fires on a complete read is one no consumer can be asked to trust.
+        if (output.account() == null) return null;
         try {
-            if (output.account() == null) throw problem(Status.ABSENT, Code.REQUIRED_ABSENT, "account");
             String text = capture(body, region, output.account(), "account", work).text();
             validateAccount(text);
             return text;

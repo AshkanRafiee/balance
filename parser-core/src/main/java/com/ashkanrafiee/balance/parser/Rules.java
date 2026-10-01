@@ -229,8 +229,10 @@ public final class Rules {
     }
 
     /** Every declared financial output is required. Fields are relative to its raw
-     * region. accountOptional permits a null selector or absent/invalid reference,
-     * emitting null account plus ACCOUNT_UNRESOLVED and the underlying diagnostic.
+     * region. accountOptional permits an absent or invalid reference to a declared
+     * account, emitting null account plus ACCOUNT_UNRESOLVED and the underlying
+     * diagnostic; an output that declares no account at all states none and reports
+     * nothing, because nothing went unresolved.
      * Optional reason/channel maps omit absent/invalid/unknown/ambiguous tokens.
      * Account ambiguity and all resource exhaustion remain failures. Original purchase
      * amount is context, never an additional ledger movement. */
