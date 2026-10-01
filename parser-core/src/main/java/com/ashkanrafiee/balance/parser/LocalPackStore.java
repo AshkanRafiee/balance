@@ -70,8 +70,8 @@ public final class LocalPackStore {
     public static final int MAX_PACKS = 64;
 
     /** The suffix a stored pack is written under, which is also how a temp file is recognised. */
-    private static final String SUFFIX = ".pack.json";
-    private static final String TEMPORARY = ".tmp";
+    public static final String SUFFIX = ".pack.json";
+    public static final String TEMPORARY = ".tmp";
 
     /** The strict JSON reader a caller supplies: decoded documents in, lexical limits and
      *  duplicate keys rejected, one tree out. */

@@ -47,8 +47,15 @@ final class BalanceData {
     /** The banks the reader had turned off when the last balance scan was published, so a later
      *  change of that choice re-reads the inbox instead of trusting the watermark. */
     static final String KEY_RECOGNITION_SEEN = "recognition_revision";
+    /** The local pack composition when the last balance scan was published. A pack imported or
+     *  removed afterwards has messages already in the inbox that only the new set can read, so the
+     *  change is a reason to re-read rather than to continue from the watermark. */
+    static final String KEY_PACKS_SEEN = "packs_generation";
     /** The same for the history scan, which has its own watermark and its own rebuild. */
     static final String KEY_HISTORY_RECOGNITION_SEEN = "history_recognition_revision";
+    /** The local pack composition when the last history scan was published, for the same reason as
+     *  {@link #KEY_PACKS_SEEN}. */
+    static final String KEY_HISTORY_PACKS_SEEN = "history_packs_generation";
 
     /** Sort modes for the bank list. Each pair (balance / update date) has a reverse variant so
      *  re-selecting the same sort flips its direction. The list is always sorted; fresh installs
@@ -700,11 +707,20 @@ final class BalanceData {
     static synchronized int scanSms(Context context, LinkedHashMap<String, Bank> saved) {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
             return 0;
-        EngineRules.activate(context);
+        EngineRules engine = EngineRules.activate(context);
         // Reload the banks the reader has turned off before the first message is classified, so a
         // choice made in another screen (or restored from a backup in another process) governs this
         // scan whatever route into it there was.
         RecognitionHelper.refresh(context);
+        // A pack the user imported since the last scan has messages already in the inbox that only
+        // that pack can read, so the composition is refreshed before the first message and the
+        // generation it reports is remembered below, forcing the same full re-read the reader's
+        // on/off choice forces.
+        int packsGeneration = -1;
+        if (engine != null) {
+            engine.refreshLocal();
+            packsGeneration = engine.localGeneration();
+        }
         FinancialAuthority authority = authority(context);
         if (authority == null) return 0;
         FinancialSnapshotAdapter.Snapshot snapshot;
@@ -726,10 +742,11 @@ final class BalanceData {
         // bank happened to send something new. Re-reading the inbox also re-derives a bank the
         // reader turned off, which is why that direction is covered too.
         int recognition = RecognitionHelper.revision();
+        SharedPreferences rules = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
         boolean full = watermark == 0 || watermark > now
             || snapshot.rulesVersion() != rulesVersion
-            || recognition != context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
-                .getInt(KEY_RECOGNITION_SEEN, -1);
+            || recognition != rules.getInt(KEY_RECOGNITION_SEEN, -1)
+            || packsGeneration != rules.getInt(KEY_PACKS_SEEN, -1);
         if (full) watermark = 0;
         int matched = 0;
         long newest = 0;
@@ -874,7 +891,8 @@ final class BalanceData {
             // the next scan trust a watermark past messages it never read.
             if (!emptyFullScan) {
                 context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
-                        .putInt(KEY_RECOGNITION_SEEN, recognition).apply();
+                        .putInt(KEY_RECOGNITION_SEEN, recognition)
+                        .putInt(KEY_PACKS_SEEN, packsGeneration).apply();
             }
         } catch (Exception e) {
             Log.w(TAG, "balance publication failed", e);
@@ -910,8 +928,16 @@ final class BalanceData {
         if (HISTORY_SCANNING) return 0;
         HISTORY_SCANNING = true;
         try {
-            EngineRules.activate(context);
+            EngineRules engine = EngineRules.activate(context);
             RecognitionHelper.refresh(context);
+            // As in scanSms: a pack imported since the last history scan has movements already in
+            // the inbox that only it can read, so the composition is refreshed here and its
+            // generation is remembered below.
+            int packsGeneration = -1;
+            if (engine != null) {
+                engine.refreshLocal();
+                packsGeneration = engine.localGeneration();
+            }
             FinancialAuthority authority = authority(context);
             if (authority == null) return 0;
             FinancialSnapshotAdapter.Snapshot snapshot;
@@ -929,11 +955,12 @@ final class BalanceData {
             // is at risk from the rebuild -- it keeps every entry no fresh parse claims -- so this
             // adds the movements that were skipped, it does not rewrite the ones that were kept.
             int recognition = RecognitionHelper.revision();
+            SharedPreferences rules = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
             boolean full = hwm == 0 || hwm > now
                 || snapshot.historyRulesVersion() != HISTORY_RULES_VERSION
                 || snapshot.historySchema() != HISTORY_SCHEMA
-                || recognition != context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
-                    .getInt(KEY_HISTORY_RECOGNITION_SEEN, -1);
+                || recognition != rules.getInt(KEY_HISTORY_RECOGNITION_SEEN, -1)
+                || packsGeneration != rules.getInt(KEY_HISTORY_PACKS_SEEN, -1);
             if (full) hwm = 0;
             // On an incremental scan the stored history doubles as the dedup set: a message already
             // recorded (by fingerprint, or by the legacy bank|date|amount triple) is left alone. On a
@@ -1295,7 +1322,8 @@ final class BalanceData {
                         removals(stored, windowsForSave, lastBalanceForSave))
                         .publish(authority.snapshots());
                 context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
-                        .putInt(KEY_HISTORY_RECOGNITION_SEEN, recognition).apply();
+                        .putInt(KEY_HISTORY_RECOGNITION_SEEN, recognition)
+                        .putInt(KEY_HISTORY_PACKS_SEEN, packsGeneration).apply();
             } catch (Exception e) {
                 Log.w(TAG, "history publication failed", e);
                 return 0;
