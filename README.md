@@ -62,7 +62,7 @@ Keep the keystore and passwords outside version control (`signing.properties` an
 
 ### Version numbers
 
-`versionName` follows `1.<minor>.<patch>`. `versionCode` is derived from it as `(10 + minor) * 1000 + patch` (so 1.15.0 → 25000); a fixed release line must keep the same `versionCode` as the tag and the store changelog file name `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`.
+`versionName` follows `<major>.<minor>.<patch>`. `versionCode` is derived from it as `major * 1000000 + minor * 1000 + patch` (so 2.0.0 → 2000000), which leaves 1000 patches and 1000 minors per major line and keeps every later release above every earlier one. Releases up to 1.17.0 used the narrower `(10 + minor) * 1000 + patch` (so 1.15.0 → 25000); a fixed release line must keep the same `versionCode` as the tag and the store changelog file name `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`.
 
 ## Privacy
 
