@@ -49,9 +49,14 @@ public final class PackDocument {
         /** Who asked for this bank's messages to be understood, which is not the same question as
          *  whether they were reviewed. OFFICIAL is a bank or market we ship coverage for on our
          *  own account; COMMUNITY is a format a user reported and we published, which is why the
-         *  app can offer a switch for it. Provenance says nothing about how well a pack parses:
-         *  every pack, whoever asked for it, is held to the same fixtures and the same gates. */
-        public enum Provenance { OFFICIAL, COMMUNITY }
+         *  app can offer a switch for it. LOCAL is a pack a user brought or wrote themselves.
+         *
+         *  <p>The value records how the app received the pack, never what the file claimed: an
+         *  imported document is rewritten to LOCAL before it is stored, so a pack cannot buy
+         *  catalog standing by spelling a word here. Provenance says nothing about how well a pack
+         *  parses: every pack, whoever asked for it, is held to the same fixtures and the same
+         *  gates. */
+        public enum Provenance { OFFICIAL, COMMUNITY, LOCAL }
     }
 
     private final String id;
@@ -87,6 +92,30 @@ public final class PackDocument {
     @Override
     public int hashCode() {
         return Objects.hash(id, revision, bank, templates);
+    }
+
+    /** The same pack under a different identity: new pack and bank ids, new provenance, and the
+     *  same templates re-bound to them. Nothing else changes, and the result is validated exactly
+     *  as a decoded document would be, because an id rewrite is how a bundled pack becomes a
+     *  local fork and must not be a way around the grammar.
+     *
+     *  <p>Template ids are deliberately untouched: they are only ever read beside the pack and
+     *  bank ids ({@code bankId/templateId}), so renaming the pack does not orphan them. */
+    public PackDocument withIdentity(String packId, String bankId, Bank.Provenance provenance) {
+        Rules.id(packId);
+        Rules.id(bankId);
+        Bank renamed = new Bank(bankId, bank.country(), bank.name(),
+                Objects.requireNonNull(provenance, "bank provenance"));
+        List<Template> rebound = new ArrayList<>(templates.size());
+        for (Template template : templates) rebound.add(new Template(packId, revision, bankId,
+                template.id(), template.senders(), template.guards(), template.outputs()));
+        try {
+            // Cross-template identity validation, as decode does, since a fork changes the keys.
+            new Parser(rebound);
+        } catch (IllegalArgumentException | NullPointerException e) {
+            throw invalid();
+        }
+        return new PackDocument(packId, revision, renamed, rebound);
     }
 
     /** All invalid documents fail without exposing values, keys, IDs or nested causes. */

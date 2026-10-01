@@ -1,6 +1,7 @@
 package com.ashkanrafiee.balance.parser;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -32,6 +33,13 @@ final class StrictJson {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    /** The same reader as a stream, which is the seam {@link LocalPackStore.Codec} is: a gate and
+     *  the app then read an imported and a stored pack through one strict reader, with the same
+     *  duplicate-key and trailing-text refusals. */
+    static Map<String, Object> read(InputStream input) throws IOException {
+        return object(parse(new String(input.readAllBytes(), StandardCharsets.UTF_8)), "stream");
     }
 
     /** Parses one complete JSON document, rejecting anything trailing it. */

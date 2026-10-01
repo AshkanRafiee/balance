@@ -26,6 +26,12 @@ tasks.register('packWriterTest', JavaExec) {
     args projectDir.parentFile.toPath().toString()
 }
 
+tasks.register('localPackStoreTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.ashkanrafiee.balance.parser.LocalPackStoreTest'
+}
+
 tasks.register('jsonLexicalGuardTest', JavaExec) {
     dependsOn testClasses
     classpath = sourceSets.test.runtimeClasspath
@@ -415,7 +421,8 @@ tasks.named('test') {
 }
 
 tasks.named('check') {
-    dependsOn prototypeTest, packDocumentTest, packWriterTest, jsonLexicalGuardTest, ruleExampleTest,
+    dependsOn prototypeTest, packDocumentTest, packWriterTest, localPackStoreTest,
+        jsonLexicalGuardTest, ruleExampleTest,
         ruleToolTest,
         iranianPrototypeTest, iranianDocumentTest, jalaliParityTest, legacyCompatibilityTest, identityTest,
         catalogParityTest, catalogToolTest, catalogDocumentTest,

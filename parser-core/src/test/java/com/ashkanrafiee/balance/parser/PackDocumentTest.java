@@ -130,7 +130,7 @@ public final class PackDocumentTest {
             reject(p -> at(p, "bank").put("country", country));
         for (String name : List.of("", "x".repeat(129), "bad\u0000", "bad\ud800"))
             reject(p -> at(p, "bank").put("name", name));
-        // Provenance is required and is exactly the two declared values. It is a label the app
+        // Provenance is required and is exactly the three declared values. It is a label the app
         // shows, never a quality claim, so nothing else about the pack changes with it -- but a
         // contributed pack that defaulted to looking official would be a trust failure, not a
         // cosmetic one, so absence is refused outright.
@@ -143,6 +143,13 @@ public final class PackDocumentTest {
                 PackDocument.Bank.Provenance.COMMUNITY);
         equal(PackDocument.decode(pack()).bank().provenance(),
                 PackDocument.Bank.Provenance.OFFICIAL);
+        // LOCAL is the value the store writes for a pack a user brought themselves, so that an
+        // imported pack can never present itself as one the app vetted.
+        Map<String, Object> local = pack();
+        at(local, "bank").put("provenance", "LOCAL");
+        equal(PackDocument.decode(local).bank().provenance(), PackDocument.Bank.Provenance.LOCAL);
+        equal(PackDocument.decode(local).templates(), PackDocument.decode(pack()).templates(),
+                "the label changes nothing about the rules");
         reject(p -> p.put("templates", List.of(at(p, "templates", 0), at(p, "templates", 0))));
         reject(p -> at(p, "templates", 0, "outputs", 1).put("id", "balance"));
         reject(p -> at(p, "templates", 0).put("senders", List.of("SYNTHETIC", "SYNTHETIC")));
@@ -326,7 +333,12 @@ public final class PackDocumentTest {
     }
 
     private static void equal(Object actual, Object expected) {
+        equal(actual, expected, "check");
+    }
+
+    private static void equal(Object actual, Object expected, String what) {
         checks++;
-        if (!java.util.Objects.equals(actual, expected)) throw new AssertionError("Expected " + expected + ", got " + actual);
+        if (!java.util.Objects.equals(actual, expected))
+            throw new AssertionError(what + ": expected " + expected + ", got " + actual);
     }
 }
