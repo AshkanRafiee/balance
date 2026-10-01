@@ -502,7 +502,7 @@ final class ScanDiagnostics {
      *  user sees beforehand exactly what leaves the device). {@code total} is the sender's message
      *  count; an empty selection composes a header with no messages. */
     static String senderReport(String sender, int total, List<Message> selected) {
-        return senderReport(sender, total, selected, java.util.Collections.emptyList());
+        return senderReport(sender, total, selected, java.util.Collections.emptyList(), null);
     }
 
     /** Like {@link #senderReport(String, int, List)} with the user-picked issue categories listed
@@ -510,8 +510,20 @@ final class ScanDiagnostics {
      *  the {@code ISSUE_*} constants; unselected categories stay out of the report. */
     static String senderReport(String sender, int total, List<Message> selected,
             List<String> issues) {
+        return senderReport(sender, total, selected, issues, null);
+    }
+
+    /** The same report with the engine's own account of each message attached: which rule was
+     *  consulted, which one matched, and which fields failed, named by identity and never by
+     *  content. A maintainer cannot otherwise tell a rule that never matched from a rule that
+     *  matched and read half the message, and those are different fixes. {@code engine} is nullable
+     *  because a device whose rules failed to load has no truthful answer to give. */
+    static String senderReport(String sender, int total, List<Message> selected,
+            List<String> issues, EngineRules engine) {
         StringBuilder out = new StringBuilder();
         out.append("## Bank SMS format Balance could not parse\n\n");
+        String header = RuleContext.header(engine);
+        if (!header.isEmpty()) out.append(header).append("\n\n");
         if (!issues.isEmpty()) {
             out.append("Issue type(s): ").append(String.join(", ", issues)).append("\n\n");
         }
@@ -521,6 +533,8 @@ final class ScanDiagnostics {
         for (Message m : selected) {
             out.append("```\n").append(m.body).append("\n```\n\n")
                 .append(readingLine(sender, m)).append("\n\n");
+            String context = RuleContext.forMessage(engine, sender, m.body, m.date);
+            if (!context.isEmpty()) out.append(context).append("\n");
         }
         out.append("---\n").append(deviceLine()).append("\n");
         return out.toString();

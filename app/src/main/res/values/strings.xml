@@ -241,6 +241,13 @@
     <string name="sender_share_copy">Copy selected (%1$d)</string>
     <string name="sender_share_copied">%1$d messages copied</string>
     <string name="sender_share_send">Send (%1$d)</string>
+    <string name="share_preview_title">Before you send</string>
+    <string name="share_preview_explain">This is exactly what will be sent, and you can change any of it. Hiding the numbers keeps their length and every line, so the rule can still be tested against them — but names, places and merchants stay as they are. Read it before you send it.</string>
+    <string name="share_preview_hide_numbers">Hide the numbers</string>
+    <string name="share_preview_copy">Copy</string>
+    <string name="share_preview_send">Send</string>
+    <string name="share_preview_copied">Copied</string>
+    <string name="share_preview_empty">There is nothing to send.</string>
     <string name="sender_share_send_via">Send report via</string>
     <string name="sender_share_pick_one">Select at least one message</string>
     <string name="sender_share_pick_issue">Select at least one issue — the sender can\'t be diagnosed otherwise</string>

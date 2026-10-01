@@ -1,17 +1,13 @@
 package com.ashkanrafiee.balance;
 
 import android.app.Activity;
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
 import android.text.TextUtils;
-import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.CheckBox;
@@ -35,13 +31,6 @@ public final class SenderShareActivity extends Activity {
     static final String EXTRA_MESSAGES = "messages";
     static final String MAILTO = "balance.plausible268@passmail.net";
 
-    private static final String TAG = "SenderShare";
-
-    /** How long a copied report stays in the system clipboard before it is cleared (see
-     *  {@link #copySelected}); the report holds raw message text, so it must not linger. */
-    private static final long CLIP_CLEAR_MS = 15_000L;
-    private static final Handler HANDLER = new Handler(android.os.Looper.getMainLooper());
-
     int bg, card, muted, accent, heroColor, fg;
     private String sender;
     private String bank;
@@ -50,7 +39,6 @@ public final class SenderShareActivity extends Activity {
     private List<CheckBox> issueChecks = new ArrayList<>();
     private LinearLayout body;
     private TextView select, copy, send;
-    private Runnable clearClipRunnable;
     private boolean allChecked = false;
 
     int color(int res) {
@@ -281,10 +269,7 @@ public final class SenderShareActivity extends Activity {
         LinearLayout.LayoutParams copyP = new LinearLayout.LayoutParams(-2, -2);
         copyP.setMarginStart(dp(10));
         copy.setBackground(rounded(heroColor, 13));
-        copy.setOnClickListener(v -> {
-            int n = copySelected();
-            if (n > 0) Toast.makeText(this, getString(R.string.sender_share_copied, n), Toast.LENGTH_SHORT).show();
-        });
+        copy.setOnClickListener(v -> preview());
         row.addView(copy, copyP);
 
         send = text(getString(R.string.sender_share_send, 0), 14, bg);
@@ -295,14 +280,7 @@ public final class SenderShareActivity extends Activity {
         LinearLayout.LayoutParams sendP = new LinearLayout.LayoutParams(0, -2, 1);
         sendP.setMarginStart(dp(10));
         send.setBackground(rounded(accent, 13));
-        send.setOnClickListener(v -> {
-            int missing = missingSelection(!issueTags().isEmpty(), selected().size());
-            if (missing != 0) {
-                Toast.makeText(this, missing, Toast.LENGTH_SHORT).show();
-                return;
-            }
-            sendMail(selectedText());
-        });
+        send.setOnClickListener(v -> preview());
         row.addView(send, sendP);
         return row;
     }
@@ -323,68 +301,25 @@ public final class SenderShareActivity extends Activity {
     private String selectedText() {
         List<ScanDiagnostics.Message> sel = selected();
         if (sel.isEmpty()) return null;
-        return ScanDiagnostics.senderReport(sender, bodies.size(), sel, issueTags());
+        return ScanDiagnostics.senderReport(sender, bodies.size(), sel, issueTags(),
+                EngineRules.get());
     }
 
-    private int copySelected() {
+    /** Hands the composed report to the preview screen. This screen decides what goes into a
+     *  report; the preview is where the reader sees the exact text, changes it if they want, hides
+     *  the numbers and then sends or copies it. Nothing leaves the device before that screen. */
+    private void preview() {
         int missing = missingSelection(!issueTags().isEmpty(), selected().size());
         if (missing != 0) {
             Toast.makeText(this, missing, Toast.LENGTH_SHORT).show();
-            return 0;
+            return;
         }
         String report = selectedText();
-        int n = selected().size();
-        ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-        clipboard.setPrimaryClip(ClipData.newPlainText(sender, report));
-        // The report holds raw message text; do not leave it readably in the system clipboard for any
-        // longer than the paste window. Clear it again once that has passed, unless the user copied
-        // something else in the meantime (then that newer clip is left alone).
-        if (clearClipRunnable != null) HANDLER.removeCallbacks(clearClipRunnable);
-        clearClipRunnable = () -> {
-            clearClipRunnable = null;
-            try {
-                CharSequence current = clipboard.hasPrimaryClip()
-                    && clipboard.getPrimaryClip() != null
-                    && clipboard.getPrimaryClip().getItemCount() > 0
-                    ? clipboard.getPrimaryClip().getItemAt(0).getText() : null;
-                if (report.equals(String.valueOf(current))) {
-                    if (android.os.Build.VERSION.SDK_INT >= 28) {
-                        clipboard.clearPrimaryClip();
-                    } else {
-                        clipboard.setPrimaryClip(ClipData.newPlainText("", ""));
-                    }
-                }
-            } catch (Exception e) {
-                // On Android 10+ a background process may be denied reading a clip another app
-                // has taken; fail as cleared and keep the app alive.
-                Log.w(TAG, "clipboard read failed", e);
-            }
-        };
-        HANDLER.postDelayed(clearClipRunnable, CLIP_CLEAR_MS);
-        return n;
-    }
-
-    /** Prefills a mail to the maintainer with the chosen messages. The system chooser is the user's
-     *  final approval: nothing is sent until they pick an app and press send there. */
-    private void sendMail(String report) {
-        final String subject = ScanDiagnostics.senderSubject(sender, bank);
-        try {
-            Intent mail = new Intent(Intent.ACTION_SENDTO, Uri.parse(mailToUri(subject, report)));
-            mail.putExtra(Intent.EXTRA_SUBJECT, subject);
-            mail.putExtra(Intent.EXTRA_TEXT, report);
-            startActivity(Intent.createChooser(mail, getString(R.string.sender_share_send_via)));
-        } catch (Exception e) {
-            Log.w(TAG, "no mail app; falling back to the share sheet");
-            try {
-                Intent share = new Intent(Intent.ACTION_SEND);
-                share.setType("text/plain");
-                share.putExtra(Intent.EXTRA_SUBJECT, subject);
-                share.putExtra(Intent.EXTRA_TEXT, report);
-                startActivity(Intent.createChooser(share, getString(R.string.sender_share_send_via)));
-            } catch (Exception e2) {
-                Log.w(TAG, "no share target at all");
-            }
-        }
+        if (report == null) return;
+        Intent preview = new Intent(this, SharePreviewActivity.class);
+        preview.putExtra(SharePreviewActivity.EXTRA_SUBJECT, ScanDiagnostics.senderSubject(sender, bank));
+        preview.putExtra(SharePreviewActivity.EXTRA_REPORT, report);
+        startActivity(preview);
     }
 
     /** mailto: URI that also carries the subject and body as query parameters. The recipient always

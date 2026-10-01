@@ -25,7 +25,7 @@ import android.widget.TextView;
  */
 abstract class ThemedScreenActivity extends Activity {
 
-    int bg, card, muted, accent, fg;
+    int bg, card, muted, accent, hero, fg;
     LockOverlay lockOverlay;
     /** The scrolling column a subclass fills. */
     LinearLayout body;
@@ -71,6 +71,7 @@ abstract class ThemedScreenActivity extends Activity {
         card = color(R.color.panel);
         muted = color(R.color.muted);
         accent = color(R.color.accent);
+        hero = color(R.color.hero);
         fg = color(R.color.fg);
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
