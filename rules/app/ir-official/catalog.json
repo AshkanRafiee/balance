@@ -9,6 +9,12 @@
       "calendar": "jalali",
       "id": "ir.pasargad",
       "name": "Pasargad",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "b.pasargad",
         "098500019000",
@@ -20,6 +26,12 @@
       "calendar": "jalali",
       "id": "ir.eghtesad-novin",
       "name": "Eghtesad Novin",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "ENBank",
         "Enbank",
@@ -31,6 +43,12 @@
       "calendar": "jalali",
       "id": "ir.shahr",
       "name": "Shahr",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "+98200035",
         "20005",
@@ -46,6 +64,12 @@
       "calendar": "jalali",
       "id": "ir.ansar",
       "name": "Ansar",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "+98200036",
         "100036",
@@ -56,6 +80,12 @@
       "calendar": "jalali",
       "id": "ir.tejarat",
       "name": "Tejarat",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "5000973189",
         "985000973189",
@@ -67,6 +97,12 @@
       "calendar": "jalali",
       "id": "ir.refah",
       "name": "Refah",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Refah",
         "REFAH",
@@ -79,6 +115,12 @@
       "calendar": "jalali",
       "id": "ir.saman",
       "name": "Saman",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "+9820000",
         "Saman Bank",
@@ -100,6 +142,12 @@
       "calendar": "jalali",
       "id": "ir.sarmayeh",
       "name": "Sarmayeh",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "+98300058",
         "98300058",
@@ -112,6 +160,12 @@
       "calendar": "jalali",
       "id": "ir.sina",
       "name": "Sina",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Sina Bank",
         "+9850003700798704",
@@ -135,6 +189,12 @@
       "calendar": "jalali",
       "id": "ir.saderat",
       "name": "Saderat",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "BankSaderat",
         "Bank Saderat",
@@ -160,6 +220,12 @@
       "calendar": "jalali",
       "id": "ir.mellat",
       "name": "Mellat",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Bank Mellat",
         "BankMellat",
@@ -181,6 +247,12 @@
       "calendar": "jalali",
       "id": "ir.melli",
       "name": "Melli",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Bank Melli",
         "BankMelli",
@@ -209,6 +281,12 @@
       "calendar": "jalali",
       "id": "ir.maskan",
       "name": "Maskan",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Bank Maskan",
         "BankMaskan",
@@ -225,6 +303,12 @@
       "calendar": "jalali",
       "id": "ir.keshavarzi",
       "name": "Keshavarzi",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Keshavarzi",
         "Bank Keshavarzi",
@@ -239,6 +323,12 @@
       "calendar": "jalali",
       "id": "ir.parsian",
       "name": "Parsian",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "ParsianBank",
         "Parsian",
@@ -262,6 +352,12 @@
       "calendar": "jalali",
       "id": "ir.post",
       "name": "Post",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Post",
         "PostBank",
@@ -286,6 +382,12 @@
       "calendar": "jalali",
       "id": "ir.dey",
       "name": "Dey",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Dey",
         "Bank Dey",
@@ -308,6 +410,12 @@
       "calendar": "jalali",
       "id": "ir.hekmat",
       "name": "Hekmat",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Hekmat Iranian",
         "Hekmat",
@@ -318,6 +426,12 @@
       "calendar": "jalali",
       "id": "ir.tosee-taavon",
       "name": "Tosee Taavon",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Tosee Taavon",
         "ttbank",
@@ -336,6 +450,12 @@
       "calendar": "jalali",
       "id": "ir.noor",
       "name": "Noor",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Noor Credit Inst.",
         "Noor",
@@ -347,6 +467,12 @@
       "calendar": "jalali",
       "id": "ir.blu",
       "name": "Blu",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Blu",
         "blu",
@@ -363,6 +489,12 @@
       "calendar": "jalali",
       "id": "ir.kosar",
       "name": "Kosar",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Kosar",
         "Kosar Credit",
@@ -377,6 +509,12 @@
       "calendar": "jalali",
       "id": "ir.mehr",
       "name": "Mehr",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Mehr Iran",
         "MehrIran",
@@ -387,6 +525,12 @@
       "calendar": "jalali",
       "id": "ir.mehr-eghtesad",
       "name": "Mehr Eghtesad",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Mehr Eghtesad",
         "MehrEghtesad",
@@ -400,6 +544,12 @@
       "calendar": "jalali",
       "id": "ir.ghavamin",
       "name": "Ghavamin",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Ghavamin",
         "Ghavamin Bank",
@@ -414,6 +564,12 @@
       "calendar": "jalali",
       "id": "ir.zamin",
       "name": "Zamin",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Iran Zamin",
         "IranZamin",
@@ -424,6 +580,12 @@
       "calendar": "jalali",
       "id": "ir.gardeshgari",
       "name": "Gardeshgari",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Gardeshgari",
         "Tourism Bank",
@@ -437,6 +599,12 @@
       "calendar": "jalali",
       "id": "ir.middle-east",
       "name": "Middle East",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Middle East Bank",
         "Khavarmianeh",
@@ -453,6 +621,12 @@
       "calendar": "jalali",
       "id": "ir.tosee",
       "name": "Tosee",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Tosee",
         "Tosee Bank"
@@ -462,6 +636,12 @@
       "calendar": "jalali",
       "id": "ir.karafarin",
       "name": "Karafarin",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Karafarin",
         "Karafarin Bank",
@@ -482,6 +662,12 @@
       "calendar": "jalali",
       "id": "ir.resalat",
       "name": "Resalat",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Resalat",
         "Bank Resalat",
@@ -514,6 +700,12 @@
       "calendar": "jalali",
       "id": "ir.venezuela",
       "name": "Venezuela",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Iran Venezuela",
         "IranVenezuela"
@@ -523,6 +715,12 @@
       "calendar": "jalali",
       "id": "ir.melal",
       "name": "Melal",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Melal",
         "Melal Credit Inst."
@@ -532,6 +730,12 @@
       "calendar": "jalali",
       "id": "ir.sanat-madan",
       "name": "Sanat Madan",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Sanat Madan",
         "SanatMadan"
@@ -541,6 +745,12 @@
       "calendar": "jalali",
       "id": "ir.sepah",
       "name": "Sepah",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Sepah",
         "Bank Sepah",
@@ -569,6 +779,12 @@
       "calendar": "jalali",
       "id": "ir.tosee-saderat",
       "name": "Tosee Saderat",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Tosee Saderat",
         "ToseeSaderat"
@@ -578,6 +794,12 @@
       "calendar": "jalali",
       "id": "ir.bankino",
       "name": "Bankino",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Bankino",
         "Bankino Bank",
@@ -588,6 +810,12 @@
       "calendar": "jalali",
       "id": "ir.wepod",
       "name": "Wepod",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "Wepod",
         "Wepod Bank",
@@ -606,6 +834,12 @@
       "calendar": "jalali",
       "id": "ir.industry-mine",
       "name": "Industry & Mine",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "+9820004003",
         "+98100099",
@@ -616,6 +850,12 @@
       "calendar": "jalali",
       "id": "ir.tosee-credit-inst",
       "name": "Tosee Credit Inst.",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "+9830005816"
       ]
@@ -624,6 +864,12 @@
       "calendar": "jalali",
       "id": "ir.edbi",
       "name": "EDBI",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "7000730",
         "+9830009430",
@@ -635,6 +881,12 @@
       "calendar": "jalali",
       "id": "ir.melal-credit-inst",
       "name": "Melal Credit Inst.",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "+98200022222"
       ]
@@ -643,6 +895,12 @@
       "calendar": "jalali",
       "id": "ir.noor-credit-inst",
       "name": "Noor Credit Inst.",
+      "review": {
+        "evidence": "legacy-tables",
+        "marketReviewer": true,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "9830009480",
         "30009480",

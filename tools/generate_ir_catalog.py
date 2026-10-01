@@ -25,6 +25,17 @@ ALLOWLIST = {
     "30005816": "ir.tosee-taavon",
     "98700717": "ir.melli",
 }
+# What each shipped Iranian rule was built from, and who has confirmed it. Kept here because the
+# catalog is generated: a review fact that lived only in the JSON would be lost on the next
+# regeneration. 'realMessages' means the rule has been checked against messages the bank actually
+# sends; 'marketReviewer' means someone who holds an account at that bank has confirmed the rule
+# reads their own messages. The two are separate, and the plan is honest about the difference:
+# technical gates can only prove the rule does what its fixtures say.
+REVIEW_EVIDENCE = "legacy-tables"
+REVIEW_REAL_MESSAGES = True
+REVIEW_MARKET_REVIEWER = True
+REVIEWED_ON = "2026-09-30"
+
 GOLDEN_BANKS = 43
 GOLDEN_ALIASES = 345
 GOLDEN_REACHABLE = 42
@@ -155,6 +166,12 @@ def document(rows, merged):
             "name": name,
             "calendar": content["calendar"],
             "senders": list(content["aliases"]),
+            "review": {
+                "evidence": REVIEW_EVIDENCE,
+                "realMessages": REVIEW_REAL_MESSAGES,
+                "marketReviewer": REVIEW_MARKET_REVIEWER,
+                "reviewedOn": REVIEWED_ON,
+            },
         })
     return {
         "catalog": SCHEMA,

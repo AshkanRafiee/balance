@@ -5,6 +5,12 @@
       "calendar": "gregorian",
       "id": "it.cartabcc",
       "name": "CartaBCC",
+      "review": {
+        "evidence": "reported-messages",
+        "marketReviewer": false,
+        "realMessages": true,
+        "reviewedOn": "2026-09-30"
+      },
       "senders": [
         "CartaBCC"
       ]

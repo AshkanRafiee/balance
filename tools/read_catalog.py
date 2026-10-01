@@ -84,6 +84,26 @@ def load(path):
     return value
 
 
+EVIDENCE = {"legacy-tables", "reported-messages", "official-spec"}
+DATE = __import__("re").compile(r"\A\d{4}-\d{2}-\d{2}\Z")
+
+
+def review(value):
+    """A rule's review record: what it was built from, and who has seen it work on a real
+    message. Both facts are asserted by the JVM gate as well; this is the strict frontend, so a
+    malformed record is rejected before it reaches the catalog pipeline."""
+    if not isinstance(value, dict) or set(value) != {"evidence", "realMessages",
+                                                     "marketReviewer", "reviewedOn"}:
+        fail()
+    if value["evidence"] not in EVIDENCE:
+        fail()
+    for flag in ("realMessages", "marketReviewer"):
+        if not isinstance(value[flag], bool):
+            fail()
+    if not isinstance(value["reviewedOn"], str) or not DATE.match(value["reviewedOn"]):
+        fail()
+
+
 def catalog(value):
     if set(value) != {"catalog", "market", "engine", "profile", "source",
                       "counts", "allowlist", "banks"}:
@@ -110,8 +130,9 @@ def catalog(value):
     names = set()
     aliases = 0
     for bank in banks:
-        if not isinstance(bank, dict) or set(bank) != {"id", "name", "calendar", "senders"}:
+        if not isinstance(bank, dict) or set(bank) != {"id", "name", "calendar", "senders", "review"}:
             fail()
+        review(bank["review"])
         if not isinstance(bank["id"], str) or not isinstance(bank["name"], str) \
                 or not isinstance(bank["calendar"], str) or not bank["id"] \
                 or not bank["name"] or not bank["calendar"]:

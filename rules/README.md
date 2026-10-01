@@ -98,6 +98,28 @@ claim about that metadata; explicit null asserts its absence. A fixture account
 may be null when unresolved. The fixture runner compares these optional assertions
 alongside the five required base fields.
 
+## Review record
+
+Every catalog bank carries a `review` record, and the build rejects a catalog
+without one:
+
+- `evidence` — what the rule was built from: `legacy-tables`, `reported-messages`
+  or `official-spec`.
+- `realMessages` — the rule has been checked against messages that bank actually
+  sends, rather than only against synthetic text derived from them.
+- `marketReviewer` — someone who holds an account at that bank has confirmed the
+  rule reads their own messages. `false` is a normal, honest state: a foreign
+  pack backed only by reader reports has one.
+- `reviewedOn` — the date of that review.
+
+The two flags are separate on purpose, and neither is the same claim as the CI
+gates passing. A fixture proves a rule does what the fixture says; the fixture is
+evidence about the rule, not about the bank. A pack claiming `marketReviewer`
+without `realMessages` is rejected, because a named reviewer is only meaningful
+if real messages were seen. The current records say `legacy-tables` with both
+flags set for the Iranian packs, and `reported-messages` with no market reviewer
+for the Italian one, which is exactly how much is known about each.
+
 ## Planned publication layout
 
 Reviewed packs will live under `official/<COUNTRY>/<bank-id>/` or

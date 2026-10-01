@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.regex.Pattern;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -28,7 +29,11 @@ import java.util.stream.Stream;
  */
 public final class ShippedPacksTest {
     private static int checks;
+    private static final Pattern REVIEWED_ON = Pattern.compile("\\d{4}-\\d{2}-\\d{2}");
     private static final String APP = "rules/app";
+    /** What a shipped rule may honestly claim it was built from. */
+    private static final Set<String> EVIDENCE =
+            Set.of("legacy-tables", "reported-messages", "official-spec");
     private static final String COMMUNITY = "community.it.cartabcc";
 
     /** What the engine must produce for each reported message: bank, kind, EUR minor units,
@@ -72,6 +77,7 @@ public final class ShippedPacksTest {
                 Map<?, ?> bank = map(item, "bank");
                 ids.add(text(bank.get("id"), "bank id"));
                 aliases += list(bank.get("senders"), "senders").size();
+                reviewed(bank.get("review"));
             }
             Map<String, Object> counts = map(catalog.get("counts"), "counts");
             equal(number(counts.get("banks"), "counts.banks"), (long) banks.size());
@@ -84,6 +90,26 @@ public final class ShippedPacksTest {
         equal(shapes.size(), 1);
         equal(shapes.iterator().next().containsAll(List.of("allowlist", "banks", "catalog", "counts",
                 "engine", "market", "profile", "source")), true);
+    }
+
+    /** Every shipped rule states what it was built from and who has seen it work on a real
+     * message, because those are two different claims. The gates in this repository can only prove
+     * that a rule does what its fixtures say: a fixture is evidence about the rule, not about the
+     * bank. So the record is kept explicit and required, and 'marketReviewer' is allowed to be
+     * false -- that is the honest state of a foreign pack that only reader reports back it. */
+    private static void reviewed(Object value) {
+        Map<?, ?> review = map(value, "review");
+        equal(Set.copyOf(review.keySet()),
+                Set.of("evidence", "realMessages", "marketReviewer", "reviewedOn"));
+        equal(EVIDENCE.contains(review.get("evidence")), true);
+        equal(review.get("realMessages") instanceof Boolean, true);
+        equal(review.get("marketReviewer") instanceof Boolean, true);
+        // Somebody holding an account is the only real proof a bank still sends this layout, so a
+        // named reviewer without real messages is not a review at all.
+        boolean reviewer = (Boolean) review.get("marketReviewer");
+        boolean realMessages = (Boolean) review.get("realMessages");
+        equal(reviewer && !realMessages, false);
+        equal(REVIEWED_ON.matcher(text(review.get("reviewedOn"), "reviewedOn")).matches(), true);
     }
 
     /** Every shipped pack decodes into the typed boundary, compiles on its own, and the whole
@@ -226,7 +252,8 @@ public final class ShippedPacksTest {
     private static void equal(Object actual, Object expected) {
         checks++;
         if (!Objects.equals(actual, expected))
-            throw new AssertionError("Shipped pack check " + checks + ": " + actual + " != " + expected);
+            throw new AssertionError("Shipped pack check " + checks + ": " + actual + " != " + expected
+);
     }
 
     // ---- reading: no library is on this module's classpath ----
