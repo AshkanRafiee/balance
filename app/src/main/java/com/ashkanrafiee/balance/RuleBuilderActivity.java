@@ -46,6 +46,7 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
      *  buttons can be told apart by anything driving this screen. */
     static final String TAG_SET = "builder.set.";
     static final String TAG_CLEAR = "builder.clear.";
+    static final String TAG_EXCLUDE = "builder.exclude";
 
     private RuleDraft draft;
     private RuleDraftStore store;
@@ -119,6 +120,8 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
         body.addView(highlightsBox(), margin(0, 0, 0, 12));
         sectionLabel(getString(R.string.builder_section_direction), 2, 0, 2, 6);
         body.addView(directionBox(), margin(0, 0, 0, 12));
+        sectionLabel(getString(R.string.builder_section_details), 2, 0, 2, 6);
+        body.addView(detailsBox(), margin(0, 0, 0, 12));
         tail = new LinearLayout(this);
         tail.setOrientation(LinearLayout.VERTICAL);
         body.addView(tail, margin(0, 0, 0, 0));
@@ -293,6 +296,63 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
         return box;
     }
 
+    /** The parts of the rule that are not words in the message: which calendar the dates are
+     *  written in, whether a highlighted date carries a time as well, and any whole line the rule
+     *  must ignore. Each is a fact about the message the builder cannot read off the digits, so the
+     *  reader says it rather than the builder guessing it. */
+    private LinearLayout detailsBox() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(14), dp(10), dp(10), dp(10));
+        box.setBackground(rounded(card, 13));
+        if (draft.anchor(RuleDraft.Role.DATE) != null) {
+            choice(box, getString(R.string.builder_calendar_jalali),
+                    draft.calendar == RuleDraft.Calendar.JALALI,
+                    () -> draft.calendar = RuleDraft.Calendar.JALALI);
+            choice(box, getString(R.string.builder_calendar_gregorian),
+                    draft.calendar == RuleDraft.Calendar.GREGORIAN,
+                    () -> draft.calendar = RuleDraft.Calendar.GREGORIAN);
+            choice(box, getString(R.string.builder_date_with_time),
+                    draft.withTime, () -> draft.withTime = true);
+            choice(box, getString(R.string.builder_date_without_time),
+                    !draft.withTime, () -> draft.withTime = false);
+        }
+        TextView add = action(getString(R.string.builder_exclusion_add));
+        EditText field = new EditText(this);
+        field.setSingleLine(true);
+        field.setTextSize(14);
+        field.setTextColor(fg);
+        field.setHintTextColor(muted);
+        field.setHint(getString(R.string.builder_exclusion_hint));
+        field.setPadding(dp(12), dp(10), dp(12), dp(10));
+        field.setBackground(rounded(bg, 13));
+        field.setSaveEnabled(false);
+        box.addView(field, margin(0, 4, 0, 0));
+        box.addView(add, margin(0, 4, 0, 0));
+        add.setTag(TAG_EXCLUDE);
+        add.setOnClickListener(v -> {
+            String line = field.getText().toString().trim();
+            if (line.isEmpty() || draft.exclusions.contains(line)) return;
+            draft.exclusions.add(line);
+            edited();
+        });
+        for (String exclusion : new ArrayList<>(draft.exclusions)) {
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            TextView held = text(exclusion, 13, fg);
+            held.setMaxLines(2);
+            row.addView(held, margin(0, 0, 0, 0));
+            TextView drop = action(getString(R.string.builder_clear));
+            drop.setOnClickListener(v -> {
+                draft.exclusions.remove(exclusion);
+                edited();
+            });
+            row.addView(drop);
+            box.addView(row, margin(0, 2, 0, 2));
+        }
+        return box;
+    }
+
     /** What still stands between this draft and a rule, in the reader's words. The codes come from
      *  the builder so the text and the validation cannot drift apart. */
     private LinearLayout problems() {
@@ -399,6 +459,19 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
 
     private void actions() {
         sectionLabel(tail, getString(R.string.builder_section_install), 2, 0, 2, 6);
+        // Another rule already reads this sender. Installing anyway is allowed -- a second rule for
+        // a bank is a normal thing to want -- but the reader is asked, because from then on both
+        // rules compete for every message from that sender and only one can win.
+        RuleDraftTester.Verdict last = verdicts.isEmpty() ? null : verdicts.get(0);
+        if (last != null && last.needsConfirming()) {
+            TextView warning = text(getString(R.string.builder_claim_message,
+                    String.join(", ", last.claims)), 13, muted);
+            warning.setLineSpacing(2, 1.05f);
+            tail.addView(warning, margin(0, 0, 0, 10));
+            TextView go = button(getString(R.string.builder_claim_install), card, fg);
+            go.setOnClickListener(v -> writePack());
+            tail.addView(go, margin(0, 0, 0, 8));
+        }
         TextView install = button(getString(R.string.builder_install), accent, bg);
         install.setOnClickListener(v -> install());
         tail.addView(install, margin(0, 0, 0, 8));
@@ -432,6 +505,11 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
             toast(R.string.builder_test_first);
             return;
         }
+        writePack();
+    }
+
+    /** Puts the draft on the device by the same path an imported pack takes. */
+    private void writePack() {
         try {
             LocalPackStore store = EngineRules.localStore(this);
             String json = PackWriter.write(PackDocument.decode(draft.document()));

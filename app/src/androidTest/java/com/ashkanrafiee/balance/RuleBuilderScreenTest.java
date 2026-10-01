@@ -75,9 +75,14 @@ public class RuleBuilderScreenTest {
         LockManager.disable(ctx);
     }
 
-    @After public void tidy() {
+    @After public void tidy() throws Exception {
         finishAnyResumedBuilder();
         store.clear();
+        // The installed pack is composed into the engine, which is a process-wide cache: clearing
+        // the files alone would leave this test's rule in front of every test that follows, so the
+        // engine is told to forget it too.
+        EngineRules.localStore(ctx).clear();
+        EngineRules.activate(ctx).refreshLocal();
     }
 
     // ---- what the screen does ----
@@ -195,6 +200,27 @@ public class RuleBuilderScreenTest {
                 0, EngineRules.localStore(ctx).snapshot().size());
         assertTrue("the draft survives a refused install", store.present());
     }
+
+    @Test public void aSenderAnotherRuleAlreadyReadsIsAskedAboutFirst() throws Exception {
+        // A sender the shipped catalog already covers, so installing a rule for it means two rules
+        // competing for every message. That is allowed, but only after the reader has been told.
+        launch();
+        tap(ctx.getString(R.string.builder_shape_both));
+        select(RuleDraft.Role.AMOUNT, "۱۲۰,۰۰۰");
+        select(RuleDraft.Role.BALANCE, "4,500,000");
+        type(fieldWith(ctx.getString(R.string.builder_bank_hint)), "Second Rule Bank");
+        type(fieldWith(ctx.getString(R.string.builder_sender_hint)), "+98200036");
+        tap(ctx.getString(R.string.builder_test));
+        awaitVerdict();
+        assertNotNull("the rule reads the message", worked());
+        assertNotNull("the existing claim must be named before installing",
+                textContaining(ctx.getString(R.string.builder_claim_message, "ir.ansar")));
+        assertEquals("nothing is installed just because the rule was tested",
+                0, EngineRules.localStore(ctx).snapshot().size());
+        tap(ctx.getString(R.string.builder_claim_install));
+        await(() -> EngineRules.localStore(ctx).snapshot().size() == 1, 15_000);
+    }
+
 
     @Test public void installingPutsTheRuleOnTheDevice() throws Exception {
         launch();

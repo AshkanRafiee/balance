@@ -49,7 +49,7 @@ final class RuleDraft {
      *  assert the code, so a wording change never breaks them. */
     enum Code {
         NO_MESSAGE, NO_SENDER, NO_BANK, MISSING_AMOUNT, MISSING_BALANCE, CROSSES_LINE,
-        OVERLAP, NO_PREFIX, NOT_NUMERIC, DATE_NO_SEPARATOR, DATE_YEAR
+        OVERLAP, NO_PREFIX, NOT_NUMERIC, DATE_NO_SEPARATOR, DATE_YEAR, DATE_NO_TIME
     }
 
     static final class Problem {
@@ -198,6 +198,12 @@ final class RuleDraft {
                 found.add(new Problem(Code.DATE_NO_SEPARATOR, span));
             }
             if (span.length() > MAX_FIELD) found.add(new Problem(Code.DATE_YEAR, span));
+            // The reader said the date carries a time, so the highlighted date has to include it:
+            // the rule reads exactly what was highlighted, and widening the reader's selection
+            // without being asked would be the builder deciding what they meant.
+            if (withTime && !carriesClock(span)) {
+                found.add(new Problem(Code.DATE_NO_TIME, span));
+            }
         }
         return found;
     }
@@ -571,6 +577,14 @@ final class RuleDraft {
 
     /** The order the reader highlighted: a four-digit year says which end it was on; two short
      *  groups mean no year at all, and the core takes the year from the message's own date. */
+    /** Whether a highlighted date already includes a clock, which the reader said it does. */
+    private boolean carriesClock(String span) {
+        int space = span.lastIndexOf(' ');
+        if (space <= 0 || space + 6 > span.length()) return false;
+        String clock = span.substring(space + 1);
+        return clock.length() == 5 && clock.charAt(2) == ':' && hasDigits(clock);
+    }
+
     private List<String> orders(String span) {
         String separator = separator(span) == null ? "/" : separator(span);
         String[] groups = span.split(String.valueOf(separator), -1);

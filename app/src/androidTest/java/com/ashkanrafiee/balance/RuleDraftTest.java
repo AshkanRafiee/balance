@@ -106,6 +106,31 @@ public class RuleDraftTest {
     }
 
     @Test
+    public void aGregorianDateWithATimeIsReadAsTheReaderSaid() {
+        RuleDraft draft = new RuleDraft();
+        draft.sender = "+982000320000";
+        draft.bankName = "Test Bank";
+        draft.body = "Withdrawal 120,000 IRR\n2026/09/01 12:41";
+        draft.shape = RuleDraft.Shape.MOVEMENT;
+        draft.direction = "DEBIT";
+        int amount = draft.body.indexOf("120,000");
+        draft.highlight(amount, amount + "120,000".length(), RuleDraft.Role.AMOUNT);
+        String stamp = "2026/09/01 12:41";
+        int date = draft.body.indexOf(stamp);
+        draft.highlight(date, date + stamp.length(), RuleDraft.Role.DATE);
+        // Two facts about a date the builder cannot read off the digits: which calendar it is
+        // written in, and whether a time sits next to it. Both are the reader's to say, and both
+        // change what comes back.
+        draft.calendar = RuleDraft.Calendar.GREGORIAN;
+        draft.withTime = true;
+        Parser.Result result = read(draft);
+        assertEquals(Parser.Status.PARSED, result.status());
+        Parser.Fact fact = result.facts().get(0);
+        assertEquals(Parser.Precision.MINUTE, fact.time().precision());
+        assertEquals(2026, LocalDate.ofInstant(fact.time().instant(), ZONE).getYear());
+    }
+
+    @Test
     public void bothShapeProducesBalanceAndMovement() {
         RuleDraft draft = movement();
         draft.shape = RuleDraft.Shape.BOTH;
