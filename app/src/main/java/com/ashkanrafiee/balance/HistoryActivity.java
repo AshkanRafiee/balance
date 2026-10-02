@@ -62,11 +62,14 @@ import java.util.Set;
  * (a ContentObserver, like the main screen), silently re-rendering on completion.
  */
 public final class HistoryActivity extends Activity {
-    private static final String MONTH_TAG = "history_month";
+    /** Visible to the instrumented tests so a test can tell an open year from a closed one, and one
+     *  year's months from another's, by what is on screen rather than by reading its text. */
+    static final String MONTH_TAG = "history_month";
     /** Visible to the instrumented tests so a test can count how much of a month is built
      *  without having to recognise a day header by its text. */
     static final String DAY_TAG = "history_day";
-    private static final String YEAR_TAG = "history_year";
+    /** Visible to the instrumented tests, for the same reason as {@link #MONTH_TAG}. */
+    static final String YEAR_TAG = "history_year";
 
     /** Result code for the system file picker that picks where the CSV is saved. */
     private static final int REQ_EXPORT = 31;
