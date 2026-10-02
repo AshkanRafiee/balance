@@ -385,7 +385,12 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
             String line = field.getText().toString().trim();
             // An exclusion the rule cannot be written with would sit in the list looking like it
             // stops a message the rule will in fact read, so it is refused here rather than quietly
-            // dropped later.
+            // dropped later. The two refusals say different things: words the example already
+            // contains are the mistake a reader is likely to make, and are worth naming.
+            if (draft.inExample(line)) {
+                toast(R.string.builder_exclusion_in_example);
+                return;
+            }
             if (!draft.exclusionUsable(line) || draft.exclusions.contains(line)) {
                 toast(R.string.builder_exclusion_unusable);
                 return;

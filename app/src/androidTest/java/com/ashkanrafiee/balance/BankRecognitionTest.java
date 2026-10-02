@@ -402,7 +402,52 @@ public class BankRecognitionTest {
         }
     }
 
+    /** A bank the reader turned off has to come back on from the same screen. The row is drawn once
+     *  and its tap target is redrawn in place, so a listener that reads the flag it was drawn with
+     *  answers the same thing twice and leaves the bank stuck off until the screen is reopened. */
+    @Test public void aBankTurnedOffCanBeTurnedOnAgainFromTheSameScreen() throws Exception {
+        RecognitionHelper.setEnabled(ctx, CARTABCC, true);
+        RecognitionHelper.refresh(ctx);
+        try (androidx.test.core.app.ActivityScenario<BankRecognitionActivity> screen =
+                androidx.test.core.app.ActivityScenario.launch(BankRecognitionActivity.class)) {
+            screen.onActivity(a -> {
+                android.view.View row = bankRow(a.getWindow().getDecorView(), CARTABCC);
+                assertNotNull("the banks screen lists " + CARTABCC, row);
+                row.performClick();
+            });
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+            assertFalse("the first tap turned it off", RecognitionHelper.isEnabled(CARTABCC));
+
+            screen.onActivity(a -> {
+                android.view.View row = bankRow(a.getWindow().getDecorView(), CARTABCC);
+                assertNotNull("the row is still there to tap again", row);
+                row.performClick();
+            });
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+            assertTrue("the second tap turned it back on, without reopening the screen",
+                RecognitionHelper.isEnabled(CARTABCC));
+        } finally {
+            RecognitionHelper.setEnabled(ctx, CARTABCC, true);
+        }
+    }
+
     // ---- helpers ----
+
+    /** The switch row for one bank, found by the state a reader would hear, which is the same for
+     *  every bank and so cannot pick a row on its own: the bank's display name has to be in it. */
+    private android.view.View bankRow(android.view.View v, String bank) {
+        String name = BankRules.displayName(ctx, bank);
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            String said = g.getContentDescription() == null ? "" : g.getContentDescription().toString();
+            if (said.contains(name)) return g;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                android.view.View found = bankRow(g.getChildAt(i), bank);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
 
     /** The dialog row that names the banks, found by the label a reader would be reading. */
     private android.view.View findBanksRow(android.view.View v) {

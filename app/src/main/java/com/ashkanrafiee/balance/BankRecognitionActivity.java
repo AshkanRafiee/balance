@@ -138,9 +138,12 @@ public final class BankRecognitionActivity extends ThemedScreenActivity {
             ? R.string.recognition_on : R.string.recognition_off, BankRules.displayName(this, bank.name));
         line.setContentDescription(what);
         line.setOnClickListener(v -> {
-            // Read the stored answer back rather than assuming the tap did what it meant to, so the
-            // row and the store can never disagree about what the reader just chose.
-            boolean now = RecognitionHelper.setEnabled(this, bank.name, !on);
+            // The choice is read from the store at the moment of the tap, never from the value this
+            // row happened to be drawn with: the closure outlives the redraw, so a captured flag
+            // would compute the same answer twice and leave a bank the reader turned off stuck off
+            // until they left the screen and came back.
+            boolean now = RecognitionHelper.setEnabled(this, bank.name,
+                !RecognitionHelper.isEnabled(bank.name));
             // Only the one row changes, so nothing else on screen can disagree with the stored choice.
             renderRow(line, name, toggle, bank, now);
         });

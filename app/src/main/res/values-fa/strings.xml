@@ -267,9 +267,10 @@
     <string name="builder_calendar_gregorian">تاریخ‌ها میلادی هستند (2026/09/01)</string>
     <string name="builder_date_with_time">تاریخ، ساعت هم دارد</string>
     <string name="builder_date_without_time">تاریخ، ساعت ندارد</string>
-    <string name="builder_exclusion_hint">یک خط کامل که این قاعده نباید بخواند</string>
-    <string name="builder_exclusion_unusable">یک خط یا چند واژه را انتخاب کنید که واقعاً در پیام باشد. فقط چیزی که در پیام هست را می‌توان نادیده گرفت.</string>
-    <string name="builder_exclusion_add">این خط را نادیده بگیر</string>
+    <string name="builder_exclusion_hint">واژه‌هایی که پیام دیگری را نشانهٔ نادیده‌گرفتن می‌کنند</string>
+    <string name="builder_exclusion_unusable">یک خط، یا چند واژه از پیام‌های دیگری که این بانک می‌فرستد و این قاعده نباید بخواند را بنویسید.</string>
+    <string name="builder_exclusion_in_example">این واژه‌ها در پیام نمونهٔ شما هستند. نادیده‌گرفتنشان باعث می‌شود قاعده همان پیام را هم نخواند.</string>
+    <string name="builder_exclusion_add">پیام‌های دارای این را نادیده بگیر</string>
     <string name="builder_section_problems">هنوز باقی‌مانده</string>
     <string name="builder_section_test">۷. بیازمایید</string>
     <string name="builder_test">این قاعده را بیازمایید</string>

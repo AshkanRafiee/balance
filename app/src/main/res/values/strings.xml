@@ -279,9 +279,10 @@
     <string name="builder_calendar_gregorian">Dates are Gregorian (2026/09/01)</string>
     <string name="builder_date_with_time">The date also carries a time</string>
     <string name="builder_date_without_time">The date carries no time</string>
-    <string name="builder_exclusion_hint">a whole line this rule must ignore</string>
-    <string name="builder_exclusion_unusable">Pick a line or a few words that actually appear in the message. Only what is in the message can be ignored.</string>
-    <string name="builder_exclusion_add">Ignore this line</string>
+    <string name="builder_exclusion_hint">words that mark another message to skip</string>
+    <string name="builder_exclusion_unusable">Type a line, or a few words, from the other messages this bank sends that this rule should skip.</string>
+    <string name="builder_exclusion_in_example">Those words are in your example message. Skipping them would stop the rule reading it.</string>
+    <string name="builder_exclusion_add">Ignore messages with this</string>
     <string name="builder_section_test">7. Test it</string>
     <string name="builder_test">Test this rule</string>
     <string name="builder_test_working">Balance reads your example: %1$s</string>

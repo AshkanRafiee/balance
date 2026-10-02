@@ -258,6 +258,11 @@ final class RuleDraft {
      * What the rule matches on: a distinctive phrase from the message itself, so the rule cannot
      * claim an unrelated message from the same sender, plus whatever the reader said must not be
      * there. The core requires at least one guard that must be present.
+     *
+     * <p>The positive guard is the whole safety boundary and it is provable against the example.
+     * An exclusion only narrows further -- it is how the reader says "this bank sends other kinds of
+     * message under the same sender" -- so it is written as given rather than dropped, and is held
+     * to the one thing that would break the rule: text the example itself contains.
      */
     private List<Map<String, Object>> guards() {
         List<Map<String, Object>> guards = new ArrayList<>();
@@ -265,7 +270,7 @@ final class RuleDraft {
         if (!phrase.isEmpty()) guards.add(map("line", 0, "literal", phrase, "excluded", false));
         for (String exclusion : exclusions) {
             String word = exclusion.trim();
-            if (word.isEmpty() || word.length() > MAX_LITERAL || body.indexOf(word) < 0) continue;
+            if (word.isEmpty() || word.length() > MAX_LITERAL || body.indexOf(word) >= 0) continue;
             guards.add(map("line", -1, "literal", word, "excluded", true));
         }
         // Short enough to stay inside the core's shared work budget on a long message: the literal
@@ -432,11 +437,21 @@ final class RuleDraft {
      * it, and the region widens to the whole message, because the rule is still recognized by
      * something the reader chose rather than by a position that only held for this message.
      */
-    /** Whether an exclusion can be written at all: it has to be a stretch of the example, since a
-     *  guard the rule cannot be shown to hold would look like protection and be none. */
+    /** Whether an exclusion can be written at all. It has to be words the reader wants the rule to
+     *  refuse, which is exactly the text the example does <em>not</em> contain: an exclusion drawn
+     *  from the example would be a guard the example itself fails, so the rule could never read the
+     *  message it was built from. Length stays capped because the literal scan charges it at every
+     *  position of every message. */
     boolean exclusionUsable(String word) {
-        return word != null && !word.isEmpty() && word.length() <= MAX_LITERAL
-                && body.indexOf(word) >= 0;
+        return word != null && !word.isEmpty() && word.trim().length() <= MAX_LITERAL
+                && body.indexOf(word.trim()) < 0;
+    }
+
+    /** Whether the words are already in the example message, which is the one refusal the reader is
+     *  likely to walk into: an exclusion taken from the example would make the rule refuse the very
+     *  message it was built from. Named apart from {@link #exclusionUsable} so the screen can say so. */
+    boolean inExample(String word) {
+        return word != null && !word.isEmpty() && body.indexOf(word.trim()) >= 0;
     }
 
     /** How many lines a message spans. The engine caps this, so the builder has to know it too. */

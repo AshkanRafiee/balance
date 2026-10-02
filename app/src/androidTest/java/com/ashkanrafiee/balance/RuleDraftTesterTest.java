@@ -87,16 +87,17 @@ public class RuleDraftTesterTest {
     }
 
     @Test
-    public void aRuleThatCannotMatchItsOwnExampleIsNotParsed() {
-        RuleDraft broken = draft(SENDER);
-        // The amount the reader highlighted is not where the rule reads it from: a guard that
-        // excludes the line the amount is on means no rule can claim the message.
-        broken.exclusions.add("مانده حساب");
+    public void anExclusionNamingTheExampleIsNotWrittenIntoTheRule() {
+        RuleDraft draft = draft(SENDER);
+        // A guard that excludes a line the example is on would mean no rule can claim the message
+        // the reader pasted. Such an exclusion is dropped rather than written, so a draft that
+        // somehow holds one still reads its own example instead of reporting a failure the reader
+        // cannot act on.
+        draft.exclusions.add("مانده حساب");
         RuleDraftTester.Verdict verdict =
-                RuleDraftTester.test(broken, engine, SENDER, BODY, ARRIVAL);
-        assertFalse(verdict.parsed);
-        assertEquals(Parser.Status.NO_MATCH, verdict.status);
-        assertEquals("no_match", verdict.reason);
+                RuleDraftTester.test(draft, engine, SENDER, BODY, ARRIVAL);
+        assertTrue(verdict.reason, verdict.parsed);
+        assertEquals(Parser.Status.PARSED, verdict.status);
     }
 
     @Test

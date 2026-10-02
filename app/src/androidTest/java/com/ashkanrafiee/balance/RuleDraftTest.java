@@ -192,11 +192,17 @@ public class RuleDraftTest {
     /** The screen refuses an exclusion the rule cannot be written with, so the list never shows a
      *  guard that would sit there looking like protection while the rule read the message anyway. */
     @Test
-    public void anExclusionThatIsNotInTheMessageIsRefused() {
+    public void anExclusionFromTheExampleIsRefused() {
         RuleDraft draft = movement();
-        assertFalse(draft.exclusionUsable("این عبارت در پیام نیست"));
+        // Words from another message are exactly what an exclusion is for, so they are accepted.
+        assertTrue(draft.exclusionUsable("رمز یک‌بار مصرف"));
+        assertTrue(draft.exclusionUsable("OTP"));
+        // Words the example contains are refused: such a guard would make the rule reject the very
+        // message it was built from, and the reader would be told their rule does not work.
+        assertFalse(draft.exclusionUsable("مانده حساب"));
+        assertTrue(draft.inExample("مانده حساب"));
+        assertFalse(draft.inExample("OTP"));
         assertFalse(draft.exclusionUsable(""));
-        assertTrue(draft.exclusionUsable("مانده حساب"));
     }
 
     /** The catch-all guard must stay short enough for the core's work budget, or a rule written
@@ -348,16 +354,32 @@ public class RuleDraftTest {
     @Test
     public void exclusionsBecomeGuards() {
         RuleDraft draft = movement();
-        // A word that is not in the example is dropped: a guard that cannot be shown to exclude
-        // anything is not written, because it would look like protection and be none.
+        // An exclusion is written as given. It narrows a rule that already cannot claim an
+        // unrelated message, so nothing about it has to be provable against the example -- which is
+        // the point, because the messages a reader wants skipped are the ones they never pasted.
         draft.exclusions.add("مانده");
         draft.exclusions.add("12:41");
-        draft.exclusions.add("رمز");
+        draft.exclusions.add("رمز یک‌بار مصرف");
         Map<?, ?> template = (Map<?, ?>) ((List<?>) draft.document().get("templates")).get(0);
         List<?> guards = (List<?>) template.get("guards");
-        assertEquals(3, guards.size());
+        // The two words the example itself contains are the ones that cannot be written: a guard
+        // the example fails would be a rule that refuses the message it was built from.
+        assertEquals(2, guards.size());
         assertEquals(Boolean.TRUE, ((Map<?, ?>) guards.get(1)).get("excluded"));
-        assertEquals(Boolean.TRUE, ((Map<?, ?>) guards.get(2)).get("excluded"));
+    }
+
+    /** The safety boundary is the positive guard, and it comes from the example. An exclusion the
+     *  example fails is not written; one it passes is written and narrows the rule. */
+    @Test
+    public void anExclusionDoesNotStopTheRuleReadingItsOwnExample() {
+        RuleDraft draft = movement();
+        draft.exclusions.clear();
+        draft.exclusions.add("رمز یک‌بار مصرف");
+        // read() fails the test unless the rule parses the example, which is the whole point: an
+        // exclusion naming another message must leave this one readable.
+        Parser.Result result = read(draft);
+        assertEquals(1, result.facts().size());
+        assertEquals(-120_000L, result.facts().get(0).money().minorUnits());
     }
 
     @Test
