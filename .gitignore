@@ -7,3 +7,7 @@ signing.properties
 *.apk
 *.aab
 local.properties
+
+# Python bytecode from the in-repo tooling
+__pycache__/
+*.pyc

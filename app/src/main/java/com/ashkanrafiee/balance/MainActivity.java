@@ -294,14 +294,13 @@ public class MainActivity extends Activity {
     /** The combined Display dialog behind the footer item: the dropdowns in a single menu, so the
      *  color theme (see {@link ThemeHelper}), the widget's own theme, the interface language, the
      *  calendar system (see {@link RegionHelper}), the currency unit (see {@link CurrencyHelper}),
-     *  the balance-freshness threshold and the "expand all history" toggle are all chosen in one
-     *  place. They are ordered by how often they are changed, and then grouped by kind, so related
-     *  options sit together instead of having to be hunted for: the two color themes are what a
-     *  user reaches for most — mostly to turn dark mode on for the evening — and read as a pair,
-     *  the language, calendar and currency are all set once and together decide how text, dates and
-     *  amounts are formatted, the freshness threshold is the odd one out, and the lone on/off
-     *  toggle closes the menu. Every picker applies its choice as soon as it is selected — a
-     *  changed region or the history toggle apply on the next history open, a changed theme or
+     *  the balance-freshness threshold are all chosen in one place. They are ordered by how often
+     *  they are changed, and then grouped by kind, so related options sit together instead of
+     *  having to be hunted for: the two color themes are what a user reaches for most — mostly to
+     *  turn dark mode on for the evening — and read as a pair, the language, calendar and currency
+     *  are all set once and together decide how text, dates and amounts are formatted, and the
+     *  freshness threshold is the odd one out. Every picker applies its choice as soon as it is
+     *  selected — a changed region applies on the next history open, a changed theme or
      *  language recreates the screen, a changed currency re-renders the dashboard and the widget —
      *  so only a typed custom currency name waits for the OK button. */
     void displayDialog() {
