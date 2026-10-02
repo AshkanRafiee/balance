@@ -116,21 +116,38 @@ final class Residual {
         long inside = 0;            // sum of movements received after it, up to the current one
         int count = 0;
         boolean exact = true;       // false once that sum has overflowed
-        for (Transaction t : sorted) {
+        int i = 0;
+        while (i < sorted.size()) {
+            long date = sorted.get(i).date;
+            int j = i + 1;
+            while (j < sorted.size() && sorted.get(j).date == date) j++;
             if (open == null) {
                 // Only a message that stated a balance can open a bracket. (The parser only records
                 // a movement together with its balance, so in practice every row gets here; a row
                 // that reached us without one simply rides inside someone else's window further
                 // down, where its amount is still counted.)
-                if (t.balance == null) continue;
-                open = t;
-                inside = 0;
-                count = 0;
-                exact = true;
+                int balances = 0;
+                Transaction sole = null;
+                for (int k = i; k < j; k++) {
+                    if (sorted.get(k).balance != null) {
+                        balances++;
+                        sole = sorted.get(k);
+                    }
+                }
+                if (balances == 1) {
+                    open = sole;
+                    inside = 0;
+                    count = 0;
+                    exact = true;
+                }
+                // Zero balances: nothing to anchor on. Several balances sharing one instant:
+                // which one opens the next window is unknowable, so the group stays silent and
+                // the next instant re-anchors.
+                i = j;
                 continue;
             }
-            if (t.date == open.date) {
-                // Two messages stamped the same second bound no interval: which movement happened
+            if (date == open.date) {
+                // Two messages stamped the same instant bound no interval: which movement happened
                 // first is unknowable, and a gap claimed across an unknowable order would be a
                 // fabrication. The bracket is dropped rather than guessed at, and the next message
                 // that states a balance opens a fresh one — so the region stays silent instead of
@@ -139,36 +156,66 @@ final class Residual {
                 inside = 0;
                 count = 0;
                 exact = true;
+                i = j;
                 continue;
             }
-            // Everything after the open statement, up to and including this one, happened inside
-            // the window the two statements bracket. The closing statement's own movement counts
-            // too: the balance it reports is the one read after that very movement, so leaving it
-            // out would report every ordinary movement as a missing one.
-            if (exact) {
-                try {
-                    inside = Math.addExact(inside, t.amount);
-                } catch (ArithmeticException overflow) {
-                    exact = false;
+            // Everything after the open statement, up to and including this instant, happened
+            // inside the window the two statements bracket. The closing statement's own movement
+            // counts too: the balance it reports is the one read after that very movement, so
+            // leaving it out would report every ordinary movement as a missing one. Movements
+            // sharing one instant are judged together: closing the window on the first of several
+            // same-minute statements would claim the later ones' own movements as missing (two
+            // Tejarat statements in one minute report the second one as unaccounted), while the
+            // order inside the instant is unknowable. A single closing balance keeps the window
+            // provable; several closers on one instant drop it instead.
+            int balances = 0;
+            Transaction closer = null;
+            for (int k = i; k < j; k++) {
+                if (sorted.get(k).balance != null) {
+                    balances++;
+                    closer = sorted.get(k);
                 }
             }
-            count++;
-            if (t.balance == null) continue;    // rides inside, never closes the bracket
+            if (balances > 1) {
+                open = null;
+                inside = 0;
+                count = 0;
+                exact = true;
+                i = j;
+                continue;
+            }
+            for (int k = i; k < j; k++) {
+                Transaction t = sorted.get(k);
+                if (exact) {
+                    try {
+                        inside = Math.addExact(inside, t.amount);
+                    } catch (ArithmeticException overflow) {
+                        exact = false;
+                    }
+                }
+                count++;
+            }
+            if (balances == 0) {
+                // Rides inside, never closes the bracket.
+                i = j;
+                continue;
+            }
             if (exact) {
                 long gap;
                 try {
-                    gap = Math.subtractExact(Math.subtractExact(t.balance, open.balance), inside);
+                    gap = Math.subtractExact(Math.subtractExact(closer.balance, open.balance), inside);
                 } catch (ArithmeticException overflow) {
                     gap = 0;
                 }
                 if (gap != 0) {
-                    out.add(new Residual(t.bank, t.account, open.date, t.date, gap, count));
+                    out.add(new Residual(closer.bank, closer.account, open.date, closer.date, gap, count));
                 }
             }
-            open = t;
+            open = closer;
             inside = 0;
             count = 0;
             exact = true;
+            i = j;
         }
     }
 }
