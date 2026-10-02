@@ -83,6 +83,7 @@ public class MainActivity extends Activity {
         getWindow().setNavigationBarColor(resColor(R.color.nav_bar));
         getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(resColor(R.color.bg)));
         view = new BalanceView();
+        view.resolveDisplay();
         FrameLayout host = new FrameLayout(this);
         setContentView(host);
         host.addView(view, new FrameLayout.LayoutParams(
@@ -120,8 +121,14 @@ public class MainActivity extends Activity {
         if (!BalanceData.isOnboardingSeen(this)) {
             startActivityForResult(new Intent(this, OnboardingActivity.class), ONBOARDING_REQUEST);
         } else {
-            requestSms();
-            smsRequested = true;
+            // Both the permission request and the scan belong to onResume(), which runs a moment
+            // later and always does both. Kicking the scan off here as well used to start a first
+            // pass that onResume immediately queued a second one behind: two full inbox reads, two
+            // publish cycles and two of every store decrypt, all to produce identical numbers. So
+            // nothing is started here — this only records that there is nothing left to ask for,
+            // which stops onResume() re-prompting a user who has already granted access.
+            smsRequested = checkSelfPermission(Manifest.permission.READ_SMS)
+                == PackageManager.PERMISSION_GRANTED;
         }
     }
 
@@ -191,6 +198,7 @@ public class MainActivity extends Activity {
         super.onResume();
         LockManager.cancelPendingLock();
         if (view != null) {
+            view.resolveDisplay();
             view.enforceAutoHide();
             view.refresh();
         }
@@ -1258,6 +1266,41 @@ public class MainActivity extends Activity {
         final Paint p = new Paint(3);
         final LinkedHashMap<String, Bank> banks = new LinkedHashMap<>();
         final java.util.Set<String> excluded = new java.util.HashSet<>();
+        /** The display settings this frame draws with, read once per resume rather than once per
+         *  row: the denomination, its unit, the digit style, the freshness window and the lock state
+         *  are all preferences or a configuration lookup, and none of them can change between two
+         *  rows of one frame. A long account asked the preferences for each of them per row and
+         *  again per bank while rebuilding its screen-reader summary, so a redraw spent most of its
+         *  time re-reading answers it already had. */
+        private String displayCurrency = CurrencyHelper.CURRENCY_TOMAN;
+        private String displayUnit;
+        private boolean persianDigits;
+        private int staleDays;
+        private boolean lockEnabled;
+
+        /** Refreshes the cached display settings. Called whenever the dashboard comes to the
+         *  foreground, so a change made in the Display, Stale or Lock screens is picked up on the
+         *  way back rather than being frozen until the process restarts. */
+        void resolveDisplay() {
+            displayCurrency = CurrencyHelper.currency(MainActivity.this);
+            displayUnit = CurrencyHelper.label(MainActivity.this);
+            persianDigits = LocaleHelper.isPersian(MainActivity.this);
+            staleDays = BalanceData.getStaleDays(MainActivity.this);
+            lockEnabled = LockManager.isEnabled(MainActivity.this);
+        }
+
+        /** Whether a balance is past the freshness window, from the threshold already read. */
+        private boolean pastFreshness(long date) {
+            return staleDays > 0 && date > 0
+                && (System.currentTimeMillis() - date) > staleDays * 86400000L;
+        }
+
+        /** How many days old a balance is, from the same threshold; 0 when the warning is off. */
+        private int ageInDays(long date) {
+            if (date <= 0 || staleDays <= 0) return 0;
+            int days = (int) ((System.currentTimeMillis() - date) / 86400000L);
+            return days > 0 ? days : 0;
+        }
         final float d = getResources().getDisplayMetrics().density;
         /** System font scale, applied to every text the canvas draws (the canvas otherwise renders in
          *  density-scaled px and would silently ignore the user's chosen font size). Layout positions
@@ -1543,7 +1586,8 @@ public class MainActivity extends Activity {
             StringBuilder sb = new StringBuilder();
             for (java.util.Map.Entry<String, Long> e : total.entries().entrySet()) {
                 if (sb.length() > 0) sb.append('\n');
-                sb.append(CurrencyHelper.amount(MainActivity.this, e.getKey(), e.getValue()))
+                sb.append(CurrencyHelper.amount(MainActivity.this, e.getKey(),
+                        displayCurrency, e.getValue()))
                     .append(' ').append(CurrencyHelper.label(MainActivity.this, e.getKey()));
             }
             return sb.toString();
@@ -1556,7 +1600,7 @@ public class MainActivity extends Activity {
             int staleCount = 0;
             for (java.util.Map.Entry<String, Bank> e : banks.entrySet())
                 if (!excluded.contains(e.getKey()) && !e.getValue().movementOnly()
-                    && BalanceData.isStale(MainActivity.this, e.getValue().date))
+                    && pastFreshness(e.getValue().date))
                     staleCount++;
             String note = staleCount > 0
                 ? " " + getResources().getQuantityString(
@@ -1568,11 +1612,12 @@ public class MainActivity extends Activity {
         /** Publishes a set of balances into the view and redraws. Every path that ends up showing
          *  saved data goes through here — a scan, a failed scan, a restore, and the dashboard's
          *  SMS-denied path — so the store, the total, the strip and the widget never drift apart. */
-        private void applySaved(LinkedHashMap<String, Bank> saved, Context app, String statusText) {
+        private void applySaved(LinkedHashMap<String, Bank> saved, Set<String> excludedEntries,
+                Context app, String statusText) {
             banks.clear();
             banks.putAll(saved);
             excluded.clear();
-            excluded.addAll(BalanceData.getExcluded(app));
+            excluded.addAll(excludedEntries);
             recalcTotal();
             status = statusText;
             refreshing = false;
@@ -1594,10 +1639,41 @@ public class MainActivity extends Activity {
             invalidate();
         }
 
-        /** Reloads the saved balances (e.g. after a restore) without re-scanning SMS. */
+        /** Publishes whatever the store still holds after a scan failed. The fallback load decrypts
+         *  the store just like the successful path, so it stays on the caller's worker and only the
+         *  result is posted — reading it inside post() put a second full decrypt on the UI thread,
+         *  exactly when the app was already busy recovering. A store that will not open either is
+         *  reported as empty rather than left on "refreshing" forever. */
+        private void recoverFailedScan(final Context app, final String unreadable, final String loaded,
+                final boolean hard, final boolean pendingHard, final boolean pendingNotes,
+                final boolean silent) {
+            final LinkedHashMap<String, Bank> recovered;
+            final Set<String> failedExcluded;
+            try {
+                recovered = BalanceData.read(app);
+                failedExcluded = BalanceData.getExcluded(app);
+            } catch (Exception fatal) {
+                post(() -> applySaved(new LinkedHashMap<String, Bank>(),
+                    new java.util.HashSet<String>(), app, unreadable));
+                return;
+            }
+            post(() -> {
+                applySaved(recovered, failedExcluded, app, recovered.isEmpty() ? unreadable : loaded);
+                if (hard) toast(R.string.toast_reset_failed);
+                if (refreshAgain) { refreshAgain = false; refresh(pendingHard, pendingNotes, silent); }
+            });
+        }
+
+        /** Reloads the saved balances (e.g. after a restore) without re-scanning SMS. Reading the
+         *  store decrypts it, so this happens off the main thread like every other load. */
         void loadSaved() {
-            applySaved(BalanceData.read(MainActivity.this), MainActivity.this,
-                getString(R.string.status_loaded_from_saved));
+            final Context app = getApplicationContext();
+            final String loaded = getString(R.string.status_loaded_from_saved);
+            new Thread(() -> {
+                LinkedHashMap<String, Bank> reloaded = BalanceData.read(app);
+                Set<String> excludedEntries = BalanceData.getExcluded(app);
+                post(() -> applySaved(reloaded, excludedEntries, app, loaded));
+            }).start();
         }
 
         void refresh(boolean hard, boolean alsoNotes) { refresh(hard, alsoNotes, false); }
@@ -1629,9 +1705,13 @@ public class MainActivity extends Activity {
                 new Thread(() -> {
                     final Context app = MainActivity.this.getApplicationContext();
                     final LinkedHashMap<String, Bank> saved = BalanceData.read(app);
+                    // Read here, off the main thread, for the same reason as the scan below: the
+                    // set lives in the encrypted store, so reading it on the UI thread would decrypt
+                    // everything and then wait on the lock a background scan may already hold.
+                    final Set<String> excludedEntries = BalanceData.getExcluded(app);
                     // Nothing stored yet (a fresh install, or a reset): the empty card wants the
                     // plain "permission is needed" wording, and there is no strip to explain it.
-                    post(() -> applySaved(saved, app, saved.isEmpty()
+                    post(() -> applySaved(saved, excludedEntries, app, saved.isEmpty()
                         ? getString(R.string.status_permission_needed)
                         : getString(R.string.status_stale_no_permission)));
                 }).start();
@@ -1651,19 +1731,20 @@ public class MainActivity extends Activity {
                     if (hard) BalanceData.reset(app, alsoNotes);
                     LinkedHashMap<String, Bank> saved = BalanceData.read(app);
                     int count = BalanceData.scanSms(app, saved);
+                    // Taken here, on the worker that already holds the store, and handed to the
+                    // view: reading it from applySaved() meant decrypting the whole store on the UI
+                    // thread while scanHistory() below held the lock across its own scan, so the
+                    // first frame of real numbers waited behind the history pass it did not need.
+                    final Set<String> excludedEntries = BalanceData.getExcluded(app);
                     post(() -> {
-                        applySaved(saved, app, buildStatus(count, saved.isEmpty(), statusNoSms, updatedNow));
+                        applySaved(saved, excludedEntries, app,
+                            buildStatus(count, saved.isEmpty(), statusNoSms, updatedNow));
                         if (hard) toast(R.string.toast_reset_done);
                         if (refreshAgain) { refreshAgain = false; refresh(pendingHard, pendingNotes, silent); }
                     });
                 } catch (Exception e) {
-                    post(() -> {
-                        LinkedHashMap<String, Bank> saved2 = BalanceData.read(app);
-                        applySaved(saved2, app,
-                            saved2.isEmpty() ? getString(R.string.status_sms_unreadable) : statusLoaded);
-                        if (hard) toast(R.string.toast_reset_failed);
-                        if (refreshAgain) { refreshAgain = false; refresh(pendingHard, pendingNotes, silent); }
-                    });
+                    recoverFailedScan(app, getString(R.string.status_sms_unreadable), statusLoaded,
+                        hard, pendingHard, pendingNotes, silent);
                 }
                 BalanceData.scanHistory(app);
             }).start();
@@ -1681,11 +1762,11 @@ public class MainActivity extends Activity {
                 text(c, "\u2022\u2022\u2022\u2022\u2022\u2022", x, baseline, size, fg, align);
                 return;
             }
-            String number = CurrencyHelper.amount(MainActivity.this, n);
+            String number = CurrencyHelper.amountIn(MainActivity.this, displayCurrency, n);
             float current = size;
             while (current > 10 && measure(number, current) > width) current -= 1;
             text(c, number, x, baseline, current, accent, align);
-            text(c, CurrencyHelper.label(MainActivity.this), x, baseline + 19, 11, muted, align);
+            text(c, displayUnit, x, baseline + 19, 11, muted, align);
             if (strikethrough) {
                 float numW = measure(number, current);
                 float lineX1 = align == Paint.Align.RIGHT ? x - numW : x;
@@ -1717,7 +1798,8 @@ public class MainActivity extends Activity {
             while (current > 10 && measure(dash, current) > width) current -= 1;
             text(c, dash, x, baseline, current, muted, align);
             String movement = bank.movement == null ? getString(R.string.no_movement_reported)
-                : CurrencyHelper.amount(MainActivity.this, bank.movementCurrency, bank.movement)
+                : CurrencyHelper.amount(MainActivity.this, bank.movementCurrency,
+                        displayCurrency, bank.movement)
                     + " " + CurrencyHelper.label(MainActivity.this, bank.movementCurrency);
             text(c, fit(movement, 11, width), x, baseline + 19, 11, muted, align);
         }
@@ -1730,11 +1812,11 @@ public class MainActivity extends Activity {
                 text(c, "\u2022\u2022\u2022\u2022\u2022\u2022", x, baseline, size, fg, align);
                 return;
             }
-            String number = CurrencyHelper.amount(MainActivity.this, n);
+            String number = CurrencyHelper.amountIn(MainActivity.this, displayCurrency, n);
             float current = size;
             while (current > 10 && measure(number, current) > width) current -= 1;
             text(c, number, x, baseline, current, color, align);
-            text(c, CurrencyHelper.label(MainActivity.this), x, baseline + 19, 11, muted, align);
+            text(c, displayUnit, x, baseline + 19, 11, muted, align);
         }
 
         /** The total card's figures. A single-currency total draws exactly as it always has; when
@@ -1758,7 +1840,7 @@ public class MainActivity extends Activity {
         private void totalLine(Canvas c, String currency, long value, float x, float baseline,
                 float width, boolean rtl, float size) {
             Paint.Align anchor = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
-            String number = CurrencyHelper.amount(MainActivity.this, currency, value);
+            String number = CurrencyHelper.amount(MainActivity.this, currency, displayCurrency, value);
             String unit = CurrencyHelper.label(MainActivity.this, currency);
             float unitSize = Math.min(13, size * 0.4f), unitGap = 10;
             float unitWidth = measure(unit, unitSize);
@@ -1850,7 +1932,7 @@ public class MainActivity extends Activity {
             text(c, getString(R.string.app_name), edgeX, 58, 25, fg, edgeAlign);
             text(c, fit(getString(R.string.subtitle_offline_bank_balances), 14, w - 64), edgeX, 86, 14, muted, edgeAlign);
 
-            drawLockIcon(c, LockManager.isEnabled(MainActivity.this) ? active : accent);
+            drawLockIcon(c, lockEnabled ? active : accent);
 
             round(c, 24, DashboardLayout.TOTAL_TOP, w - 24, DashboardLayout.TOTAL_BOTTOM, 28, panel);
             float totalLabelX = rtl ? w - 48 : 48;
@@ -1912,7 +1994,7 @@ public class MainActivity extends Activity {
                     String displayName = BankRules.displayName(MainActivity.this, row.bankName);
                     String nameShown = fit(displayName, 17, Math.max(40, valueLeft - 100));
                     boolean stale = !row.excluded && !row.bank.movementOnly()
-                        && BalanceData.isStale(MainActivity.this, row.bank.date);
+                        && pastFreshness(row.bank.date);
                     round(c, 24, yy, w - 24, yy + 82, 20, row.excluded ? bg : panel);
                     if (stale) roundStroke(c, 24, yy, w - 24, yy + 82, 20, 1.8f, warn);
                     bankBadge(c, row.bankName, badgeX, yy + 41);
@@ -1922,7 +2004,7 @@ public class MainActivity extends Activity {
                     text(c, nameShown, nameX, yy + 36, 17, row.excluded ? muted : fg, nameAlign);
                     if (stale)
                         drawStaleBadge(c, nameShown, nameX, yy, nameAlign,
-                            BalanceData.staleDays(MainActivity.this, row.bank.date),
+                            ageInDays(row.bank.date),
                             rtl ? w - valueLeft + 4 : valueLeft - 4);
                     if (row.bank.movementOnly()) {
                         // The bank told us what it did, never what we have. The value slot says so
@@ -2076,8 +2158,7 @@ public class MainActivity extends Activity {
         /** Account numbers and other plain numerals follow the app language's digit rules, matching
          *  how {@link BalanceData#toman} formats amounts. */
         String faDigits(String s) {
-            return LocaleHelper.isPersian(MainActivity.this)
-                ? HistoryActivity.faDigitsString(s) : s;
+            return persianDigits ? HistoryActivity.faDigitsString(s) : s;
         }
 
         /** One card row in the bank list. Every bank entry — whether a one-account bank or a single

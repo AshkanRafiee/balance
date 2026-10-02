@@ -12,6 +12,7 @@ import android.content.pm.PackageManager;
 import android.os.SystemClock;
 import android.view.View;
 import android.widget.RemoteViews;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class BalanceWidgetProvider extends AppWidgetProvider {
@@ -126,8 +127,12 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         // Per currency, never one number: two currencies are not summable, so a mixed total is
         // reported as one self-labelled line each.
         CurrencyTotals totals = new CurrencyTotals();
+        // Read once for the whole loop: the excluded set lives in the encrypted store, so asking
+        // per row decrypted everything again for every bank — eight banks meant eight decrypts on
+        // the widget's render thread.
+        Set<String> excluded = BalanceData.getExcluded(c);
         for (java.util.Map.Entry<String, Bank> e : BalanceData.read(c).entrySet())
-            if (!BalanceData.isExcluded(c, e.getKey()) && !e.getValue().movementOnly())
+            if (!excluded.contains(e.getKey()) && !e.getValue().movementOnly())
                 totals.add(e.getValue().currency, e.getValue().amount);
         String only = totals.only();
         String totalText;

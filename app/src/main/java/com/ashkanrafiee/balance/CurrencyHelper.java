@@ -72,7 +72,15 @@ public final class CurrencyHelper {
      *  rial amount follows the app's chosen denomination exactly as before; every other currency is
      *  shown at its own scale with no conversion of any kind, because none exists offline. */
     public static String amount(Context context, String currency, long minorUnits) {
-        if (currency == null || BalanceData.IRR.equals(currency)) return amount(context, minorUnits);
+        return amount(context, currency, currency(context), minorUnits);
+    }
+
+    /** This with the rial denomination already read by the caller. A screen that totals one line per
+     *  currency formats several amounts per frame, and for every rial line the three-argument form
+     *  re-read the denomination the caller had just resolved for the frame. Only the rial path uses
+     *  {@code denomination}: every other currency keeps its own scale either way. */
+    public static String amount(Context context, String currency, String denomination, long minorUnits) {
+        if (currency == null || BalanceData.IRR.equals(currency)) return amountIn(context, denomination, minorUnits);
         int scale = scaleOf(currency);
         if (scale == 0) return display(context, minorUnits);
         return display(context, new BigDecimal(BigInteger.valueOf(minorUnits), scale));
