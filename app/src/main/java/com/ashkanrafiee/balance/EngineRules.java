@@ -69,7 +69,14 @@ final class EngineRules {
          *  to no region: a region is a grouping of the catalog we publish, not a claim about a
          *  user's own rules. */
         final String region;
+        /** The pack id: what the catalog, the store and the settings screens address a pack by. */
         final String id;
+        /** The bank id: what a parsed fact carries, and therefore what storage is keyed by. Equal to
+         *  {@link #id} for every shipped pack, and deliberately not equal for a local one -- the
+         *  store namespaces a pack the user brought so it cannot collide with the catalog, while the
+         *  bank id stays the one its own templates emit. Conflating the two is what leaves a local
+         *  pack unable to resolve the facts it just produced. */
+        final String bankId;
         final String name;
         final String country;
         /** Who asked for this bank's coverage. Purely descriptive: it decides what the settings
@@ -79,10 +86,11 @@ final class EngineRules {
         final Parser parser;
         final List<Rules.Template> templates;
 
-        Bank(String region, String id, String name, String country,
+        Bank(String region, String id, String bankId, String name, String country,
              PackDocument.Bank.Provenance provenance, Parser parser, List<Rules.Template> templates) {
             this.region = region;
             this.id = id;
+            this.bankId = bankId;
             this.name = name;
             this.country = country;
             this.provenance = provenance;
@@ -100,15 +108,21 @@ final class EngineRules {
      *  a reader never observes a partially rebuilt index. */
     private static final class Index {
         final Map<String, Bank> bySender;
-        final Map<String, Bank> byId;
         final List<Bank> bundled;
         final List<Bank> local;
         final List<String> unreadable;
 
-        Index(Map<String, Bank> bySender, Map<String, Bank> byId, List<Bank> bundled,
-                List<Bank> local, List<String> unreadable) {
+        /** Pack id -> pack. What the catalog, the store and the settings screens address by. */
+        final Map<String, Bank> byPackId;
+        /** Bank id -> pack. What a parsed fact resolves against, and so the bridge from the engine's
+         *  bank ids to the bank name storage is keyed by. */
+        final Map<String, Bank> byBankId;
+
+        Index(Map<String, Bank> bySender, Map<String, Bank> byPackId, Map<String, Bank> byBankId,
+                List<Bank> bundled, List<Bank> local, List<String> unreadable) {
             this.bySender = bySender;
-            this.byId = byId;
+            this.byPackId = byPackId;
+            this.byBankId = byBankId;
             this.bundled = Collections.unmodifiableList(bundled);
             this.local = Collections.unmodifiableList(local);
             this.unreadable = Collections.unmodifiableList(unreadable);
@@ -198,7 +212,8 @@ final class EngineRules {
                 if (find(ordered, id) != null) {
                     throw new IOException("two regions ship a bank with the id " + id);
                 }
-                Bank bank = new Bank(region, id, pack.bank().name(), pack.bank().country(),
+                Bank bank = new Bank(region, id, pack.templates().get(0).bankId(),
+                        pack.bank().name(), pack.bank().country(),
                         pack.bank().provenance(), new Parser(pack.templates()), pack.templates());
                 ordered.add(bank);
             }
@@ -256,7 +271,7 @@ final class EngineRules {
             LocalPackStore.Snapshot snapshot = store.snapshot();
             for (LocalPackStore.Pack pack : snapshot.packs()) {
                 PackDocument document = pack.document();
-                banks.add(new Bank(null, document.id(), document.bank().name(),
+                banks.add(new Bank(null, document.id(), document.bank().id(), document.bank().name(),
                         document.bank().country(), document.bank().provenance(),
                         new Parser(document.templates()), document.templates()));
             }
@@ -328,17 +343,21 @@ final class EngineRules {
      *  overwrites, which is what makes the outcome independent of map iteration order. */
     private static Index compose(List<Bank> shipped, List<Bank> local, List<String> unreadable) {
         Map<String, Bank> bySender = new HashMap<>();
-        Map<String, Bank> byId = new HashMap<>();
-        for (Bank bank : shipped) register(bySender, byId, bank);
-        for (Bank bank : local) register(bySender, byId, bank);
-        return new Index(bySender, byId, new ArrayList<>(shipped), new ArrayList<>(local), unreadable);
+        Map<String, Bank> byPackId = new HashMap<>();
+        Map<String, Bank> byBankId = new HashMap<>();
+        for (Bank bank : shipped) register(bySender, byPackId, byBankId, bank);
+        for (Bank bank : local) register(bySender, byPackId, byBankId, bank);
+        return new Index(bySender, byPackId, byBankId, new ArrayList<>(shipped),
+                new ArrayList<>(local), unreadable);
     }
 
     /** Registers every packed alias under both its raw form (the engine matches senders exactly,
      *  as authored) and its BankRules-normalized form (what the legacy resolve() path matches inbox
      *  senders against). Never overwrites an existing owner: the first-registered bank wins. */
-    private static void register(Map<String, Bank> bySender, Map<String, Bank> byId, Bank bank) {
-        byId.putIfAbsent(bank.id, bank);
+    private static void register(Map<String, Bank> bySender, Map<String, Bank> byPackId,
+            Map<String, Bank> byBankId, Bank bank) {
+        byPackId.putIfAbsent(bank.id, bank);
+        byBankId.putIfAbsent(bank.bankId, bank);
         for (Rules.Template template : bank.templates) {
             for (String sender : template.senders()) {
                 put(bySender, sender, bank);
@@ -368,8 +387,10 @@ final class EngineRules {
         return bank;
     }
 
+    /** How many packs the engine answers from. Counted by pack id, since that is what "a pack" means
+     *  to the store and the catalog, and a pack is one entry however many bank ids it declares. */
     int bankCount() {
-        return index.byId.size();
+        return index.byPackId.size();
     }
 
     /** Every shipped bank, in the order the index registers its regions. */
@@ -409,7 +430,15 @@ final class EngineRules {
     /** The canonical bank name a packed catalog id maps to, or null when no pack carries it. This
      *  is the bridge from the engine's catalog ids to the bank name the app keys storage by. */
     String bankNameOf(String bankId) {
-        Bank bank = index.byId.get(bankId);
+        Bank bank = index.byBankId.get(bankId);
+        return bank == null ? null : bank.name;
+    }
+
+    /** The bank name a pack id maps to, or null when no such pack is loaded. Separate from
+     *  {@link #bankNameOf} because a pack id and a bank id are the same string only for the shipped
+     *  catalog; the store rewrites a pack's id when the user brings it. */
+    String packNameOf(String packId) {
+        Bank bank = index.byPackId.get(packId);
         return bank == null ? null : bank.name;
     }
 

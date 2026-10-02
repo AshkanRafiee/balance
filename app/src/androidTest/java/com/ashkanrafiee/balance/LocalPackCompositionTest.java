@@ -81,7 +81,7 @@ public class LocalPackCompositionTest {
         assertEquals("under the namespaced id it was stored as", "local.example.composition", local.id);
         assertEquals(PackDocument.Bank.Provenance.LOCAL, local.provenance);
         assertEquals("and its bank is addressable by the name storage keys on",
-                "Composition Bank", engine.bankNameOf("local.example.composition"));
+                "Composition Bank", engine.packNameOf("local.example.composition"));
 
         assertNotNull("and the engine routes that sender's messages to it",
                 engine.parse("local", LOCAL_ONLY_SENDER, "Balance=1,000\nDate=2026/04/04\n",
@@ -150,6 +150,42 @@ public class LocalPackCompositionTest {
                 install(pack("example.counted", LOCAL_ONLY_SENDER)).outcome());
         assertEquals("the generation stands", generation + 1, engine.localGeneration());
         assertEquals("and the composition is not rebuilt", false, engine.refreshLocal());
+    }
+
+    /** The gap the composition tests above leave open: they ask the engine about a pack and then
+     *  ask it for a name by pack id, but a message is never taken all the way to a stored fact. That
+     *  is the path a real message takes, and it resolves the bank id the parser emits -- which a
+     *  local pack deliberately keeps different from its pack id. */
+    @Test public void aLocalPackReadsAMessageAllTheWayToAStoredFact() throws Exception {
+        install(pack("example.reading", LOCAL_ONLY_SENDER));
+        assertTrue(engine.refreshLocal());
+
+        String[] corpus = fixtureCase();
+        MessageFacts facts = MessageFacts.of(LOCAL_ONLY_SENDER, corpus[0],
+                java.time.Instant.parse(corpus[1]).toEpochMilli());
+
+        assertNotNull("the pack must answer for its own message", facts.bank);
+        assertEquals("under the bank name its storage key comes from", "Composition Bank",
+                facts.bank);
+        assertTrue("and the message is actually read, not merely routed",
+                facts.balance != MessageFacts.NO_BALANCE);
+    }
+
+    /** A body the donor pack really accepts, taken from the corpus the app ships beside it rather
+     *  than written here -- a hand-written body matches no template, and a test that proves nothing
+     *  is worse than no test. Returns the body and the arrival the fixture was recorded with. */
+    @SuppressWarnings("unchecked")
+    private String[] fixtureCase() throws Exception {
+        EngineRules.Bank donor = engine.banksInOrder().get(0);
+        try (InputStream input = context.getAssets()
+                .open(donor.region + "/" + donor.id + "/fixtures.json")) {
+            Map<String, Object> doc = PlatformRuleJson.read(input);
+            for (Object entry : (List<Object>) doc.get("cases")) {
+                Map<String, Object> c = (Map<String, Object>) entry;
+                return new String[] {(String) c.get("body"), (String) c.get("arrival")};
+            }
+        }
+        throw new IllegalStateException("the donor pack ships no fixtures");
     }
 
     // ---- fixtures ----

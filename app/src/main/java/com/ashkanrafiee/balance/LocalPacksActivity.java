@@ -117,7 +117,7 @@ public final class LocalPacksActivity extends ThemedScreenActivity {
         LinearLayout column = new LinearLayout(this);
         column.setOrientation(LinearLayout.VERTICAL);
         TextView name = text(BankRules.displayName(this,
-            engine.bankNameOf(packId) == null ? packId : engine.bankNameOf(packId)), 14, fg);
+            engine.packNameOf(packId) == null ? packId : engine.packNameOf(packId)), 14, fg);
         name.setMaxLines(2);
         column.addView(name);
         TextView id = text(packId, 11, muted);
@@ -222,7 +222,7 @@ public final class LocalPacksActivity extends ThemedScreenActivity {
         if (!localId.startsWith(LocalPackStore.NAMESPACE)
                 || localId.length() <= LocalPackStore.NAMESPACE.length()) return "";
         String upstream = localId.substring(LocalPackStore.NAMESPACE.length());
-        return engine == null || engine.bankNameOf(upstream) == null ? "" : upstream;
+        return engine == null || engine.packNameOf(upstream) == null ? "" : upstream;
     }
 
     private static int senderCount(PackDocument document) {
@@ -288,7 +288,7 @@ public final class LocalPacksActivity extends ThemedScreenActivity {
         new AlertDialog.Builder(this)
             .setTitle(R.string.local_packs_remove)
             .setMessage(getString(R.string.local_packs_remove_confirm,
-                engine == null || engine.bankNameOf(packId) == null ? packId : engine.bankNameOf(packId)))
+                engine == null || engine.packNameOf(packId) == null ? packId : engine.packNameOf(packId)))
             .setPositiveButton(R.string.local_packs_remove, (d, w) -> {
                 try {
                     LocalPackStore store = localStore();
