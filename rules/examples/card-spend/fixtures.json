@@ -1,0 +1,57 @@
+{
+  "schema": "prototype-fixtures-1",
+  "pack": "example.card-spend",
+  "cases": [
+    {
+      "id": "amount-and-balance-below-one-unit",
+      "sourceId": "synthetic-occurrence-1",
+      "sender": "EXAMPLE-CARD",
+      "arrival": "2026-09-05T06:00:00Z",
+      "zone": "Asia/Amman",
+      "body": "Synthetic card statement\nCur=JOD;Amount=.11;At=05/09/2026 08:10:24;Bal=.005;",
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "id": "balance",
+            "account": null,
+            "currency": "JOD",
+            "minorUnits": "5",
+            "scale": 3,
+            "time": {
+              "instant": "2026-09-05T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Amman",
+              "fallback": true
+            }
+          },
+          {
+            "id": "movement",
+            "account": null,
+            "currency": "JOD",
+            "minorUnits": "-110",
+            "scale": 3,
+            "time": {
+              "instant": "2026-09-05T05:10:24Z",
+              "precision": "SECOND",
+              "zone": "Asia/Amman",
+              "fallback": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "movement-in-a-currency-the-pack-does-not-map",
+      "sourceId": "synthetic-occurrence-2",
+      "sender": "EXAMPLE-CARD",
+      "arrival": "2026-09-05T06:00:00Z",
+      "zone": "Asia/Amman",
+      "body": "Synthetic card statement\nCur=EUR;Amount=10;At=05/09/2026 08:10:24;Bal=1000;",
+      "expected": {
+        "status": "INVALID",
+        "outputs": []
+      }
+    }
+  ]
+}

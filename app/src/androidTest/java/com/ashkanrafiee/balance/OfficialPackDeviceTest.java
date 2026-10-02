@@ -69,10 +69,10 @@ public class OfficialPackDeviceTest {
         }
 
         assertEquals("Every catalog bank in every region is packed except the documented collision",
-                44, banks.size());
-        assertEquals("Missing pack must be exactly the collision bank", 43, packed.size());
+                45, banks.size());
+        assertEquals("Missing pack must be exactly the collision bank", 44, packed.size());
         assertEquals(Set.of(MISSING), missing);
-        assertEquals("Shipped fixture count matches the host corpus", 114, fixtures);
+        assertEquals("Shipped fixture count matches the host corpus", 118, fixtures);
     }
 
     /** The shipped regions, in the order the index registers them. */

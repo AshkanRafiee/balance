@@ -32,7 +32,7 @@ public class MainAssetsEngineRulesTest {
         assertEquals("activation is idempotent", rules,
                 EngineRules.activate(InstrumentationRegistry.getInstrumentation().getTargetContext()));
         assertEquals("Every non-collision bank in every shipped region is packed",
-                43, rules.bankCount());
+                44, rules.bankCount());
         assertTrue("Sender index is populated", rules.senderAliasCount() > 0);
 
         // The whole shipped corpus, region by region as the index registers it: the loader's own
@@ -68,7 +68,7 @@ public class MainAssetsEngineRulesTest {
                 fixtures++;
             }
         }
-        assertEquals("The full corpus was exercised", 114, fixtures);
+        assertEquals("The full corpus was exercised", 118, fixtures);
     }
 
     private static Map<String, Object> asset(String path) throws Exception {

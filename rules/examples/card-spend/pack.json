@@ -1,0 +1,122 @@
+{
+  "schema": "prototype-1",
+  "id": "example.card-spend",
+  "revision": "r1",
+  "bank": {
+    "id": "example.card-spend",
+    "country": "JO",
+    "name": "Synthetic Card Example Bank",
+    "provenance": "OFFICIAL"
+  },
+  "templates": [
+    {
+      "id": "synthetic-spend",
+      "senders": [
+        "EXAMPLE-CARD"
+      ],
+      "guards": [
+        {
+          "line": 0,
+          "literal": "Synthetic card statement",
+          "excluded": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "movement",
+          "region": {
+            "line": 1,
+            "after": "",
+            "before": "",
+            "maxLength": 256
+          },
+          "kind": "POSTED_MOVEMENT",
+          "accountOptional": true,
+          "direction": {
+            "fixed": "DEBIT"
+          },
+          "money": {
+            "amount": {
+              "line": -1,
+              "after": "Amount=",
+              "before": ";",
+              "maxLength": 16
+            },
+            "currency": {
+              "token": {
+                "line": -1,
+                "after": "Cur=",
+                "before": ";",
+                "maxLength": 3
+              },
+              "mapping": {
+                "JOD": "JOD",
+                "USD": "USD"
+              }
+            },
+            "decimal": ".",
+            "group": "",
+            "grouping": "NONE",
+            "digits": "ASCII",
+            "unitMultiplier": 1,
+            "leadingPoint": true
+          },
+          "date": {
+            "calendar": "GREGORIAN",
+            "field": {
+              "line": -1,
+              "after": "At=",
+              "before": ";",
+              "maxLength": 19
+            },
+            "orders": [
+              "DMY"
+            ],
+            "separator": "/",
+            "withTime": true,
+            "digits": "ASCII",
+            "maxPastSeconds": 2592000,
+            "maxFutureSeconds": 172800,
+            "options": {
+              "year": "FULL",
+              "yearBase": 0,
+              "variableWidth": false,
+              "layout": "SEPARATED",
+              "timeSeparator": " ",
+              "seconds": true,
+              "zone": "Asia/Amman"
+            }
+          }
+        },
+        {
+          "id": "balance",
+          "region": {
+            "line": 1,
+            "after": "",
+            "before": "",
+            "maxLength": 256
+          },
+          "kind": "AVAILABLE_BALANCE",
+          "accountOptional": true,
+          "money": {
+            "amount": {
+              "line": -1,
+              "after": "Bal=",
+              "before": ";",
+              "maxLength": 16
+            },
+            "currency": {
+              "fixed": "JOD"
+            },
+            "decimal": ".",
+            "group": "",
+            "grouping": "NONE",
+            "digits": "ASCII",
+            "unitMultiplier": 1,
+            "leadingPoint": true
+          }
+        }
+      ]
+    }
+  ]
+}

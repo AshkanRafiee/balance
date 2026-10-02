@@ -1,0 +1,28 @@
+{
+  "allowlist": {},
+  "banks": [
+    {
+      "calendar": "gregorian",
+      "id": "jo.linc",
+      "name": "LINC",
+      "review": {
+        "evidence": "reported-messages",
+        "marketReviewer": false,
+        "realMessages": true,
+        "reviewedOn": "2026-10-02"
+      },
+      "senders": [
+        "LINC"
+      ]
+    }
+  ],
+  "catalog": "sender-catalog-1",
+  "counts": {
+    "aliases": 1,
+    "banks": 1
+  },
+  "engine": "prototype-1",
+  "market": "JO",
+  "profile": "exact-s1",
+  "source": "app user report via GitHub issue #6, opened 2026-09-21 by a reader in Jordan: redacted samples of the LINC card-withdrawal wording, covering a JOD withdrawal, a USD withdrawal against a JOD balance, and amounts printed with no integer part; a fourth sample was truncated in the report and is used as wording evidence only. No official bank documentation or spec was consulted; sender string as reported, matched exactly with no normalization. The reported dates were redacted, so the date rule accepts both day/month and month/day orders and falls back to the message arrival whenever a date is ambiguous."
+}

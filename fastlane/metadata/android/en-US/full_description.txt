@@ -1,6 +1,6 @@
-Balance reads your bank's balance SMS on the phone and shows the latest balance for every supported bank — split per account number when the bank states one — plus the combined total. No account, no cloud, no analytics and no internet permission: the parsing happens on your device, and your financial data stays there, encrypted.
+Balance reads your bank's balance SMS on the phone and shows the latest balance for every supported bank — split per account number when the bank states one — plus the combined total. No account, no cloud, no analytics and no internet permission: parsing happens on your device and your data stays encrypted there.
 
-Iranian banks ship with the app, plus a rule other readers wrote for an Italian bank; others are added from user reports.
+Iranian banks ship with the app, plus rules other readers wrote for banks in Italy and Jordan; others are added from user reports.
 
 Features:
 - If your bank isn't recognized, paste one of its messages, select the amount, balance and date inside it, and Balance writes the rule, tries it on that same message and shows what it read. It stays on your phone; nothing is sent anywhere unless you choose to send it for review
@@ -16,7 +16,7 @@ Features:
 - Filter the history by deposits or withdrawals and by date — today, this month, this year, or a custom range in the Persian or Gregorian calendar
 - Movement reasons read from the bank: when a message names the event behind a movement — a top-up, a bill payment, a refund, an instant transfer — the row says so in your own language, as does the channel when the bank states that. Where it states nothing, nothing is added, and it never mixes into your note
 - Private notes: tap any row to write your own words about that movement; they follow it through every filter, into CSV exports and into encrypted backups
-- CSV export of exactly what the history shows at that moment, through the system file picker, with UTC timestamps, the date in your calendar, every amount paired with its own currency code, your notes, the bank's reason and channel, and a column marking each row a movement or unaccounted money
+- CSV export of exactly what the history shows at that moment, with UTC timestamps, the date in your calendar, each amount with its own currency code, your notes, the bank's reason and channel, and a column marking a movement or unaccounted money
 - Password-encrypted backup and restore of balances, history, notes, reasons and channels
 - Optional in-app lock with PIN, password or fingerprint, covering the app, the widget and screenshots/recents
 - English and Persian interface, Persian (Jalali) or Gregorian calendar, and a light or dark theme that follows the device

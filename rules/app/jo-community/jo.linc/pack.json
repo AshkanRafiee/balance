@@ -1,0 +1,215 @@
+{
+  "schema": "prototype-1",
+  "id": "community.jo.linc",
+  "revision": "jo-1",
+  "bank": {
+    "id": "jo.linc",
+    "country": "JO",
+    "name": "LINC",
+    "provenance": "COMMUNITY"
+  },
+  "templates": [
+    {
+      "id": "card-spend-jod",
+      "senders": [
+        "LINC"
+      ],
+      "guards": [
+        {
+          "line": -1,
+          "literal": "JOD was withdrawn at ",
+          "excluded": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "movement",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "kind": "POSTED_MOVEMENT",
+          "money": {
+            "amount": {
+              "line": -1,
+              "after": "",
+              "before": " ",
+              "maxLength": 32
+            },
+            "currency": {
+              "fixed": "JOD"
+            },
+            "decimal": ".",
+            "group": "",
+            "grouping": "NONE",
+            "digits": "ASCII",
+            "unitMultiplier": 1,
+            "leadingPoint": true
+          },
+          "direction": {
+            "fixed": "DEBIT"
+          },
+          "accountOptional": true,
+          "date": {
+            "calendar": "GREGORIAN",
+            "field": {
+              "line": -1,
+              "after": " on ",
+              "before": ", Authorization Number",
+              "maxLength": 32
+            },
+            "orders": [
+              "DMY",
+              "MDY"
+            ],
+            "separator": "/",
+            "withTime": true,
+            "digits": "ASCII",
+            "maxPastSeconds": 2592000,
+            "maxFutureSeconds": 172800,
+            "options": {
+              "year": "FULL",
+              "yearBase": 0,
+              "variableWidth": false,
+              "layout": "SEPARATED",
+              "timeSeparator": " ",
+              "seconds": true,
+              "zone": "Asia/Amman"
+            }
+          }
+        },
+        {
+          "id": "balance",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "kind": "AVAILABLE_BALANCE",
+          "money": {
+            "amount": {
+              "line": -1,
+              "after": "You current available balance is ",
+              "before": ", for any objections call",
+              "maxLength": 32
+            },
+            "currency": {
+              "fixed": "JOD"
+            },
+            "decimal": ".",
+            "group": "",
+            "grouping": "NONE",
+            "digits": "ASCII",
+            "unitMultiplier": 1,
+            "leadingPoint": true
+          },
+          "accountOptional": true
+        }
+      ]
+    },
+    {
+      "id": "card-spend-usd",
+      "senders": [
+        "LINC"
+      ],
+      "guards": [
+        {
+          "line": -1,
+          "literal": "USD was withdrawn at ",
+          "excluded": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "movement",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "kind": "POSTED_MOVEMENT",
+          "money": {
+            "amount": {
+              "line": -1,
+              "after": "",
+              "before": " ",
+              "maxLength": 32
+            },
+            "currency": {
+              "fixed": "USD"
+            },
+            "decimal": ".",
+            "group": "",
+            "grouping": "NONE",
+            "digits": "ASCII",
+            "unitMultiplier": 1,
+            "leadingPoint": true
+          },
+          "direction": {
+            "fixed": "DEBIT"
+          },
+          "accountOptional": true,
+          "date": {
+            "calendar": "GREGORIAN",
+            "field": {
+              "line": -1,
+              "after": " on ",
+              "before": ", Authorization Number",
+              "maxLength": 32
+            },
+            "orders": [
+              "DMY",
+              "MDY"
+            ],
+            "separator": "/",
+            "withTime": true,
+            "digits": "ASCII",
+            "maxPastSeconds": 2592000,
+            "maxFutureSeconds": 172800,
+            "options": {
+              "year": "FULL",
+              "yearBase": 0,
+              "variableWidth": false,
+              "layout": "SEPARATED",
+              "timeSeparator": " ",
+              "seconds": true,
+              "zone": "Asia/Amman"
+            }
+          }
+        },
+        {
+          "id": "balance",
+          "region": {
+            "line": -1,
+            "after": "",
+            "before": "",
+            "maxLength": 1024
+          },
+          "kind": "AVAILABLE_BALANCE",
+          "money": {
+            "amount": {
+              "line": -1,
+              "after": "You current available balance is ",
+              "before": ", for any objections call",
+              "maxLength": 32
+            },
+            "currency": {
+              "fixed": "JOD"
+            },
+            "decimal": ".",
+            "group": "",
+            "grouping": "NONE",
+            "digits": "ASCII",
+            "unitMultiplier": 1,
+            "leadingPoint": true
+          },
+          "accountOptional": true
+        }
+      ]
+    }
+  ]
+}

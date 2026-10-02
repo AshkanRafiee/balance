@@ -1,0 +1,162 @@
+{
+  "schema": "prototype-fixtures-1",
+  "pack": "community.jo.linc",
+  "cases": [
+    {
+      "id": "jod-spend",
+      "sourceId": "reported-spend-jod-1",
+      "sender": "LINC",
+      "arrival": "2026-09-27T06:00:00Z",
+      "zone": "Asia/Amman",
+      "body": ".11 JOD was withdrawn at PAYPAL *G2A COM LTD from your card ending in xxxx on 27/09/2026 08:10:24, Authorization Number :xxxxxx. You current available balance is 123.456, for any objections call 065007700 in no more than 7 days",
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "id": "balance",
+            "account": null,
+            "currency": "JOD",
+            "minorUnits": "123456",
+            "scale": 3,
+            "time": {
+              "instant": "2026-09-27T06:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Amman",
+              "fallback": true
+            }
+          },
+          {
+            "id": "movement",
+            "account": null,
+            "currency": "JOD",
+            "minorUnits": "-110",
+            "scale": 3,
+            "time": {
+              "instant": "2026-09-27T05:10:24Z",
+              "precision": "SECOND",
+              "zone": "Asia/Amman",
+              "fallback": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "usd-spend-jod-balance",
+      "sourceId": "reported-spend-usd-2",
+      "sender": "LINC",
+      "arrival": "2026-09-26T20:00:00Z",
+      "zone": "Asia/Amman",
+      "body": "123 USD was withdrawn at Amazon.com from your card ending in  xxxx on 26/09/2026 22:22:34, Authorization Number :xxxxxx. You current available balance is 123.456, for any objections call 065007700 in no more than 7 days",
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "id": "balance",
+            "account": null,
+            "currency": "JOD",
+            "minorUnits": "123456",
+            "scale": 3,
+            "time": {
+              "instant": "2026-09-26T20:00:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Amman",
+              "fallback": true
+            }
+          },
+          {
+            "id": "movement",
+            "account": null,
+            "currency": "USD",
+            "minorUnits": "-12300",
+            "scale": 2,
+            "time": {
+              "instant": "2026-09-26T19:22:34Z",
+              "precision": "SECOND",
+              "zone": "Asia/Amman",
+              "fallback": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sub-unit-balance",
+      "sourceId": "reported-spend-jod-3",
+      "sender": "LINC",
+      "arrival": "2026-09-28T07:30:00Z",
+      "zone": "Asia/Amman",
+      "body": "12.3 JOD was withdrawn at Talabat from your card ending in  xxxx on 28/09/2026 09:58:20, Authorization Number :xxxxxx. You current available balance is .23, for any objections call 065007700 in no more than 7 days",
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "id": "balance",
+            "account": null,
+            "currency": "JOD",
+            "minorUnits": "230",
+            "scale": 3,
+            "time": {
+              "instant": "2026-09-28T07:30:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Amman",
+              "fallback": true
+            }
+          },
+          {
+            "id": "movement",
+            "account": null,
+            "currency": "JOD",
+            "minorUnits": "-12300",
+            "scale": 3,
+            "time": {
+              "instant": "2026-09-28T06:58:20Z",
+              "precision": "SECOND",
+              "zone": "Asia/Amman",
+              "fallback": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "ambiguous-date-falls-back",
+      "sourceId": "reported-spend-jod-4",
+      "sender": "LINC",
+      "arrival": "2026-09-05T09:20:00Z",
+      "zone": "Asia/Amman",
+      "body": "1234.567 JOD was withdrawn at Talabat from your card ending in  xxxx on 05/09/2026 11:15:00, Authorization Number :xxxxxx. You current available balance is 9876.543, for any objections call 065007700 in no more than 7 days",
+      "expected": {
+        "status": "PARSED",
+        "outputs": [
+          {
+            "id": "balance",
+            "account": null,
+            "currency": "JOD",
+            "minorUnits": "9876543",
+            "scale": 3,
+            "time": {
+              "instant": "2026-09-05T09:20:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Amman",
+              "fallback": true
+            }
+          },
+          {
+            "id": "movement",
+            "account": null,
+            "currency": "JOD",
+            "minorUnits": "-1234567",
+            "scale": 3,
+            "time": {
+              "instant": "2026-09-05T09:20:00Z",
+              "precision": "ARRIVAL",
+              "zone": "Asia/Amman",
+              "fallback": true
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

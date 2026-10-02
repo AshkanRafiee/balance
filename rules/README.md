@@ -16,6 +16,8 @@ Every pack, shipped or written on the device, declares `"schema": "prototype-1"`
   [fixtures](examples/iranian-prototype/fixtures.json)
 - [Synthetic international pack](examples/international/pack.json) and
   [fixtures](examples/international/fixtures.json)
+- [Synthetic sub-unit card pack](examples/card-spend/pack.json) and
+  [fixtures](examples/card-spend/fixtures.json)
 - [Raw JSON acceptance corpus](examples/json-acceptance/cases.json)
 - [Executable core contract](../parser-core/CONTRACT.md)
 
@@ -125,7 +127,7 @@ evidence about the rule, not about the bank. A pack claiming `marketReviewer`
 without `realMessages` is rejected, because a named reviewer is only meaningful
 if real messages were seen. The current records say `legacy-tables` with both
 flags set for the Iranian packs, and `reported-messages` with no market reviewer
-for the Italian one, which is exactly how much is known about each.
+for the community ones, which is exactly how much is known about each.
 
 ## Shipped layout
 
@@ -144,9 +146,10 @@ registration never depends on map iteration order.
 
 A region is a grouping for the settings screen and nothing more. Nothing here
 treats an official pack as more trusted than a community one: each pack states
-its own country and where it came from, and both are read the same way. Two
-regions ship today: `ir-official`, with 43 Iranian banks, and `it-community`,
-with one bank a reader contributed after reporting its messages.
+its own country and where it came from, and both are read the same way. Three
+regions ship today: `ir-official`, with 43 Iranian banks, and `it-community`
+and `jo-community`, one bank each that a reader contributed after reporting the
+messages it sends.
 
 Adding a region is a new directory under `rules/app` plus its name in
 `index.json`, and nothing else.
