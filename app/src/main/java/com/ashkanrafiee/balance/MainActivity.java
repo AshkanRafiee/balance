@@ -508,6 +508,18 @@ public class MainActivity extends Activity {
         box.addView(staleLabel, staleLp);
         box.addView(staleSpin);
 
+        // A single on/off choice (not a dropdown): with it on, the history breakdown opens every
+        // year, month and day by default instead of only the current year, month and its days. It is
+        // the only way to ask for the whole history, so it stays off unless it is asked for.
+        CheckBox expandAll = new CheckBox(this);
+        expandAll.setText(getString(R.string.settings_history_expand_all_label));
+        expandAll.setChecked(BalanceData.getExpandAllHistory(MainActivity.this));
+        expandAll.setOnCheckedChangeListener((b, on) ->
+            BalanceData.setExpandAllHistory(MainActivity.this, on));
+        LinearLayout.LayoutParams expandLp = new LinearLayout.LayoutParams(-1, -2);
+        expandLp.topMargin = dp(18);
+        box.addView(expandAll, expandLp);
+
         showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.footer_display))
             .setView(box)
@@ -1503,7 +1515,12 @@ public class MainActivity extends Activity {
 
         /** Publishes a set of balances into the view and redraws. Every path that ends up showing
          *  saved data goes through here — a scan, a failed scan, a restore, and the dashboard's
-         *  SMS-denied path — so the store, the total, the strip and the widget never drift apart. */
+         *  SMS-denied path — so the store, the total, the strip and the widget never drift apart.
+         *
+         *  <p>The widget repaint is handed to a worker: it decrypts the store again, asks the
+         *  launcher for its widget ids and writes back to it, none of which the dashboard needs in
+         *  order to be usable, and all of which used to happen inside the frame that painted the
+         *  balances the user came to see. */
         private void applySaved(LinkedHashMap<String, Bank> saved, Context app, String statusText) {
             banks.clear();
             banks.putAll(saved);
@@ -1514,7 +1531,8 @@ public class MainActivity extends Activity {
             refreshing = false;
             updateSmsBanner();
             invalidate();
-            BalanceWidgetProvider.push(app);
+            final Context appContext = app.getApplicationContext();
+            new Thread(() -> BalanceWidgetProvider.push(appContext), "balance-widget").start();
         }
 
         /** Recomputes whether the stale-data strip belongs on screen and keeps the scroll position
@@ -1556,6 +1574,10 @@ public class MainActivity extends Activity {
                 return;
             }
             pendingHard = pendingNotes = false;
+            // Cleared here rather than only on the granted path below: a request that arrived while
+            // this one was in flight has now been folded into it, so leaving the flag set would make
+            // the first refresh after permission is granted run the whole inbox a second time.
+            refreshAgain = false;
             if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
                 // Without SMS access the saved store is all that is left, and it is the app's only
                 // remaining record of the user's balances — so show it rather than an empty
