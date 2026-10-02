@@ -63,6 +63,7 @@ final class BalanceData {
     static final String KEY_EXCLUDED = "excluded_banks";
     static final String KEY_SORT = "sort_mode";
     static final String KEY_STALE_DAYS = "stale_days";
+    static final String KEY_EXPAND_ALL_HISTORY = "expand_all_history";
     static final int DEFAULT_STALE_DAYS = 7;
     static final String KEY_ONBOARDING_SEEN = "onboarding_seen";
 
@@ -744,6 +745,22 @@ final class BalanceData {
     static void setStaleDays(Context context, int days) {
         context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
             .edit().putInt(KEY_STALE_DAYS, Math.max(0, days)).apply();
+    }
+
+    /** Whether the history breakdown opens every year, month and day by default instead of only the
+     *  current year, month and its days. A display choice, picked in the Display menu.
+     *
+     *  <p>Off unless the user turns it on, so a first open shows the freshest history rather than
+     *  the whole account. Each level still opens on its own, so this is the only thing that can ask
+     *  for everything, and it is a deliberate choice rather than a default. */
+    static boolean getExpandAllHistory(Context context) {
+        return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+            .getBoolean(KEY_EXPAND_ALL_HISTORY, false);
+    }
+
+    static void setExpandAllHistory(Context context, boolean on) {
+        context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_EXPAND_ALL_HISTORY, on).apply();
     }
 
     /** How many whole days a balance has gone without a refresh, or 0 when its SMS date is unknown
