@@ -104,16 +104,17 @@ final class BackupManager {
     static void create(Context context, Uri uri, String password) throws Exception {
         String payload;
         synchronized (BalanceData.class) {
+            // One read for everything the backup carries: the four history sets plus the balances
+            // all live in the same store and used to cost a full read each.
+            BalanceData.Store store = BalanceData.readStore(context);
             payload = new JSONObject()
                 .put("payloadFormat", PAYLOAD_FORMAT)
-                .put("balances", new JSONObject(BalanceData.serialize(BalanceData.read(context))))
+                .put("balances", new JSONObject(BalanceData.serialize(store.balances)))
                 .put("transactions", new JSONObject(
-                    BalanceData.serializeTransactions(BalanceData.readTransactions(context))))
-                .put("txNotes", new JSONObject(BalanceData.serializeTextMap(BalanceData.readNotes(context))))
-                .put("txReasons", new JSONObject(
-                    BalanceData.serializeTextMap(BalanceData.readReasons(context))))
-                .put("txChannels", new JSONObject(
-                    BalanceData.serializeTextMap(BalanceData.readChannels(context))))
+                    BalanceData.serializeTransactions(store.transactions)))
+                .put("txNotes", new JSONObject(BalanceData.serializeTextMap(store.notes)))
+                .put("txReasons", new JSONObject(BalanceData.serializeTextMap(store.reasons)))
+                .put("txChannels", new JSONObject(BalanceData.serializeTextMap(store.channels)))
                 .toString();
         }
 
@@ -286,8 +287,11 @@ final class BackupManager {
 
         // Transaction history is merged as a union (deduped), never dropped, so restoring onto the
         // same device does not lose locally-scanned movements and a newer backup cannot destroy older
-        // ones. The roster is capped so a hostile backup cannot bloat the in-memory history.
-        List<Transaction> currentTxs = new ArrayList<>(BalanceData.readTransactions(context));
+        // ones. The roster is capped so a hostile backup cannot bloat the in-memory history. Read once
+        // for the movements and the three text sets: they travel together and must be merged against
+        // the same generation.
+        BalanceData.Store restored = BalanceData.readStore(context);
+        List<Transaction> currentTxs = new ArrayList<>(restored.transactions);
         if (backupTxs.size() > MAX_TRANSACTIONS)
             backupTxs = backupTxs.subList(0, MAX_TRANSACTIONS);
         Set<String> seen = new HashSet<>();
@@ -309,9 +313,9 @@ final class BackupManager {
         // reasons the banks stated travel with the movements they describe, merged exactly like the
         // notes, and so do the channels — so a movement whose SMS was deleted before the backup
         // still shows why it happened and how the money moved.
-        Map<String, String> currentNotes = new LinkedHashMap<>(BalanceData.readNotes(context));
-        Map<String, String> currentReasons = new LinkedHashMap<>(BalanceData.readReasons(context));
-        Map<String, String> currentChannels = new LinkedHashMap<>(BalanceData.readChannels(context));
+        Map<String, String> currentNotes = new LinkedHashMap<>(restored.notes);
+        Map<String, String> currentReasons = new LinkedHashMap<>(restored.reasons);
+        Map<String, String> currentChannels = new LinkedHashMap<>(restored.channels);
         boolean notesChanged = unionLocalFirst(currentNotes, backupNotes);
         boolean reasonsChanged = unionLocalFirst(currentReasons, backupReasons);
         boolean channelsChanged = unionLocalFirst(currentChannels, backupChannels);

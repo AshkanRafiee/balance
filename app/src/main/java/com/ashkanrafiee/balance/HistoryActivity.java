@@ -143,6 +143,10 @@ public final class HistoryActivity extends Activity {
     /** Bumped on every render request; the finished render applies its result only if it is still
      *  the newest, so a quick filter change never gets overwritten by a stale slower build. */
     private int renderGen;
+    /** The language and currency this screen formats amounts with, resolved once per foreground.
+     *  Written and read on the main thread only, like the views they shape. */
+    private boolean persianDigits;
+    private String displayCurrency;
 
     /** The placeholder blocks on screen while the history is being read, and the one animator that
      *  sweeps a highlight across all of them. */
@@ -707,10 +711,11 @@ public final class HistoryActivity extends Activity {
                 final java.util.Map<String, String> channels;
                 final List<Residual> residuals;
                 synchronized (BalanceData.class) {
-                    txs = BalanceData.readTransactions(getApplicationContext());
-                    notes = BalanceData.readNotes(getApplicationContext());
-                    reasons = BalanceData.readReasons(getApplicationContext());
-                    channels = BalanceData.readChannels(getApplicationContext());
+                    BalanceData.Store store = BalanceData.readStore(getApplicationContext());
+                    txs = store.transactions;
+                    notes = store.notes;
+                    reasons = store.reasons;
+                    channels = store.channels;
                     // Detected before narrowing, exactly as on screen, so the file reconciles with
                     // the totals the user just looked at.
                     residuals = Residual.between(txs);
@@ -1266,6 +1271,7 @@ public final class HistoryActivity extends Activity {
     protected void onResume() {
         super.onResume();
         LockManager.cancelPendingLock();
+        resolveDisplay();
         BalanceData.addHistoryListener(onHistoryChanged);
         registerSmsObserver();
         // The delayed lock may have engaged while we were paused on a ROM that skipped onStop;
@@ -1342,7 +1348,13 @@ public final class HistoryActivity extends Activity {
         final boolean iran = iranCalendar;
         historyReadExecutor.execute(() -> {
             try {
-                List<Transaction> txs = BalanceData.readTransactions(getApplicationContext());
+                // One read of the store for everything on this screen: the movements, the reader's
+                // notes and the reasons and channels the bank stated all come from the same pinned
+                // generation, so a scan landing mid-render cannot pair a movement with a note that
+                // was never written for it, and the store is decrypted once rather than four times.
+                final BalanceData.Store read =
+                    BalanceData.readStore(getApplicationContext());
+                List<Transaction> txs = read.transactions;
                 if (bank != null) txs = filterByBank(txs, bank);
                 if (acct != null) txs = filterByAccount(txs, acct);
                 // Detected across the whole account before any narrowing, since a residual is only
@@ -1352,12 +1364,9 @@ public final class HistoryActivity extends Activity {
                 final List<Transaction> filtered = applyFilters(txs, f, iran);
                 final Lists lists = buildLists(filtered, residuals, iran);
                 allResiduals = residuals;
-                final Map<String, String> notesNow =
-                    BalanceData.readNotes(getApplicationContext());
-                final Map<String, String> reasonsNow =
-                    BalanceData.readReasons(getApplicationContext());
-                final Map<String, String> channelsNow =
-                    BalanceData.readChannels(getApplicationContext());
+                final Map<String, String> notesNow = read.notes;
+                final Map<String, String> reasonsNow = read.reasons;
+                final Map<String, String> channelsNow = read.channels;
                 runOnUiThread(() -> {
                     if (gen != renderGen || isDestroyed() || isFinishing()) return;
                     notes = notesNow;
@@ -3061,17 +3070,27 @@ public final class HistoryActivity extends Activity {
 
     /** Account numbers follow the app language's digit rules, like the displayed amounts. */
     private String digits(String s) {
-        return LocaleHelper.isPersian(this) ? faDigitsString(s) : s;
+        return persianDigits ? faDigitsString(s) : s;
     }
 
     /** Formats an amount as a signed currency string, following the app language's digit rules and
      *  the chosen currency's value (toman divides by ten, other currencies show the raw amount). */
     private String signedAmount(long n) {
-        String mag = CurrencyHelper.amount(this, Math.abs(n));
+        String mag = CurrencyHelper.amountIn(this, displayCurrency, Math.abs(n));
         if (n == 0) return mag;
         String sign = (n < 0 ? "\u2212" : "+");
-        if (!LocaleHelper.isPersian(this)) return sign + mag;
+        if (!persianDigits) return sign + mag;
         return "\u2066" + sign + mag + "\u2069";
+    }
+
+    /** The language and currency this screen draws with, read once rather than per amount. Both are
+     *  chosen in the Display menu, which this screen does not offer, and a long account formats one
+     *  amount per movement and per group header: asking the preferences for each of them repeated
+     *  work whose answer could not have changed while the screen was up. Re-read whenever the screen
+     *  comes to the foreground, so a change made elsewhere is picked up on the way back. */
+    private void resolveDisplay() {
+        persianDigits = LocaleHelper.isPersian(this);
+        displayCurrency = CurrencyHelper.currency(this);
     }
 
     // ====================================================================

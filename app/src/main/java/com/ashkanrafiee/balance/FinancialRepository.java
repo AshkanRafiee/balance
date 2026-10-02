@@ -21,19 +21,34 @@ final class FinancialRepository {
     public static final class Snapshot {
         private final String revision;
         private final Map<String, byte[]> values;
+        private final boolean draft;
 
         public Snapshot(String revision, Map<String, byte[]> values) {
-            this(revision, values, false);
+            this(revision, values, false, false);
         }
 
         // Owned maps are private, and their byte arrays are never mutated internally.
         private Snapshot(String revision, Map<String, byte[]> values, boolean owned) {
+            this(revision, values, owned, false);
+        }
+
+        private Snapshot(String revision, Map<String, byte[]> values, boolean owned, boolean draft) {
             if (revision == null || values == null) throw new IllegalArgumentException("ARGUMENT");
             this.revision = revision;
             this.values = owned ? values : copy(values);
+            this.draft = draft;
+        }
+
+        /** A snapshot taken from inside a transaction carries that transaction's uncommitted work
+         *  under the revision it started from, so it is not the state its revision names and must
+         *  never be served to anyone from a cache of that revision. */
+        private static Snapshot draftOf(String revision, Map<String, byte[]> values) {
+            return new Snapshot(revision, values, true, true);
         }
 
         public String revision() { return revision; }
+
+        public boolean isDraft() { return draft; }
 
         public byte[] get(String name) {
             byte[] value = values.get(name);
@@ -119,8 +134,8 @@ final class FinancialRepository {
         synchronized (BalanceData.class) {
             rejectBackendReentry();
             State state = current(this);
-            if (state != null) return new Snapshot(state.base.revision(),
-                    new LinkedHashMap<>(state.draft.values), true);
+            if (state != null) return Snapshot.draftOf(state.base.revision(),
+                    new LinkedHashMap<>(state.draft.values));
             return backendLoad();
         }
     }

@@ -232,6 +232,41 @@ public class HistoryScanTest {
         "\u062E\u0631\u06CC\u062F \u0628\u0647 \u0645\u0628\u0644\u063A 120,000 \u0631\u06CC\u0627\u0644 \u0627\u0646\u062C\u0627\u0645 \u0634\u062F\u060C \u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000 \u0631\u06CC\u0627\u0644";
 
     // ============================================================
+    // Waking the readers
+    // ============================================================
+
+    @Test public void aScanThatChangesNothingDoesNotWakeItsReaders() throws Exception {
+        // Opening the history screen starts a scan, so the overwhelmingly common scan finds nothing
+        // it had not already stored. Waking every reader for that costs each of them a read, a
+        // re-parse and a rebuild of a screen whose data came back byte for byte identical.
+        final int[] woken = {0};
+        Runnable listener = new Runnable() {
+            @Override public void run() { woken[0]++; }
+        };
+        BalanceData.addHistoryListener(listener);
+        try {
+            // The first scan records the rules version and the watermark, so it really does move
+            // the store. Skipping the wake-up here would leave the dashboard showing nothing.
+            assertEquals(0, BalanceData.scanHistory(ctx));
+            assertEquals("the first scan changed the store, so it must say so", 1, woken[0]);
+
+            assertEquals(0, BalanceData.scanHistory(ctx));
+            assertEquals("a second scan over an unchanged inbox must not wake anyone", 1, woken[0]);
+
+            assertEquals(0, BalanceData.scanHistory(ctx));
+            assertEquals("and neither does a third", 1, woken[0]);
+
+            // The other half, and the reason the skip cannot be allowed to get this wrong: a scan
+            // that stores a movement has to reach the screens showing history.
+            seed("500095", DEPOSIT, T + 1000);
+            assertEquals(1, BalanceData.scanHistory(ctx));
+            assertEquals("a scan that stored a movement must wake its readers", 2, woken[0]);
+        } finally {
+            BalanceData.removeHistoryListener(listener);
+        }
+    }
+
+    // ============================================================
     // Full first scan
     // ============================================================
 

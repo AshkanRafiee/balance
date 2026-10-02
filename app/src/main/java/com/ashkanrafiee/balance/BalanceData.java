@@ -278,6 +278,45 @@ final class BalanceData {
         return snapshot == null ? new ArrayList<>() : snapshot.transactions();
     }
 
+    /** Everything a screen draws from the financial store, taken from one read.
+     *
+     *  <p>These datasets belong together: a movement and the note that describes it are written in
+     *  the same generation, so reading them separately can pair a movement from one generation with
+     *  a note from another when a scan lands between the reads. It also costs a whole store read
+     *  each time, since every read decrypts and validates every component before handing back one of
+     *  them. A caller that needs more than one of these therefore reads them once, here. */
+    static final class Store {
+        final LinkedHashMap<String, Bank> balances;
+        final List<Transaction> transactions;
+        final Map<String, String> notes;
+        final Map<String, String> reasons;
+        final Map<String, String> channels;
+
+        private Store(LinkedHashMap<String, Bank> balances, List<Transaction> transactions,
+                Map<String, String> notes, Map<String, String> reasons,
+                Map<String, String> channels) {
+            this.balances = balances;
+            this.transactions = transactions;
+            this.notes = notes;
+            this.reasons = reasons;
+            this.channels = channels;
+        }
+
+        /** The empty store a screen can draw, for one that cannot be read at all. */
+        static Store empty() {
+            return new Store(new LinkedHashMap<>(), new ArrayList<>(), new LinkedHashMap<>(),
+                    new LinkedHashMap<>(), new LinkedHashMap<>());
+        }
+    }
+
+    /** One pinned read of the store, for a caller that needs several parts of it. */
+    static Store readStore(Context context) {
+        FinancialSnapshotAdapter.Snapshot snapshot = view(context);
+        if (snapshot == null) return Store.empty();
+        return new Store(snapshot.balances(), snapshot.transactions(), snapshot.transactionNotes(),
+                snapshot.transactionReasons(), snapshot.transactionChannels());
+    }
+
     /** Serializes transactions to the JSON shape used for the local store and the backup payload. The
      *  message fingerprint, account number, reported balance and content digest are optional and
      *  skipped when absent, so backups stay readable both ways. */
@@ -927,6 +966,10 @@ final class BalanceData {
             return 0;
         if (HISTORY_SCANNING) return 0;
         HISTORY_SCANNING = true;
+        // Set by the publication below, and read in the finally block to decide whether a reader
+        // has anything new to be told about. A scan that returns early never published, so it never
+        // changed anything either, and must not say otherwise.
+        boolean changed = false;
         try {
             EngineRules engine = EngineRules.activate(context);
             RecognitionHelper.refresh(context);
@@ -1301,11 +1344,11 @@ final class BalanceData {
                 // The reasons and channels land in the same generation as the transactions they
                 // belong to, so the stores never hold one for a movement that was not written.
                 TextStores text = textStores(snapshot, replacedForText, detectedReasons, detectedChannels);
-                // Only commit the rules version and watermark now that the scan finished cleanly:
-                // marking a full rebuild as done (or advancing past rows that failed) would skip the
-                // correction forever until the next manual version bump.
-                HistoryScanPublication.prepare(
-                        serializeTransactions(stored).getBytes(StandardCharsets.UTF_8),
+                byte[] transactionsForSave = stored.isEmpty() ? null
+                        : serializeTransactions(stored).getBytes(StandardCharsets.UTF_8);
+                Set<String> removed = removals(windowsForSave, lastBalanceForSave);
+                HistoryScanPublication publication = HistoryScanPublication.prepare(
+                        transactionsForSave,
                         text.reasonsChanged
                                 ? serializeTextMap(text.reasons).getBytes(StandardCharsets.UTF_8) : null,
                         text.channelsChanged
@@ -1319,8 +1362,15 @@ final class BalanceData {
                         newest > 0 ? newest : null,
                         full ? HISTORY_RULES_VERSION : null,
                         full ? HISTORY_SCHEMA : null,
-                        removals(stored, windowsForSave, lastBalanceForSave))
-                        .publish(authority.snapshots());
+                        removed);
+                // Whether anything moved at all, asked of the publication itself: it holds every
+                // component the scan would write, so the answer needs no second account of the scan.
+                // The first scan after install answers true, because it records the rules version.
+                changed = publication.changesAnything(snapshot.components());
+                // Only commit the rules version and watermark now that the scan finished cleanly:
+                // marking a full rebuild as done (or advancing past rows that failed) would skip the
+                // correction forever until the next manual version bump.
+                publication.publish(authority.snapshots());
                 context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
                         .putInt(KEY_HISTORY_RECOGNITION_SEEN, recognition)
                         .putInt(KEY_HISTORY_PACKS_SEEN, packsGeneration).apply();
@@ -1331,16 +1381,20 @@ final class BalanceData {
             return added;
         } finally {
             HISTORY_SCANNING = false;
-            notifyHistoryChanged();
+            // Only when the publication moved something: a scan is started by opening a screen, and
+            // telling every reader to redraw for a store that is byte-for-byte what it already had
+            // is the cost of opening the app at all.
+            if (changed) notifyHistoryChanged();
         }
     }
 
     /** The history components a completed scan derived nothing for, and therefore deletes — the
-     *  generation-store equivalent of the legacy empty-value key removal. */
-    private static Set<String> removals(List<Transaction> stored,
+     *  generation-store equivalent of the legacy empty-value key removal. The transactions are not
+     *  among them: the publication deletes that component itself when there is nothing to store, and
+     *  asking it to do both is what made an empty history fail to publish at all. */
+    private static Set<String> removals(
             Map<String, List<Reconcile.Entry>> windows, Map<String, Long> lastBalances) {
         Set<String> removals = new LinkedHashSet<>();
-        if (stored.isEmpty()) removals.add(FinancialSnapshotAdapter.TRANSACTIONS);
         if (windows == null || windows.isEmpty())
             removals.add(FinancialSnapshotAdapter.RECENT_MOVEMENTS);
         if (lastBalances == null || lastBalances.isEmpty())

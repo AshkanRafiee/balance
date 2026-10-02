@@ -25,8 +25,12 @@ final class HistoryScanPublication {
     private HistoryScanPublication(byte[] transactionsJson, byte[] reasonsJson, byte[] channelsJson,
             byte[] recentMovementsJson, byte[] historyLastBalanceJson, Long historyThrough,
             Integer historyRulesVersion, Integer historySchema, Set<String> removals) {
-        if (transactionsJson == null) throw new IllegalArgumentException("ARGUMENT");
-        this.transactionsJson = transactionsJson.clone();
+        // No transactions is expressed as a deletion, not as a stored empty list, because that is
+        // what the store already means by it: the canonical writer drops the component for an
+        // empty list, and a reader reads an absent component as no history. Writing the empty list
+        // as well would leave two ways to say the same thing and, worse, ask the store to write and
+        // delete one component in the same generation, which it rightly refuses.
+        this.transactionsJson = clone(transactionsJson);
         this.reasonsJson = clone(reasonsJson);
         this.channelsJson = clone(channelsJson);
         this.recentMovementsJson = clone(recentMovementsJson);
@@ -34,14 +38,17 @@ final class HistoryScanPublication {
         this.historyThrough = historyThrough;
         this.historyRulesVersion = historyRulesVersion;
         this.historySchema = historySchema;
-        this.removals = removals(removals, Arrays.asList(FinancialSnapshotAdapter.TRANSACTIONS,
+        Set<String> removed = new LinkedHashSet<>(removals(removals, Arrays.asList(
+                FinancialSnapshotAdapter.TRANSACTIONS,
                 FinancialSnapshotAdapter.TRANSACTION_REASONS,
                 FinancialSnapshotAdapter.TRANSACTION_CHANNELS,
                 FinancialSnapshotAdapter.RECENT_MOVEMENTS,
                 FinancialSnapshotAdapter.HISTORY_LAST_BALANCE,
                 FinancialSnapshotAdapter.HISTORY_THROUGH,
                 FinancialSnapshotAdapter.HISTORY_RULES_VERSION,
-                FinancialSnapshotAdapter.HISTORY_SCHEMA));
+                FinancialSnapshotAdapter.HISTORY_SCHEMA)));
+        if (transactionsJson == null) removed.add(FinancialSnapshotAdapter.TRANSACTIONS);
+        this.removals = Collections.unmodifiableSet(removed);
     }
 
     static Builder builder() { return new Builder(); }
@@ -63,7 +70,7 @@ final class HistoryScanPublication {
                 historyRulesVersion, historySchema, removals);
     }
 
-    byte[] transactionsJson() { return transactionsJson.clone(); }
+    byte[] transactionsJson() { return clone(transactionsJson); }
     byte[] reasonsJson() { return clone(reasonsJson); }
     byte[] channelsJson() { return clone(channelsJson); }
     byte[] recentMovementsJson() { return clone(recentMovementsJson); }
@@ -75,10 +82,35 @@ final class HistoryScanPublication {
     /** The history-owned components this publication deletes, because the scan derived none. */
     Set<String> removals() { return removals; }
 
+    /** Whether publishing this would leave {@code current} different from what it holds now.
+     *
+     *  <p>A scan is started every time the history screen opens, and the overwhelmingly common one
+     *  finds no movement it had not already stored. Publishing is cheap; telling every reader to
+     *  redraw is not, and it costs each of them a read, a re-parse and a rebuild of a screen whose
+     *  data came back identical. So the question is worth asking before publishing rather than after,
+     *  and it can be answered exactly: the publication knows every component it would write, and a
+     *  component is a change only when its bytes differ from the ones already stored.
+     *
+     *  <p>Only components this publication would write or delete are considered, so an unrelated
+     *  difference in {@code current} does not count as a change to make. Deleting a component that
+     *  is not there is not a change either.
+     */
+    boolean changesAnything(Map<String, byte[]> current) {
+        if (current == null) throw new IllegalArgumentException("ARGUMENT");
+        for (String name : removals) {
+            if (current.containsKey(name)) return true;
+        }
+        for (Map.Entry<String, byte[]> update : updates().entrySet()) {
+            if (!Arrays.equals(current.get(update.getKey()), update.getValue())) return true;
+        }
+        return false;
+    }
+
     /** Returns only the history-owned components represented by this publication. */
     Map<String, byte[]> updates() {
         Map<String, byte[]> updates = new LinkedHashMap<>();
-        updates.put(FinancialSnapshotAdapter.TRANSACTIONS, transactionsJson.clone());
+        if (transactionsJson != null) updates.put(FinancialSnapshotAdapter.TRANSACTIONS,
+                transactionsJson.clone());
         if (reasonsJson != null) updates.put(FinancialSnapshotAdapter.TRANSACTION_REASONS,
                 reasonsJson.clone());
         if (channelsJson != null) updates.put(FinancialSnapshotAdapter.TRANSACTION_CHANNELS,

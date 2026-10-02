@@ -54,7 +54,17 @@ public final class CurrencyHelper {
     /** Formats a stored rial amount for the chosen currency, following the app language's digit
      *  rules: Toman divides by ten, every other currency shows the raw figure. */
     public static String amount(Context context, long n) {
-        if (CURRENCY_TOMAN.equals(currency(context))) return BalanceData.toman(context, n);
+        return amountIn(context, currency(context), n);
+    }
+
+    /** Formats a stored rial amount in a denomination the caller has already read. A screen that
+     *  formats one amount per movement and per group header cannot ask the preferences for the
+     *  denomination every time: the answer cannot change between two amounts of the same row, and
+     *  on a long account it is the reason a redraw spends its time outside the work it was asked
+     *  to do. Callers must pass the current {@link #currency} and refresh it whenever they might
+     *  have gone stale; {@link #amount} is this with the read left in place. */
+    public static String amountIn(Context context, String denomination, long n) {
+        if (CURRENCY_TOMAN.equals(denomination)) return BalanceData.toman(context, n);
         return display(context, n);
     }
 

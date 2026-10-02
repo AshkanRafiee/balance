@@ -290,6 +290,84 @@ public class FinancialSnapshotAdapterTest {
         } finally { delete(root); }
     }
 
+    @Test public void aRepeatReadOfOneGenerationIsCheckedOnlyOnce() throws Exception {
+        Fake fake = new Fake();
+        FinancialSnapshotAdapter adapter = new FinancialSnapshotAdapter(new FinancialRepository(fake));
+        adapter.transaction(draft -> {
+            draft.put(FinancialSnapshotAdapter.BALANCES, bytes("{\"a\":1}"));
+            return null;
+        });
+        // A generation names itself and never changes its bytes, so the second read of the same one
+        // is looking at components that were already decrypted, copied and validated. The dashboard
+        // reads several times per refresh and pays for the whole store every time.
+        FinancialSnapshotAdapter.Snapshot first = adapter.snapshot();
+        assertSame("the same generation must not be checked twice", first, adapter.snapshot());
+        assertSame("nor again", first, adapter.snapshot());
+        assertArrayEquals(bytes("{\"a\":1}"), first.get(FinancialSnapshotAdapter.BALANCES));
+    }
+
+    @Test public void aCommitIsVisibleOnTheNextRead() throws Exception {
+        Fake fake = new Fake();
+        FinancialSnapshotAdapter adapter = new FinancialSnapshotAdapter(new FinancialRepository(fake));
+        adapter.transaction(draft -> {
+            draft.put(FinancialSnapshotAdapter.BALANCES, bytes("{\"a\":1}"));
+            return null;
+        });
+        FinancialSnapshotAdapter.Snapshot first = adapter.snapshot();
+        adapter.transaction(draft -> {
+            draft.put(FinancialSnapshotAdapter.BALANCES, bytes("{\"a\":2}"));
+            return null;
+        });
+        FinancialSnapshotAdapter.Snapshot second = adapter.snapshot();
+        assertNotSame("a new generation must not be answered from the old one", first, second);
+        assertArrayEquals(bytes("{\"a\":2}"), second.get(FinancialSnapshotAdapter.BALANCES));
+    }
+
+    @Test public void anIdenticalCommitIsStillANewGeneration() throws Exception {
+        // Even a commit that writes back what it read gets a fresh id from the real store, so a
+        // reader may not treat "the bytes are equal" as "nothing happened".
+        Fake fake = new Fake();
+        FinancialSnapshotAdapter adapter = new FinancialSnapshotAdapter(new FinancialRepository(fake));
+        adapter.transaction(draft -> {
+            draft.put(FinancialSnapshotAdapter.BALANCES, bytes("{\"a\":1}"));
+            return null;
+        });
+        FinancialSnapshotAdapter.Snapshot first = adapter.snapshot();
+        fake.revision = first.revision();
+        adapter.transaction(draft -> {
+            draft.put(FinancialSnapshotAdapter.BALANCES, bytes("{\"a\":2}"));
+            return null;
+        });
+        assertArrayEquals(bytes("{\"a\":2}"),
+                adapter.snapshot().get(FinancialSnapshotAdapter.BALANCES));
+    }
+
+    @Test public void aFailedTransactionLeavesNoDraftBehindToBeServed() throws Exception {
+        // The one thing the checked-read cache must never keep: a read taken from inside a
+        // transaction sees that transaction's uncommitted work under the revision the transaction
+        // started from. If that draft were remembered under that revision, a transaction that then
+        // failed would leave work that was never written being served as the committed state.
+        Fake fake = new Fake();
+        FinancialSnapshotAdapter adapter = new FinancialSnapshotAdapter(new FinancialRepository(fake));
+        adapter.transaction(draft -> {
+            draft.put(FinancialSnapshotAdapter.BALANCES, bytes("{\"a\":1}"));
+            return null;
+        });
+        try {
+            adapter.transaction(draft -> {
+                draft.put(FinancialSnapshotAdapter.BALANCES, bytes("{\"a\":2}"));
+                // Read from inside the transaction: the uncommitted value is what it must see.
+                assertArrayEquals(bytes("{\"a\":2}"),
+                        adapter.snapshot().get(FinancialSnapshotAdapter.BALANCES));
+                throw new IOException("FAILED");
+            });
+            fail("a failed transaction committed");
+        } catch (IOException expected) { }
+
+        assertArrayEquals("a draft that was never committed must not be served afterwards",
+                bytes("{\"a\":1}"), adapter.snapshot().get(FinancialSnapshotAdapter.BALANCES));
+    }
+
     private static byte[] bytes(String value) { return value.getBytes(java.nio.charset.StandardCharsets.UTF_8); }
     private static void delete(File file) {
         File[] children = file.listFiles();

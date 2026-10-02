@@ -192,9 +192,23 @@ final class FinancialSnapshotAdapter {
 
     private final FinancialRepository repository;
 
+    /** The last validated read of this store's committed generation, or null when none is held. */
+    private volatile Checked checked;
+
     FinancialSnapshotAdapter(FinancialRepository repository) {
         if (repository == null) throw new IllegalArgumentException("ARGUMENT");
         this.repository = repository;
+    }
+
+    /** One validated read, tagged with the generation it was validated as. */
+    private static final class Checked {
+        final String revision;
+        final Snapshot snapshot;
+
+        Checked(String revision, Snapshot snapshot) {
+            this.revision = revision;
+            this.snapshot = snapshot;
+        }
     }
 
     Snapshot snapshot() throws IOException {
@@ -261,10 +275,23 @@ final class FinancialSnapshotAdapter {
         });
     }
 
-    private static Snapshot checked(FinancialRepository.Snapshot source) throws IOException {
+    private Snapshot checked(FinancialRepository.Snapshot source) throws IOException {
+        // Reading a generation costs a decryption of the whole store, a copy of every component and
+        // a validation of all of them — including the full history, which the dashboard has no use
+        // for but pays for anyway. A generation is immutable and names itself, so the second read of
+        // the same revision is looking at bytes that were already checked: the work is redundant, not
+        // the checking. Anything new still goes through the whole path.
+        //
+        // A snapshot taken inside a transaction is left out of this, and of the cache entirely: it
+        // carries uncommitted work under the revision the transaction started from, so it is not the
+        // state that revision names.
+        Checked previous = source.isDraft() ? null : checked;
+        if (previous != null && previous.revision.equals(source.revision())) return previous.snapshot;
         Map<String, byte[]> values = source.components();
         for (Map.Entry<String, byte[]> entry : values.entrySet()) validate(entry.getKey(), entry.getValue());
-        return new Snapshot(source.revision(), values);
+        Snapshot result = new Snapshot(source.revision(), values);
+        if (!source.isDraft()) checked = new Checked(source.revision(), result);
+        return result;
     }
 
     private static void validate(String name, byte[] value) throws IOException {
