@@ -228,6 +228,9 @@
     <string name="history_filter_from_without_to">From %1$s onward</string>
     <string name="history_filter_to_without_from">Up to %1$s</string>
     <string name="history_empty_filtered">No transactions match the current filters.</string>
+    <string name="history_search_hint">Search transactions…</string>
+    <string name="history_search_clear">Clear search</string>
+    <string name="history_empty_search">No results for "%1$s".</string>
     <string name="history_empty_account">No transactions found for this account yet.</string>
     <string name="history_prev_month">Previous month</string>
     <string name="history_next_month">Next month</string>

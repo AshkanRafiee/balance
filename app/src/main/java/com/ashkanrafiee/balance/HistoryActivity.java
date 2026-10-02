@@ -23,11 +23,14 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Telephony;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.inputmethod.EditorInfo;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -124,6 +127,32 @@ public final class HistoryActivity extends Activity {
      *  and the breakdown always match what is on screen. Starts from {@link Filter#ALL} on every open
      *  and survives rotation through the saved state; never persisted across sessions. */
     private Filter filter = Filter.ALL;
+
+    /** The free-text query narrowing the history beyond {@link #filter}: every whitespace-separated
+     *  word must appear somewhere in a movement's own fields (bank, account, amount, note, the
+     *  bank's reason and channel, date and time) for it to stay on screen. Empty means no narrowing.
+     *  Like the filter it shapes the hero, the breakdown and the export, and it survives rotation
+     *  through the saved state; never persisted across sessions. */
+    private String searchQuery = "";
+
+    /** The query the breakdown was last expanded for. While a search is active every matching year,
+     *  month and day starts open so a match never hides inside a collapsed group; the sets below
+     *  keep the user's own collapses from then on, until the query itself changes. */
+    private String searchExpandedFor;
+
+    /** The expansion the screen had before the current search began, restored verbatim when the
+     *  search is cleared, so searching never leaves the whole history open behind it. */
+    private Set<String> preSearchYears, preSearchMonths, preSearchDays;
+
+    /** The search field and its clear button, built once in {@link #onCreate} (never rebuilt by a
+     *  render, so typing never loses focus) and driven with a short debounce. */
+    private EditText searchInput;
+    private TextView searchClear;
+    private final Handler searchHandler = new Handler(Looper.getMainLooper());
+    private Runnable searchPending;
+    /** How long typing rests before the history re-renders: one pause, one pass, however fast the
+     *  typing. Short enough to feel live, long enough that a word costs a single scan of the list. */
+    private static final long SEARCH_DEBOUNCE_MS = 300L;
 
     /** The filter controls row (direction segment above the date presets), rebuilt by every render
      *  so its highlight and labels always mirror {@link #filter}. */
@@ -384,6 +413,11 @@ public final class HistoryActivity extends Activity {
             expandedSeeded = state.getBoolean(KEY_EXPANDED_SEEDED, false);
             pendingScroll = state.getInt(KEY_SCROLL_Y, 0);
             restoreFilter(state);
+            searchQuery = state.getString(KEY_SEARCH_QUERY, "");
+            searchExpandedFor = state.getString(KEY_SEARCH_EXPANDED_FOR, null);
+            preSearchYears = stringSet(state, KEY_PRE_SEARCH_YEARS);
+            preSearchMonths = stringSet(state, KEY_PRE_SEARCH_MONTHS);
+            preSearchDays = stringSet(state, KEY_PRE_SEARCH_DAYS);
         }
         bankFilter = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_BANK);
         accountFilter = bankFilter == null ? null
@@ -441,6 +475,7 @@ public final class HistoryActivity extends Activity {
         host.addView(root, new FrameLayout.LayoutParams(-1, -1));
 
         root.addView(buildHeader(), margin(0, 0, 0, 14));
+        root.addView(buildSearchBar(), margin(0, 0, 0, 10));
         filterBar = new LinearLayout(this);
         filterBar.setOrientation(LinearLayout.VERTICAL);
         root.addView(filterBar, margin(0, 0, 0, 12));
@@ -509,6 +544,10 @@ public final class HistoryActivity extends Activity {
         if (scrollView != null) {
             scrollView.handler.removeCallbacks(scrollView.refreshTicker);
         }
+        // Same reasoning for a debounced search keystroke: without this one late pass would render
+        // into a finished screen (harmlessly gated, but pointless work either way).
+        searchHandler.removeCallbacksAndMessages(null);
+        searchPending = null;
         // Same reasoning for the skeleton sweep: it repeats forever and holds the activity with it.
         stopShimmer();
         super.onDestroy();
@@ -678,9 +717,11 @@ public final class HistoryActivity extends Activity {
     }
 
     /** Builds the CSV of the on-screen transactions and writes it to the SAF uri on a worker
-     *  thread. The current filters shape the snapshot (with none active that is the full history),
-     *  and the store lock keeps it from ever racing a background scan mid-write. */
+     *  thread. The current filters and the search query shape the snapshot (with none active that
+     *  is the full history), and the store lock keeps it from ever racing a background scan
+     *  mid-write. */
     private void writeExport(Uri uri) {
+        final String query = searchQuery == null ? "" : searchQuery.trim();
         new Thread(() -> {
             final int[] error = {0};
             try {
@@ -710,6 +751,11 @@ public final class HistoryActivity extends Activity {
                 }
                 List<Residual> residualOut = applyResidualFilters(residualScope, filter, iranCalendar);
                 scope = applyFilters(scope, filter, iranCalendar);
+                if (!query.isEmpty()) {
+                    final java.util.Map<String, String> n = notes, r = reasons, c = channels;
+                    scope = filterBySearch(scope, query, t -> txHaystack(t, n, r, c));
+                    residualOut = filterBySearch(residualOut, query, this::residualHaystack);
+                }
                 String csv = CsvExport.csv(getApplicationContext(), scope, residualOut,
                     new CsvExport.Text(notes, reasons, channels));
                 OutputStream out = getContentResolver().openOutputStream(uri, "w");
@@ -821,6 +867,106 @@ public final class HistoryActivity extends Activity {
 
     private void applyDirection(int direction) {
         filter = filter.withDirection(direction);
+        render();
+    }
+
+    // ====================================================================
+    // Search field
+    // ====================================================================
+
+    /** The search row: a magnifier, a typeable field and a clear button on one quiet strip. Built
+     *  once (never rebuilt by a render, so typing never loses focus) and deliberately not
+     *  auto-focused, so opening the history never pops the keyboard up uninvited. */
+    private LinearLayout buildSearchBar() {
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setBackground(rounded(chipBg, 14));
+        bar.setPadding(dp(4), dp(2), dp(4), dp(2));
+
+        TextView icon = text("\u2315", 16, muted, MEDIUM);
+        icon.setGravity(Gravity.CENTER);
+        icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        bar.addView(icon, new LinearLayout.LayoutParams(dp(36), dp(44)));
+
+        searchInput = new EditText(this);
+        searchInput.setBackground(null);
+        searchInput.setHint(getString(R.string.history_search_hint));
+        searchInput.setTextColor(fg);
+        searchInput.setHintTextColor(muted);
+        searchInput.setTextSize(14);
+        searchInput.setSingleLine(true);
+        searchInput.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
+        searchInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+        searchInput.setPadding(dp(2), dp(10), dp(2), dp(10));
+        if (searchQuery != null && !searchQuery.isEmpty()) {
+            searchInput.setText(searchQuery);
+            searchInput.setSelection(searchInput.getText().length());
+        }
+        searchInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) { }
+            @Override public void onTextChanged(CharSequence s, int st, int b, int c) { }
+            @Override public void afterTextChanged(Editable s) {
+                // One pause, one pass: restart the wait on every keystroke and render only once
+                // the typing rests, however fast it goes. The text is copied now — the Editable
+                // is the live field, and by the time the wait ends it may already say more.
+                final String now = s.toString();
+                if (searchPending != null) searchHandler.removeCallbacks(searchPending);
+                searchPending = () -> {
+                    searchPending = null;
+                    searchQuery = now;
+                    updateSearchClear();
+                    render();
+                };
+                searchHandler.postDelayed(searchPending, SEARCH_DEBOUNCE_MS);
+                updateSearchClear();
+            }
+        });
+        searchInput.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                flushSearch();
+                android.view.inputmethod.InputMethodManager imm =
+                    (android.view.inputmethod.InputMethodManager)
+                        getSystemService(INPUT_METHOD_SERVICE);
+                if (imm != null) imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
+                return true;
+            }
+            return false;
+        });
+        bar.addView(searchInput, new LinearLayout.LayoutParams(0, -2, 1));
+
+        searchClear = text("\u00D7", 18, muted, MEDIUM);
+        searchClear.setGravity(Gravity.CENTER);
+        searchClear.setContentDescription(getString(R.string.history_search_clear));
+        searchClear.setBackground(ripple(rounded(chipBg, 12)));
+        searchClear.setClickable(true);
+        searchClear.setFocusable(true);
+        searchClear.setOnClickListener(v -> {
+            searchInput.setText("");
+            flushSearch();
+        });
+        bar.addView(searchClear, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        updateSearchClear();
+        return bar;
+    }
+
+    /** Shows the clear button only while there is something to clear. */
+    private void updateSearchClear() {
+        if (searchClear == null || searchInput == null) return;
+        searchClear.setVisibility(
+            searchInput.getText().length() > 0 ? View.VISIBLE : View.GONE);
+    }
+
+    /** Applies the field's current text now instead of at the end of the debounce wait: the
+     *  keyboard's search action and the clear button both answer at once rather than trailing the
+     *  typing they just finished. */
+    private void flushSearch() {
+        if (searchPending != null) {
+            searchHandler.removeCallbacks(searchPending);
+            searchPending = null;
+        }
+        if (searchInput != null) searchQuery = searchInput.getText().toString();
+        updateSearchClear();
         render();
     }
 
@@ -1129,6 +1275,11 @@ public final class HistoryActivity extends Activity {
     private static final String KEY_FILTER_TO_YEAR = "filter_to_year";
     private static final String KEY_FILTER_TO_MONTH = "filter_to_month";
     private static final String KEY_FILTER_TO_DAY = "filter_to_day";
+    private static final String KEY_SEARCH_QUERY = "search_query";
+    private static final String KEY_SEARCH_EXPANDED_FOR = "search_expanded_for";
+    private static final String KEY_PRE_SEARCH_YEARS = "pre_search_years";
+    private static final String KEY_PRE_SEARCH_MONTHS = "pre_search_months";
+    private static final String KEY_PRE_SEARCH_DAYS = "pre_search_days";
 
     /** The sets of year, month and day keys currently expanded in the breakdown. The current year,
      *  current month and its days start expanded. */
@@ -1187,6 +1338,42 @@ public final class HistoryActivity extends Activity {
         return CalDate.today(iranCalendar);
     }
 
+    /** Opens every matching year, month and day for a fresh query, so a match never hides inside a
+     *  collapsed group the query itself did not open. The expansion the search started from is
+     *  remembered and restored when the search is cleared, so searching never leaves the whole
+     *  history open behind it; collapses made mid-search are respected until the query changes. */
+    private void expandForSearch(String query, List<YearGroup> years) {
+        if (query == null || query.isEmpty()) {
+            if (searchExpandedFor != null) {
+                searchExpandedFor = null;
+                if (preSearchYears != null) {
+                    expandedYears.clear();
+                    expandedYears.addAll(preSearchYears);
+                    expandedMonths.clear();
+                    expandedMonths.addAll(preSearchMonths);
+                    expandedDays.clear();
+                    expandedDays.addAll(preSearchDays);
+                    preSearchYears = preSearchMonths = preSearchDays = null;
+                }
+            }
+            return;
+        }
+        if (query.equals(searchExpandedFor)) return;
+        if (searchExpandedFor == null) {
+            preSearchYears = new java.util.LinkedHashSet<>(expandedYears);
+            preSearchMonths = new java.util.LinkedHashSet<>(expandedMonths);
+            preSearchDays = new java.util.LinkedHashSet<>(expandedDays);
+        }
+        searchExpandedFor = query;
+        for (YearGroup y : years) {
+            expandedYears.add(y.key());
+            for (MonthGroup m : y.months) {
+                expandedMonths.add(m.key());
+                for (DayGroup d : m.days) expandedDays.add(d.key());
+            }
+        }
+    }
+
     @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
@@ -1197,6 +1384,11 @@ public final class HistoryActivity extends Activity {
         if (scrollView != null) outState.putInt(KEY_SCROLL_Y, scrollView.getScrollY());
         outState.putInt(KEY_FILTER_DIRECTION, filter.direction);
         outState.putInt(KEY_FILTER_RANGE, filter.rangePreset);
+        outState.putString(KEY_SEARCH_QUERY, searchQuery == null ? "" : searchQuery);
+        outState.putString(KEY_SEARCH_EXPANDED_FOR, searchExpandedFor);
+        putStringSet(outState, KEY_PRE_SEARCH_YEARS, preSearchYears);
+        putStringSet(outState, KEY_PRE_SEARCH_MONTHS, preSearchMonths);
+        putStringSet(outState, KEY_PRE_SEARCH_DAYS, preSearchDays);
         writeDate(outState, KEY_FILTER_FROM_YEAR, KEY_FILTER_FROM_MONTH, KEY_FILTER_FROM_DAY, filter.from);
         writeDate(outState, KEY_FILTER_TO_YEAR, KEY_FILTER_TO_MONTH, KEY_FILTER_TO_DAY, filter.to);
     }
@@ -1208,6 +1400,19 @@ public final class HistoryActivity extends Activity {
         outState.putInt(yKey, d.year);
         outState.putInt(mKey, d.month);
         outState.putInt(dKey, d.day);
+    }
+
+    /** Persists an expansion snapshot for the search restore, leaving the key out when there is no
+     *  search in flight to restore from. */
+    private static void putStringSet(Bundle outState, String key, Set<String> set) {
+        if (set == null) return;
+        outState.putStringArrayList(key, new java.util.ArrayList<>(set));
+    }
+
+    /** Reads back an expansion snapshot, or null when none was saved. */
+    private static Set<String> stringSet(Bundle state, String key) {
+        java.util.ArrayList<String> list = state.getStringArrayList(key);
+        return list == null ? null : new java.util.LinkedHashSet<>(list);
     }
 
     /** Rebuilds {@link #filter} from the saved state, staying on {@link Filter#ALL} when a fresh
@@ -1294,20 +1499,62 @@ public final class HistoryActivity extends Activity {
     }
 
     // ====================================================================
+    // Free-text search state
+    // ====================================================================
+
+    /** Whether a query is narrowing the screen right now. */
+    private boolean isSearching() {
+        return searchQuery != null && !searchQuery.trim().isEmpty();
+    }
+
+    /** One movement's searchable text in the current language: what the row shows (bank, time,
+     *  account, amount) plus what it carries (note, the bank's reason and channel) and when it is
+     *  shown. Reads the wrapped activity context so the names match the language on screen. */
+    private String txHaystack(Transaction t, Map<String, String> notes,
+            Map<String, String> reasons, Map<String, String> channels) {
+        String key = BalanceData.noteKey(t);
+        String note = notes == null ? null : notes.get(key);
+        String reasonRaw = reasons == null ? null : reasons.get(key);
+        String channelRaw = channels == null ? null : channels.get(key);
+        int[] g = gDate(t.date);
+        CalDate d = CalDate.fromGregorian(g[0], g[1], g[2], iranCalendar);
+        return transactionSearchText(t, BankRules.displayName(this, t.bank), note,
+            reasonRaw, BankRules.reasonCaption(this, reasonRaw),
+            channelRaw, BankRules.channelCaption(this, channelRaw),
+            CurrencyHelper.amount(this, t.amount),
+            t.amount > 0 ? getString(R.string.history_deposit)
+                : t.amount < 0 ? getString(R.string.history_withdrawal) : null,
+            dateText(d), timeText(t.date), monthName(d.month), compactDate(d));
+    }
+
+    /** One gap's searchable text in the current language, mirroring {@link #txHaystack}. */
+    private String residualHaystack(Residual r) {
+        CalDate d = calOf(r.toDate, iranCalendar);
+        return residualSearchText(r, BankRules.displayName(this, r.bank),
+            CurrencyHelper.amount(this, r.amount),
+            r.amount > 0 ? getString(R.string.history_deposit)
+                : r.amount < 0 ? getString(R.string.history_withdrawal) : null,
+            getString(R.string.residual_label),
+            dateText(d), timeText(r.toDate), monthName(d.month), compactDate(d));
+    }
+
+    // ====================================================================
     // Screen rendering
     // ====================================================================
 
-    /** Re-reads the saved history, applies the current filters and rebuilds the whole screen from
-     *  it: the filter bar first (so its chips mirror the active filter), then the hero and the
-     *  breakdown computed over the filtered list, so every figure on screen reflects exactly what
-     *  is shown. The decrypt-and-parse plus the per-movement calendar math run on a worker thread
-     *  so a large story never stalls the UI; only the finished groups are drawn here. */
+    /** Re-reads the saved history, applies the current filters and the search query, and rebuilds
+     *  the whole screen from it: the filter bar first (so its chips mirror the active filter),
+     *  then the hero and the breakdown computed over the narrowed list, so every figure on screen
+     *  reflects exactly what is shown. The decrypt-and-parse plus the per-movement calendar math
+     *  run on a worker thread so a large story never stalls the UI; only the finished groups are
+     *  drawn here. */
     private void render() {
         final int gen = ++renderGen;
         final Filter f = filter;
         final String bank = bankFilter;
         final String acct = accountFilter;
         final boolean iran = iranCalendar;
+        final String query = searchQuery == null ? "" : searchQuery.trim();
         new Thread(() -> {
             try {
                 List<Transaction> txs = BalanceData.readTransactions(getApplicationContext());
@@ -1316,16 +1563,23 @@ public final class HistoryActivity extends Activity {
                 // Detected across the whole account before any narrowing, since a residual is only
                 // provable between two balance statements a filter may hide, and then narrowed by the
                 // same rules so what is on screen and what the totals say always agree.
-                final List<Residual> residuals = applyResidualFilters(Residual.between(txs), f, iran);
-                final List<Transaction> filtered = applyFilters(txs, f, iran);
-                final Lists lists = buildLists(filtered, residuals, iran);
-                allResiduals = residuals;
+                List<Residual> residuals = applyResidualFilters(Residual.between(txs), f, iran);
+                List<Transaction> filtered = applyFilters(txs, f, iran);
                 final Map<String, String> notesNow =
                     BalanceData.readNotes(getApplicationContext());
                 final Map<String, String> reasonsNow =
                     BalanceData.readReasons(getApplicationContext());
                 final Map<String, String> channelsNow =
                     BalanceData.readChannels(getApplicationContext());
+                if (!query.isEmpty()) {
+                    final Map<String, String> n = notesNow, r = reasonsNow, c = channelsNow;
+                    filtered = filterBySearch(filtered, query, t -> txHaystack(t, n, r, c));
+                    residuals = filterBySearch(residuals, query, this::residualHaystack);
+                }
+                final List<Transaction> shown = filtered;
+                final List<Residual> shownResiduals = residuals;
+                final Lists lists = buildLists(shown, shownResiduals, iran);
+                allResiduals = shownResiduals;
                 runOnUiThread(() -> {
                     if (gen != renderGen || isDestroyed() || isFinishing()) return;
                     notes = notesNow;
@@ -1337,12 +1591,14 @@ public final class HistoryActivity extends Activity {
                     body.setContentDescription(null);
                     body.removeAllViews();
                     if (lists.years.isEmpty()) {
+                        expandForSearch(query, lists.years);
                         emptyState();
                     } else {
                         body.addView(heroCard(lists), margin(0, 0, 0, 6));
-                        body.addView(breakdownHeading(filtered.size()), margin(0, 16, 0, 12));
+                        body.addView(breakdownHeading(shown.size()), margin(0, 16, 0, 12));
                         allYears = lists.years;
                         seedExpanded();
+                        expandForSearch(query, lists.years);
                         renderYears(body, allYears);
                     }
                 });
@@ -1412,7 +1668,11 @@ public final class HistoryActivity extends Activity {
         icon.setColorFilter(muted);
         wrap.addView(icon);
         String empty;
-        if (filter.isActive()) {
+        if (isSearching()) {
+            // A search that matches nothing says what it looked for, so the dead end reads as an
+            // answer rather than a blank screen.
+            empty = getString(R.string.history_empty_search, searchQuery.trim());
+        } else if (filter.isActive()) {
             // A filter may hide every transaction even though history exists.
             empty = getString(R.string.history_empty_filtered);
         } else if (accountFilter != null) {
@@ -2514,6 +2774,143 @@ public final class HistoryActivity extends Activity {
                 if (f.to != null && d.compare(f.to) > 0) continue;
             }
             out.add(r);
+        }
+        return out;
+    }
+
+    // ====================================================================
+    // Free-text search (kept static so the instrumented tests cover it)
+    // ====================================================================
+
+    /** Normalizes text for search: lowercased, Persian and Arabic digits folded to Latin, the
+     *  Arabic kaf/yeh/teh-marbuta/alef variants folded to their Persian forms, grouping separators
+     *  dropped so "500,000" and "500000" read the same, and the zero-width marks dropped so a word
+     *  typed with, without, or instead-spaced around a half-space still reads as one word. */
+    static String normalizeSearch(String s) {
+        if (s == null) return "";
+        StringBuilder b = new StringBuilder(s.length());
+        for (int i = 0; i < s.length();) {
+            int cp = s.codePointAt(i);
+            i += Character.charCount(cp);
+            if (cp >= '\u06F0' && cp <= '\u06F9') b.append((char) ('0' + cp - '\u06F0'));
+            else if (cp >= '\u0660' && cp <= '\u0669') b.append((char) ('0' + cp - '\u0660'));
+            else if (cp == '\u0643') b.append('\u06A9');
+            else if (cp == '\u064A') b.append('\u06CC');
+            else if (cp == '\u0629') b.append('\u0647');
+            else if (cp == '\u0623' || cp == '\u0625' || cp == '\u0622') b.append('\u0627');
+            else if (cp == '\u200C' || cp == '\u200D' || cp == '\u0640' || cp == '\uFEFF') continue;
+            else if (cp == ',' || cp == '\u066C' || cp == '\u066B') continue;
+            else b.appendCodePoint(Character.toLowerCase(cp));
+        }
+        return b.toString().trim().replaceAll("\\s+", " ");
+    }
+
+    /** The query's words after {@link #normalizeSearch}: what a movement must each contain somewhere
+     *  in its own fields to stay on screen. Empty when there is nothing to narrow by. */
+    static List<String> searchTokens(String query) {
+        List<String> tokens = new ArrayList<>();
+        String norm = normalizeSearch(query);
+        if (norm.isEmpty()) return tokens;
+        for (String w : norm.split(" ")) {
+            if (!w.isEmpty()) tokens.add(w);
+        }
+        return tokens;
+    }
+
+    /** Whether every word of {@code query} appears (in full or in part) somewhere in
+     *  {@code haystack}. A blank query matches everything, so an empty search narrows nothing. A
+     *  word also matches when it only reads whole with the spaces dropped, so "میشود" still finds
+     *  "می شود" however either side spaced the half-space. */
+    static boolean matchesSearch(String haystack, String query) {
+        List<String> tokens = searchTokens(query);
+        if (tokens.isEmpty()) return true;
+        if (haystack == null) return false;
+        String hay = normalizeSearch(haystack);
+        String compact = null;
+        for (String tok : tokens) {
+            if (hay.contains(tok)) continue;
+            if (compact == null) compact = hay.replace(" ", "");
+            if (!compact.contains(tok.replace(" ", ""))) return false;
+        }
+        return true;
+    }
+
+    /** Appends one search field to a haystack, skipping nulls and blanks so absent facts (an
+     *  account a message never stated, a note never written) contribute nothing. */
+    private static void searchField(StringBuilder hay, String field) {
+        if (field == null || field.isEmpty()) return;
+        if (hay.length() > 0) hay.append(' ');
+        hay.append(field);
+    }
+
+    /** Everything a movement can be found by, as one searchable text: the bank (canonical and
+     *  displayed names), the account, the amount (raw rials and as displayed), the movement
+     *  direction word, the user's note, the bank's own reason and channel (raw and captioned),
+     *  and the date it is shown under (full date, time, month name and compact form). The
+     *  fingerprint and content digest are deliberately absent: opaque hashes a search could only
+     *  match by accident. Null-safe throughout; any absent field simply narrows nothing. */
+    static String transactionSearchText(Transaction t, String bankDisplay, String note,
+            String reasonRaw, String reasonCaption, String channelRaw, String channelCaption,
+            String amountFormatted, String directionText, String dateText, String timeText,
+            String monthName, String compactDate) {
+        StringBuilder hay = new StringBuilder();
+        if (t != null) {
+            searchField(hay, t.bank);
+            searchField(hay, t.account);
+            searchField(hay, Long.toString(t.amount));
+            if (t.amount != 0) searchField(hay, Long.toString(Math.abs(t.amount)));
+        }
+        searchField(hay, bankDisplay);
+        searchField(hay, amountFormatted);
+        searchField(hay, directionText);
+        searchField(hay, note);
+        searchField(hay, reasonRaw);
+        searchField(hay, reasonCaption);
+        searchField(hay, channelRaw);
+        searchField(hay, channelCaption);
+        searchField(hay, dateText);
+        searchField(hay, timeText);
+        searchField(hay, monthName);
+        searchField(hay, compactDate);
+        return hay.toString();
+    }
+
+    /** Everything unaccounted money can be found by: the bank, the account, the amount, the
+     *  direction word, the "Unaccounted" label itself, and the date it is placed on. */
+    static String residualSearchText(Residual r, String bankDisplay, String amountFormatted,
+            String directionText, String residualLabel, String dateText, String timeText,
+            String monthName, String compactDate) {
+        StringBuilder hay = new StringBuilder();
+        if (r != null) {
+            searchField(hay, r.bank);
+            searchField(hay, r.account);
+            searchField(hay, Long.toString(r.amount));
+            if (r.amount != 0) searchField(hay, Long.toString(Math.abs(r.amount)));
+        }
+        searchField(hay, bankDisplay);
+        searchField(hay, amountFormatted);
+        searchField(hay, directionText);
+        searchField(hay, residualLabel);
+        searchField(hay, dateText);
+        searchField(hay, timeText);
+        searchField(hay, monthName);
+        searchField(hay, compactDate);
+        return hay.toString();
+    }
+
+    /** Keeps the entries whose haystack matches {@code query}, preserving input order and never
+     *  mutating the caller's list. A blank query keeps everything, so the unsearched screen costs
+     *  no per-row work beyond the token check. */
+    static <T> List<T> filterBySearch(List<T> in, String query,
+            java.util.function.Function<T, String> haystackOf) {
+        List<T> out = new ArrayList<>(in == null ? 0 : in.size());
+        if (in == null) return out;
+        if (searchTokens(query).isEmpty()) {
+            out.addAll(in);
+            return out;
+        }
+        for (T e : in) {
+            if (matchesSearch(haystackOf.apply(e), query)) out.add(e);
         }
         return out;
     }

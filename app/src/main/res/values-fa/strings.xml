@@ -228,6 +228,9 @@
     <string name="history_filter_from_without_to">از %1$s به بعد</string>
     <string name="history_filter_to_without_from">تا %1$s</string>
     <string name="history_empty_filtered">هیچ تراکنشی با فیلترهای فعلی مطابقت ندارد.</string>
+    <string name="history_search_hint">جست‌وجو در تراکنش‌ها…</string>
+    <string name="history_search_clear">پاک کردن جست‌وجو</string>
+    <string name="history_empty_search">نتیجه‌ای برای «%1$s» یافت نشد.</string>
     <string name="history_empty_account">هنوز تراکنشی برای این حساب یافت نشده است.</string>
     <string name="history_prev_month">ماه قبل</string>
     <string name="history_next_month">ماه بعد</string>
