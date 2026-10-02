@@ -103,6 +103,11 @@ final class RuleDraft {
 
     String sender = "";
     String bankName = "";
+    /** Deliberately not offered as a question. The builder exists to describe a bank the app has
+     *  no pack for, and every bank it can be pointed at is one this catalog already names in a
+     *  language it already has a logo for; a country picker would only offer to build a pack for a
+     *  bank the rest of the app cannot name, draw or speak. It becomes a real question the day the
+     *  catalog itself reaches past Iran. */
     String country = "IR";
     String body = "";
     Shape shape = Shape.MOVEMENT;
