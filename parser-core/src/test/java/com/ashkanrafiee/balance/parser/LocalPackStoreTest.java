@@ -41,6 +41,8 @@ public final class LocalPackStoreTest {
             removal();
             bounds();
             idsCannotEscapeTheDirectory();
+            idsTheStoreCannotNameAreRefused();
+            aFileTheStoreWouldNotNameIsIsolated();
         } finally {
             deleteTree(root);
         }
@@ -309,6 +311,42 @@ public final class LocalPackStoreTest {
             equal(e.code, expected, "refusal code");
             return true;
         }
+    }
+
+    /** An id the reader accepts but this store cannot spell is refused where the local identity is
+     *  derived, not left to fail later. {@code Rules.id} allows {@code _} and the published schema
+     *  allows it too, so a pack built to the documented schema can carry an id no stored file may be
+     *  named -- and staging it used to succeed, preview as an install, and then throw an unchecked
+     *  IllegalArgumentException from pathOf the moment the user confirmed. */
+    private static void idsTheStoreCannotNameAreRefused() throws Exception {
+        for (String id : List.of("my_pack", "example.pack_")) {
+            LocalPackStore store = open();
+            equal(refused(store, document(id, "r1", null), LocalPackStore.Code.MALFORMED), true,
+                "refused at the door rather than crashing on confirm: " + id);
+        }
+
+        // Only the pack id names a file. The same character in the bank id, which names no file, is
+        // still perfectly storable, and refusing that too would refuse packs the schema allows.
+        LocalPackStore store = open();
+        equal(store.install(store.stage(document("example.bankname", "my_bank", "r1", "COMMUNITY", "anchor")))
+                .outcome(), LocalPackStore.Outcome.INSTALLED,
+            "an underscore in the bank id alone is no reason to refuse a pack");
+    }
+
+    /** A file this store would never name is still only one bad file. Its stem is not a stored id, so
+     *  pathOf refuses it; before this, that refusal escaped as an unchecked throw out of snapshot()
+     *  and clear(), and one stray file took the whole engine down rather than costing itself. */
+    private static void aFileTheStoreWouldNotNameIsIsolated() throws Exception {
+        LocalPackStore store = open();
+        store.install(stage(store, "example.good", "r1", null));
+        Files.writeString(store.directory().resolve("Evil.pack.json"), "{ not a pack");
+
+        LocalPackStore.Snapshot snapshot = store.snapshot();
+        equal(snapshot.packs().size(), 1, "the good pack is still composed");
+        equal(snapshot.packs().get(0).packId(), "local.example.good");
+
+        store.clear();
+        equal(store.snapshot().packs().size(), 0, "and the store can still be emptied");
     }
 
     /** Deletes what the gate created, so a run leaves nothing behind. */

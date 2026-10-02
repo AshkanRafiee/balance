@@ -230,6 +230,12 @@ public final class LocalPackStore {
         } catch (IllegalArgumentException | NullPointerException e) {
             throw new Failure(Code.MALFORMED);
         }
+        // The reader's id alphabet is wider than the one a stored file may be named from, and the
+        // published schema permits the difference. An id this store could not spell is refused here,
+        // as a malformed pack, rather than previewing as an install and then throwing an unchecked
+        // IllegalArgumentException from pathOf once the user has already confirmed it.
+        if (!isStoredId(localPackId(validated.id())))
+            throw new Failure(Code.MALFORMED);
         PackDocument local = validated.withIdentity(localPackId(validated.id()),
                 localBankId(validated.bank().id()), PackDocument.Bank.Provenance.LOCAL);
         byte[] bytes;
@@ -327,12 +333,16 @@ public final class LocalPackStore {
         return new Snapshot(packs, unreadable);
     }
 
+    /** Only stems this store could have written. A file named by hand, or left by another version,
+     *  is not something pathOf may be asked about, and letting that refusal escape as an unchecked
+     *  throw would let one stray file cost every pack rather than itself. */
     private List<String> names() throws IOException {
         List<String> found = new ArrayList<>();
         try (DirectoryStream<Path> entries = Files.newDirectoryStream(directory)) {
             for (Path entry : entries) {
                 String name = entry.getFileName().toString();
-                if (name.endsWith(SUFFIX) && !name.endsWith(TEMPORARY))
+                if (name.endsWith(SUFFIX) && !name.endsWith(TEMPORARY)
+                        && isStoredId(name.substring(0, name.length() - SUFFIX.length())))
                     found.add(name.substring(0, name.length() - SUFFIX.length()));
             }
         }
