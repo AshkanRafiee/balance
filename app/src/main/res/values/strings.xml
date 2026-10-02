@@ -164,6 +164,13 @@
     <string name="about_suggestions_label">Suggestions</string>
     <string name="about_donate_label">Donate</string>
     <string name="about_footer">Balance · Version %1$s</string>
+    <!-- Experimental features. A gated feature is hidden until the About screen's version line is
+         held for ten seconds, so an ordinary reader never meets a screen we cannot promise yet. -->
+    <string name="experimental_hold">Keep holding to enable experimental settings… %1$d</string>
+    <string name="experimental_hold_done">Enabled</string>
+    <string name="experimental_enabled_title">Experimental settings on</string>
+    <string name="experimental_enabled_message">Your own packs is now available under Settings → Banks.\n\nIt is experimental: it lets Balance read a bank\'s messages with rules you supply instead of the ones it ships, so a wrong rule will show a wrong balance. It may change, or go away, in a future version.\n\nYour packs stay on this device — nothing is uploaded. Remove one there whenever you like.</string>
+    <string name="experimental_enabled_ok">Got it</string>
     <string name="footer_report">Report</string>
 
     <string name="scan_diag_title">Scan diagnostics</string>

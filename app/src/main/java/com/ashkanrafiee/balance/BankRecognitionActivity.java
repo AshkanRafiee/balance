@@ -70,8 +70,13 @@ public final class BankRecognitionActivity extends ThemedScreenActivity {
 
     /** The way to the reader's own packs. It lives at the end of this screen rather than in its own
      *  place in the settings, because a reader who has packs of their own came here to see them, and
-     *  a reader who has none scrolls past one row. */
+     *  a reader who has none scrolls past one row.
+     *
+     *  <p>It is hidden until the reader opens the gate in the About screen. Importing your own rules
+     *  changes how every message from that bank is read, so it is offered to people who asked for it
+     *  rather than shown to everyone — see {@link Experimental}.</p> */
     private void packsEntry() {
+        if (!Experimental.ownPacksEnabled(this)) return;
         LinearLayout row = cardRow();
         row.addView(text(getString(R.string.local_packs_title), 15, accent),
             new LinearLayout.LayoutParams(0, -2, 1));

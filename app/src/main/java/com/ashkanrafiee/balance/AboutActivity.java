@@ -7,9 +7,13 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -23,6 +27,8 @@ public final class AboutActivity extends Activity {
     static final String DONATION_URL = "https://balance.ashkanrafiee.com/#donate";
     int bg, card, muted, accent, heroColor, link, footerColor, fg;
     private LockOverlay lockOverlay;
+    /** Stops the version line's hold countdown; see {@link #enableExperimentalGate}. */
+    private Runnable cancelHold = () -> {};
 
     int color(int res) {
         return getResources().getColor(res, getTheme());
@@ -153,7 +159,72 @@ public final class AboutActivity extends Activity {
 
         TextView footerView = text(getString(R.string.about_footer, appVersion()), 11, footerColor);
         footerView.setGravity(Gravity.CENTER);
+        enableExperimentalGate(footerView);
         body.addView(footerView);
+    }
+
+    /**
+     * Makes the version line the switch that reveals experimental features.
+     *
+     * <p>Android's own long-press timeout is half a second and cannot be stretched, so the hold is
+     * measured here against {@link Experimental#UNLOCK_MILLIS}. The line counts down while it is
+     * held: a ten-second press that says nothing would be indistinguishable from a frozen screen, so
+     * the reader is told what is happening and how much is left. Letting go early restores the line
+     * and changes nothing.</p>
+     */
+    private void enableExperimentalGate(TextView footer) {
+        final String idle = footer.getText().toString();
+        final Handler ticker = new Handler(Looper.getMainLooper());
+        final long[] downAt = { 0L };
+
+        Runnable[] tick = { null };
+        tick[0] = () -> {
+            long held = SystemClock.elapsedRealtime() - downAt[0];
+            long left = Experimental.UNLOCK_MILLIS - held;
+            if (left <= 0) {
+                ticker.removeCallbacks(tick[0]);
+                footer.setText(idle);
+                Experimental.setOwnPacksEnabled(AboutActivity.this, true);
+                showExperimentalEnabled();
+                return;
+            }
+            footer.setText(getString(R.string.experimental_hold,
+                (int) Math.ceil(left / 1000.0)));
+            ticker.postDelayed(tick[0], 100);
+        };
+
+        cancelHold = () -> {
+            ticker.removeCallbacks(tick[0]);
+            if (downAt[0] != 0L) footer.setText(idle);
+            downAt[0] = 0L;
+        };
+
+        footer.setOnTouchListener((v, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downAt[0] = SystemClock.elapsedRealtime();
+                    ticker.post(tick[0]);
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    cancelHold.run();
+                    v.performClick();
+                    return true;
+                default:
+                    return false;
+            }
+        });
+        footer.setClickable(true);
+    }
+
+    /** The warning that comes with the switch, stated at the moment it is turned on rather than
+     *  hidden on a screen the reader may never open. */
+    private void showExperimentalEnabled() {
+        new android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.experimental_enabled_title)
+            .setMessage(R.string.experimental_enabled_message)
+            .setPositiveButton(R.string.experimental_enabled_ok, null)
+            .create().show();
     }
 
     @Override
@@ -182,6 +253,9 @@ public final class AboutActivity extends Activity {
 
     @Override
     protected void onPause() {
+        // A hold in progress must not keep counting — and must not fire the unlock — once this
+        // screen is no longer in front of the reader.
+        cancelHold.run();
         if (LockManager.isEnabled(this)) {
             // Arm the lock now so it engages even on ROMs that delay or skip onStop; the next
             // screen's start cancels it, so navigating between our own screens never locks.

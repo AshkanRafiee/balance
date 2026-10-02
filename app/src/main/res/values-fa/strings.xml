@@ -164,6 +164,13 @@
     <string name="about_suggestions_label">پیشنهادها</string>
     <string name="about_donate_label">حمایت مالی</string>
     <string name="about_footer">نسخهٔ %1$s · Balance</string>
+    <!-- Experimental features. A gated feature is hidden until the About screen's version line is
+         held for ten seconds, so an ordinary reader never meets a screen we cannot promise yet. -->
+    <string name="experimental_hold">برای روشن کردن تنظیمات آزمایشی نگه دارید… %1$d</string>
+    <string name="experimental_hold_done">روشن شد</string>
+    <string name="experimental_enabled_title">تنظیمات آزمایشی روشن شد</string>
+    <string name="experimental_enabled_message">از این پس «بسته‌های خودتان» در تنظیمات ← بانک‌ها در دسترس است.\n\nاین قابلیت آزمایشی است: با آن، پیام‌های یک بانک را با قواعدی که خودتان می‌دهید می‌خواند، نه قواعدی که Balance عرضه می‌کند؛ پس یک قاعدهٔ نادرست، موجودی نادرست نشان می‌دهد. ممکن است در نسخه‌های بعد تغییر کند یا حذف شود.\n\nبسته‌های شما روی همین دستگاه می‌ماند و چیزی جایی ارسال نمی‌شود. هر وقت خواستید از همان‌جا می‌توانید حذفشان کنید.</string>
+    <string name="experimental_enabled_ok">متوجه شدم</string>
     <string name="footer_report">گزارش</string>
 
     <string name="scan_diag_title">تشخیص اسکن پیامک</string>
