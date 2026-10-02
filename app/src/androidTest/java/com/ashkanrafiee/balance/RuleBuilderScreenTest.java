@@ -357,6 +357,20 @@ public class RuleBuilderScreenTest {
         return null;
     }
 
+    @Test public void directionIsOnlyAskedWhenAMovementReadsIt() {
+        launch();
+        assertNotNull("a movement states which way the money went",
+                text(ctx.getString(R.string.builder_section_direction)));
+
+        tap(ctx.getString(R.string.builder_shape_balance));
+        assertNull("a balance-only rule writes no direction, so it must not be asked for one",
+                text(ctx.getString(R.string.builder_section_direction)));
+
+        tap(ctx.getString(R.string.builder_shape_both));
+        assertNotNull("a rule reading both asks again",
+                text(ctx.getString(R.string.builder_section_direction)));
+    }
+
     private void fillBankAndSender() {
         type(fieldWith(ctx.getString(R.string.builder_bank_hint)), BANK);
         type(fieldWith(ctx.getString(R.string.builder_sender_hint)), SENDER);

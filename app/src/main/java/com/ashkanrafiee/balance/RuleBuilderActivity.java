@@ -137,8 +137,13 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
         }
         sectionLabel(getString(R.string.builder_section_highlights), 2, 0, 2, 6);
         body.addView(highlightsBox(), margin(0, 0, 0, 12));
-        sectionLabel(getString(R.string.builder_section_direction), 2, 0, 2, 6);
-        body.addView(directionBox(), margin(0, 0, 0, 12));
+        // Only a movement states which way the money went. A balance-only rule writes no direction
+        // at all, so asking for one would collect an answer nothing reads, and the reader would be
+        // left thinking their choice had been dropped.
+        if (draft.shape != RuleDraft.Shape.BALANCE) {
+            sectionLabel(getString(R.string.builder_section_direction), 2, 0, 2, 6);
+            body.addView(directionBox(), margin(0, 0, 0, 12));
+        }
         sectionLabel(getString(R.string.builder_section_details), 2, 0, 2, 6);
         body.addView(detailsBox(), margin(0, 0, 0, 12));
         tail = new LinearLayout(this);
