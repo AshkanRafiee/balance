@@ -194,11 +194,13 @@ public class ResidualTest {
         // 11:51 minute whose balances chain exactly. Closing the window on the first of the
         // pair alone would claim the second movement (-50,010,000) as missing while the
         // history shows it too — the same money counted twice. The pair is judged together,
-        // so a fully accounted minute stays silent.
+        // so a fully accounted minute stays silent. Listed newest-first, the way the store
+        // hands the walk its rows: the stable sort keeps that tie order, which is the order
+        // that used to phantom.
         List<Transaction> txs = Arrays.asList(
-            t(MELLAT, "123", 10 * DAY, -18_190_000L, 2_979_102_303L),
+            t(MELLAT, "123", 12 * DAY, -25_008_000L, 2_904_084_303L),
             t(MELLAT, "123", 12 * DAY, -50_010_000L, 2_929_092_303L),
-            t(MELLAT, "123", 12 * DAY, -25_008_000L, 2_904_084_303L));
+            t(MELLAT, "123", 10 * DAY, -18_190_000L, 2_979_102_303L));
         assertTrue(Residual.between(txs).isEmpty());
     }
 
@@ -206,10 +208,11 @@ public class ResidualTest {
         // An open bracket followed by two same-instant closers: whichever of the pair closed
         // first, the other movement is also inside the window, so reporting the first alone
         // invents a gap equal to the second movement. The whole minute is dropped instead.
+        // Newest-first, as stored: the tie order the walk actually sees.
         List<Transaction> txs = Arrays.asList(
-            t(MELLAT, "123", 10 * DAY, -1_000_000L, 100_000_000L),
+            t(MELLAT, "123", 12 * DAY, -5_000_000L, 85_000_000L),
             t(MELLAT, "123", 12 * DAY, -10_000_000L, 90_000_000L),
-            t(MELLAT, "123", 12 * DAY, -5_000_000L, 85_000_000L));
+            t(MELLAT, "123", 10 * DAY, -1_000_000L, 100_000_000L));
         assertTrue(Residual.between(txs).isEmpty());
     }
 
