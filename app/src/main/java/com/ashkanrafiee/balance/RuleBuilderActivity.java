@@ -349,6 +349,13 @@ public final class RuleBuilderActivity extends ThemedScreenActivity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(14), dp(10), dp(10), dp(10));
         box.setBackground(rounded(card, 13));
+        choice(box, getString(R.string.builder_digits_fixed), !draft.varyingDigits,
+                () -> draft.varyingDigits = false);
+        choice(box, getString(R.string.builder_digits_vary), draft.varyingDigits,
+                () -> draft.varyingDigits = true);
+        TextView digitsNote = text(getString(R.string.builder_digits_note), 13, muted);
+        digitsNote.setLineSpacing(2, 1.05f);
+        box.addView(digitsNote, margin(2, 2, 2, 8));
         if (draft.anchor(RuleDraft.Role.DATE) != null) {
             choice(box, getString(R.string.builder_calendar_jalali),
                     draft.calendar == RuleDraft.Calendar.JALALI,

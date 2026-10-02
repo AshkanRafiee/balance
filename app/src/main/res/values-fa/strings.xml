@@ -259,6 +259,9 @@
     <string name="builder_section_direction">۵. پول به کدام سمت می‌رود</string>
     <string name="builder_direction_debit">پول از حساب خارج می‌شود</string>
     <string name="builder_direction_credit">پول به حساب می‌آید</string>
+    <string name="builder_digits_fixed">مبلغ‌ها همیشه با یک طول نوشته می‌شوند</string>
+    <string name="builder_digits_vary">این بانک گاهی مبلغ‌های خیلی بزرگ‌تری می‌نویسد</string>
+    <string name="builder_digits_note">بیشتر بانک‌ها یک قالب ثابت دارند، پس همان گزینهٔ اول را انتخاب کنید. گزینهٔ دوم را فقط وقتی بزنید که این بانک واقعاً گاهی عددهای خیلی بزرگ‌تر مثل ۱٬۲۰۰٬۰۰۰ بفرستد. این کار به قاعده اجازه می‌دهد دورتر را نگاه کند؛ و قاعده‌ای که خیلی دور را نگاه کند ممکن است عدد اشتباهی را بردارد.</string>
     <string name="builder_section_details">۶. بخش‌هایی که کلمه نیستند</string>
     <string name="builder_calendar_jalali">تاریخ‌ها شمسی هستند (۱۴۰۵/۰۷/۰۹)</string>
     <string name="builder_calendar_gregorian">تاریخ‌ها میلادی هستند (2026/09/01)</string>

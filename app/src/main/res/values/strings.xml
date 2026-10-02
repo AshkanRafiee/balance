@@ -271,6 +271,9 @@
     <string name="builder_section_direction">5. Which way it moves</string>
     <string name="builder_direction_debit">Money leaving the account</string>
     <string name="builder_direction_credit">Money arriving in the account</string>
+    <string name="builder_digits_fixed">Amounts are written the same length every time</string>
+    <string name="builder_digits_vary">This bank sometimes writes much larger amounts</string>
+    <string name="builder_digits_note">Most banks keep to one format, so leave the first option alone. Choose the second only if this bank really does send far larger numbers now and then, such as 1,200,000. It lets the rule look further, and a rule that looks too far can pick up the wrong number.</string>
     <string name="builder_section_details">6. The parts that are not words</string>
     <string name="builder_calendar_jalali">Dates are Persian (۱۴۰۵/۰۷/۰۹)</string>
     <string name="builder_calendar_gregorian">Dates are Gregorian (2026/09/01)</string>

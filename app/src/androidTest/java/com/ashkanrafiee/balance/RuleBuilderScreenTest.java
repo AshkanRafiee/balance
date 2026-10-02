@@ -371,6 +371,16 @@ public class RuleBuilderScreenTest {
                 text(ctx.getString(R.string.builder_section_direction)));
     }
 
+    @Test public void theDigitsSettingIsOfferedAndExplained() {
+        launch();
+        assertNotNull("the reader can say how long amounts run",
+                text(ctx.getString(R.string.builder_digits_fixed)));
+        assertNotNull("and the other answer is offered too",
+                text(ctx.getString(R.string.builder_digits_vary)));
+        assertNotNull("with a note saying which to pick, rather than leaving it to be guessed",
+                text(ctx.getString(R.string.builder_digits_note)));
+    }
+
     private void fillBankAndSender() {
         type(fieldWith(ctx.getString(R.string.builder_bank_hint)), BANK);
         type(fieldWith(ctx.getString(R.string.builder_sender_hint)), SENDER);

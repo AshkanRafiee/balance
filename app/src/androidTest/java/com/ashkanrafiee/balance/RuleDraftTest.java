@@ -371,4 +371,27 @@ public class RuleDraftTest {
         assertEquals(Parser.Status.NO_MATCH, other.status());
         assertEquals(0, other.facts().size());
     }
+
+    @Test
+    public void varyingDigitsWidensOnlyWhenTheReaderAsksForIt() {
+        // The example's own length is the default: a rule looks exactly as far as it needs to,
+        // because a rule that looks too far can pick up a neighbouring number.
+        RuleDraft tight = movement();
+        int tightWidth = amountMaxLength(tight);
+
+        RuleDraft loose = movement();
+        loose.varyingDigits = true;
+        int looseWidth = amountMaxLength(loose);
+
+        assertTrue("the wider rule really does look further: " + tightWidth + " -> " + looseWidth,
+                looseWidth > tightWidth);
+    }
+
+    /** The maxLength the generated rule gives its amount, read back out of the document rather
+     *  than recomputed, so the test measures what a user would actually install. */
+    private static int amountMaxLength(RuleDraft draft) {
+        PackDocument document = PackDocument.decode(draft.document());
+        Rules.Output output = document.templates().get(0).outputs().get(0);
+        return output.money().amount().maxLength();
+    }
 }
