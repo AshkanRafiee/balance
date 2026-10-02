@@ -1,6 +1,7 @@
 package com.ashkanrafiee.balance;
 
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -81,12 +82,15 @@ final class Residual {
      * account whose statements all agree reports nothing at all — this only speaks up when the bank
      * contradicts us.
      *
-     * <p>Two movements sharing a timestamp bound no interval: we cannot tell which came first, and a
-     * residual claimed across an unknowable ordering would be a fabrication. Such a pair is dropped
-     * rather than guessed at, and the next message stating a balance opens a fresh bracket, so the
-     * region stays silent instead of reporting a number we cannot stand behind. Likewise, arithmetic
-     * that would overflow {@code long} yields no residual: a wrapped subtraction would report a
-     * spectacularly wrong number as fact.
+     * <p>Movements sharing a timestamp are first put in the order their stated balances prove, which
+     * is usually enough: two statements stamped the same second are told apart by the one arithmetic
+     * relation that cannot be coincidental, {@code balance(i) + amount(j) == balance(j)}. Where that
+     * chain is exact the window is reconciled normally. Where it is not — the movements disagree
+     * with each other, or both sit at the same balance — the timestamps bound no interval, and no
+     * statement inside such a tie may anchor or close a window: it sits at a point in time the app
+     * cannot place. The region stays silent instead of reporting a number we cannot stand behind.
+     * Likewise, arithmetic that would overflow {@code long} yields no residual: a wrapped
+     * subtraction would report a spectacularly wrong number as fact.
      *
      * <p>The input list is never modified.
      */
@@ -106,7 +110,7 @@ final class Residual {
         for (List<Transaction> slot : bySlot.values()) {
             List<Transaction> sorted = new ArrayList<>(slot);
             sorted.sort((a, b) -> Long.compare(a.date, b.date));
-            walk(sorted, found);
+            walk(sorted, disambiguate(sorted), found);
         }
         found.sort((a, b) -> {
             int byDate = Long.compare(a.toDate, b.toDate);
@@ -116,19 +120,102 @@ final class Residual {
         return out;
     }
 
+    /**
+     * Puts every run of movements sharing a timestamp into the order their stated balances prove,
+     * and marks the runs that stay unknowable.
+     *
+     * <p>A date sort alone leaves same-timestamp movements in whatever order they arrived, and
+     * arrival order is the reverse of chronology for rows read back newest-first. Reconciling them
+     * as they came would subtract one movement's amount from the *other* movement's balance and
+     * report the money that provably moved as money that went missing. Where the balances chain
+     * exactly — {@code balance(i) + amount(j) == balance(j)}, the relation no coincidence survives —
+     * the real order is provable, so the run is reordered and reconciled like any other window.
+     *
+     * <p>{@code sorted} is rearranged in place; the caller owns that copy.
+     *
+     * @return flags where {@code flags[i]} is true when {@code sorted.get(i)} belongs to a run of
+     *     same-timestamp movements whose order no balance chain settles. Such a row may neither
+     *     anchor a window nor close one: it sits at a point in time the app cannot place, so letting
+     *     it open a window would measure the next statement against an arbitrary member of the tie.
+     */
+    private static boolean[] disambiguate(List<Transaction> sorted) {
+        int n = sorted.size();
+        boolean[] flags = new boolean[n];
+        int start = 0;
+        while (start < n) {
+            int end = start + 1;
+            while (end < n && sorted.get(end).date == sorted.get(start).date) end++;
+            if (end - start > 1) {
+                List<Transaction> proven = provenOrder(sorted.subList(start, end));
+                if (proven != null) {
+                    for (int k = 0; k < proven.size(); k++) sorted.set(start + k, proven.get(k));
+                } else {
+                    for (int k = start; k < end; k++) flags[k] = true;
+                }
+            }
+            start = end;
+        }
+        return flags;
+    }
+
+    /**
+     * The chronological order of a run of same-timestamp movements when their stated balances admit
+     * exactly one, or {@code null} when the run is genuinely ambiguous.
+     *
+     * <p>Delegates the ordering decision to {@link Reconcile#order} so the history view and the
+     * unaccounted-money walk agree on what "provable order" means; that returns {@code null} for
+     * equal-opposite pairs, branching, cycles and mixed currencies alike.
+     */
+    private static List<Transaction> provenOrder(List<Transaction> run) {
+        int n = run.size();
+        if (n < 2) return null;
+        List<Reconcile.Entry> entries = new ArrayList<>(n);
+        IdentityHashMap<Reconcile.Entry, Transaction> owners = new IdentityHashMap<>();
+        for (Transaction t : run) {
+            // Chaining needs a stated balance on both sides, so one bare row makes the run unknowable.
+            if (t.balance == null) return null;
+            Reconcile.Entry entry = new Reconcile.Entry(t.date, t.amount, t.balance, null,
+                    t.currency, t.balanceCurrency);
+            entries.add(entry);
+            owners.put(entry, t);
+        }
+        List<Reconcile.Entry> ordered = Reconcile.order(entries);
+        if (ordered == null) return null;
+        List<Transaction> out = new ArrayList<>(n);
+        for (Reconcile.Entry entry : ordered) out.add(owners.get(entry));
+        return out;
+    }
+
     /** The bracketing walk for one account slot, appending every residual it proves.
      *
      *  <p>All arithmetic is exact. A window whose running sum has once overflowed {@code long} stays
      *  unclaimed for the rest of the walk: a wrapped number is not a small error, it is a
      *  spectacularly wrong one, and reporting it as fact is the one outcome worse than staying
      *  silent. Real rial totals sit many orders of magnitude below the bound, so the guard costs
-     *  nothing in practice. */
-    private static void walk(List<Transaction> sorted, List<Residual> out) {
+     *  nothing in practice.
+     *
+     *  @param unsettled per-position flags from {@link #disambiguate}: true where the movement sits in
+     *  a tie no balance chain settles, so it is in no position to anchor or close a window. */
+    private static void walk(List<Transaction> sorted, boolean[] unsettled, List<Residual> out) {
         Transaction open = null;    // the last movement that stated a balance
         long inside = 0;            // sum of movements received after it, up to the current one
         int count = 0;
         boolean exact = true;       // false once that sum has overflowed
-        for (Transaction t : sorted) {
+        for (int i = 0; i < sorted.size(); i++) {
+            Transaction t = sorted.get(i);
+            if (unsettled[i]) {
+                // Two or more messages stamped the same second, in an order no balance chain
+                // settles: which movement happened first is unknowable, so this row sits at no
+                // known point in time. It neither closes the window before it nor opens one, and
+                // the next statement that states a balance opens a fresh window instead. Anchoring
+                // on it would measure that statement against an arbitrary member of the tie and
+                // report a gap the bank never described.
+                open = null;
+                inside = 0;
+                count = 0;
+                exact = true;
+                continue;
+            }
             if (open == null) {
                 // Only a message that stated a balance can open a bracket. (The parser only records
                 // a movement together with its balance, so in practice every row gets here; a row
@@ -136,18 +223,6 @@ final class Residual {
                 // down, where its amount is still counted.)
                 if (t.balance == null) continue;
                 open = t;
-                inside = 0;
-                count = 0;
-                exact = true;
-                continue;
-            }
-            if (t.date == open.date) {
-                // Two messages stamped the same second bound no interval: which movement happened
-                // first is unknowable, and a gap claimed across an unknowable order would be a
-                // fabrication. The bracket is dropped rather than guessed at, and the next message
-                // that states a balance opens a fresh one — so the region stays silent instead of
-                // reporting a number we cannot stand behind.
-                open = null;
                 inside = 0;
                 count = 0;
                 exact = true;
