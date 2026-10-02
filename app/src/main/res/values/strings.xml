@@ -67,6 +67,7 @@
     <string name="channel_pos">Point-of-sale terminal</string>
     <string name="channel_mobile">Mobile banking</string>
     <string name="channel_branch">Bank branch</string>
+    <string name="channel_paya">Paya</string>
     <string name="row_fact_channel">Channel: %1$s.</string>
     <string name="row_fact_note">Your note: %1$s.</string>
     <string name="row_hint_edit_note">Tap to edit it</string>

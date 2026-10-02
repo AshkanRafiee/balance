@@ -522,6 +522,7 @@ public class BankRulesTest {
         assertEquals("پایانه فروش", BankRules.extractChannel("Tejarat", TejaratMessages.WITHDRAWAL_POS));
         assertEquals("همراه بانک", BankRules.extractChannel("Tejarat", TejaratMessages.WITHDRAWAL_MOBILE));
         assertEquals("شعبه", BankRules.extractChannel("Tejarat", TejaratMessages.WITHDRAWAL_BRANCH));
+        assertEquals("پایا", BankRules.extractChannel("Tejarat", TejaratMessages.DEPOSIT_PAYA));
     }
 
     @Test public void extractChannel_storesTheBanksOwnWords() {

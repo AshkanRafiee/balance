@@ -60,6 +60,14 @@ final class TejaratMessages {
         + "\u0645\u0627\u0646\u062F\u0647: 46,000,000 \u0631\u06CC\u0627\u0644 \n"
         + "1405/06/10\n13:20";
 
+    /** A deposit over Paya, the batch clearing system for non-instant transfers. */
+    static final String DEPOSIT_PAYA =
+        BRAND + ACCOUNT
+        + "\u0648\u0627\u0631\u06CC\u0632: 6,425,201 \u0631\u06CC\u0627\u0644 \n"
+        + "\u0627\u0632 \u0637\u0631\u064A\u0642: \u067E\u0627\u06CC\u0627  \n"
+        + "\u0645\u0627\u0646\u062F\u0647: 113,265,115 \u0631\u06CC\u0627\u0644 \n"
+        + "1405/07/08\n19:13";
+
     /** A movement that states no channel at all: the bank sent it without the line, and the movement
      *  still has to be read, dated and summed exactly as before. */
     static final String NO_CHANNEL =

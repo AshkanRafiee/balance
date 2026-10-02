@@ -577,6 +577,7 @@ final class BankRules {
         CHANNEL_CAPTION_RES.put("پایانه فروش", R.string.channel_pos);
         CHANNEL_CAPTION_RES.put("همراه بانک", R.string.channel_mobile);
         CHANNEL_CAPTION_RES.put("شعبه", R.string.channel_branch);
+        CHANNEL_CAPTION_RES.put("پایا", R.string.channel_paya);
     }
 
     /** Builds the matcher for one {@link #CHANNEL_RULES} row. The label is quoted, so a bank label
