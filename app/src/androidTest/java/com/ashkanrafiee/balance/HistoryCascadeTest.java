@@ -2,7 +2,6 @@ package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 
 import android.app.Activity;
 import android.content.Context;
@@ -24,11 +23,17 @@ import org.junit.runner.RunWith;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.function.Predicate;
 
 /**
- * How the breakdown opens: the current year, month and day open on their own, and from there each
- * level brings the one below it. The point of the cascade is that there is no longer a way to ask
- * for the whole history at once, so nothing can build every row in one go.
+ * How the breakdown opens: the current year, month and its days open by themselves, and from there
+ * each level opens on its own. Opening a year shows its months and nothing more; opening a month
+ * shows its days and nothing more.
+ *
+ * <p>The levels are kept independent deliberately. Cascading them meant one tap on a year built a
+ * whole year's movements in a single pass, which is a screen that takes seconds to appear, and a
+ * year of a busy account took long enough to be mistaken for a freeze. Asking for the whole
+ * history is still possible, but only by choosing it in the Display menu.
  */
 @RunWith(AndroidJUnit4.class)
 public class HistoryCascadeTest {
@@ -48,11 +53,13 @@ public class HistoryCascadeTest {
         originalCurrency = CurrencyHelper.currency(ctx);
         LocaleHelper.setLanguage(ctx, "en");
         CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_RIAL);
+        BalanceData.setExpandAllHistory(ctx, false);
     }
 
     @After public void tearDown() {
         LocaleHelper.setLanguage(ctx, originalTag);
         CurrencyHelper.setCurrency(ctx, originalCurrency);
+        BalanceData.setExpandAllHistory(ctx, false);
         BalanceData.reset(ctx, true);
     }
 
@@ -95,46 +102,79 @@ public class HistoryCascadeTest {
             findByTextContaining("10,000,000"));
     }
 
-    @Test public void theCurrentYearArrivesWholeBecauseItsMonthsFollowIt() {
-        // The visible consequence of dropping the expand-all switch: the year is now the unit. The
-        // current year opens, so its months and their days come with it and the screen shows the
-        // year rather than only today. Nothing here is built past the row budget, so this stays
-        // cheap however long the year is.
+    @Test public void openingTheCurrentYear_showsItsMonthsWithoutBuildingTheirRows() {
+        // The regression this guards: the current year used to bring its months with it, and each of
+        // those brought its days, so an ordinary open built a year of movements in one pass. Only a
+        // built row carries a clock time, and a collapsed month still shows its own net, so counting
+        // clock times is what tells built rows from collapsed ones.
         storeThisMonth();
         launch();
-        assertNotNull("today's movement must be there", findByTextContaining("10,000,000"));
-        assertNotNull("the rest of the current year must come with it",
-            findByTextContaining("12,000,000"));
-        assertEquals("both movements are on screen", 2, clockTimes());
+        assertEquals("only this month's movements are built on a plain open", 1, clockTimes());
+        assertEquals("the year is on screen", 1, years().size());
+        assertEquals("its two months are on screen", 2, months().size());
+        assertEquals("only today's day is open with it", 1, days().size());
+        assertNotNull("this month's movements are on screen", findByTextContaining("10,000,000"));
+
+        // The other month opens to its days, and only then to its movements.
+        tapGroup(collapsedHeader());
+        await(() -> days().size() == 2, 10_000, "the older month to show its days");
+        assertEquals("opening a month must not have built any of its movements", 1, clockTimes());
+        tapGroup(days().get(1));
+        await(() -> clockTimes() == 2, 10_000, "the older day to show its movements");
     }
 
-    @Test public void anEarlierYear_staysClosedSoItsRowsAreNeverBuilt() {
+    @Test public void openingAnEarlierYear_showsItsMonthsWithoutBuildingTheirRows() {
         // Nothing beyond the current year opens by itself, so an older year builds no rows at all
-        // until the user opens it. The test counts clock times rather than amounts on purpose: a
-        // collapsed month still shows its own net, so an amount on screen proves nothing. Only a
-        // built row carries a clock time.
+        // until the user opens it — and opening it stops at its months.
         storePastYear();
         launch();
         assertNotNull("today's movement must be there", findByTextContaining("10,000,000"));
         assertEquals("an unopened year must not have built any rows", 1, clockTimes());
-        View year = descriptionEnding(ctx.getString(R.string.history_collapsed));
-        assertNotNull("the earlier year must be on screen, closed", year);
-        tap(year);
-        await(() -> clockTimes() == 2, 10_000, "the older year to reveal its movements");
-        assertEquals("opening a year must bring its months, and so its movements", 2, clockTimes());
+        assertEquals("both years must be on screen, the older one closed", 2, years().size());
+        assertEquals("only this year is open, so only its months are on screen", 1, months().size());
+
+        tapGroup(years().get(1));
+        await(() -> months().size() == 2, 10_000, "the older year to show its months");
+        assertEquals("opening a year must not have built any of its movements", 1, clockTimes());
+        assertEquals("and must not have built any of its days", 1, days().size());
+
+        // And its movements are one tap at a time further away.
+        tapGroup(collapsedHeader());
+        await(() -> days().size() == 2, 10_000, "the older month to show its days");
+        assertEquals("opening a month must not have built any of its movements", 1, clockTimes());
+        tapGroup(days().get(1));
+        await(() -> clockTimes() == 2, 10_000, "the older day to show its movements");
     }
 
-    @Test public void thereIsNoLongerAWayToAskForEverythingAtOnce() {
-        // The Display menu used to carry an "expand all history" switch. With it gone, no single
-        // choice opens every row, which is what used to make a long account take seconds.
+    @Test public void askingToExpandEverything_opensEveryLevelAtOnce() {
+        // The Display menu's switch is the one way to ask for the whole history, so it has to do
+        // exactly that: with it on, everything is already on screen and nothing has to be tapped.
         storeThisMonth();
+        BalanceData.setExpandAllHistory(ctx, true);
         launch();
-        assertNull("the expand-all setting must be gone from the app",
-            viewWithDescriptionContaining("expand all"));
+        assertNotNull("today's movement must be there", findByTextContaining("10,000,000"));
+        assertNotNull("the other month's movement must be there without any tap",
+            findByTextContaining("12,000,000"));
+        assertEquals("both movements are on screen", 2, clockTimes());
     }
 
-    private void tap(View target) {
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(target::performClick);
+    /** Taps a group to open it. The tag identifies the card that holds the whole group, while the
+     *  click listener belongs to the header row inside it, so the tap has to go to that header. */
+    private void tapGroup(View group) {
+        View header = firstClickable(group);
+        assertNotNull("a group must have a header to tap", header);
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(header::performClick);
+    }
+
+    private static View firstClickable(View v) {
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                View hit = firstClickable(g.getChildAt(i));
+                if (hit != null) return hit;
+            }
+        }
+        return v.isClickable() ? v : null;
     }
 
     private static List<TextView> texts() {
@@ -151,11 +191,6 @@ public class HistoryCascadeTest {
             ViewGroup g = (ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) collect(g.getChildAt(i), out);
         }
-    }
-
-    private static TextView findByText(String want) {
-        for (TextView t : texts()) if (want.equals(t.getText().toString())) return t;
-        return null;
     }
 
     private static TextView findByTextContaining(String want) {
@@ -176,26 +211,55 @@ public class HistoryCascadeTest {
         return n;
     }
 
-    /** The first header whose accessible description ends with this expansion state. */
-    private static View descriptionEnding(String ending) {
-        return find(v -> {
-            CharSequence d = v.getContentDescription();
-            return d != null && d.toString().endsWith(ending);
+    /** The year cards on screen, in the order they were rendered (newest first). */
+    private static List<View> years() {
+        return tagged(HistoryActivity.YEAR_TAG);
+    }
+
+    /** The month rows on screen, across every open year, in the order they were rendered. */
+    private static List<View> months() {
+        return tagged(HistoryActivity.MONTH_TAG);
+    }
+
+    private static List<View> tagged(String tag) {
+        final List<View> out = new ArrayList<>();
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            for (Activity a : resumed()) {
+                collectTagged(a.getWindow().getDecorView(), tag, out);
+            }
         });
+        return out;
+    }
+
+    private static void collectTagged(View v, String tag, List<View> out) {
+        if (tag.equals(v.getTag())) out.add(v);
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) collectTagged(g.getChildAt(i), tag, out);
+        }
+    }
+
+    /** The day rows on screen, told apart by the tag rather than by their text. */
+    private static List<View> days() {
+        return tagged(HistoryActivity.DAY_TAG);
+    }
+
+    /** The first collapsed group's header on screen, which is the next one a tap would open. */
+    private View collapsedHeader() {
+        String collapsed = ctx.getString(R.string.history_collapsed);
+        View header = find(v -> {
+            CharSequence d = v.getContentDescription();
+            return d != null && d.toString().endsWith(collapsed);
+        });
+        assertNotNull("there must be something closed to open", header);
+        return header;
     }
 
     private static View findByDescription(String want) {
         return find(v -> want.equals(v.getContentDescription()));
     }
 
-    private static View viewWithDescriptionContaining(String want) {
-        return find(v -> {
-            CharSequence d = v.getContentDescription();
-            return d != null && d.toString().toLowerCase().contains(want);
-        });
-    }
-
-    private static View find(java.util.function.Predicate<View> m) {
+    private static View find(Predicate<View> m) {
         final List<View> hits = new ArrayList<>();
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
             for (Activity a : resumed()) collect(a.getWindow().getDecorView(), m, hits);
@@ -203,7 +267,7 @@ public class HistoryCascadeTest {
         return hits.isEmpty() ? null : hits.get(0);
     }
 
-    private static void collect(View v, java.util.function.Predicate<View> m, List<View> out) {
+    private static void collect(View v, Predicate<View> m, List<View> out) {
         if (m.test(v)) out.add(v);
         if (v instanceof ViewGroup) {
             ViewGroup g = (ViewGroup) v;
