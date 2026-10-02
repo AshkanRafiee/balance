@@ -492,6 +492,9 @@ public final class HistoryActivity extends Activity {
         } else {
             lockOverlay.hide();
         }
+        // The sweep repeats forever, so a screen that is only stopped (backgrounded, or behind the
+        // lock overlay) would keep asking for frames no one is looking at.
+        stopShimmer();
         updateSecureFlag();
         super.onStop();
     }
@@ -1340,15 +1343,23 @@ public final class HistoryActivity extends Activity {
                         renderYears(body, allYears);
                     }
                 });
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 // A corrupt store or a scan race must never blank the screen; keep the previous
                 // render and flag the failure quietly. On a first load there is no previous render,
                 // so the placeholder would be left sweeping over nothing, which reads as a screen
                 // that will never finish. Say so instead.
+                //
+                // <p>Throwable rather than Exception: the sweeping placeholder is stopped below, and
+                // an OutOfMemoryError on this thread would otherwise leave it sweeping forever, with
+                // no render left to replace it.
                 android.util.Log.w("BalanceHistory", "render failed", e);
                 runOnUiThread(() -> {
-                    if (gen != renderGen || isDestroyed() || isFinishing()) return;
+                    if (isDestroyed() || isFinishing()) return;
+                    // Deliberately not gated on the generation: a superseded render still means this
+                    // screen is done loading, and leaving the sweep running would keep the main
+                    // thread asking for frames that no render is left to answer.
                     stopShimmer();
+                    if (gen != renderGen) return;
                     body.setContentDescription(null);
                     body.removeAllViews();
                     emptyState();
@@ -1653,6 +1664,9 @@ public final class HistoryActivity extends Activity {
         private final android.graphics.Paint paint =
             new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
         private final android.graphics.Matrix matrix = new android.graphics.Matrix();
+        /** Reused across frames: the sweep redraws every bar on screen sixty times a second, so a
+         *  rectangle built per draw would be a steady stream of garbage for as long as it runs. */
+        private final android.graphics.RectF rect = new android.graphics.RectF();
         private final int base, shine;
         private float at;
 
@@ -1678,7 +1692,8 @@ public final class HistoryActivity extends Activity {
                 matrix.setTranslate(w * (at * 2f - 1f), 0);
                 ((android.graphics.LinearGradient) s).setLocalMatrix(matrix);
             }
-            android.graphics.RectF r = new android.graphics.RectF(getBounds());
+            android.graphics.RectF r = rect;
+            r.set(getBounds());
             canvas.drawRoundRect(r, r.height() / 2f, r.height() / 2f, paint);
         }
 
