@@ -59,16 +59,18 @@ public class HistoryLoadingStateTest {
     }
 
     /**
-     * Enough movements that reading and grouping them takes long enough to be observed.
+     * Enough movements that reading and grouping them takes far longer than the screen takes to
+     * open.
      *
-     * <p>The placeholders are put up during the screen's own setup and taken down by the render that
-     * follows, so a small store would finish before anything could look. A large one holds the
-     * window open without making the test slow.
+     * <p>The placeholders go up during the screen's own setup and come down with the render that
+     * follows, and launching waits for the screen to settle, so this is a race by nature: a store
+     * that reads quickly is simply never caught mid-load. It is sized with a wide margin so the race
+     * is not close — a few thousand movements are finished before the launch returns.
      */
     private void storeEnoughToBeSlowToRead() {
         long now = System.currentTimeMillis();
         List<Transaction> txs = new ArrayList<>();
-        for (int i = 0; i < 2000; i++) {
+        for (int i = 0; i < 20000; i++) {
             txs.add(new Transaction(MELLAT, ACCOUNT, now - i * HOUR,
                 (i % 3 == 0 ? 1 : -1) * (100_000L + i), "sig" + i, null));
         }
