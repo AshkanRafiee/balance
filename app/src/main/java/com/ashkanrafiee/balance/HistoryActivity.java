@@ -2738,18 +2738,36 @@ public final class HistoryActivity extends Activity {
 
     /** The movement's time of day as a compact "HH:mm" string in the app digits. */
     private String timeText(long date) {
-        String s = CLOCK.get().format(new java.util.Date(date));
+        String s = CLOCK.get().format(date);
         return LocaleHelper.isPersian(this) ? faDigitsString(s) : s;
     }
 
-    /** The clock a movement row shows, kept per thread. SimpleDateFormat is not thread safe, and
-     *  building one per row was a large part of the cost of filling a screen with movements. */
-    private static final ThreadLocal<java.text.SimpleDateFormat> CLOCK =
-        new ThreadLocal<java.text.SimpleDateFormat>() {
-            @Override protected java.text.SimpleDateFormat initialValue() {
-                return new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US);
+    /** The clock a movement row shows, kept per thread. {@code SimpleDateFormat} is not thread safe,
+     *  and building one per row was a large part of the cost of filling a screen with movements.
+     *
+     *  <p>The time zone is re-read on every row rather than captured once, because the formatter
+     *  takes its zone from a {@code Calendar} at construction: a cached instance would keep showing
+     *  the old zone after a flight or a DST-rule change until the process died, so every movement
+     *  row would quietly report the wrong time. */
+    private static final ThreadLocal<Clock> CLOCK = new ThreadLocal<Clock>() {
+        @Override protected Clock initialValue() { return new Clock(); }
+    };
+
+    /** One formatter per thread, kept honest about the current time zone. */
+    private static final class Clock {
+        private final java.text.SimpleDateFormat format =
+            new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US);
+        private java.util.TimeZone zone = java.util.TimeZone.getDefault();
+
+        String format(long millis) {
+            java.util.TimeZone now = java.util.TimeZone.getDefault();
+            if (!now.equals(zone)) {
+                zone = now;
+                format.setTimeZone(now);
             }
-        };
+            return format.format(new java.util.Date(millis));
+        }
+    }
 
     /** Converts a calendar number (year, day) to Persian digits without any thousands grouping —
      *  grouping separators belong to prices, not calendar numerals like "۱۴۰۳". */
