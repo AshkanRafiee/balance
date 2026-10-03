@@ -52,14 +52,43 @@ public class ScanDiagnosticsTest {
         assertEquals(1, s.unknownSendersMessages);
     }
 
-    @Test public void analyze_allParsed_noReportableSenders() {
+    @Test public void analyze_allParsed_noProblemSenders() {
         ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
             new Object[]{TEJARAT, "balance 1000", 1000L},
             new Object[]{SAMAN, "balance 2000", 2000L}));
         assertEquals(0, s.unparsedMessages());
         assertTrue(s.unknownSenders.isEmpty());
         assertTrue(s.unparsedSenders.isEmpty());
+        assertTrue(ScanDiagnostics.problemSenders(s).isEmpty());
         assertEquals(2, s.banks.size());
+        // Parsed messages stay reportable per sender, for wrong details (amount, date, ...).
+        assertEquals(2, s.parsedSenders.size());
+    }
+
+    @Test public void analyze_parsedSenders_keepNewestSamplesPerSender() {
+        ScanDiagnostics.Summary s = ScanDiagnostics.analyze(rows(
+            new Object[]{TEJARAT, "balance 3000", 3000L},
+            new Object[]{TEJARAT, "balance 1000", 1000L},
+            new Object[]{SAMAN, "balance 2000", 2000L}));
+        assertEquals(3, s.parsedMessages);
+        assertEquals(2, s.parsedSenders.size());
+        ScanDiagnostics.SenderHit top = s.parsedSenders.get(0);
+        assertEquals(TEJARAT, top.sender);
+        assertEquals("Tejarat", top.bank);
+        assertEquals(2, top.messages);
+        assertEquals("balance 3000", top.stored.get(0).body);
+        assertEquals("balance 1000", top.stored.get(1).body);
+    }
+
+    @Test public void analyze_parsedSamples_capped() {
+        List<Object[]> r = new ArrayList<>();
+        for (int i = ScanDiagnostics.MAX_SAMPLES_PER_SENDER + 4; i >= 0; i--)
+            r.add(new Object[]{TEJARAT, "balance " + i, 1000L + i});
+        ScanDiagnostics.Summary s = ScanDiagnostics.analyze(r);
+        assertEquals(1, s.parsedSenders.size());
+        ScanDiagnostics.SenderHit h = s.parsedSenders.get(0);
+        assertEquals(ScanDiagnostics.MAX_SAMPLES_PER_SENDER + 5, h.messages);
+        assertEquals(ScanDiagnostics.MAX_SAMPLES_PER_SENDER, h.stored.size());
     }
 
     @Test public void analyze_allUnrecognized_noBanks() {
@@ -237,6 +266,18 @@ public class ScanDiagnosticsTest {
         assertTrue(txt.contains("+98Saman"));
         assertTrue(txt.contains("3 message"));
         assertTrue(!txt.contains("Balance detection"));
+    }
+
+    @Test public void senderReport_marksTheNewDetailIssueTypes() {
+        List<ScanDiagnostics.Message> sel = new ArrayList<>();
+        sel.add(new ScanDiagnostics.Message("lay out 1,000 Toman", 1000L));
+        String txt = ScanDiagnostics.senderReport("+98Saman", 3, sel,
+            java.util.Arrays.asList(ScanDiagnostics.ISSUE_AMOUNT, ScanDiagnostics.ISSUE_DATE,
+                ScanDiagnostics.ISSUE_REASON, ScanDiagnostics.ISSUE_CHANNEL));
+        assertTrue(txt.contains("Amount detection"));
+        assertTrue(txt.contains("Date detection"));
+        assertTrue(txt.contains("Reason detection"));
+        assertTrue(txt.contains("Channel detection"));
     }
 
     @Test public void senderReport_noIssues_omitsTheLine() {
@@ -473,6 +514,7 @@ public class ScanDiagnosticsTest {
             String all = waitFor(act, ctx.getString(R.string.scan_diag_unparsed_banks_title));
             assertTrue(all.contains(ctx.getString(R.string.scan_diag_recognized)));
             assertTrue(all.contains(ctx.getString(R.string.scan_diag_recognized_banks)));
+            assertTrue(all.contains(ctx.getString(R.string.scan_diag_recognized_hint)));
             assertTrue(all.contains(ctx.getString(R.string.scan_diag_unparsed_banks_title)));
             assertTrue(all.contains(ctx.getString(R.string.scan_diag_skipped_senders)));
             assertTrue(all.contains("Tejarat")); // the parses card and the flagged bank line
@@ -481,6 +523,27 @@ public class ScanDiagnosticsTest {
             assertTrue(all.contains(UNKNOWN_2));
             // Selection is not on this screen: it happens inside each sender's messages, so there
             // must be no checkboxes or whole-report buttons here.
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                List<android.widget.CheckBox> checks = new ArrayList<>();
+                findChecks(act.getWindow().getDecorView(), checks);
+                assertTrue("the diagnostics screen must not carry its own checkboxes", checks.isEmpty());
+            });
+        } finally {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(act::finish);
+        }
+    }
+
+    @Test public void screen_allParsed_recognizedSendersStayReportable() throws Exception {
+        seed(TEJARAT, "موجودی شما: 1,250,000 تومان", 1_710_000_000_000L);
+        ScanDiagnosticsActivity act = launch();
+        try {
+            String all = waitFor(act, ctx.getString(R.string.scan_diag_recognized_banks));
+            assertTrue(all.contains(ctx.getString(R.string.scan_diag_recognized)));
+            assertTrue(all.contains("Tejarat"));
+            assertTrue(all.contains(ctx.getString(R.string.scan_diag_recognized_hint)));
+            assertTrue(all.contains(ctx.getString(R.string.scan_diag_all_recognized)));
+            assertTrue(all.contains("موجودی شما: 1,250,000 تومان".substring(0, 8)));
+            // Tappable rows, not checkboxes: selection still lives inside the sender chooser.
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
                 List<android.widget.CheckBox> checks = new ArrayList<>();
                 findChecks(act.getWindow().getDecorView(), checks);
@@ -509,6 +572,14 @@ public class ScanDiagnosticsTest {
             assertTrue(all.contains(ctx.getString(R.string.sender_share_select_all)));
             assertTrue(all.contains(ctx.getString(R.string.sender_share_copy, 0)));
             assertTrue(all.contains(ctx.getString(R.string.sender_share_send, 0)));
+            assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_title)));
+            assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_account)));
+            assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_balance)));
+            assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_number)));
+            assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_amount)));
+            assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_date)));
+            assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_reason)));
+            assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_channel)));
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
                 List<android.widget.CheckBox> checks = new ArrayList<>();
                 findChecks(act.getWindow().getDecorView(), checks);
