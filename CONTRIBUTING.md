@@ -26,7 +26,9 @@ will add or fix the rule.
 Before writing a report manually, try **Scan diagnostics** — it is the
 **Report** item in the footer of the main screen.
 It reads the messages on your device and shows, per recognized bank, how many
-SMS it parsed, and below that every **message it could not parse**:
+SMS it parsed — each recognized sender below the counts is tappable, so a
+message that parsed but gets an amount, date, account, reason or channel wrong
+can be reported too — and below that every **message it could not parse**:
 
 - **Known senders, unrecognized messages** — a supported bank's sender, but a
   message layout we could not read (a format gap, just like an unknown sender).
@@ -34,7 +36,8 @@ SMS it parsed, and below that every **message it could not parse**:
 
 Each sender is a compact, tappable entry (a chevron marks it): tapping it opens
 its message chooser, where the checkmarks live — tick exactly which of its
-messages to share, nothing is preselected, and then:
+messages to share, nothing is preselected, mark what is wrong (account,
+balance, sender-number, amount, date, reason or channel detection), and then:
 
 - **Send (n)** — a prefilled email to us opens; nothing is sent until you
   choose your mail app and confirm there.
