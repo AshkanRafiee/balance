@@ -2138,7 +2138,13 @@ public class MainActivity extends Activity {
             long shown = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(MainActivity.this))
                 ? value / 10 : value;
             String amount = Long.toString(shown);
-            clipboard.setPrimaryClip(ClipData.newPlainText(label, amount));
+            ClipData clip = ClipData.newPlainText(label, amount);
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                android.os.PersistableBundle clipExtras = new android.os.PersistableBundle();
+                clipExtras.putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true);
+                clip.getDescription().setExtras(clipExtras);
+            }
+            clipboard.setPrimaryClip(clip);
             Toast.makeText(MainActivity.this, getString(R.string.toast_copied_balance, label), Toast.LENGTH_SHORT).show();
             // Sensitive numbers must not linger in the system clipboard (other apps can read it):
             // clear it again once the paste window has passed, unless the user copied something else

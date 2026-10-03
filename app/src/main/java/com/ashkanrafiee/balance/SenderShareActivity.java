@@ -345,7 +345,13 @@ public final class SenderShareActivity extends Activity {
         String report = selectedText();
         int n = selected().size();
         ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-        clipboard.setPrimaryClip(ClipData.newPlainText(sender, report));
+        ClipData clip = ClipData.newPlainText(sender, report);
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            android.os.PersistableBundle clipExtras = new android.os.PersistableBundle();
+            clipExtras.putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true);
+            clip.getDescription().setExtras(clipExtras);
+        }
+        clipboard.setPrimaryClip(clip);
         // The report holds raw message text; do not leave it readably in the system clipboard for any
         // longer than the paste window. Clear it again once that has passed, unless the user copied
         // something else in the meantime (then that newer clip is left alone).

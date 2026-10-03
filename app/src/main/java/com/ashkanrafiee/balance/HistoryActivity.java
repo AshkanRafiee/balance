@@ -660,7 +660,13 @@ public final class HistoryActivity extends Activity {
     /** Copies the bare account number and schedules its guarded clear from the system clipboard. */
     private void copyAccount(String account) {
         ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-        clipboard.setPrimaryClip(ClipData.newPlainText(account, account));
+        ClipData clip = ClipData.newPlainText(account, account);
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            android.os.PersistableBundle clipExtras = new android.os.PersistableBundle();
+            clipExtras.putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true);
+            clip.getDescription().setExtras(clipExtras);
+        }
+        clipboard.setPrimaryClip(clip);
         // Do not leave an account number readably in the system clipboard for any longer than the
         // paste window; clear it again once that has passed, unless the user copied something else
         // in the meantime (then that newer clip is left alone).
