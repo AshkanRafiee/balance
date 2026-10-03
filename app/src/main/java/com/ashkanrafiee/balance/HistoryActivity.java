@@ -1666,6 +1666,12 @@ public final class HistoryActivity extends Activity {
                     rebuildFilterBar();
                     stopShimmer();
                     body.setContentDescription(null);
+                    // Build the new tree while the container is gone: every addView on an
+                    // attached container schedules a measure of the whole tree, so a big history
+                    // pays a full measure per frame until the build finishes. Gone children are
+                    // skipped by measure, and showing the finished tree costs exactly one pass.
+                    // The swap the user sees is the same single frame as before.
+                    body.setVisibility(View.GONE);
                     body.removeAllViews();
                     if (lists.years.isEmpty()) {
                         expandForSearch(query, lists.years);
@@ -1678,6 +1684,7 @@ public final class HistoryActivity extends Activity {
                         expandForSearch(query, lists.years);
                         renderYears(body, allYears);
                     }
+                    body.setVisibility(View.VISIBLE);
                 });
             } catch (Throwable e) {
                 // A corrupt store or a scan race must never blank the screen; keep the previous
@@ -1697,8 +1704,12 @@ public final class HistoryActivity extends Activity {
                     stopShimmer();
                     if (gen != renderGen) return;
                     body.setContentDescription(null);
+                    // Gone while rebuilding, as in the success path above: one measure instead of
+                    // one per frame.
+                    body.setVisibility(View.GONE);
                     body.removeAllViews();
                     emptyState();
+                    body.setVisibility(View.VISIBLE);
                 });
             }
         }).start();
