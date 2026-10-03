@@ -204,6 +204,14 @@ public final class HistoryActivity extends Activity {
     // Shared drawing helpers
     // ====================================================================
 
+    /** One stateless fill per (color, corner size), shared by every row of this screen. Filling a
+     *  long history created one {@code GradientDrawable} per row and header; the instances are
+     *  never mutated after they are set as backgrounds, so sharing is invisible. RippleDrawable is
+     *  deliberately not shared: it carries press state, so one shared ripple would leak one row's
+     *  touch feedback into another. UI thread only, like all view building here; the instance dies
+     *  with the screen, so a later theme (new color ints) can never read stale entries. */
+    private final Map<Long, GradientDrawable> fillCache = new HashMap<>();
+
     int color(int res) {
         return getResources().getColor(res, getTheme());
     }
@@ -240,10 +248,16 @@ public final class HistoryActivity extends Activity {
     }
 
     GradientDrawable rounded(int color, float radius) {
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(color);
-        g.setCornerRadius(dp(radius));
-        return g;
+        int px = dp(radius);
+        long key = (((long) color) << 32) | (px & 0xffffffffL);
+        GradientDrawable cached = fillCache.get(key);
+        if (cached == null) {
+            cached = new GradientDrawable();
+            cached.setColor(color);
+            cached.setCornerRadius(px);
+            fillCache.put(key, cached);
+        }
+        return cached;
     }
 
     GradientDrawable roundedStroke(int color, float radius, int strokeColor) {
