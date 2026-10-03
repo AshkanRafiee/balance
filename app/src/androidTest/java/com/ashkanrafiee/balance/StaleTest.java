@@ -33,9 +33,9 @@ public class StaleTest {
 
     // ---- getStaleDays / setStaleDays persistence ----
 
-    @Test public void getStaleDays_freshInstall_defaultsToSeven() {
+    @Test public void getStaleDays_freshInstall_defaultsToFourteen() {
         assertEquals(BalanceData.DEFAULT_STALE_DAYS, BalanceData.getStaleDays(ctx));
-        assertEquals(7, BalanceData.getStaleDays(ctx));
+        assertEquals(14, BalanceData.getStaleDays(ctx));
     }
 
     @Test public void setStaleDays_persistsAndReadsBack() {
@@ -83,13 +83,13 @@ public class StaleTest {
 
     @Test public void isStale_overThreshold_flags() {
         long now = System.currentTimeMillis();
-        assertTrue(BalanceData.isStale(ctx, now - 8 * DAY));
+        assertTrue(BalanceData.isStale(ctx, now - 15 * DAY));
     }
 
-    @Test public void isStale_defaultThreshold_sevenDays() {
+    @Test public void isStale_defaultThreshold_fourteenDays() {
         long now = System.currentTimeMillis();
-        assertFalse("six days is still fresh by default", BalanceData.isStale(ctx, now - 6 * DAY));
-        assertTrue("eight days is past the default window", BalanceData.isStale(ctx, now - 8 * DAY));
+        assertFalse("thirteen days is still fresh by default", BalanceData.isStale(ctx, now - 13 * DAY));
+        assertTrue("fifteen days is past the default window", BalanceData.isStale(ctx, now - 15 * DAY));
     }
 
     @Test public void isStale_respectsConfiguredThreshold() {

@@ -64,7 +64,7 @@ final class BalanceData {
     static final String KEY_SORT = "sort_mode";
     static final String KEY_STALE_DAYS = "stale_days";
     static final String KEY_EXPAND_ALL_HISTORY = "expand_all_history";
-    static final int DEFAULT_STALE_DAYS = 7;
+    static final int DEFAULT_STALE_DAYS = 14;
     static final String KEY_ONBOARDING_SEEN = "onboarding_seen";
 
     /** Sort modes for the bank list. Each pair (balance / update date) has a reverse variant so
