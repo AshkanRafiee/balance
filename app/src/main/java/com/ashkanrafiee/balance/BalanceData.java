@@ -429,21 +429,23 @@ final class BalanceData {
      *  already stored for a movement is kept as it is, nothing is removed, and the user's own notes are
      *  not touched at all — they live in a store of their own, so a detected reason can never
      *  overwrite a note, and clearing a note can never lose what the bank said. Nothing is written when
-     *  every detected reason was already stored, so an unchanged inbox costs no write. */
-    static void mergeReasons(Context context, Map<String, String> detected) {
-        mergeDetectedTextStore(context, KEY_TX_REASONS, detected);
+     *  every detected reason was already stored, so an unchanged inbox costs no write. Returns whether
+     *  the store gained anything, so a scan can tell a visible change from a no-op. */
+    static boolean mergeReasons(Context context, Map<String, String> detected) {
+        return mergeDetectedTextStore(context, KEY_TX_REASONS, detected);
     }
 
     /** Folds the channels one scan detected into the stored ones, on exactly the terms the reasons are
      *  folded on and for the same reason: the channel a bank stated is a fact about its message, the
-     *  user's note is theirs, and neither store can clobber the other. */
-    static void mergeChannels(Context context, Map<String, String> detected) {
-        mergeDetectedTextStore(context, KEY_TX_CHANNELS, detected);
+     *  user's note is theirs, and neither store can clobber the other. Returns whether the store
+     *  gained anything, like {@link #mergeReasons}. */
+    static boolean mergeChannels(Context context, Map<String, String> detected) {
+        return mergeDetectedTextStore(context, KEY_TX_CHANNELS, detected);
     }
 
-    private static void mergeDetectedTextStore(Context context, String key,
+    private static boolean mergeDetectedTextStore(Context context, String key,
             Map<String, String> detected) {
-        if (detected == null || detected.isEmpty()) return;
+        if (detected == null || detected.isEmpty()) return false;
         Map<String, String> stored = readTextStore(context, key);
         boolean changed = false;
         for (Map.Entry<String, String> e : detected.entrySet()) {
@@ -452,6 +454,7 @@ final class BalanceData {
             changed = true;
         }
         if (changed) writeTextStore(context, key, stored);
+        return changed;
     }
 
     /** Serializes a per-transaction text map (the notes, or the reasons) to the JSON shape used for
@@ -958,6 +961,13 @@ final class BalanceData {
         if (HISTORY_SCANNING) return 0;
         HISTORY_SCANNING = true;
         boolean completed = false;
+        // Whether anything the history screen shows may have changed. A scan that finds nothing new
+        // rewrites the same transactions and commits only watermarks, so notifying then would just
+        // rebuild an identical screen (every open currently pays for that second render). A failed
+        // scan still notifies, exactly as before, so its render path is unchanged.
+        int added = 0;
+        boolean failed = false;
+        boolean textChanged = false;
         try {
             List<Transaction> stored = readTransactions(context);
             SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
@@ -984,7 +994,6 @@ final class BalanceData {
                     else seenLegacy.add(legacyEntryKey(t));
                 }
             }
-            int added = 0;
             long newest = 0;
             // The reasons and channels this scan reads out of the bank messages, folded into their
             // stores once the movements they belong to are written. Declared out here so they survive
@@ -997,7 +1006,10 @@ final class BalanceData {
                 Telephony.Sms.Inbox.CONTENT_URI,
                 new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
                 selection, args, Telephony.Sms.DATE + " DESC")) {
-                if (cursor == null) return 0;
+                if (cursor == null) {
+                    failed = true;
+                    return 0;
+                }
                 List<Object[]> rows = new ArrayList<>();
                 while (cursor.moveToNext()) {
                     // Two clocks, deliberately. `arrival` is when the phone received the message and
@@ -1295,13 +1307,18 @@ final class BalanceData {
                 saveLastBalances(context, lastBalance);
                 completed = true;
             } catch (Exception e) {
+                failed = true;
                 Log.w(TAG, "history scan failed", e);
             }
             writeTransactions(context, stored);
             // The reasons and channels land after the transactions they belong to, so the stores never
             // hold one for a movement that was not written.
-            mergeReasons(context, detectedReasons);
-            mergeChannels(context, detectedChannels);
+            boolean reasonsChanged = mergeReasons(context, detectedReasons);
+            boolean channelsChanged = mergeChannels(context, detectedChannels);
+            // Reasons and channels are only ever recorded beside a movement the scan kept, so when
+            // nothing was placed both merges are no-ops; the flags below still guard the gate
+            // against that coupling ever changing.
+            textChanged = reasonsChanged || channelsChanged;
             SharedPreferences.Editor editor = prefs.edit();
             // Only commit the rules version and watermark when the scan finished cleanly: marking a
             // full rebuild as done (or advancing past rows that failed) would skip the correction
@@ -1313,12 +1330,15 @@ final class BalanceData {
             return added;
         } finally {
             HISTORY_SCANNING = false;
-            notifyHistoryChanged();
+            if (added != 0 || failed || textChanged) notifyHistoryChanged();
         }
     }
 
-    /** Notifies registered listeners that a history re-scan finished, so an open history screen can
-     *  re-render with the fresh data and drop its updating indicator. */
+    /** Notifies registered listeners that a history re-scan finished with something to show — new
+     *  movements, new reasons or channels, or a failure worth rendering — so an open history screen
+     *  can re-render with the fresh data and drop its updating indicator. A clean scan that changed
+     *  nothing notifies no one: there is nothing new to draw. Today the only listener is the open
+     *  history screen's re-render. */
     static void addHistoryListener(Runnable r) {
         synchronized (historyListeners) { historyListeners.add(r); }
     }
