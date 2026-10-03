@@ -11,7 +11,9 @@ import java.util.Map;
  *  {@link BalanceData#extract}):
  *  <ul>
  *    <li><b>parsed</b> — a recognized bank-sender whose message text yielded a balance; these feed
- *        the per-bank "recognized" counts only.</li>
+ *        the per-bank "recognized" counts, and each sender stays tappable so a parsed message
+ *        whose details (amount, date, account, reason, channel) are wrong can still be
+ *        reported.</li>
  *    <li><b>known sender, unparsed content</b> — the sender matches a supported bank but the message
  *        layout did not parse. These are undetected structures from a bank we already know, and they
  *        count as format gaps exactly like an unknown sender.</li>
@@ -32,6 +34,10 @@ final class ScanDiagnostics {
     static final String ISSUE_ACCOUNT = "Account detection";
     static final String ISSUE_BALANCE = "Balance detection";
     static final String ISSUE_NUMBER = "Sender number detection";
+    static final String ISSUE_AMOUNT = "Amount detection";
+    static final String ISSUE_DATE = "Date detection";
+    static final String ISSUE_REASON = "Reason detection";
+    static final String ISSUE_CHANNEL = "Channel detection";
 
     /** One recognized bank and how many of its SMS messages the scan parsed. */
     static final class BankHit {
@@ -69,15 +75,20 @@ final class ScanDiagnostics {
         final List<BankHit> banks = new ArrayList<>();
         final List<SenderHit> unknownSenders = new ArrayList<>();
         final List<SenderHit> unparsedSenders = new ArrayList<>();
+        /** Every recognized sender with its newest parsed samples, so a message that parsed can
+         *  still be reported when one of its details (amount, date, account, reason, channel)
+         *  is wrong. Sorted by message count, highest first. */
+        final List<SenderHit> parsedSenders = new ArrayList<>();
     }
 
     /** Splits inbox rows ({sender, body, date}) into parsed messages, known-bank senders with
      *  unparsed content, and wholly unknown senders — counting messages and keeping, for every
-     *  problem sender, its newest messages (newest first, capped). All lists come back sorted by
-     *  message count, highest first. */
+     *  sender (parsed or problem), its newest messages (newest first, capped). All lists come back
+     *  sorted by message count, highest first. */
     static Summary analyze(List<Object[]> rows) {
         Summary s = new Summary();
         Map<String, int[]> banks = new LinkedHashMap<>();
+        Map<String, Mutable> parsed = new LinkedHashMap<>();
         Map<String, Mutable> unknown = new LinkedHashMap<>();
         Map<String, Mutable> unparsed = new LinkedHashMap<>();
         for (Object[] row : rows) {
@@ -96,11 +107,13 @@ final class ScanDiagnostics {
                 s.parsedMessages++;
                 int[] c = banks.get(bank);
                 banks.put(bank, new int[]{c == null ? 1 : c[0] + 1});
+                add(parsed, sender, bank, body, date);
             }
         }
         List<Map.Entry<String, int[]>> bl = new ArrayList<>(banks.entrySet());
         bl.sort((a, b) -> Integer.compare(b.getValue()[0], a.getValue()[0]));
         for (Map.Entry<String, int[]> e : bl) s.banks.add(new BankHit(e.getKey(), e.getValue()[0]));
+        s.parsedSenders.addAll(sortedHits(parsed));
         s.unknownSenders.addAll(sortedHits(unknown));
         s.unparsedSenders.addAll(sortedHits(unparsed));
         return s;

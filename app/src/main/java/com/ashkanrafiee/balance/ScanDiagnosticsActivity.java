@@ -23,13 +23,14 @@ import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Scan diagnostics: shows which SMS Balance recognized fully (per bank) and which it could not
- *  parse — senders that are a known bank's but whose message layout failed, plus wholly unknown
- *  senders, each with its newest sample. Every flagged sender is a compact, tappable entry that
- *  opens its message chooser, where the user ticks the exact messages to share (nothing is
- *  preselected) and copies or sends them from there — the checkmarks live inside the messages,
- *  not on this screen. The inbox is read on demand for this screen only — nothing is stored, so
- *  the feature adds no new persisted data to a device. */
+/** Scan diagnostics: shows which SMS Balance recognized fully (per bank, each sender tappable)
+ *  and which it could not parse — senders that are a known bank's but whose message layout failed,
+ *  plus wholly unknown senders, each with its newest sample. Every sender entry is a compact,
+ *  tappable row that opens its message chooser, where the user ticks the exact messages to share
+ *  (nothing is preselected) and copies or sends them from there — the checkmarks live inside the
+ *  messages, not on this screen. Recognized senders stay reportable too, for parsed messages whose
+ *  amount, date, account, reason or channel is wrong. The inbox is read on demand for this screen
+ *  only — nothing is stored, so the feature adds no new persisted data to a device. */
 public final class ScanDiagnosticsActivity extends Activity {
     private static final String TAG = "ScanDiag";
     int bg, card, muted, accent, heroColor, fg;
@@ -182,7 +183,9 @@ public final class ScanDiagnosticsActivity extends Activity {
         summaryCard(s);
         recognizedCard(s);
         if (s.unparsedSenders.isEmpty() && s.unknownSenders.isEmpty()) {
-            body.addView(section(getString(R.string.scan_diag_none_skipped)), margin(0, 12, 0, 0));
+            body.addView(section(s.messages == 0
+                ? getString(R.string.scan_diag_none_skipped)
+                : getString(R.string.scan_diag_all_recognized)), margin(0, 12, 0, 0));
             return;
         }
         unparsedCard(s);
@@ -190,8 +193,9 @@ public final class ScanDiagnosticsActivity extends Activity {
         body.addView(privacyNote(), margin(18, 14, 18, 0));
     }
 
-    /** The banks Balance parsed successfully and how many of their messages — the workload that is
-     *  already covered, shown so the contribution funnel is easy to weigh. */
+    /** The banks Balance parsed successfully with how many of their messages, followed by every
+     *  recognized sender as a tappable entry — a parsed message can still carry a wrong amount,
+     *  date, account, reason or channel, and tapping its sender reports exactly that. */
     private void recognizedCard(ScanDiagnostics.Summary s) {
         if (s.banks.isEmpty()) return;
         LinearLayout box = cardBox();
@@ -209,6 +213,10 @@ public final class ScanDiagnosticsActivity extends Activity {
             line.addView(count, countLp);
             line.setPadding(dp(4), dp(3), dp(4), dp(3));
             box.addView(line);
+        }
+        box.addView(section(getString(R.string.scan_diag_recognized_hint)), margin(2, 6, 2, 6));
+        for (ScanDiagnostics.SenderHit h : s.parsedSenders) {
+            addSenderRow(box, h, true);
         }
         body.addView(box, margin(0, 0, 0, 12));
     }

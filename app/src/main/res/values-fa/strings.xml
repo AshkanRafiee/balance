@@ -175,6 +175,8 @@
     <string name="scan_diag_recognized">پیامک‌های بانکی شناخته‌شده</string>
     <string name="scan_diag_summary">%1$d پیامک خوانده شد · %2$d ناشناخته</string>
     <string name="scan_diag_recognized_banks">بانک‌های شناخته‌شده</string>
+    <string name="scan_diag_recognized_hint">برای گزارش مبلغ، تاریخ، حساب، دلیل یا کانالِ نادرست در یک پیامکِ شناخته‌شده، روی فرستنده بزنید.</string>
+    <string name="scan_diag_all_recognized">همهٔ پیامک‌ها شناخته‌شده‌اند. اگر مبلغ، تاریخ، حساب، دلیل یا کانالی نادرست به نظر می‌رسد، برای گزارش روی فرستنده‌اش در بالا بزنید.</string>
     <string name="scan_diag_unparsed_banks_title">فرستنده‌های شناخته‌شده با پیامک ناخوانا</string>
     <string name="scan_diag_unparsed_bank_hint">فرستنده یک بانک پشتیبانی‌شده است، اما قالب این پیامک را نتوانستیم بخوانیم — درست مانند یک فرستندهٔ ناشناخته، نقیصهٔ قالب است.</string>
     <string name="scan_diag_skipped_senders">فرستنده‌هایی که هنوز شناخته نشده‌اند</string>
@@ -199,6 +201,10 @@
     <string name="sender_share_issue_account">تشخیص حساب</string>
     <string name="sender_share_issue_balance">تشخیص موجودی</string>
     <string name="sender_share_issue_number">تشخیص شمارهٔ فرستنده</string>
+    <string name="sender_share_issue_amount">تشخیص مبلغ</string>
+    <string name="sender_share_issue_date">تشخیص تاریخ</string>
+    <string name="sender_share_issue_reason">تشخیص دلیل</string>
+    <string name="sender_share_issue_channel">تشخیص کانال</string>
 
     <string name="history_title">تاریخچه</string>
     <string name="history_bank_chip">بانک</string>

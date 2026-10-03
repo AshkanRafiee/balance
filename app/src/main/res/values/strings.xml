@@ -175,6 +175,8 @@
     <string name="scan_diag_recognized">Recognized bank messages</string>
     <string name="scan_diag_summary">%1$d SMS read · %2$d not recognized</string>
     <string name="scan_diag_recognized_banks">Recognized banks</string>
+    <string name="scan_diag_recognized_hint">Tap a sender to report a wrong amount, date, account, reason or channel in a message that parsed.</string>
+    <string name="scan_diag_all_recognized">Every message is recognized. If an amount, date, account, reason or channel looks wrong, tap its sender above to report it.</string>
     <string name="scan_diag_unparsed_banks_title">Known senders, unrecognized messages</string>
     <string name="scan_diag_unparsed_bank_hint">The sender is a supported bank, but this message layout could not be parsed — a format gap just like an unknown sender.</string>
     <string name="scan_diag_skipped_senders">Senders not recognized yet</string>
@@ -199,6 +201,10 @@
     <string name="sender_share_issue_account">Account detection</string>
     <string name="sender_share_issue_balance">Balance detection</string>
     <string name="sender_share_issue_number">Sender number detection</string>
+    <string name="sender_share_issue_amount">Amount detection</string>
+    <string name="sender_share_issue_date">Date detection</string>
+    <string name="sender_share_issue_reason">Reason detection</string>
+    <string name="sender_share_issue_channel">Channel detection</string>
 
     <string name="history_title">History</string>
     <string name="history_bank_chip">Bank</string>
