@@ -151,6 +151,7 @@ public final class SenderShareActivity extends Activity {
         root.addView(bar, margin(0, 0, 0, 8));
 
         ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
         body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(body, new ScrollView.LayoutParams(-1, -1));

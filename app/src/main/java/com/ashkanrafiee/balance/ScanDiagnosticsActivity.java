@@ -138,6 +138,7 @@ public final class ScanDiagnosticsActivity extends Activity {
         root.addView(bar, margin(0, 0, 0, 12));
 
         ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
         body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(body, new ScrollView.LayoutParams(-1, -1));
