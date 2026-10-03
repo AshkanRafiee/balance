@@ -2322,6 +2322,9 @@ public final class HistoryActivity extends Activity {
      * comparing references would break the ordering contract.
      */
     private static List<Line> dayLines(DayGroup g) {
+        // Built by buildLists in display order; only a hand-made group without them falls back
+        // to sorting here, with the same comparator.
+        if (!g.lines.isEmpty() || (g.txs.isEmpty() && g.residuals.isEmpty())) return g.lines;
         List<Line> lines = new ArrayList<>(g.txs.size() + g.residuals.size());
         for (Transaction t : g.txs) lines.add(new Line(t.date, t, null));
         for (Residual r : g.residuals) lines.add(new Line(r.toDate, null, r));
@@ -2735,6 +2738,10 @@ public final class HistoryActivity extends Activity {
         /** Unaccounted money detected on this day, shown beside the movements rather than among
          *  them: it is proven by the day's own balance statements, not read off a message. */
         final List<Residual> residuals = new ArrayList<>();
+        /** The day's movements and gaps in display order (newest first, gaps before their
+         *  statement), interleaved while {@link #buildLists} walks the already-sorted stream so
+         *  the screen never re-sorts them on the UI thread. */
+        final List<Line> lines = new ArrayList<>();
         DayGroup(CalDate date) {
             this.date = date;
         }
@@ -3075,6 +3082,9 @@ public final class HistoryActivity extends Activity {
             DayGroup day = accumulate(lists, yearIndex, monthIndex, calOf(l.date, iran), amount,
                 !isResidual, today);
             if (isResidual) day.residuals.add(l.residual); else day.txs.add(l.tx);
+            // The stream above is already in display order, so each day collects its own lines
+            // in that order as it is built; dayLines then hands them out without re-sorting.
+            day.lines.add(l);
         }
         return lists;
     }
