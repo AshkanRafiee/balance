@@ -50,13 +50,22 @@ public final class CurrencyHelper {
     /** Formats a stored rial amount for the chosen currency, following the app language's digit
      *  rules: Toman divides by ten, every other currency shows the raw figure. */
     public static String amount(Context context, long n) {
-        if (CURRENCY_TOMAN.equals(currency(context))) return BalanceData.toman(context, n);
-        return display(context, n);
+        return amount(CURRENCY_TOMAN.equals(currency(context)), LocaleHelper.isPersian(context), n);
+    }
+
+    /** Formats without re-reading the stored currency and language, for passes over many rows
+     *  whose caller resolves both once. The result is identical to {@link #amount(Context, long)}. */
+    static String amount(boolean toman, boolean persian, long n) {
+        return display(persian, toman ? n / 10 : n);
     }
 
     /** A number written the way this app writes numbers, in the chosen language. */
     static String display(Context context, long n) {
-        Locale locale = LocaleHelper.isPersian(context) ? FA : Locale.US;
+        return display(LocaleHelper.isPersian(context), n);
+    }
+
+    private static String display(boolean persian, long n) {
+        Locale locale = persian ? FA : Locale.US;
         Numbers c = NUMBERS.get();
         if (!locale.equals(c.locale)) {
             c.format = NumberFormat.getNumberInstance(locale);

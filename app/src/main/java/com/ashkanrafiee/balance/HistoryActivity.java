@@ -758,9 +758,10 @@ public final class HistoryActivity extends Activity {
                 List<Residual> residualOut = applyResidualFilters(residualScope, filter, iranCalendar);
                 scope = applyFilters(scope, filter, iranCalendar);
                 if (!query.isEmpty()) {
-                    final java.util.Map<String, String> n = notes, r = reasons, c = channels;
-                    scope = filterBySearch(scope, query, t -> txHaystack(t, n, r, c));
-                    residualOut = filterBySearch(residualOut, query, this::residualHaystack);
+                    final SearchPass pass =
+                        new SearchPass(this, iranCalendar, notes, reasons, channels);
+                    scope = filterBySearch(scope, query, t -> txHaystack(pass, t));
+                    residualOut = filterBySearch(residualOut, query, r -> residualHaystack(pass, r));
                 }
                 String csv = CsvExport.csv(getApplicationContext(), scope, residualOut,
                     new CsvExport.Text(notes, reasons, channels));
@@ -1513,35 +1514,104 @@ public final class HistoryActivity extends Activity {
         return searchQuery != null && !searchQuery.trim().isEmpty();
     }
 
+    /** The per-search-pass resolved strings and caches for building haystacks: the currency and
+     *  language the whole pass shares, the direction and label words looked up once, and one cache
+     *  each for bank names, reason and channel captions and formatted amounts, which repeat heavily
+     *  across rows. Built once per render/export search instead of re-resolving per row; every
+     *  string it produces is identical to the per-row resolution it replaces. Used on worker
+     *  threads only, so the plain maps need no synchronization. */
+    private static final class SearchPass {
+        private final Context context;
+        private final boolean iran;
+        private final Map<String, String> notes;
+        private final Map<String, String> reasons;
+        private final Map<String, String> channels;
+        private final boolean toman;
+        private final boolean persian;
+        private final String depositText;
+        private final String withdrawalText;
+        private final String residualLabel;
+        private final Map<String, String> displayCache = new HashMap<>();
+        private final Map<String, String> reasonCache = new HashMap<>();
+        private final Map<String, String> channelCache = new HashMap<>();
+        private final Map<Long, String> amountCache = new HashMap<>();
+
+        SearchPass(Context context, boolean iran, Map<String, String> notes,
+                Map<String, String> reasons, Map<String, String> channels) {
+            this.context = context;
+            this.iran = iran;
+            this.notes = notes;
+            this.reasons = reasons;
+            this.channels = channels;
+            this.toman = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(context));
+            this.persian = LocaleHelper.isPersian(context);
+            this.depositText = context.getString(R.string.history_deposit);
+            this.withdrawalText = context.getString(R.string.history_withdrawal);
+            this.residualLabel = context.getString(R.string.residual_label);
+        }
+
+        private String display(String bank) {
+            String s = displayCache.get(bank);
+            if (s == null && !displayCache.containsKey(bank)) {
+                s = BankRules.displayName(context, bank);
+                displayCache.put(bank, s);
+            }
+            return s;
+        }
+
+        private String reason(String raw) {
+            if (reasonCache.containsKey(raw)) return reasonCache.get(raw);
+            String s = BankRules.reasonCaption(context, raw);
+            reasonCache.put(raw, s);
+            return s;
+        }
+
+        private String channel(String raw) {
+            if (channelCache.containsKey(raw)) return channelCache.get(raw);
+            String s = BankRules.channelCaption(context, raw);
+            channelCache.put(raw, s);
+            return s;
+        }
+
+        private String amount(long n) {
+            String s = amountCache.get(n);
+            if (s == null && !amountCache.containsKey(n)) {
+                s = CurrencyHelper.amount(toman, persian, n);
+                amountCache.put(n, s);
+            }
+            return s;
+        }
+
+        private String direction(long n) {
+            return n > 0 ? depositText : n < 0 ? withdrawalText : null;
+        }
+    }
+
     /** One movement's searchable text in the current language: what the row shows (bank, time,
      *  account, amount) plus what it carries (note, the bank's reason and channel) and when it is
      *  shown. Reads the wrapped activity context so the names match the language on screen. */
-    private String txHaystack(Transaction t, Map<String, String> notes,
-            Map<String, String> reasons, Map<String, String> channels) {
+    private String txHaystack(SearchPass pass, Transaction t) {
         String key = BalanceData.noteKey(t);
-        String note = notes == null ? null : notes.get(key);
-        String reasonRaw = reasons == null ? null : reasons.get(key);
-        String channelRaw = channels == null ? null : channels.get(key);
+        String note = pass.notes == null ? null : pass.notes.get(key);
+        String reasonRaw = pass.reasons == null ? null : pass.reasons.get(key);
+        String channelRaw = pass.channels == null ? null : pass.channels.get(key);
         int[] g = gDate(t.date);
-        CalDate d = CalDate.fromGregorian(g[0], g[1], g[2], iranCalendar);
-        return transactionSearchText(t, BankRules.displayName(this, t.bank), note,
-            reasonRaw, BankRules.reasonCaption(this, reasonRaw),
-            channelRaw, BankRules.channelCaption(this, channelRaw),
-            CurrencyHelper.amount(this, t.amount),
-            t.amount > 0 ? getString(R.string.history_deposit)
-                : t.amount < 0 ? getString(R.string.history_withdrawal) : null,
-            dateText(d), timeText(t.date), monthName(d.month), compactDate(d));
+        CalDate d = CalDate.fromGregorian(g[0], g[1], g[2], pass.iran);
+        return transactionSearchText(t, pass.display(t.bank), note,
+            reasonRaw, pass.reason(reasonRaw),
+            channelRaw, pass.channel(channelRaw),
+            pass.amount(t.amount), pass.direction(t.amount),
+            dateText(d, pass.persian), timeText(t.date, pass.persian),
+            monthName(d.month, pass.persian), compactDate(d, pass.persian));
     }
 
     /** One gap's searchable text in the current language, mirroring {@link #txHaystack}. */
-    private String residualHaystack(Residual r) {
-        CalDate d = calOf(r.toDate, iranCalendar);
-        return residualSearchText(r, BankRules.displayName(this, r.bank),
-            CurrencyHelper.amount(this, r.amount),
-            r.amount > 0 ? getString(R.string.history_deposit)
-                : r.amount < 0 ? getString(R.string.history_withdrawal) : null,
-            getString(R.string.residual_label),
-            dateText(d), timeText(r.toDate), monthName(d.month), compactDate(d));
+    private String residualHaystack(SearchPass pass, Residual r) {
+        CalDate d = calOf(r.toDate, pass.iran);
+        return residualSearchText(r, pass.display(r.bank),
+            pass.amount(r.amount), pass.direction(r.amount), pass.residualLabel,
+            dateText(d, pass.persian), timeText(r.toDate, pass.persian),
+            monthName(d.month, pass.persian), compactDate(d, pass.persian));
     }
 
     // ====================================================================
@@ -1578,9 +1648,10 @@ public final class HistoryActivity extends Activity {
                 final Map<String, String> channelsNow =
                     BalanceData.readChannels(getApplicationContext());
                 if (!query.isEmpty()) {
-                    final Map<String, String> n = notesNow, r = reasonsNow, c = channelsNow;
-                    filtered = filterBySearch(filtered, query, t -> txHaystack(t, n, r, c));
-                    residuals = filterBySearch(residuals, query, this::residualHaystack);
+                    final SearchPass pass =
+                        new SearchPass(this, iran, notesNow, reasonsNow, channelsNow);
+                    filtered = filterBySearch(filtered, query, t -> txHaystack(pass, t));
+                    residuals = filterBySearch(residuals, query, r -> residualHaystack(pass, r));
                 }
                 final List<Transaction> shown = filtered;
                 final List<Residual> shownResiduals = residuals;
@@ -2828,7 +2899,12 @@ public final class HistoryActivity extends Activity {
      *  word also matches when it only reads whole with the spaces dropped, so "میشود" still finds
      *  "می شود" however either side spaced the half-space. */
     static boolean matchesSearch(String haystack, String query) {
-        List<String> tokens = searchTokens(query);
+        return matchesTokens(haystack, searchTokens(query));
+    }
+
+    /** Token-list core of {@link #matchesSearch(String, String)}, so a pass over many rows
+     *  tokenizes the query once instead of once per row. */
+    static boolean matchesTokens(String haystack, java.util.List<String> tokens) {
         if (tokens.isEmpty()) return true;
         if (haystack == null) return false;
         String hay = normalizeSearch(haystack);
@@ -2911,12 +2987,13 @@ public final class HistoryActivity extends Activity {
             java.util.function.Function<T, String> haystackOf) {
         List<T> out = new ArrayList<>(in == null ? 0 : in.size());
         if (in == null) return out;
-        if (searchTokens(query).isEmpty()) {
+        List<String> tokens = searchTokens(query);
+        if (tokens.isEmpty()) {
             out.addAll(in);
             return out;
         }
         for (T e : in) {
-            if (matchesSearch(haystackOf.apply(e), query)) out.add(e);
+            if (matchesTokens(haystackOf.apply(e), tokens)) out.add(e);
         }
         return out;
     }
@@ -3060,8 +3137,21 @@ public final class HistoryActivity extends Activity {
         return day;
     }
 
+    /** One calendar per thread for reading movement dates, kept honest about the current time
+     *  zone like {@link #CLOCK}: {@code Calendar.getInstance} on every row was a measurable part of
+     *  grouping a long history, and a cached instance would keep showing the old zone after a flight
+     *  or a DST-rule change, so the zone is re-checked on every use. Year, month and day numbers do
+     *  not depend on the locale, so only the zone is guarded. */
+    private static final ThreadLocal<Calendar> DATE_CAL = new ThreadLocal<Calendar>() {
+        @Override protected Calendar initialValue() {
+            return Calendar.getInstance(Locale.getDefault());
+        }
+    };
+
     private static int[] gDate(long date) {
-        Calendar c = Calendar.getInstance(Locale.getDefault());
+        Calendar c = DATE_CAL.get();
+        java.util.TimeZone now = java.util.TimeZone.getDefault();
+        if (!now.equals(c.getTimeZone())) c.setTimeZone(now);
         c.setTimeInMillis(date);
         return new int[]{c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH)};
     }
@@ -3078,7 +3168,12 @@ public final class HistoryActivity extends Activity {
      *  names (Jalali script or the "Farvardin"-style transliteration) for the Iran region, and the
      *  Gregorian month names (Persian-scripted in the Persian UI) for International. */
     private String monthName(int month) {
-        boolean fa = "fa".equals(LocaleHelper.currentTag(this));
+        return monthName(month, "fa".equals(LocaleHelper.currentTag(this)));
+    }
+
+    /** Flag-taking core of {@link #monthName(int)}, so a pass over many rows resolves the language
+     *  once instead of once per row. */
+    private String monthName(int month, boolean fa) {
         if (iranCalendar) {
             switch (month) {
                 case 1: return fa ? "\u0641\u0631\u0648\u0631\u062f\u06cc\u0646" : "Farvardin";
@@ -3128,24 +3223,38 @@ public final class HistoryActivity extends Activity {
     /** Formats a calendar date in the app language, e.g. "Khordad 12 1403" / "۱۲ خرداد ۱۴۰۳" in the
      *  Iran region and "January 26 2026" / "۲۶ ژانویه ۲۰۲۶" in International. */
     private String dateText(CalDate d) {
-        boolean fa = LocaleHelper.isPersian(this);
+        return dateText(d, LocaleHelper.isPersian(this));
+    }
+
+    /** Flag-taking core of {@link #dateText(CalDate)}, resolved once per pass by the caller. */
+    private String dateText(CalDate d, boolean fa) {
         if (fa) {
-            return faDigits(d.day) + " " + monthName(d.month) + " " + faDigits(d.year);
+            return faDigits(d.day) + " " + monthName(d.month, true) + " " + faDigits(d.year);
         }
-        return monthName(d.month) + " " + d.day + " " + d.year;
+        return monthName(d.month, false) + " " + d.day + " " + d.year;
     }
 
     /** Formats a calendar date as the compact "y/m/d" used by the custom-range inputs and summary,
      *  in the app language's digits. */
     private String compactDate(CalDate d) {
+        return compactDate(d, LocaleHelper.isPersian(this));
+    }
+
+    /** Flag-taking core of {@link #compactDate(CalDate)}, resolved once per pass by the caller. */
+    private String compactDate(CalDate d, boolean fa) {
         String s = d.year + "/" + d.month + "/" + d.day;
-        return LocaleHelper.isPersian(this) ? faDigitsString(s) : s;
+        return fa ? faDigitsString(s) : s;
     }
 
     /** The movement's time of day as a compact "HH:mm" string in the app digits. */
     private String timeText(long date) {
+        return timeText(date, LocaleHelper.isPersian(this));
+    }
+
+    /** Flag-taking core of {@link #timeText(long)}, resolved once per pass by the caller. */
+    private String timeText(long date, boolean fa) {
         String s = CLOCK.get().format(date);
-        return LocaleHelper.isPersian(this) ? faDigitsString(s) : s;
+        return fa ? faDigitsString(s) : s;
     }
 
     /** The clock a movement row shows, kept per thread. {@code SimpleDateFormat} is not thread safe,
