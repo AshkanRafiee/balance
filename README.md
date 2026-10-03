@@ -19,7 +19,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Full history from the total card, per-bank history from any bank card, and single-account history by tapping an account row in the list — an account's history shows the account number in its header, and tapping that chip copies the number
 - Long-press the total card to copy the combined total, or long-press a bank or account card to copy that balance; long-press the eye to switch auto-mask on or off (balances start hidden on every open), and long-press the lock icon for the lock settings
 - Bank sorting by balance or update time, mirrored in the list and the home-screen widget
-- Home-screen widget with the same bank order, totals, and privacy mask as the app, in the app's own color theme
+- Home-screen widget with the same bank order, totals, and privacy mask as the app, in its own color theme
 - Password-encrypted backup and restore (balances, transaction history, notes and the reasons read from the SMS); the same Data menu holds a full reset — deleting every balance and transaction (and optionally every note) needs a second confirmation so it can never be triggered by a stray tap
 - Auto light/dark theme (following the device or forced either way), persistent masked-balance and currency display preference
 - Automatic refresh as bank SMS arrive, plus pull-to-refresh from the top of the bank list or the history screen (full, per-bank or per-account) — a pull there scans the SMS inbox, the balances and the history together
@@ -78,10 +78,11 @@ your phone model. You may swap the real numbers for made-up ones of the same
 length and format for privacy. The fastest way to hand us every unparsed
 message is the **Report** item in the footer:
 known banks with an unreadable message layout are highlighted first, then
-unknown senders — tap any flagged sender to open its messages, tick the ones to
-share, mark what seems wrong (account, balance or sender-number detection), and
-send or copy exactly those. Nothing is sent until you confirm in
-your mail app.
+unknown senders — and any recognized sender is tappable too, when a parsed
+message gets an amount, date, account, reason or channel wrong. Tap a sender
+to open its messages, tick the ones to share, mark what seems wrong (account,
+balance, sender-number, amount, date, reason or channel detection), and send
+or copy exactly those. Nothing is sent until you confirm in your mail app.
 Otherwise, open an [issue](https://github.com/AshkanRafiee/balance/issues)
 or email us; see [CONTRIBUTING.md](CONTRIBUTING.md) for the full checklist.
 
