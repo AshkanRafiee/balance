@@ -120,6 +120,19 @@ public class HistoryTest {
             + "\u06F1\u06F4\u06F0\u06F5.\u06F0\u06F6.\u06F1\u06F5"));
     }
 
+    @Test public void txn_middleEast_signedDepositWithSlashAccount() {
+        String body = "بانک خاورمیانه\n020/002863516\n+1,000,000\n07/13\n21:32\n"
+            + "مانده 1,000,000\nواریز مبلغ افزایش موجودی حساب";
+        assertEquals(1_000_000L, (long) BalanceData.extractTransaction(body));
+        Transaction t = BalanceData.parseMovement("Middle East", "20004861", body,
+            System.currentTimeMillis(), false, 0);
+        assertNotNull(t);
+        assertEquals("Middle East", t.bank);
+        assertEquals("020/002863516", t.account);
+        assertEquals(1_000_000L, t.amount);
+        assertEquals(Long.valueOf(1_000_000L), t.balance);
+    }
+
     @Test public void txn_parsian_trailingMinusSign() {
         assertEquals(-500000L, (long) BalanceData.extractTransaction(
             "30101234567890\n"

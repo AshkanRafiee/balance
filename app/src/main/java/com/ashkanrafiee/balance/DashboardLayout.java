@@ -5,23 +5,25 @@ import android.content.pm.PackageManager;
 /** The dashboard's fixed vertical geometry, in dp.
  *
  *  <p>These numbers used to be spelled out at every draw, scroll and touch site, which meant the
- *  SMS strip below the total card would have had to be threaded through each of them by hand. The
- *  strip is the dashboard's explanation of why the balances on screen may be out of date: it shows
- *  only when saved data is displayed but SMS access is gone. While it is up, the banks section
- *  header and the list below it move down by exactly its height, so every site asks this class
- *  where things are instead of carrying its own copy.
+ *  SMS strip would have had to be threaded through each of them by hand. The strip is the
+ *  dashboard's explanation of why the balances on screen may be out of date: it shows only when
+ *  saved data is displayed but SMS access is gone. While it is up, the banks section header and the
+ *  list below it move down by exactly its height, so every site asks this class where things are
+ *  instead of carrying its own copy.
  *
  *  <p>Pure arithmetic on purpose — the dashboard draws onto a {@code Canvas} by hand, and keeping
  *  the geometry free of any {@code View} lets the visibility rule and the shift be tested without
  *  launching an activity. */
 final class DashboardLayout {
     static final float TOTAL_TOP = 120f, TOTAL_BOTTOM = 270f;
-    /** The strip sits in the gap under the total card, clear of both it and the section header. */
+    /** The stale-data strip sits in the gap under the total card, clear of the section header. */
     static final float BANNER_TOP = 284f, BANNER_H = 56f;
     static final float SECTION_HEADER_Y = 320f;
     static final float LIST_TOP = 352f;
-    /** Everything above the list that does not scroll: title, total card, section header. */
-    static final float CHROME_H = 440f;
+    /** Bottom breathing room for the bank list inside the content view. */
+    static final float LIST_BOTTOM_GAP = 32f;
+    /** The non-scrolling height the list is measured against, including its bottom breathing room. */
+    static final float CHROME_H = LIST_TOP + LIST_BOTTOM_GAP;
     /** The sort button's tap band, as a half-height around the section-header baseline. */
     static final float SORT_BAND = 30f;
 

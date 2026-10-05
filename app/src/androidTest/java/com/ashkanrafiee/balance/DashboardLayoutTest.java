@@ -58,7 +58,9 @@ public class DashboardLayoutTest {
         assertEquals(0f, DashboardLayout.shift(false), 0f);
         assertEquals(352f, DashboardLayout.listTop(false), 0f);
         assertEquals(320f, DashboardLayout.sectionHeaderY(false), 0f);
-        assertEquals(440f, DashboardLayout.chromeH(false), 0f);
+        assertEquals(384f, DashboardLayout.chromeH(false), 0f);
+        assertEquals(DashboardLayout.LIST_TOP + DashboardLayout.LIST_BOTTOM_GAP,
+            DashboardLayout.chromeH(false), 0f);
     }
 
     @Test public void shift_withStrip_pushesSectionDownByItsHeight() {
@@ -67,7 +69,7 @@ public class DashboardLayoutTest {
         assertEquals(352f + shift, DashboardLayout.listTop(true), 0f);
         assertEquals(320f + shift, DashboardLayout.sectionHeaderY(true), 0f);
         // The chrome grows with the section, or the list would scroll further than it can be drawn.
-        assertEquals(440f + shift, DashboardLayout.chromeH(true), 0f);
+        assertEquals(384f + shift, DashboardLayout.chromeH(true), 0f);
     }
 
     @Test public void strip_sitsBetweenTotalCardAndSectionHeader() {
@@ -103,8 +105,7 @@ public class DashboardLayoutTest {
     }
 
     @Test public void inSortBand_withoutStrip_keepsItsOriginalRange() {
-        // The sort button's band used to be a hardcoded 290..350; pinning it guards the header tap
-        // target against drifting when the strip shifts things down.
+        // Pin the sort band's location so the header tap target follows the restored geometry.
         assertTrue(DashboardLayout.inSortBand(292f, false));
         assertTrue(DashboardLayout.inSortBand(348f, false));
         assertFalse(DashboardLayout.inSortBand(288f, false));
@@ -112,8 +113,9 @@ public class DashboardLayoutTest {
     }
 
     @Test public void inSortBand_withStrip_movesDownWithTheHeader() {
-        assertFalse(DashboardLayout.inSortBand(292f, true));
-        assertTrue(DashboardLayout.inSortBand(292f + DashboardLayout.BANNER_H, true));
+        assertFalse(DashboardLayout.inSortBand(DashboardLayout.SECTION_HEADER_Y, true));
+        assertTrue(DashboardLayout.inSortBand(
+            DashboardLayout.SECTION_HEADER_Y + DashboardLayout.BANNER_H, true));
     }
 
     @Test public void inSortBand_neverOverlapsTheStrip() {

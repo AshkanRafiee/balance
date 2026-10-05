@@ -34,14 +34,16 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.OverScroller;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.util.LinkedHashMap;
 import java.util.Locale;
-import java.util.Set;
 
 public class MainActivity extends Activity {
+    public static final String EXTRA_TAB = "navigation_tab";
+    private static final String STATE_TAB = "active_navigation_tab";
     private static final int SMS_REQUEST = 10;
     private static final int ONBOARDING_REQUEST = 12;
     private static final int REQ_CREATE_BACKUP = 20;
@@ -53,6 +55,9 @@ public class MainActivity extends Activity {
      *  can grind at, so a very short code would nullify the 600k-iteration KDF. */
     private static final int MIN_BACKUP_PASSWORD_LENGTH = 8;
     private BalanceView view;
+    private FrameLayout content;
+    private BottomNavigation navigation;
+    private int activeTab = BottomNavigation.HOME;
     private boolean smsRequested;
     private String pendingBackupPassword;
     private LockOverlay lockOverlay;
@@ -84,13 +89,25 @@ public class MainActivity extends Activity {
         getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(resColor(R.color.bg)));
         view = new BalanceView();
         FrameLayout host = new FrameLayout(this);
+        LinearLayout shell = new LinearLayout(this);
+        shell.setOrientation(LinearLayout.VERTICAL);
+        shell.setBackgroundColor(resColor(R.color.bg));
+        content = new FrameLayout(this);
+        content.setBackgroundColor(resColor(R.color.bg));
+        shell.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
+        int requestedTab = state != null
+            ? state.getInt(STATE_TAB, BottomNavigation.HOME)
+            : getIntent().getIntExtra(EXTRA_TAB, BottomNavigation.HOME);
+        activeTab = validTab(requestedTab) ? requestedTab : BottomNavigation.HOME;
+        navigation = new BottomNavigation(this, activeTab, this::selectTab);
+        shell.addView(navigation, new LinearLayout.LayoutParams(-1, -2));
         setContentView(host);
-        host.addView(view, new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-        view.setOnApplyWindowInsetsListener((v, insets) -> {
-            view.insetsTop = insets.getSystemWindowInsetTop();
-            view.insetsBottom = insets.getSystemWindowInsetBottom();
-            view.invalidate();
+        host.addView(shell, new FrameLayout.LayoutParams(-1, -1));
+        // The shell owns the system-bar insets. Its content and navigation children are measured in
+        // the remaining area, so the canvas and the navigation row do not each subtract the bars.
+        host.setOnApplyWindowInsetsListener((v, insets) -> {
+            int[] bars = systemBarInsets(insets);
+            shell.setPadding(0, bars[0], 0, bars[1]);
             return insets;
         });
         lockOverlay = new LockOverlay(this);
@@ -107,8 +124,173 @@ public class MainActivity extends Activity {
         host.addView(lockOverlay, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         lockOverlay.setVisibility(View.GONE);
+        showTab(activeTab);
         updateSecureFlag();
         startOnboardingIfFirstRun();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (intent != null && intent.hasExtra(EXTRA_TAB))
+            selectTab(intent.getIntExtra(EXTRA_TAB, BottomNavigation.HOME));
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        outState.putInt(STATE_TAB, activeTab);
+        super.onSaveInstanceState(outState);
+    }
+
+    private boolean validTab(int tab) {
+        return tab >= BottomNavigation.HOME && tab <= BottomNavigation.SETTINGS;
+    }
+
+    private void selectTab(int tab) {
+        if (!validTab(tab)) tab = BottomNavigation.HOME;
+        activeTab = tab;
+        if (navigation != null) navigation.setSelectedTab(tab);
+        showTab(tab);
+    }
+
+    private void showTab(int tab) {
+        if (content == null) return;
+        if (tab == BottomNavigation.PAYMENTS) {
+            // Payments has its own activity (and its own copy of this navigation bar). Keep the
+            // underlying shell on Home so pressing Back never leaves a Payments highlight over the
+            // balance canvas.
+            activeTab = BottomNavigation.HOME;
+            if (navigation != null) navigation.setSelectedTab(BottomNavigation.HOME);
+            startActivity(new Intent(this, ScheduledPaymentsActivity.class));
+            return;
+        }
+        content.removeAllViews();
+        if (tab == BottomNavigation.HOME) {
+            content.addView(view, new FrameLayout.LayoutParams(-1, -1));
+        } else if (tab == BottomNavigation.SAVINGS) {
+            content.addView(buildSavingsPage(), new FrameLayout.LayoutParams(-1, -1));
+        } else {
+            content.addView(buildSettingsPage(), new FrameLayout.LayoutParams(-1, -1));
+        }
+    }
+
+    /** Builds the settings landing page while keeping the existing settings flows as their single
+     * source of truth. The rows deliberately do not duplicate any preference UI: each one opens the
+     * established dialog or activity, so lock checks, secure dialogs and backup handling remain
+     * exactly the same as before. */
+    private View buildSettingsPage() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setVerticalScrollBarEnabled(false);
+        LinearLayout body = pageBody();
+
+        TextView heading = pageHeading(getString(R.string.settings_heading));
+        body.addView(heading, pageMargins(0, 8, 0, 8));
+        TextView description = pageDescription(getString(R.string.settings_description));
+        body.addView(description, pageMargins(0, 0, 0, 22));
+
+        body.addView(settingsEntry(getString(R.string.footer_about),
+            v -> startActivity(new Intent(this, AboutActivity.class))), pageMargins(0, 0, 0, 10));
+        body.addView(settingsEntry(getString(R.string.footer_display),
+            v -> displayDialog()), pageMargins(0, 0, 0, 10));
+        body.addView(settingsEntry(getString(R.string.footer_data),
+            v -> dataDialog()), pageMargins(0, 0, 0, 10));
+        body.addView(settingsEntry(getString(R.string.footer_report),
+            v -> startActivity(new Intent(this, ScanDiagnosticsActivity.class))), pageMargins(0, 0, 0, 10));
+
+        scroll.addView(body, new ScrollView.LayoutParams(-1, -2));
+        return scroll;
+    }
+
+    /** The savings page is intentionally only a product-level placeholder until the feature has a
+     * real data model. It must not imply that any savings operation is available. */
+    private View buildSavingsPage() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setVerticalScrollBarEnabled(false);
+        LinearLayout body = pageBody();
+        body.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        TextView heading = pageHeading(getString(R.string.savings_heading));
+        heading.setGravity(Gravity.CENTER);
+        body.addView(heading, pageMargins(0, 8, 0, 10));
+        TextView placeholder = pageDescription(getString(R.string.savings_coming_soon));
+        placeholder.setGravity(Gravity.CENTER);
+        body.addView(placeholder, pageMargins(0, 0, 0, 20));
+
+        scroll.addView(body, new ScrollView.LayoutParams(-1, -1));
+        return scroll;
+    }
+
+    private LinearLayout pageBody() {
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(24), dp(12), dp(24), dp(24));
+        body.setBackgroundColor(resColor(R.color.bg));
+        return body;
+    }
+
+    private TextView pageHeading(String value) {
+        TextView heading = new TextView(this);
+        heading.setText(value);
+        heading.setTextColor(resColor(R.color.fg));
+        heading.setTextSize(28);
+        heading.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        return heading;
+    }
+
+    private TextView pageDescription(String value) {
+        TextView description = new TextView(this);
+        description.setText(value);
+        description.setTextColor(resColor(R.color.muted));
+        description.setTextSize(15);
+        description.setLineSpacing(dp(2), 1f);
+        return description;
+    }
+
+    private View settingsEntry(String label, View.OnClickListener action) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(dp(58));
+        row.setPadding(dp(18), dp(6), dp(14), dp(6));
+        row.setBackground(ripple(rounded(resColor(R.color.panel), 16)));
+        row.setClickable(true);
+        row.setFocusable(true);
+        row.setOnClickListener(action);
+
+        TextView title = new TextView(this);
+        title.setText(label);
+        title.setTextColor(resColor(R.color.fg));
+        title.setTextSize(16);
+        title.setGravity(isRtl() ? Gravity.RIGHT : Gravity.LEFT);
+        row.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView arrow = new TextView(this);
+        arrow.setText(isRtl() ? "‹" : "›");
+        arrow.setTextColor(resColor(R.color.muted));
+        arrow.setTextSize(25);
+        arrow.setGravity(Gravity.CENTER);
+        row.addView(arrow, new LinearLayout.LayoutParams(dp(40), -1));
+        return row;
+    }
+
+    private LinearLayout.LayoutParams pageMargins(int start, int top, int end, int bottom) {
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
+        p.setMarginStart(dp(start));
+        p.topMargin = dp(top);
+        p.setMarginEnd(dp(end));
+        p.bottomMargin = dp(bottom);
+        return p;
+    }
+
+    private android.graphics.drawable.Drawable ripple(android.graphics.drawable.Drawable background) {
+        if (android.os.Build.VERSION.SDK_INT >= 21) {
+            return new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(Color.argb(35, 0, 0, 0)),
+                background, null);
+        }
+        return background;
     }
 
     /** On a fresh install, open the first-run introduction before asking for anything: it explains
@@ -192,7 +374,7 @@ public class MainActivity extends Activity {
         LockManager.cancelPendingLock();
         if (view != null) {
             view.enforceAutoHide();
-            view.refresh();
+            if (activeTab == BottomNavigation.HOME) view.refresh();
         }
         registerSmsObserver();
         // A fresh install that skipped or finished the introduction returns here without ever
@@ -212,8 +394,8 @@ public class MainActivity extends Activity {
 
     /**
      * Forces a full redraw when the window regains focus. Without this, a frame
-     * drawn around an Activity recreation can leave the bottom strip (below the
-     * footer) showing the dark window background until something triggers a
+     * drawn around an Activity recreation can leave the bottom edge of the content showing the dark
+     * window background until something triggers a
      * redraw (e.g. tapping the eye). Repainting here clears that stale frame.
      */
     @Override
@@ -277,7 +459,7 @@ public class MainActivity extends Activity {
         smsObserver = new ContentObserver(new Handler(Looper.getMainLooper())) {
             @Override public void onChange(boolean selfChange) { onChange(selfChange, null); }
             @Override public void onChange(boolean selfChange, Uri uri) {
-                if (view != null) view.refreshSilent();
+                if (view != null && activeTab == BottomNavigation.HOME) view.refreshSilent();
             }
         };
         getContentResolver().registerContentObserver(
@@ -291,7 +473,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** The combined Display dialog behind the footer item: the dropdowns in a single menu, so the
+    /** The combined Display dialog behind the Settings page item: the dropdowns in a single menu, so the
      *  color theme (see {@link ThemeHelper}), the widget's own theme, the interface language, the
      *  calendar system (see {@link RegionHelper}), the currency unit (see {@link CurrencyHelper}),
      *  the balance-freshness threshold and the "expand all history" toggle are all chosen in one
@@ -1149,7 +1331,10 @@ public class MainActivity extends Activity {
                     }
                 } else {
                     view.loadSaved();
-                    String summary = res.changed()
+                    String summary = res.plansAdded > 0 || res.planStatesAdded > 0
+                        ? getString(R.string.backup_restore_summary_with_plans, res.added, res.updated,
+                            res.plansAdded + res.planStatesAdded)
+                        : res.changed()
                         ? getString(R.string.backup_restore_summary, res.added, res.updated)
                         : getString(R.string.backup_restore_summary_none);
                     Toast.makeText(MainActivity.this,
@@ -1223,6 +1408,10 @@ public class MainActivity extends Activity {
         return getResources().getColor(res, getTheme());
     }
 
+    private boolean isRtl() {
+        return getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+    }
+
     private final class BalanceView extends View {
         static final int ICON_NONE = 0, ICON_LOCK = 1, ICON_EYE = 2;
         final Paint p = new Paint(3);
@@ -1241,7 +1430,6 @@ public class MainActivity extends Activity {
          *  on screen and SMS access is gone, and it shifts the banks section down by its height, so
          *  every geometry question is asked of {@link DashboardLayout} against this flag. */
         boolean smsBanner;
-        int insetsTop, insetsBottom;
         int sortMode;
         float scrollY = 0, lastY, downY;
         float bankListHeight;
@@ -1343,13 +1531,10 @@ public class MainActivity extends Activity {
         };
         String status = getString(R.string.status_reading_sms);
         long total;
-        float footerAboutStart, footerAboutEnd, footerLangStart, footerLangEnd,
-            footerBackupStart, footerBackupEnd, footerReportStart, footerReportEnd, footerY;
         final int fg = resColor(R.color.fg);
         final int muted = resColor(R.color.muted);
         final int accent = resColor(R.color.accent);
         final int active = resColor(R.color.active);
-        final int purple = resColor(R.color.purple);
         final int panel = resColor(R.color.panel);
         final int bg = resColor(R.color.bg);
         final int warn = resColor(R.color.warn);
@@ -1364,15 +1549,9 @@ public class MainActivity extends Activity {
             scroller = new OverScroller(MainActivity.this);
         }
 
-        /** The list's visible height after the system bars (dp), mirroring the touch calculation. */
+        /** The list's visible height in the content area above the shell navigation bar. */
         float listViewH() {
-            int top = insetsTop, bottom = insetsBottom;
-            if (top == 0 && bottom == 0 && android.os.Build.VERSION.SDK_INT >= 23
-                    && getRootWindowInsets() != null) {
-                top = getRootWindowInsets().getSystemWindowInsetTop();
-                bottom = getRootWindowInsets().getSystemWindowInsetBottom();
-            }
-            return (getHeight() - top - bottom) / d;
+            return getHeight() / d;
         }
 
         /** The farthest the list can be scrolled (dp), i.e. its content height minus the viewport
@@ -1754,14 +1933,7 @@ public class MainActivity extends Activity {
         protected void onDraw(Canvas c) {
             super.onDraw(c);
             boolean rtl = isRtl();
-            int top = insetsTop, bottom = insetsBottom;
-            if (top == 0 && bottom == 0 && android.os.Build.VERSION.SDK_INT >= 23
-                    && getRootWindowInsets() != null) {
-                top = getRootWindowInsets().getSystemWindowInsetTop();
-                bottom = getRootWindowInsets().getSystemWindowInsetBottom();
-            }
             c.save();
-            c.translate(0, top);
             c.scale(d, d);
             int w = (int) (getWidth() / d);
             c.drawColor(bg);
@@ -1810,10 +1982,10 @@ public class MainActivity extends Activity {
             Paint.Align sortAlign = rtl ? Paint.Align.LEFT : Paint.Align.RIGHT;
             text(c, sortLabel(), sortX, sectionHeaderY, 14, accent, sortAlign);
 
-            float by = (getHeight() - top - bottom) / d - 32;
+            float by = getHeight() / d - DashboardLayout.LIST_BOTTOM_GAP;
             float listTop = DashboardLayout.listTop(smsBanner);
             c.save();
-            c.clipRect(0, listTop, w, by - 42);
+            c.clipRect(0, listTop, w, by);
             float y = listTop - scrollY;
             if (banks.isEmpty()) {
                 round(c, 24, y, w - 24, y + 96, 22, panel);
@@ -1866,36 +2038,6 @@ public class MainActivity extends Activity {
             }
             c.restore();
 
-            p.setTextSize(13);
-            String aboutText = getString(R.string.footer_about);
-            String langText = getString(R.string.footer_display);
-            String backupText = getString(R.string.footer_data);
-            String reportText = getString(R.string.footer_report);
-            String sep = "  \u00b7  ";
-            float aboutW = measure(aboutText, 13), langW = measure(langText, 13),
-                backupW = measure(backupText, 13), reportW = measure(reportText, 13),
-                sepW = measure(sep, 13);
-            float totalW = aboutW + langW + backupW + reportW + sepW * 3;
-            float scale = Math.min(1, (w - 64) / totalW);
-            float x0 = (w - totalW * scale) / 2;
-            if (!rtl) {
-                footerReportStart = x0; text(c, reportText, x0, by + 4, 13 * scale, accent, Paint.Align.LEFT); x0 += reportW * scale; footerReportEnd = x0;
-                text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
-                footerBackupStart = x0; text(c, backupText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += backupW * scale; footerBackupEnd = x0;
-                text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
-                footerLangStart = x0; text(c, langText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += langW * scale; footerLangEnd = x0;
-                text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
-                footerAboutStart = x0; text(c, aboutText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += aboutW * scale; footerAboutEnd = x0;
-            } else {
-                footerAboutStart = x0; text(c, aboutText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += aboutW * scale; footerAboutEnd = x0;
-                text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
-                footerLangStart = x0; text(c, langText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += langW * scale; footerLangEnd = x0;
-                text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
-                footerBackupStart = x0; text(c, backupText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += backupW * scale; footerBackupEnd = x0;
-                text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
-                footerReportStart = x0; text(c, reportText, x0, by + 4, 13 * scale, accent, Paint.Align.LEFT); x0 += reportW * scale; footerReportEnd = x0;
-            }
-            footerY = by;
             if (indicatorVisible) drawPullIndicator(c, w);
             String summary = announce();
             if (!summary.equals(getContentDescription())) setContentDescription(summary);
@@ -2203,14 +2345,8 @@ public class MainActivity extends Activity {
         @Override
         public boolean onTouchEvent(MotionEvent e) {
             boolean rtl = isRtl();
-            int top = insetsTop, bottom = insetsBottom;
-            if (top == 0 && bottom == 0 && android.os.Build.VERSION.SDK_INT >= 23
-                    && getRootWindowInsets() != null) {
-                top = getRootWindowInsets().getSystemWindowInsetTop();
-                bottom = getRootWindowInsets().getSystemWindowInsetBottom();
-            }
-            float x = e.getX() / d, y = (e.getY() - top) / d,
-                h = (getHeight() - top - bottom) / d;
+            float x = e.getX() / d, y = e.getY() / d,
+                h = getHeight() / d;
             if (velocityTracker == null) velocityTracker = VelocityTracker.obtain();
             velocityTracker.addMovement(e);
             if (e.getAction() == MotionEvent.ACTION_DOWN) {
@@ -2236,7 +2372,7 @@ public class MainActivity extends Activity {
                 if (lockArmed) handler.postDelayed(lockLongProbe, 480);
                 else if (eyeArmed) handler.postDelayed(eyeLongProbe, 500);
                 else if (totalArmed) handler.postDelayed(totalLongProbe, 500);
-                else if (y >= DashboardLayout.listTop(smsBanner) && y < byForTouch(h)
+                else if (y >= DashboardLayout.listTop(smsBanner) && y < listBottomForTouch(h)
                         && (rtl ? x >= 56 : x <= getWidth() / d - 56)) {
                     // On a bank or account row, off the 3-dot menu: a long-press copies that row's
                     // balance, mirroring the total card.
@@ -2314,17 +2450,7 @@ public class MainActivity extends Activity {
                 handleDragRelease(downY, y);
                 return true;
             }
-            if (y > footerY - 20 && y < footerY + 24) {
-                if (x >= footerAboutStart - 10 && x <= footerAboutEnd + 10) {
-                    startActivity(new Intent(MainActivity.this, AboutActivity.class));
-                } else if (x >= footerLangStart - 10 && x <= footerLangEnd + 10) {
-                    MainActivity.this.displayDialog();
-                } else if (x >= footerBackupStart - 10 && x <= footerBackupEnd + 10) {
-                    MainActivity.this.dataDialog();
-                } else if (x >= footerReportStart - 10 && x <= footerReportEnd + 10) {
-                    startActivity(new Intent(MainActivity.this, ScanDiagnosticsActivity.class));
-                }
-            } else if (downIcon == ICON_LOCK) {
+            if (downIcon == ICON_LOCK) {
                 MainActivity.this.onLockTap();
             } else if (downIcon == ICON_EYE) {
                 hidden = !hidden;
@@ -2341,7 +2467,7 @@ public class MainActivity extends Activity {
             } else if (DashboardLayout.inSortBand(y, smsBanner)
                     && (rtl ? x < 150 : x > getWidth() / d - 150)) {
                 showSortDialog();
-            } else if (y >= DashboardLayout.listTop(smsBanner) && y < byForTouch(h)) {
+            } else if (y >= DashboardLayout.listTop(smsBanner) && y < listBottomForTouch(h)) {
                 if (banks.isEmpty()) {
                     // No balances at all: the empty card is the app's main entry point again. Without
                     // SMS permission (e.g. after a permanent denial, which no runtime re-request can
@@ -2376,6 +2502,6 @@ public class MainActivity extends Activity {
             return super.performClick();
         }
 
-        float byForTouch(float h) { return h - 74; }
+        float listBottomForTouch(float h) { return h - DashboardLayout.LIST_BOTTOM_GAP; }
     }
 }

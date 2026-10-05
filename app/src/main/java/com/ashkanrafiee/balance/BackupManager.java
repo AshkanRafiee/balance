@@ -25,7 +25,7 @@ import javax.crypto.spec.SecretKeySpec;
 import org.json.JSONObject;
 
 /**
- * Encrypted, self-describing backups of the saved balances.
+ * Encrypted, self-describing backups of saved balances, history and manually entered plans.
  *
  * <p>The on-disk format is a small plaintext header followed by an AES-256-GCM ciphertext. The header
  * carries every parameter the decryption needs (KDF algorithm, iteration count, salt, key size, cipher
@@ -51,10 +51,9 @@ final class BackupManager {
     private static final byte[] MAGIC = {'B', 'A', 'L', 'N', 'C', 'E', 'B', 'K'};
     private static final int FORMAT_VERSION = 1;
     /** Payload shape: 1 = balances only, 2 = balances + transactions, 3 = balances + transactions +
-     *  notes, 4 = those plus the reasons the banks stated, 5 = those plus the channels they stated.
-     *  Older backups (1 to 4) are still read; those carry no reasons or channels, which a restore
-     *  leaves to the next scan to re-read from the inbox. */
-    private static final int PAYLOAD_FORMAT = 5;
+     *  notes, 4 = those plus the reasons the banks stated, 5 = those plus the channels they stated,
+     *  6 = those plus manually entered scheduled payments. Older backups remain readable. */
+    private static final int PAYLOAD_FORMAT = 6;
     private static final String KDF_ALGORITHM = "PBKDF2WithHmacSHA256";
     private static final String CIPHER_ALGORITHM = "AES/GCM/NoPadding";
     private static final int ITERATIONS = 600_000;
@@ -92,7 +91,9 @@ final class BackupManager {
     static final class RestoreResult {
         int added;
         int updated;
-        boolean changed() { return added > 0 || updated > 0; }
+        int plansAdded;
+        int planStatesAdded;
+        boolean changed() { return added > 0 || updated > 0 || plansAdded > 0 || planStatesAdded > 0; }
     }
 
     private BackupManager() {}
@@ -113,6 +114,8 @@ final class BackupManager {
                     BalanceData.serializeTextMap(BalanceData.readReasons(context))))
                 .put("txChannels", new JSONObject(
                     BalanceData.serializeTextMap(BalanceData.readChannels(context))))
+                .put("scheduledPayments", new JSONObject(
+                    BalanceData.serializeScheduledPayments(BalanceData.readScheduledPayments(context))))
                 .toString();
         }
 
@@ -241,6 +244,7 @@ final class BackupManager {
         Map<String, String> backupNotes = new LinkedHashMap<>();
         Map<String, String> backupReasons = new LinkedHashMap<>();
         Map<String, String> backupChannels = new LinkedHashMap<>();
+        List<ScheduledPayment> backupPlans = new ArrayList<>();
         try {
             JSONObject payload = new JSONObject(plain);
             if (payload.has("balances"))
@@ -258,6 +262,15 @@ final class BackupManager {
             if (payload.has("txChannels"))
                 backupChannels = BalanceData.deserializeTextMap(
                     payload.getJSONObject("txChannels").toString());
+            if (payload.has("scheduledPayments")) {
+                // Presence is meaningful: an invalid planner section must reject the complete
+                // backup before any balances, history, or local planner data are mutated. An older
+                // backup that has no section at all is intentionally accepted below unchanged.
+                if (payload.isNull("scheduledPayments"))
+                    throw new IllegalArgumentException("Malformed scheduled payments section");
+                backupPlans = BalanceData.deserializeScheduledPayments(
+                    payload.getJSONObject("scheduledPayments").toString());
+            }
         } catch (Throwable e) {
             // A validly-decrypted but hostile payload can nest its JSON so deeply that parsing
             // exhausts the stack; that must land on the same "wrong password or corrupted backup"
@@ -266,6 +279,37 @@ final class BackupManager {
             throw new BackupException(R.string.backup_error_password);
         }
 
+        // Validate the local planner snapshot before touching any other store. A corrupt local
+        // planner must not be turned into an empty list or leave a partially restored backup behind.
+        List<ScheduledPayment> currentPlans = BalanceData.readScheduledPayments(context);
+        if (currentPlans.size() > ScheduledPayments.MAX_PLANS)
+            throw new BackupException(R.string.backup_error_unsupported);
+        if (!backupPlans.isEmpty()) {
+            Set<String> localIds = new HashSet<>();
+            Map<String, ScheduledPayment> localById = new LinkedHashMap<>();
+            for (ScheduledPayment plan : currentPlans) {
+                localIds.add(plan.id);
+                localById.put(plan.id, plan);
+            }
+            int additions = 0;
+            for (ScheduledPayment plan : backupPlans) {
+                ScheduledPayment local = localById.get(plan.id);
+                if (local == null) {
+                    localIds.add(plan.id); additions++;
+                } else if (local.hasSameSchedule(plan)) {
+                    int missing = 0;
+                    for (Integer sequence : plan.states.keySet())
+                        if (!local.states.containsKey(sequence)) missing++;
+                    if (local.states.size() + missing > ScheduledPayment.MAX_OCCURRENCES)
+                        throw new BackupException(R.string.backup_error_unsupported);
+                }
+            }
+            if (currentPlans.size() + additions > ScheduledPayments.MAX_PLANS)
+                throw new BackupException(R.string.backup_error_unsupported);
+        }
+        Map<String, ?> dataSnapshot = new LinkedHashMap<>(
+            context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).getAll());
+        try {
         LinkedHashMap<String, Bank> current = BalanceData.read(context);
         RestoreResult result = new RestoreResult();
         LinkedHashMap<String, Bank> merged = new LinkedHashMap<>();
@@ -329,7 +373,59 @@ final class BackupManager {
             if (unionLocalFirst(currentChannels, backupChannels))
                 BalanceData.writeChannels(context, currentChannels);
         }
+
+        // Plans are user-authored rather than SMS-derived, so they are merged independently of
+        // balances and transactions. A local definition wins on an ID collision. States can only
+        // cross devices when the complete occurrence schedule, including the stop cutoff, is the
+        // same; an explicit local unpaid state remains authoritative.
+        if (!backupPlans.isEmpty()) {
+            Map<String, ScheduledPayment> byId = new LinkedHashMap<>();
+            for (ScheduledPayment plan : currentPlans) byId.put(plan.id, plan);
+            boolean plansChanged = false;
+            for (ScheduledPayment incoming : backupPlans) {
+                ScheduledPayment existing = byId.get(incoming.id);
+                if (existing == null) {
+                    currentPlans.add(incoming);
+                    byId.put(incoming.id, incoming);
+                    result.plansAdded++;
+                    plansChanged = true;
+                } else {
+                    if (!existing.hasSameSchedule(incoming)) continue;
+                    int before = existing.states.size();
+                    existing.mergeStates(incoming.states);
+                    if (existing.states.size() != before) {
+                        result.planStatesAdded += existing.states.size() - before;
+                        plansChanged = true;
+                    }
+                }
+            }
+            if (plansChanged) BalanceData.writeScheduledPayments(context, currentPlans);
+        }
         return result;
+        } catch (Exception e) {
+            restoreDataSnapshot(context, dataSnapshot);
+            throw e;
+        }
+    }
+
+    /** Restores the raw encrypted preference snapshot when a multi-store restore fails halfway. */
+    private static void restoreDataSnapshot(Context context, Map<String, ?> snapshot) {
+        android.content.SharedPreferences.Editor editor =
+            context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear();
+        for (Map.Entry<String, ?> entry : snapshot.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof String) editor.putString(entry.getKey(), (String) value);
+            else if (value instanceof Boolean) editor.putBoolean(entry.getKey(), (Boolean) value);
+            else if (value instanceof Integer) editor.putInt(entry.getKey(), (Integer) value);
+            else if (value instanceof Long) editor.putLong(entry.getKey(), (Long) value);
+            else if (value instanceof Float) editor.putFloat(entry.getKey(), (Float) value);
+            else if (value instanceof Set<?>) {
+                Set<String> strings = new HashSet<>();
+                for (Object item : (Set<?>) value) if (item instanceof String) strings.add((String) item);
+                editor.putStringSet(entry.getKey(), strings);
+            }
+        }
+        editor.commit();
     }
 
     /** Adds every entry of {@code incoming} that {@code current} does not already have, in place, and

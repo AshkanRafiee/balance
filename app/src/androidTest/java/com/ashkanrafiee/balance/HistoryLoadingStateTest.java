@@ -24,6 +24,12 @@ import org.junit.runner.RunWith;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * What the history screen shows while it is still reading its history.
@@ -38,6 +44,8 @@ public class HistoryLoadingStateTest {
     private Context ctx;
     private String originalTag;
     private String originalCurrency;
+    private HistoryActivity activity;
+    private HoldingRenderExecutor heldRenders;
 
     private static final String MELLAT = "Mellat";
     private static final String ACCOUNT = "111";
@@ -53,33 +61,42 @@ public class HistoryLoadingStateTest {
     }
 
     @After public void tearDown() {
-        LocaleHelper.setLanguage(ctx, originalTag);
-        CurrencyHelper.setCurrency(ctx, originalCurrency);
-        BalanceData.reset(ctx, true);
+        // Restore dispatch before closing the activity: a scan completion can enqueue one last
+        // render while the lifecycle callbacks remove their listener. The held workers are released
+        // and joined below, so none can outlive test cleanup.
+        if (heldRenders != null) HistoryActivity.historyRenderExecutor = heldRenders.previous;
+        try {
+            closeOpenedHistory();
+        } finally {
+            try {
+                if (heldRenders != null) heldRenders.close();
+            } finally {
+                heldRenders = null;
+                LocaleHelper.setLanguage(ctx, originalTag);
+                CurrencyHelper.setCurrency(ctx, originalCurrency);
+                BalanceData.reset(ctx, true);
+            }
+        }
     }
 
-    /**
-     * Enough movements that reading and grouping them takes far longer than the screen takes to
-     * open.
-     *
-     * <p>The placeholders go up during the screen's own setup and come down with the render that
-     * follows, and launching waits for the screen to settle, so this is a race by nature: a store
-     * that reads quickly is simply never caught mid-load. It is sized with a wide margin so the race
-     * is not close — a few thousand movements are finished before the launch returns.
-     */
-    private void storeEnoughToBeSlowToRead() {
+    /** A small real history; the loading test controls the worker rather than its data size. */
+    private void storeHistory() {
         long now = System.currentTimeMillis();
         List<Transaction> txs = new ArrayList<>();
-        for (int i = 0; i < 20000; i++) {
+        for (int i = 0; i < 3; i++) {
             txs.add(new Transaction(MELLAT, ACCOUNT, now - i * HOUR,
                 (i % 3 == 0 ? 1 : -1) * (100_000L + i), "sig" + i, null));
         }
         BalanceData.writeTransactions(ctx, txs);
     }
 
-    @Test public void whileItIsStillReading_theScreenShowsPlaceholdersRatherThanBlank() {
-        storeEnoughToBeSlowToRead();
+    @Test public void whileItIsStillReading_theScreenShowsPlaceholdersRatherThanBlank()
+            throws Exception {
+        storeHistory();
+        heldRenders = new HoldingRenderExecutor();
         openHistory();
+        assertTrue("the history render worker must start",
+            heldRenders.started.await(10, TimeUnit.SECONDS));
 
         assertNotNull("a blank white page is not a loading state",
             findByDescription(ctx.getString(R.string.history_loading)));
@@ -93,10 +110,14 @@ public class HistoryLoadingStateTest {
         // empty cards. The screen has not been measured when the activity starts, so let it have the
         // frames it needs; bars that can never lay out never satisfy this.
         await(() -> allLaidOut(bars), 15_000, "the placeholders to be laid out");
+
+        heldRenders.release();
+        await(() -> findByText(ctx.getString(R.string.history_breakdown)) != null, 60_000,
+            "the history to finish loading after release");
     }
 
     @Test public void onceLoaded_thePlaceholdersAreGone() {
-        storeEnoughToBeSlowToRead();
+        storeHistory();
         openHistory();
 
         // The breakdown heading only exists once a render has produced real history. Waiting on a
@@ -114,7 +135,7 @@ public class HistoryLoadingStateTest {
             .putExtra(HistoryActivity.EXTRA_BANK, MELLAT)
             .putExtra(HistoryActivity.EXTRA_ACCOUNT, ACCOUNT)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        InstrumentationRegistry.getInstrumentation().startActivitySync(i);
+        activity = (HistoryActivity) InstrumentationRegistry.getInstrumentation().startActivitySync(i);
     }
 
     private static boolean allLaidOut(List<View> bars) {
@@ -123,7 +144,7 @@ public class HistoryLoadingStateTest {
     }
 
     /** Every view on screen still wearing a placeholder surface. */
-    private static List<View> shimmerBars() {
+    private List<View> shimmerBars() {
         HistoryActivity a = opened();
         if (a == null) return new ArrayList<>();
         final List<View> hits = new ArrayList<>();
@@ -147,6 +168,7 @@ public class HistoryLoadingStateTest {
                 if (a instanceof HistoryActivity) a.finish();
             }
         });
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
     }
 
     /**
@@ -154,20 +176,16 @@ public class HistoryLoadingStateTest {
      *
      * <p>An activity closed by a previous test can still be in the resumed stage for a moment, and a
      * search across every resumed screen would then find the old one's placeholders and report that
-     * the loading state outlived the load.
+     * the loading state outlived the load. The launch result is retained so no fallback search is
+     * needed.
      */
-    private static HistoryActivity opened() {
-        final List<Activity> out = new ArrayList<>();
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            for (Activity a : ActivityLifecycleMonitorRegistry.getInstance()
-                    .getActivitiesInStage(Stage.RESUMED)) {
-                if (a instanceof HistoryActivity) out.add(a);
-            }
-        });
-        return out.isEmpty() ? null : (HistoryActivity) out.get(out.size() - 1);
+    private HistoryActivity opened() {
+        // Keep all probes tied to the instance this test launched. Looking through every resumed
+        // activity lets a screen left by another test become the source of a loading assertion.
+        return activity;
     }
 
-    private static View findByDescription(String want) {
+    private View findByDescription(String want) {
         // Resolve the activity first: runOnMainSync blocks the caller while the runnable is
         // pending, so asking for it from inside another runOnMainSync would wait on the main
         // thread from the main thread and never come back.
@@ -179,7 +197,7 @@ public class HistoryLoadingStateTest {
         return hits.isEmpty() ? null : hits.get(0);
     }
 
-    private static View findByText(String want) {
+    private View findByText(String want) {
         HistoryActivity a = opened();
         if (a == null) return null;
         final List<View> hits = new ArrayList<>();
@@ -201,6 +219,67 @@ public class HistoryLoadingStateTest {
         if (v instanceof ViewGroup) {
             ViewGroup g = (ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) collect(g.getChildAt(i), want, out);
+        }
+    }
+
+    /** Finish the exact screen opened by this test before resetting its data and preferences. */
+    private void closeOpenedHistory() {
+        if (activity == null) return;
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            if (!activity.isFinishing()) activity.finish();
+        });
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        activity = null;
+    }
+
+    /** Holds every render worker submitted during launch until the loading state is inspected. */
+    private static final class HoldingRenderExecutor implements Executor {
+        final CountDownLatch started = new CountDownLatch(1);
+        private final CountDownLatch release = new CountDownLatch(1);
+        private final ExecutorService workers = Executors.newSingleThreadExecutor();
+        private final AtomicReference<Throwable> failure = new AtomicReference<>();
+        final Executor previous;
+
+        HoldingRenderExecutor() {
+            previous = HistoryActivity.historyRenderExecutor;
+            HistoryActivity.historyRenderExecutor = this;
+        }
+
+        @Override public void execute(Runnable command) {
+            workers.execute(() -> {
+                started.countDown();
+                try {
+                    if (!release.await(60, TimeUnit.SECONDS)) {
+                        throw new AssertionError("history render gate was not released");
+                    }
+                    command.run();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    failure.compareAndSet(null, e);
+                } catch (Throwable t) {
+                    failure.compareAndSet(null, t);
+                }
+            });
+        }
+
+        void release() {
+            release.countDown();
+        }
+
+        void close() {
+            release();
+            workers.shutdown();
+            try {
+                assertTrue("history render workers must finish before cleanup",
+                    workers.awaitTermination(60, TimeUnit.SECONDS));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("interrupted while waiting for history render workers", e);
+            } finally {
+                workers.shutdownNow();
+            }
+            Throwable t = failure.get();
+            if (t != null) throw new AssertionError("history render worker failed", t);
         }
     }
 

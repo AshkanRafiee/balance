@@ -42,6 +42,8 @@ final class BalanceData {
      *  own, for the same reason: a stated channel is a fact about the message, never something the user
      *  wrote, and a note must be able to clear without taking it with it. */
     static final String KEY_TX_CHANNELS = "transaction_channels";
+    /** Manually entered payment plans and their per-occurrence states. Kept apart from SMS history. */
+    static final String KEY_SCHEDULED_PAYMENTS = "scheduled_payments";
     /** Upper bound on one transaction note, so a huge paste cannot bloat the encrypted store. */
     static final int MAX_NOTE_LENGTH = 500;
     static final String PREFS_PREF = "balance_preferences";
@@ -129,7 +131,7 @@ final class BalanceData {
      *  ("-200,000,000" on its own line, resulting balance on the last). The explicit sign tells the
      *  direction, so no label or keyword is needed. */
     private static final Pattern signedAmount = Pattern.compile(
-        "^\\s*([+-])\\s*([0-9][0-9,]*)", Pattern.MULTILINE);
+        "(?m)^[ \\t\\u202A-\\u202E]*([+-])[ \\t]*([0-9][0-9,]*)[ \\t\\u202A-\\u202E]*$");
     /** A bare, signed amount on its own line with the sign after the number, as Mehr Iran writes it
      *  ("400,000-" on its own line, resulting balance on the last). Allowing RTL bidi marks around
      *  the amount and holding the whole line to the shape "digits, optional sign" keeps unsigned
@@ -394,6 +396,192 @@ final class BalanceData {
         writeTextStore(context, KEY_TX_CHANNELS, channels);
     }
 
+    // ====================================================================
+    // Scheduled payments
+    // ====================================================================
+
+    /**
+     * Reads manually entered plans from the encrypted data store.
+     *
+     * <p>A planner blob is one atomic snapshot.  A missing blob means no plans; a present but
+     * malformed blob is an error, never an empty list that a later save could overwrite.
+     */
+    static List<ScheduledPayment> readScheduledPayments(Context context) {
+        synchronized (BalanceData.class) {
+            try {
+                String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
+                    .getString(KEY_SCHEDULED_PAYMENTS, null);
+                if (stored == null) return new ArrayList<>();
+                String trimmed = stored.trim();
+                boolean legacy = trimmed.startsWith("{");
+                String json = legacy ? trimmed : decrypt(stored);
+                List<ScheduledPayment> plans = deserializeScheduledPayments(json);
+                // Plaintext was accepted by the first planner implementation. Upgrade only after
+                // the complete section has parsed and validated; the corrupt-blob path never writes.
+                if (legacy) writeScheduledPayments(context, plans);
+                return plans;
+            } catch (Exception e) {
+                Log.w(TAG, "scheduled payments read failed");
+                throw new IllegalStateException("Scheduled payments storage is corrupt", e);
+            }
+        }
+    }
+
+    /** Persists the whole planner snapshot as one encrypted blob, so a plan and its states cannot drift. */
+    static void writeScheduledPayments(Context context, List<ScheduledPayment> plans) {
+        synchronized (BalanceData.class) {
+            try {
+                android.content.SharedPreferences.Editor e =
+                    context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit();
+                if (plans == null || plans.isEmpty()) {
+                    if (!e.remove(KEY_SCHEDULED_PAYMENTS).commit())
+                        throw new IllegalStateException("Scheduled payments delete failed");
+                    if (context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
+                            .contains(KEY_SCHEDULED_PAYMENTS))
+                        throw new IllegalStateException("Scheduled payments delete was not confirmed");
+                    return;
+                }
+                String encrypted = encrypt(serializeScheduledPayments(plans));
+                if (!e.putString(KEY_SCHEDULED_PAYMENTS, encrypted).commit())
+                    throw new IllegalStateException("Scheduled payments write failed");
+                String confirmed = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
+                    .getString(KEY_SCHEDULED_PAYMENTS, null);
+                if (!encrypted.equals(confirmed))
+                    throw new IllegalStateException("Scheduled payments write was not confirmed");
+            } catch (Exception ex) {
+                if (ex instanceof IllegalStateException) throw (IllegalStateException) ex;
+                Log.w(TAG, "scheduled payments write failed");
+                throw new IllegalStateException("Scheduled payments write failed", ex);
+            }
+        }
+    }
+
+    static String serializeScheduledPayments(List<ScheduledPayment> plans) throws Exception {
+        JSONArray arr = new JSONArray();
+        if (plans != null) {
+            for (ScheduledPayment plan : plans) {
+                if (plan == null) throw new IllegalArgumentException("Null scheduled payment");
+                if (arr.length() >= ScheduledPayments.MAX_PLANS)
+                    throw new IllegalArgumentException("Too many scheduled payments");
+                plan.validate();
+                arr.put(plan.toJson());
+            }
+        }
+        return new JSONObject().put("schema", 1).put("plans", arr).toString();
+    }
+
+    static List<ScheduledPayment> deserializeScheduledPayments(String json) {
+        try {
+            if (json == null) throw new IllegalArgumentException("Missing scheduled payments JSON");
+            JSONObject root = new JSONObject(json);
+            if (root.getInt("schema") != 1) throw new IllegalArgumentException("Unsupported planner schema");
+            JSONArray arr = root.getJSONArray("plans");
+            if (arr.length() > ScheduledPayments.MAX_PLANS)
+                throw new IllegalArgumentException("Too many scheduled payments");
+            List<ScheduledPayment> out = new ArrayList<>(arr.length());
+            Set<String> ids = new HashSet<>();
+            for (int i = 0; i < arr.length(); i++) {
+                ScheduledPayment plan = ScheduledPayment.fromJson(arr.getJSONObject(i));
+                if (!ids.add(plan.id)) throw new IllegalArgumentException("Duplicate scheduled payment id");
+                out.add(plan);
+            }
+            return out;
+        } catch (Exception e) {
+            if (e instanceof IllegalArgumentException) throw (IllegalArgumentException) e;
+            throw new IllegalArgumentException("Scheduled payments JSON unreadable", e);
+        }
+    }
+
+    static void saveScheduledPayment(Context context, ScheduledPayment plan) {
+        if (plan == null) throw new IllegalStateException("Scheduled payment required");
+        synchronized (BalanceData.class) {
+            List<ScheduledPayment> plans = readScheduledPayments(context);
+            boolean replaced = false;
+            for (int i = 0; i < plans.size(); i++) {
+                if (plans.get(i).id.equals(plan.id)) {
+                    ScheduledPayment existing = plans.get(i);
+                    // The first date and frequency define the stable sequence identity. Once a
+                    // state exists those fields cannot move; end metadata can change, and the
+                    // existing states are copied back even when an older UI candidate omitted them.
+                    if (!existing.states.isEmpty() && !existing.hasSameOccurrenceIdentity(plan))
+                        throw new IllegalStateException("Cannot change an active schedule with history");
+                    if (!existing.states.isEmpty()) {
+                        plan.states.clear();
+                        plan.states.putAll(existing.states);
+                    }
+                    if (plan.stoppedAfter == null && existing.stoppedAfter != null)
+                        plan.stoppedAfter = existing.stoppedAfter;
+                    plan.archived = existing.archived;
+                    try {
+                        plan.validate();
+                    } catch (IllegalArgumentException ex) {
+                        throw new IllegalStateException("Invalid scheduled payment", ex);
+                    }
+                    plans.set(i, plan);
+                    replaced = true;
+                    break;
+                }
+            }
+            if (!replaced) {
+                try { plan.validate(); }
+                catch (IllegalArgumentException ex) { throw new IllegalStateException("Invalid scheduled payment", ex); }
+                if (plans.size() >= ScheduledPayments.MAX_PLANS)
+                    throw new IllegalStateException("Too many scheduled payments");
+                plans.add(plan);
+            }
+            writeScheduledPayments(context, plans);
+        }
+    }
+
+    static boolean deleteScheduledPayment(Context context, String id) {
+        if (id == null || !ScheduledPayment.ID_PATTERN.matcher(id).matches()) return false;
+        synchronized (BalanceData.class) {
+            List<ScheduledPayment> plans = readScheduledPayments(context);
+            boolean removed = false;
+            for (int i = plans.size() - 1; i >= 0; i--)
+                if (plans.get(i).id.equals(id)) { plans.remove(i); removed = true; }
+            if (removed) writeScheduledPayments(context, plans);
+            return removed;
+        }
+    }
+
+    /** Changes only one derived occurrence; this never creates a transaction or changes a balance. */
+    static boolean setScheduledPaymentState(Context context, String id, int sequence, int state) {
+        if (id == null || !ScheduledPayment.ID_PATTERN.matcher(id).matches()) return false;
+        synchronized (BalanceData.class) {
+            List<ScheduledPayment> plans = readScheduledPayments(context);
+            for (ScheduledPayment plan : plans) {
+                if (!plan.id.equals(id)) continue;
+                try { plan.setState(sequence, state); }
+                catch (IllegalArgumentException ex) { throw new IllegalStateException("Invalid occurrence", ex); }
+                writeScheduledPayments(context, plans);
+                return true;
+            }
+            return false;
+        }
+    }
+
+    /** Stops future occurrences while retaining all past and cutoff-day states. */
+    static boolean stopScheduledPayment(Context context, String id, ScheduledDate today) {
+        if (id == null || today == null || !ScheduledPayment.ID_PATTERN.matcher(id).matches()) return false;
+        synchronized (BalanceData.class) {
+            List<ScheduledPayment> plans = readScheduledPayments(context);
+            for (ScheduledPayment plan : plans) {
+                if (!plan.id.equals(id)) continue;
+                ScheduledDate cutoff = today;
+                if (today.calendar != plan.calendar) {
+                    int[] g = today.toGregorian();
+                    cutoff = ScheduledDate.fromGregorian(g[0], g[1], g[2], plan.calendar);
+                }
+                if (!plan.hasFutureOccurrences(cutoff)) return false;
+                plan.setStoppedAfter(cutoff);
+                writeScheduledPayments(context, plans);
+                return true;
+            }
+            return false;
+        }
+    }
+
     /** Reads one encrypted {@code key → text} store, or an empty map when it holds nothing or cannot
      *  be read. A value left in plaintext by an older build is still accepted. */
     private static Map<String, String> readTextStore(Context context, String key) {
@@ -583,8 +771,9 @@ final class BalanceData {
      *  behave like a fresh install and rebuild from the messages currently in the inbox. Display
      *  preferences are deliberately untouched — the hide/unmask toggle, the language and the sort mode
      *  are choices, not data (a data reset must not dump the user back to defaults); the excluded
-     *  entries are forgotten too, because a fresh install has no exclusions. Transaction notes are a
-     *  hard-won recollection, so they are kept unless the user explicitly opts into deleting them. The
+     *  entries are forgotten too, because a fresh install has no exclusions. Manually entered scheduled
+     *  payments are deliberately preserved because this operation rebuilds SMS-derived data only.
+     *  Transaction notes are a hard-won recollection, so they are kept unless the user explicitly opts into deleting them. The
      *  reasons and channels the bank stated go either way: they are the bank's own words, re-read from
      *  the messages the rebuild below reprocesses, and the transactions they describe are deleted here
      *  with everything else — keeping them would only leave entries nothing points at. */
@@ -1494,8 +1683,17 @@ final class BalanceData {
         int sign = 0;
         int labelDir = 0;
 
+        // A signed amount on the first line is unambiguous. Resolve it before broad "مبلغ" scans:
+        // a later explanatory sentence can contain that word and a following date, which must never
+        // be mistaken for the movement amount.
+        Matcher leadingSigned = signedAmount.matcher(n);
+        if (leadingSigned.find()) {
+            sign = leadingSigned.group(1).equals("-") ? -1 : 1;
+            amount = toLong(leadingSigned.group(2));
+        }
+
         // 1) Amount following the "مبلغ" label, with an optional explicit sign.
-        String g = lastGroup(amountLabel, n);
+        String g = amount > 0 ? null : lastGroup(amountLabel, n);
         if (g != null) {
             String t = g.trim();
             if (t.startsWith("-") || t.endsWith("-")) sign = -1;

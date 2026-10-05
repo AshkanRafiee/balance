@@ -94,7 +94,7 @@ final class BankRules {
         {"Ghavamin", "Ghavamin|Ghavamin Bank", "J"},
         {"Zamin", "Iran Zamin|IranZamin", "J"},
         {"Gardeshgari", "Gardeshgari|Tourism Bank", "J"},
-        {"Middle East", "Middle East Bank|Khavarmianeh", "J"},
+        {"Middle East", "Middle East Bank|Khavarmianeh|بانک خاورمیانه", "J"},
         {"Tosee", "Tosee|Tosee Bank", "J"},
         {"Karafarin", "Karafarin|Karafarin Bank", "J"},
         {"Resalat", "Resalat|Bank Resalat", "J"},
@@ -363,6 +363,7 @@ final class BankRules {
         {"Mehr",     "bare-bidi",       "10", "24"},
         {"Resalat",  "dotted",          "",   ""},
         {"Pasargad", "dotted-line",     "",   ""},
+        {"Middle East", "slash-line",    "",   ""},
     };
 
     /** Builds the matcher for one {@link #ACCOUNT_RULES} row. Each shape carries the guards — the
@@ -387,6 +388,8 @@ final class BankRules {
                 return Pattern.compile("(?<![0-9])[0-9]{1,2}\\.[0-9]{4,12}\\.[0-9]{1,2}(?![0-9])");
             case "dotted-line":   // Pasargad: four-part dotted id alone on its own line
                 return Pattern.compile("(?m)^[0-9]{1,4}\\.[0-9]{1,6}\\.[0-9]{6,12}\\.[0-9]{1,3}(?![0-9.])\\s*\\r?$");
+            case "slash-line":    // Middle East: branch/account identifier, e.g. 020/002863516
+                return Pattern.compile("(?m)^([0-9]{3}/[0-9]{9})[ \\t]*\\r?$");
             default:
                 throw new IllegalArgumentException("unknown account shape '" + shape + "' for " + row[0]);
         }
@@ -432,6 +435,7 @@ final class BankRules {
      *  {bank, shape}. */
     private static final String[][] REASON_RULES = {
         {"Blu", "title-line"},
+        {"Middle East", "final-line"},
     };
 
     /** Longest title line {@link #compileReason} will read as a reason. A bank names the event in a few
@@ -455,6 +459,7 @@ final class BankRules {
         REASON_CAPTION_RES.put("برگشت پول", R.string.reason_refund);
         REASON_CAPTION_RES.put("دریافت پل", R.string.reason_transfer_in);
         REASON_CAPTION_RES.put("انتقال پل", R.string.reason_transfer_out);
+        REASON_CAPTION_RES.put("واریز مبلغ افزایش موجودی حساب", R.string.reason_balance_increase);
     }
 
     /** Builds the matcher for one {@link #REASON_RULES} row. Each shape carries the guards that keep a
@@ -476,6 +481,9 @@ final class BankRules {
                 // scan that is holding the store's lock.
                 return Pattern.compile("\\A[^\\r\\n]*\\r?\\n[ \\t]*([^\\d\\s\\r\\n][^\\d\\r\\n]{0,"
                     + (MAX_REASON_LENGTH - 2) + "}[^\\d\\s\\r\\n])[ \\t]*\\r?\\n");
+            case "final-line":   // Middle East: the bank's movement explanation is the final line.
+                return Pattern.compile("(?s)(?:\\A|\\r?\\n)[ \\t]*([^\\d\\s\\r\\n][^\\d\\r\\n]{0,"
+                    + (MAX_REASON_LENGTH - 2) + "}[^\\d\\s\\r\\n])[ \\t]*(?:\\r?\\n)?\\z");
             default:
                 throw new IllegalArgumentException("unknown reason shape '" + row[1] + "' for " + row[0]);
         }
