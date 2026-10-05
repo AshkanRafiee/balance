@@ -151,6 +151,7 @@ public final class ScheduledPaymentsActivity extends Activity {
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .putExtra(MainActivity.EXTRA_TAB, tab);
         startActivity(intent);
+        disableOpenTransition();
     }
 
     private void refreshMask() {
@@ -195,7 +196,7 @@ public final class ScheduledPaymentsActivity extends Activity {
         back.setGravity(Gravity.CENTER);
         back.setContentDescription(getString(R.string.scheduled_back));
         back.setBackground(ripple(round(panel, 24)));
-        back.setOnClickListener(v -> finish());
+        back.setOnClickListener(v -> finishWithoutTransition());
         bar.addView(back, lp(48, 48, 0, 0, 0, 0));
 
         TextView title = text(getString(R.string.scheduled_title), 22, fg);
@@ -223,6 +224,29 @@ public final class ScheduledPaymentsActivity extends Activity {
         });
         bar.addView(mask, 1, lp(48, 48, 0, 0, 0, 0));
         return bar;
+    }
+
+    private void finishWithoutTransition() {
+        finish();
+        disableCloseTransition();
+    }
+
+    @SuppressWarnings("deprecation")
+    private void disableOpenTransition() {
+        if (android.os.Build.VERSION.SDK_INT >= 34)
+            overrideActivityTransition(Activity.OVERRIDE_TRANSITION_OPEN, 0, 0);
+        else overridePendingTransition(0, 0);
+    }
+
+    @SuppressWarnings("deprecation")
+    private void disableCloseTransition() {
+        if (android.os.Build.VERSION.SDK_INT >= 34)
+            overrideActivityTransition(Activity.OVERRIDE_TRANSITION_CLOSE, 0, 0);
+        else overridePendingTransition(0, 0);
+    }
+
+    @Override public void onBackPressed() {
+        finishWithoutTransition();
     }
 
     private void loadPlans() {

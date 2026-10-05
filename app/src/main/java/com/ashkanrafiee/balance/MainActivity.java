@@ -163,13 +163,19 @@ public class MainActivity extends Activity {
             activeTab = BottomNavigation.HOME;
             if (navigation != null) navigation.setSelectedTab(BottomNavigation.HOME);
             startActivity(new Intent(this, ScheduledPaymentsActivity.class));
+            disableOpenTransition();
+            return;
+        }
+        if (tab == BottomNavigation.SAVINGS) {
+            activeTab = BottomNavigation.HOME;
+            if (navigation != null) navigation.setSelectedTab(BottomNavigation.HOME);
+            startActivity(new Intent(this, SavingsActivity.class));
+            disableOpenTransition();
             return;
         }
         content.removeAllViews();
         if (tab == BottomNavigation.HOME) {
             content.addView(view, new FrameLayout.LayoutParams(-1, -1));
-        } else if (tab == BottomNavigation.SAVINGS) {
-            content.addView(buildSavingsPage(), new FrameLayout.LayoutParams(-1, -1));
         } else {
             content.addView(buildSettingsPage(), new FrameLayout.LayoutParams(-1, -1));
         }
@@ -215,7 +221,7 @@ public class MainActivity extends Activity {
         TextView heading = pageHeading(getString(R.string.savings_heading));
         heading.setGravity(Gravity.CENTER);
         body.addView(heading, pageMargins(0, 8, 0, 10));
-        TextView placeholder = pageDescription(getString(R.string.savings_coming_soon));
+        TextView placeholder = pageDescription(getString(R.string.savings_empty));
         placeholder.setGravity(Gravity.CENTER);
         body.addView(placeholder, pageMargins(0, 0, 0, 20));
 
@@ -1331,7 +1337,9 @@ public class MainActivity extends Activity {
                     }
                 } else {
                     view.loadSaved();
-                    String summary = res.plansAdded > 0 || res.planStatesAdded > 0
+                    String summary = res.savingsAdded > 0
+                        ? getString(R.string.backup_restore_summary_with_assets, res.added, res.updated, res.savingsAdded)
+                        : res.plansAdded > 0 || res.planStatesAdded > 0
                         ? getString(R.string.backup_restore_summary_with_plans, res.added, res.updated,
                             res.plansAdded + res.planStatesAdded)
                         : res.changed()
@@ -1406,6 +1414,13 @@ public class MainActivity extends Activity {
 
     private int resColor(int res) {
         return getResources().getColor(res, getTheme());
+    }
+
+    @SuppressWarnings("deprecation")
+    private void disableOpenTransition() {
+        if (android.os.Build.VERSION.SDK_INT >= 34)
+            overrideActivityTransition(Activity.OVERRIDE_TRANSITION_OPEN, 0, 0);
+        else overridePendingTransition(0, 0);
     }
 
     private boolean isRtl() {

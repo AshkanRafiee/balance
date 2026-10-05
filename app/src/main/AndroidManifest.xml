@@ -20,6 +20,7 @@
         <activity android:name=".SenderShareActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity android:name=".HistoryActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity android:name=".ScheduledPaymentsActivity" android:screenOrientation="portrait" android:exported="false" />
+        <activity android:name=".SavingsActivity" android:screenOrientation="portrait" android:exported="false" />
         <receiver android:name=".BalanceWidgetProvider" android:exported="false">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />

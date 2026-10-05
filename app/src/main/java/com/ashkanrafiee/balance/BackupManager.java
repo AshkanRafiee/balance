@@ -52,8 +52,9 @@ final class BackupManager {
     private static final int FORMAT_VERSION = 1;
     /** Payload shape: 1 = balances only, 2 = balances + transactions, 3 = balances + transactions +
      *  notes, 4 = those plus the reasons the banks stated, 5 = those plus the channels they stated,
-     *  6 = those plus manually entered scheduled payments. Older backups remain readable. */
-    private static final int PAYLOAD_FORMAT = 6;
+     *  6 = those plus manually entered scheduled payments, 7 = those plus manual savings assets.
+     *  Older backups remain readable. */
+    private static final int PAYLOAD_FORMAT = 7;
     private static final String KDF_ALGORITHM = "PBKDF2WithHmacSHA256";
     private static final String CIPHER_ALGORITHM = "AES/GCM/NoPadding";
     private static final int ITERATIONS = 600_000;
@@ -93,7 +94,8 @@ final class BackupManager {
         int updated;
         int plansAdded;
         int planStatesAdded;
-        boolean changed() { return added > 0 || updated > 0 || plansAdded > 0 || planStatesAdded > 0; }
+        int savingsAdded;
+        boolean changed() { return added > 0 || updated > 0 || plansAdded > 0 || planStatesAdded > 0 || savingsAdded > 0; }
     }
 
     private BackupManager() {}
@@ -116,6 +118,8 @@ final class BackupManager {
                     BalanceData.serializeTextMap(BalanceData.readChannels(context))))
                 .put("scheduledPayments", new JSONObject(
                     BalanceData.serializeScheduledPayments(BalanceData.readScheduledPayments(context))))
+                .put("savings", new JSONObject(
+                    BalanceData.serializeSavingsAssets(BalanceData.readSavingsAssets(context))))
                 .toString();
         }
 
@@ -245,6 +249,7 @@ final class BackupManager {
         Map<String, String> backupReasons = new LinkedHashMap<>();
         Map<String, String> backupChannels = new LinkedHashMap<>();
         List<ScheduledPayment> backupPlans = new ArrayList<>();
+        List<SavingsAsset> backupSavings = new ArrayList<>();
         try {
             JSONObject payload = new JSONObject(plain);
             if (payload.has("balances"))
@@ -271,6 +276,10 @@ final class BackupManager {
                 backupPlans = BalanceData.deserializeScheduledPayments(
                     payload.getJSONObject("scheduledPayments").toString());
             }
+            if (payload.has("savings")) {
+                if (payload.isNull("savings")) throw new IllegalArgumentException("Malformed savings section");
+                backupSavings = BalanceData.deserializeSavingsAssets(payload.getJSONObject("savings").toString());
+            }
         } catch (Throwable e) {
             // A validly-decrypted but hostile payload can nest its JSON so deeply that parsing
             // exhausts the stack; that must land on the same "wrong password or corrupted backup"
@@ -282,6 +291,7 @@ final class BackupManager {
         // Validate the local planner snapshot before touching any other store. A corrupt local
         // planner must not be turned into an empty list or leave a partially restored backup behind.
         List<ScheduledPayment> currentPlans = BalanceData.readScheduledPayments(context);
+        List<SavingsAsset> currentSavings = BalanceData.readSavingsAssets(context);
         if (currentPlans.size() > ScheduledPayments.MAX_PLANS)
             throw new BackupException(R.string.backup_error_unsupported);
         if (!backupPlans.isEmpty()) {
@@ -306,6 +316,30 @@ final class BackupManager {
             }
             if (currentPlans.size() + additions > ScheduledPayments.MAX_PLANS)
                 throw new BackupException(R.string.backup_error_unsupported);
+        }
+        if (currentSavings.size() > SavingsAsset.MAX_ITEMS)
+            throw new BackupException(R.string.backup_error_unsupported);
+        if (!backupSavings.isEmpty()) {
+            Set<String> savingsIds = new HashSet<>();
+            for (SavingsAsset asset : currentSavings) savingsIds.add(asset.id);
+            int newSavings = 0;
+            List<SavingsAsset> mergedSavingsForValidation = new ArrayList<>(currentSavings);
+            for (SavingsAsset asset : backupSavings) {
+                if (savingsIds.add(asset.id)) {
+                    newSavings++;
+                    mergedSavingsForValidation.add(asset);
+                }
+            }
+            if (currentSavings.size() + newSavings > SavingsAsset.MAX_ITEMS)
+                throw new BackupException(R.string.backup_error_unsupported);
+            // Do this before balances, history, notes, or plans are touched. A backup may contain
+            // rows that are valid alone but whose combined estimated value cannot fit the public
+            // long-valued total API.
+            try {
+                SavingsAsset.totalRial(mergedSavingsForValidation);
+            } catch (IllegalArgumentException e) {
+                throw new BackupException(R.string.backup_error_unsupported);
+            }
         }
         Map<String, ?> dataSnapshot = new LinkedHashMap<>(
             context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).getAll());
@@ -400,6 +434,18 @@ final class BackupManager {
                 }
             }
             if (plansChanged) BalanceData.writeScheduledPayments(context, currentPlans);
+        }
+        if (!backupSavings.isEmpty()) {
+            Map<String, SavingsAsset> byId = new LinkedHashMap<>();
+            for (SavingsAsset asset : currentSavings) byId.put(asset.id, asset);
+            List<SavingsAsset> mergedSavings = new ArrayList<>(currentSavings);
+            for (SavingsAsset incoming : backupSavings) {
+                if (byId.containsKey(incoming.id)) continue;
+                mergedSavings.add(incoming);
+                byId.put(incoming.id, incoming);
+                result.savingsAdded++;
+            }
+            if (result.savingsAdded > 0) BalanceData.writeSavingsAssets(context, mergedSavings);
         }
         return result;
         } catch (Exception e) {

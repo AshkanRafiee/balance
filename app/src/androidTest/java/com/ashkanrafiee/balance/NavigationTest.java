@@ -3,7 +3,10 @@ package com.ashkanrafiee.balance;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
+import android.view.View;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -68,5 +71,85 @@ public class NavigationTest {
         assertEquals(0, navigation.get().getLeft());
         assertEquals(parent.get().getWidth(), navigation.get().getRight());
         assertEquals(parent.get().getWidth(), navigation.get().getMeasuredWidth());
+    }
+
+    @Test public void realSavingsAndPaymentsBarsReachBothWindowEdges() {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Activity savings = null;
+        Activity payments = null;
+        try {
+            savings = InstrumentationRegistry.getInstrumentation().startActivitySync(
+                new Intent(context, SavingsActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            BottomNavigation savingsBar = awaitNavigation(savings);
+            assertWindowEdges(savingsBar, context);
+
+            finish(savings);
+            savings = null;
+
+            payments = InstrumentationRegistry.getInstrumentation().startActivitySync(
+                new Intent(context, ScheduledPaymentsActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            BottomNavigation paymentsBar = awaitNavigation(payments);
+            assertWindowEdges(paymentsBar, context);
+        } finally {
+            finish(payments);
+            finish(savings);
+        }
+    }
+
+    private static BottomNavigation awaitNavigation(Activity activity) {
+        long deadline = System.currentTimeMillis() + 10_000L;
+        while (System.currentTimeMillis() < deadline) {
+            AtomicReference<BottomNavigation> result = new AtomicReference<>();
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                View found = find(activity.getWindow().getDecorView(), view -> view instanceof BottomNavigation);
+                if (found instanceof BottomNavigation && found.getWidth() > 0) {
+                    result.set((BottomNavigation) found);
+                }
+            });
+            if (result.get() != null) return result.get();
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+            sleep(50);
+        }
+        throw new AssertionError("timed out waiting for the real bottom navigation");
+    }
+
+    private static void assertWindowEdges(BottomNavigation navigation, Context context) {
+        AtomicReference<int[]> location = new AtomicReference<>();
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            int[] point = new int[2];
+            navigation.getLocationOnScreen(point);
+            location.set(new int[]{point[0], point[0] + navigation.getWidth()});
+        });
+        assertEquals(0, location.get()[0]);
+        assertEquals(context.getResources().getDisplayMetrics().widthPixels, location.get()[1]);
+    }
+
+    private static void finish(Activity activity) {
+        if (activity == null) return;
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(activity::finish);
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+    }
+
+    private interface Match { boolean accepts(View view); }
+
+    private static View find(View root, Match match) {
+        if (match.accepts(root)) return root;
+        if (root instanceof android.view.ViewGroup) {
+            android.view.ViewGroup group = (android.view.ViewGroup) root;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View found = find(group.getChildAt(i), match);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("interrupted while waiting for navigation", e);
+        }
     }
 }

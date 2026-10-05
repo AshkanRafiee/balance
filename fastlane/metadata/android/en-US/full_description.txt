@@ -1,15 +1,15 @@
-Balance reads your bank's balance SMS on the phone and shows the latest balance for every supported bank — split per account number when the bank states one — plus the combined total. No account, no cloud, no analytics and no internet permission: the parsing happens on your device, and your financial data stays there, encrypted.
+Balance reads bank balance SMS locally and shows the latest balance for each supported bank — split by account when stated — plus a combined total. No account, cloud, analytics or internet permission: all saved financial data stays encrypted on your device, and backups use your password.
 
 Currently built for users in Iran, with Iranian banks and their Persian message formats.
 
 Features:
-- Four bottom tabs: Balance, Payments, Savings (reserved for a future feature), and Settings. Settings contains About, Display, Data and Report
-- A contextual first-run introduction explaining what is read and why; it is skippable, re-openable from Settings > About, and asks for SMS access there. All parsing is offline, with no network request
+- Four bottom tabs: Balance, Payments, Savings and Settings. Settings contains About, Display, Data and Report
+- A contextual, skippable first-run introduction explaining what is read and why; reopen it from Settings > About and request SMS access there. Parsing is offline, with no network request
 - Latest balance per bank, split per account when stated, without counting the same message twice, plus a combined total with optional account exclusions
 - A manual Payments tab for one-off payments, subscriptions, debts and fixed loan installments. Choose weekly, monthly or yearly repeats and end by date or count; mark each occurrence paid or unpaid. It estimates included balances minus this month's unpaid plans and lists overdue plans separately
 - Stop a plan after today while preserving its existing occurrences and paid states. Planned payments never make an actual payment, change bank balances or history, or match themselves against SMS transactions
+- Separate Savings page for gold grams and bars (18/24 karat), silver grams, Emami, Bahar Azadi, Half, Rob, Gram or Other coins (before 1386 or 1386 and newer), and USD, EUR, GBP or custom currencies. Enter each quantity and current unit value. Its estimated total is independent of balances, payments, history and the widget; prices are never fetched online
 - Toman (default), Rial as stored, or a custom currency name, with balances masked by default and hidden again on every open
-- Automatic SMS updates, pull-to-refresh on the bank list or history, and a freshness warning for old balances
 - Turning SMS access off deletes nothing — everything already read stays on screen, and a strip under the total card offers to grant access again
 - Home-screen widget with the same bank order, totals and masking, in its own color theme, locking together with the app
 - Transaction history by day, month and year, keeping out-of-order messages (such as a transfer and its fee) in their true order
@@ -18,12 +18,12 @@ Features:
 - Bank-stated movement reasons and channels — such as phone top-ups, bill payments, refunds and instant transfers — shown in your language and kept separate from your notes
 - Private notes: tap any row to write your own words about that movement; they follow it through every filter, into CSV exports and into encrypted backups
 - CSV export of the history shown at that moment, including your notes and the bank's stated reason and channel
-- Password-encrypted backup and restore of balances, history, notes, planned payments, their payment states, reasons and channels
-- A full SMS reset in Settings > Data, confirmed twice; it rebuilds SMS-derived balances and history while preserving manual payment plans and their payment states
+- Encrypted storage with password-encrypted backup and restore for all saved financial data: balances, history, notes, payment plans and states, savings holdings, reasons and channels
+- A full SMS reset in Settings > Data, confirmed twice; it rebuilds SMS-derived data while preserving manual plans and holdings
 - Optional in-app lock with PIN, password or fingerprint, covering the app, the widget and screenshots/recents
 - English and Persian interface, Persian (Jalali) or Gregorian calendar, and a light or dark theme that follows the device
 - Settings > Report shows which bank messages parse and which do not, and lets you send or copy exactly the ones you pick
 
-Free and open source. If your bank's messages are not recognized, or a balance or account looks wrong, telling us — through Settings > Report, the issue tracker or email — is the fastest way to get it added.
+Free and open source. Report unrecognized bank messages or wrong balances through Settings > Report, the issue tracker or email.
 
-If Balance is useful to you, you can support its development: donation options are in the project readme at https://github.com/AshkanRafiee/balance#donate
+Support Balance: donation options are in the project readme at https://github.com/AshkanRafiee/balance#donate

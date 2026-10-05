@@ -44,6 +44,8 @@ final class BalanceData {
     static final String KEY_TX_CHANNELS = "transaction_channels";
     /** Manually entered payment plans and their per-occurrence states. Kept apart from SMS history. */
     static final String KEY_SCHEDULED_PAYMENTS = "scheduled_payments";
+    /** Manual holdings, separate from bank balances and planned payments. */
+    static final String KEY_SAVINGS_ASSETS = "savings_assets";
     /** Upper bound on one transaction note, so a huge paste cannot bloat the encrypted store. */
     static final int MAX_NOTE_LENGTH = 500;
     static final String PREFS_PREF = "balance_preferences";
@@ -579,6 +581,117 @@ final class BalanceData {
                 return true;
             }
             return false;
+        }
+    }
+
+    // ====================================================================
+    // Manual savings assets
+    // ====================================================================
+
+    static List<SavingsAsset> readSavingsAssets(Context context) {
+        synchronized (BalanceData.class) {
+            try {
+                String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
+                    .getString(KEY_SAVINGS_ASSETS, null);
+                if (stored == null) return new ArrayList<>();
+                String json = stored.trim().startsWith("{") ? stored : decrypt(stored);
+                List<SavingsAsset> assets = deserializeSavingsAssets(json);
+                if (stored.trim().startsWith("{")) writeSavingsAssets(context, assets);
+                return assets;
+            } catch (Exception e) {
+                Log.w(TAG, "savings assets read failed");
+                throw new IllegalStateException("Savings data is corrupt", e);
+            }
+        }
+    }
+
+    static void writeSavingsAssets(Context context, List<SavingsAsset> assets) {
+        synchronized (BalanceData.class) {
+            try {
+                android.content.SharedPreferences.Editor editor =
+                    context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit();
+                if (assets == null || assets.isEmpty()) {
+                    if (!editor.remove(KEY_SAVINGS_ASSETS).commit())
+                        throw new IllegalStateException("Savings data delete failed");
+                    return;
+                }
+                String encrypted = encrypt(serializeSavingsAssets(assets));
+                if (!editor.putString(KEY_SAVINGS_ASSETS, encrypted).commit())
+                    throw new IllegalStateException("Savings data write failed");
+                if (!encrypted.equals(context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
+                        .getString(KEY_SAVINGS_ASSETS, null)))
+                    throw new IllegalStateException("Savings data write was not confirmed");
+            } catch (Exception e) {
+                if (e instanceof IllegalStateException) throw (IllegalStateException) e;
+                throw new IllegalStateException("Savings data write failed", e);
+            }
+        }
+    }
+
+    static String serializeSavingsAssets(List<SavingsAsset> assets) throws Exception {
+        if (assets == null) assets = new ArrayList<>();
+        if (assets.size() > SavingsAsset.MAX_ITEMS) throw new IllegalArgumentException("Too many assets");
+        JSONArray array = new JSONArray();
+        Set<String> ids = new HashSet<>();
+        for (SavingsAsset asset : assets) {
+            if (asset == null || !ids.add(asset.id)) throw new IllegalArgumentException("Invalid asset list");
+            array.put(asset.toJson());
+        }
+        // Validate the complete snapshot, not just each row. A set of individually valid holdings
+        // must not overflow the long used by the display and backup APIs when restored together.
+        SavingsAsset.totalRial(assets);
+        return new JSONObject().put("schema", 1).put("assets", array).toString();
+    }
+
+    static List<SavingsAsset> deserializeSavingsAssets(String json) {
+        try {
+            JSONObject root = new JSONObject(json);
+            if (root.getInt("schema") != 1) throw new IllegalArgumentException("Unsupported assets schema");
+            JSONArray array = root.getJSONArray("assets");
+            if (array.length() > SavingsAsset.MAX_ITEMS) throw new IllegalArgumentException("Too many assets");
+            List<SavingsAsset> assets = new ArrayList<>();
+            Set<String> ids = new HashSet<>();
+            for (int i = 0; i < array.length(); i++) {
+                SavingsAsset asset = SavingsAsset.fromJson(array.getJSONObject(i));
+                if (!ids.add(asset.id)) throw new IllegalArgumentException("Duplicate asset id");
+                assets.add(asset);
+            }
+            SavingsAsset.totalRial(assets);
+            return assets;
+        } catch (Exception e) {
+            if (e instanceof IllegalArgumentException) throw (IllegalArgumentException) e;
+            throw new IllegalArgumentException("Savings assets JSON unreadable", e);
+        }
+    }
+
+    static void saveSavingsAsset(Context context, SavingsAsset asset) {
+        if (asset == null) throw new IllegalArgumentException("Asset required");
+        asset.validate();
+        synchronized (BalanceData.class) {
+            List<SavingsAsset> assets = readSavingsAssets(context);
+            boolean replaced = false;
+            for (int i = 0; i < assets.size(); i++) {
+                if (assets.get(i).id.equals(asset.id)) {
+                    assets.set(i, asset);
+                    replaced = true;
+                    break;
+                }
+            }
+            if (!replaced) {
+                if (assets.size() >= SavingsAsset.MAX_ITEMS) throw new IllegalStateException("Too many assets");
+                assets.add(asset);
+            }
+            writeSavingsAssets(context, assets);
+        }
+    }
+
+    static boolean deleteSavingsAsset(Context context, String id) {
+        if (id == null) return false;
+        synchronized (BalanceData.class) {
+            List<SavingsAsset> assets = readSavingsAssets(context);
+            boolean removed = assets.removeIf(asset -> id.equals(asset.id));
+            if (removed) writeSavingsAssets(context, assets);
+            return removed;
         }
     }
 
