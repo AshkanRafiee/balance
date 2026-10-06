@@ -277,6 +277,14 @@ public final class HistoryActivity extends Activity {
         return g;
     }
 
+    /** A private fill for controls whose drawable bounds must not be shared with other views. */
+    GradientDrawable freshRounded(int color, float radius) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(dp(radius));
+        return g;
+    }
+
     GradientDrawable heroGradient() {
         GradientDrawable g = new GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM, new int[]{heroTop, heroBottom});
@@ -841,7 +849,6 @@ public final class HistoryActivity extends Activity {
 
         LinearLayout tagRow = new LinearLayout(this);
         tagRow.setOrientation(LinearLayout.HORIZONTAL);
-        tagRow.setGravity(Gravity.END);
         addTagFilterChip(tagRow);
         LinearLayout.LayoutParams tagLp = new LinearLayout.LayoutParams(-1, -2);
         tagLp.topMargin = dp(8);
@@ -865,12 +872,12 @@ public final class HistoryActivity extends Activity {
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
         chip.setPadding(dp(12), dp(7), dp(12), dp(7));
-        chip.setBackground(rounded(selectedTags.isEmpty() ? chipBg : accent, 10));
+        chip.setBackground(freshRounded(selectedTags.isEmpty() ? chipBg : accent, 10));
         chip.setContentDescription(getString(R.string.history_filter_tags_accessibility, label));
         chip.setClickable(true);
         chip.setFocusable(true);
         chip.setOnClickListener(v -> tagFilterDialog());
-        host.addView(chip, new LinearLayout.LayoutParams(-2, -2));
+        host.addView(chip, new LinearLayout.LayoutParams(-1, -2));
     }
 
     /** Rebuilds the per-bank account chips: "All accounts" plus one chip per account the bank has
@@ -914,7 +921,7 @@ public final class HistoryActivity extends Activity {
         chip.setSingleLine(true);
         chip.setAutoSizeTextTypeWithDefaults(android.widget.TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM);
         chip.setPadding(dp(4), dp(7), dp(4), dp(7));
-        chip.setBackground(rounded(selected ? accent : chipBg, 10));
+        chip.setBackground(freshRounded(selected ? accent : chipBg, 10));
         chip.setContentDescription(label);
         if (action != null) {
             chip.setClickable(true);
