@@ -89,6 +89,10 @@ public class BankRulesTest {
         assertEquals("Tosee Taavon", BankRules.resolve("Tosee Taavon"));
     }
 
+    @Test public void resolve_middleEastPersianSender_returnsBank() {
+        assertEquals("Middle East", BankRules.resolve("بانک خاورمیانه"));
+    }
+
     // ---- rejections --------------------------------------------------------------------
     @Test public void resolve_nullAndEmpty_rejected() {
         assertNull(BankRules.resolve(null));
@@ -293,6 +297,13 @@ public class BankRulesTest {
         assertNull(BankRules.extractAccount("Pasargad", "06/29_21:06\n\u0645\u0627\u0646\u062F\u0647: 51,289"));
     }
 
+    @Test public void extractAccount_middleEastSlashAccount_returnsAccount() {
+        String body = "بانک خاورمیانه\n020/002863516\n+1,000,000\n07/13\n21:32\n"
+            + "مانده 1,000,000\nواریز مبلغ افزایش موجودی حساب";
+        assertEquals("020/002863516", BankRules.extractAccount("Middle East", body));
+        assertNull(BankRules.extractAccount("Middle East", "+1,000,000\n07/13\nمانده 1,000,000"));
+    }
+
     @Test public void extractAccount_saderatLabel_returnsAccount() {
         // Saderat movements state the account right after the "حساب:" label, with or without
         // spacing, on its own line.
@@ -321,7 +332,7 @@ public class BankRulesTest {
         java.util.Set<String> known = BankRules.supportedNames();
         java.util.Set<String> shapes = new java.util.HashSet<>(java.util.Arrays.asList(
             "label-glued", "label-colon", "label-colon-line", "bare-mablagh", "bare-bidi",
-            "dotted", "dotted-line"));
+            "dotted", "dotted-line", "slash-line"));
         java.util.Set<String> banksSeen = new java.util.HashSet<>();
         for (String[] row : BankRules.accountRulesTestOnly()) {
             assertEquals(4, row.length);
@@ -334,7 +345,7 @@ public class BankRulesTest {
     @Test public void accountTable_rowLengthBoundsAreValid() {
         for (String[] row : BankRules.accountRulesTestOnly()) {
             String shape = row[1];
-            if (shape.equals("dotted") || shape.equals("dotted-line")) {
+            if (shape.equals("dotted") || shape.equals("dotted-line") || shape.equals("slash-line")) {
                 assertEquals("", row[2]);
                 assertEquals("", row[3]);
                 continue;
@@ -369,7 +380,8 @@ public class BankRulesTest {
             assertEquals("row must be {bank, shape}", 2, row.length);
             assertTrue("row bank not known: " + row[0], known.contains(row[0]));
             assertTrue("duplicate bank row: " + row[0], banksSeen.add(row[0]));
-            assertTrue("unknown shape: " + row[1], row[1].equals("title-line"));
+            assertTrue("unknown shape: " + row[1], row[1].equals("title-line")
+                || row[1].equals("final-line"));
         }
     }
 
@@ -386,7 +398,8 @@ public class BankRulesTest {
         for (String[] row : BankRules.reasonRulesTestOnly()) {
             boolean captioned = false;
             for (String title : BankRules.reasonCaptionKeys())
-                if (BankRules.extractReason(row[0], "x\n" + title + "\ny\n") != null) captioned = true;
+                if (BankRules.extractReason(row[0], row[1].equals("final-line")
+                    ? "\n" + title : "x\n" + title + "\ny\n") != null) captioned = true;
             assertTrue("no captioned title for " + row[0], captioned);
         }
     }
@@ -397,6 +410,15 @@ public class BankRulesTest {
         assertEquals("برگشت پول", BankRules.extractReason("Blu", BluMessages.REFUND));
         assertEquals("دریافت پل", BankRules.extractReason("Blu", BluMessages.TRANSFER_IN));
         assertEquals("انتقال پل", BankRules.extractReason("Blu", BluMessages.TRANSFER_OUT));
+    }
+
+    @Test public void extractReason_middleEastFinalLine_returnsTheStatedReason() {
+        assertEquals("واریز مبلغ افزایش موجودی حساب", BankRules.extractReason("Middle East",
+            "بانک خاورمیانه\n020/002863516\n+1,000,000\n07/13\n21:32\n"
+                + "مانده 1,000,000\nواریز مبلغ افزایش موجودی حساب"));
+        assertEquals("واریز مبلغ افزایش موجودی حساب", BankRules.extractReason("Middle East",
+            "بانک خاورمیانه\n020/002863516\n+1,000,000\n07/13\n21:32\n"
+                + "مانده 1,000,000\nواریز مبلغ افزایش موجودی حساب\r\n"));
     }
 
     @Test public void extractReason_plainDirectionTitle_statesNoReason() {
