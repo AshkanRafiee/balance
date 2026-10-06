@@ -64,7 +64,6 @@
     <string name="tag_none">هنوز برچسبی نیست</string>
     <string name="tag_clear">پاک کردن برچسب‌ها</string>
     <string name="tag_remove">حذف برچسب %1$s</string>
-    <string name="tag_more">%1$d برچسب دیگر</string>
     <string name="row_fact_tags">برچسب‌های شما: %1$s.</string>
     <string name="reason_topup">شارژ تلفن همراه</string>
     <string name="reason_bill_payment">پرداخت قبض</string>
@@ -243,8 +242,6 @@
     <string name="history_filter_tags_accessibility">فیلتر بر اساس %1$s</string>
     <string name="history_filter_tags_title">فیلتر بر اساس برچسب</string>
     <string name="history_filter_tags_empty">ابتدا به تراکنش‌ها برچسب اضافه کنید تا بتوانید تاریخچه را بر اساس آن‌ها فیلتر کنید.</string>
-    <string name="history_filter_tags_all">مطابقت با همهٔ برچسب‌های انتخاب‌شده</string>
-    <string name="history_filter_tags_any">مطابقت با یکی از برچسب‌ها</string>
     <string name="history_filter_tags_clear">پاک کردن فیلتر برچسب</string>
     <string name="history_filter_apply">اعمال</string>
     <string name="history_filter_pick_from">روز از را انتخاب کنید</string>

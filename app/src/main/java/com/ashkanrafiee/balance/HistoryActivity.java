@@ -30,6 +30,7 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
@@ -199,8 +200,6 @@ public final class HistoryActivity extends Activity {
 
     /** Exact tag selection applied in addition to the direction/date filter and text search. */
     private final List<String> selectedTags = new ArrayList<>();
-    private boolean matchAllTags = true;
-    private List<String> availableTags = new ArrayList<>();
 
     /** An account number is sensitive: it is copied to the clipboard only for the paste window,
      *  then cleared again unless the user copied something else in the meantime; the clear is keyed
@@ -439,7 +438,6 @@ public final class HistoryActivity extends Activity {
             restoreFilter(state);
             java.util.ArrayList<String> savedTags = state.getStringArrayList(KEY_FILTER_TAGS);
             if (savedTags != null) selectedTags.addAll(savedTags);
-            matchAllTags = state.getBoolean(KEY_FILTER_TAG_MODE_ALL, true);
             searchQuery = state.getString(KEY_SEARCH_QUERY, "");
             searchExpandedFor = state.getString(KEY_SEARCH_EXPANDED_FOR, null);
             preSearchYears = stringSet(state, KEY_PRE_SEARCH_YEARS);
@@ -756,7 +754,6 @@ public final class HistoryActivity extends Activity {
     private void writeExport(Uri uri) {
         final String query = searchQuery == null ? "" : searchQuery.trim();
         final List<String> tagSelection = new ArrayList<>(selectedTags);
-        final boolean tagMatchAll = matchAllTags;
         new Thread(() -> {
             final int[] error = {0};
             try {
@@ -788,7 +785,7 @@ public final class HistoryActivity extends Activity {
                 }
                 List<Residual> residualOut = applyResidualFilters(residualScope, filter, iranCalendar);
                 scope = applyFilters(scope, filter, iranCalendar);
-                scope = applyTagFilter(scope, tagsNow, tagSelection, tagMatchAll);
+                scope = applyTagFilter(scope, tagsNow, tagSelection);
                 if (!tagSelection.isEmpty()) residualOut = new ArrayList<>();
                 if (!query.isEmpty()) {
                     final SearchPass pass =
@@ -844,6 +841,7 @@ public final class HistoryActivity extends Activity {
 
         LinearLayout tagRow = new LinearLayout(this);
         tagRow.setOrientation(LinearLayout.HORIZONTAL);
+        tagRow.setGravity(Gravity.END);
         addTagFilterChip(tagRow);
         LinearLayout.LayoutParams tagLp = new LinearLayout.LayoutParams(-1, -2);
         tagLp.topMargin = dp(8);
@@ -935,7 +933,7 @@ public final class HistoryActivity extends Activity {
         render();
     }
 
-    /** Lets the user stage several reusable tags and choose exact all/any matching before applying. */
+    /** Lets the user stage several reusable tags. A transaction must contain every selected tag. */
     private void tagFilterDialog() {
         final List<String> choices = new ArrayList<>(BalanceData.readTagNames(this));
         final LinkedHashSet<String> staged = new LinkedHashSet<>();
@@ -955,25 +953,6 @@ public final class HistoryActivity extends Activity {
             wrap.addView(text(getString(R.string.history_filter_tags_empty), 14, muted),
                 new LinearLayout.LayoutParams(-1, -2));
         } else {
-            LinearLayout mode = new LinearLayout(this);
-            mode.setOrientation(LinearLayout.HORIZONTAL);
-            android.widget.RadioButton all = new android.widget.RadioButton(this);
-            all.setText(getString(R.string.history_filter_tags_all));
-            all.setTextColor(fg);
-            all.setTextSize(13);
-            all.setChecked(matchAllTags);
-            android.widget.RadioButton any = new android.widget.RadioButton(this);
-            any.setText(getString(R.string.history_filter_tags_any));
-            any.setTextColor(fg);
-            any.setTextSize(13);
-            any.setChecked(!matchAllTags);
-            mode.addView(all, new LinearLayout.LayoutParams(0, -2, 1));
-            mode.addView(any, new LinearLayout.LayoutParams(0, -2, 1));
-            // Keep the two mode choices mutually exclusive without introducing another dependency.
-            all.setOnClickListener(v -> { all.setChecked(true); any.setChecked(false); });
-            any.setOnClickListener(v -> { any.setChecked(true); all.setChecked(false); });
-            wrap.addView(mode, new LinearLayout.LayoutParams(-1, -2));
-
             for (String choice : choices) {
                 android.widget.CheckBox check = new android.widget.CheckBox(this);
                 check.setText(choice);
@@ -997,7 +976,6 @@ public final class HistoryActivity extends Activity {
                 dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
                     selectedTags.clear();
                     selectedTags.addAll(staged);
-                    matchAllTags = all.isChecked();
                     dlg.dismiss();
                     render();
                 });
@@ -1443,7 +1421,6 @@ public final class HistoryActivity extends Activity {
     private static final String KEY_FILTER_TO_MONTH = "filter_to_month";
     private static final String KEY_FILTER_TO_DAY = "filter_to_day";
     private static final String KEY_FILTER_TAGS = "filter_tags";
-    private static final String KEY_FILTER_TAG_MODE_ALL = "filter_tag_mode_all";
     private static final String KEY_SEARCH_QUERY = "search_query";
     private static final String KEY_SEARCH_EXPANDED_FOR = "search_expanded_for";
     private static final String KEY_PRE_SEARCH_YEARS = "pre_search_years";
@@ -1512,8 +1489,7 @@ public final class HistoryActivity extends Activity {
     private String expansionQuery(String query) {
         String base = query == null ? "" : query;
         if (selectedTags.isEmpty()) return base;
-        StringBuilder key = new StringBuilder(base).append("\u0000tags:")
-            .append(matchAllTags ? "all:" : "any:");
+        StringBuilder key = new StringBuilder(base).append("\u0000tags:");
         for (String tag : selectedTags) key.append(tag).append('|');
         return key.toString();
     }
@@ -1565,7 +1541,6 @@ public final class HistoryActivity extends Activity {
         outState.putInt(KEY_FILTER_DIRECTION, filter.direction);
         outState.putInt(KEY_FILTER_RANGE, filter.rangePreset);
         outState.putStringArrayList(KEY_FILTER_TAGS, new java.util.ArrayList<>(selectedTags));
-        outState.putBoolean(KEY_FILTER_TAG_MODE_ALL, matchAllTags);
         outState.putString(KEY_SEARCH_QUERY, searchQuery == null ? "" : searchQuery);
         outState.putString(KEY_SEARCH_EXPANDED_FOR, searchExpandedFor);
         putStringSet(outState, KEY_PRE_SEARCH_YEARS, preSearchYears);
@@ -1811,7 +1786,6 @@ public final class HistoryActivity extends Activity {
         final boolean iran = iranCalendar;
         final String query = searchQuery == null ? "" : searchQuery.trim();
         final List<String> tagSelection = new ArrayList<>(selectedTags);
-        final boolean tagMatchAll = matchAllTags;
         new Thread(() -> {
             try {
                 List<Transaction> txs = BalanceData.readTransactions(getApplicationContext());
@@ -1830,8 +1804,7 @@ public final class HistoryActivity extends Activity {
                     BalanceData.readChannels(getApplicationContext());
                 final Map<String, List<String>> tagsNow =
                     BalanceData.readTags(getApplicationContext());
-                final List<String> tagNamesNow = BalanceData.readTagNames(getApplicationContext());
-                filtered = applyTagFilter(filtered, tagsNow, tagSelection, tagMatchAll);
+                filtered = applyTagFilter(filtered, tagsNow, tagSelection);
                 if (!tagSelection.isEmpty()) residuals = new ArrayList<>();
                 if (!query.isEmpty()) {
                     final SearchPass pass =
@@ -1849,7 +1822,6 @@ public final class HistoryActivity extends Activity {
                     reasons = reasonsNow;
                     channels = channelsNow;
                     tags = tagsNow;
-                    availableTags = tagNamesNow;
                     refreshDates();
                     rebuildFilterBar();
                     stopShimmer();
@@ -2719,16 +2691,7 @@ public final class HistoryActivity extends Activity {
         String note = notes == null ? null : notes.get(key);
         if (note != null) addChip(cell, note, true, badgeBg, badgeFg, null, inset);
         List<String> tagValues = tags == null ? null : tags.get(key);
-        if (tagValues != null && !tagValues.isEmpty()) {
-            int shown = Math.min(4, tagValues.size());
-            for (int i = 0; i < shown; i++) {
-                addChip(cell, "#" + tagValues.get(i), false, chipBg, muted, MEDIUM, inset);
-            }
-            if (tagValues.size() > shown) {
-                addChip(cell, getString(R.string.tag_more, tagValues.size() - shown), false,
-                    chipBg, muted, MEDIUM, inset);
-            }
-        }
+        if (tagValues != null && !tagValues.isEmpty()) tagFlow(cell, tagValues, inset);
         // The row is a single clickable node, so a screen reader announces this description and never
         // reaches the chips below it. Everything the row says therefore belongs here rather than on a
         // chip of its own: a row carrying only a channel would otherwise be heard as nothing but the
@@ -2781,6 +2744,99 @@ public final class HistoryActivity extends Activity {
         lp.topMargin = dp(2);
         cell.addView(chip, lp);
         return chip;
+    }
+
+    /** Adds all tags in a compact wrapping flow: chips use the available horizontal space and move
+     *  to the next line instead of consuming one full-width row each. */
+    private void tagFlow(LinearLayout cell, List<String> values, int inset) {
+        TagFlowLayout flow = new TagFlowLayout();
+        flow.setPaddingRelative(dp(inset), dp(3), dp(4), dp(3));
+        for (String value : values) {
+            TextView chip = text("#" + value, 11, muted, MEDIUM);
+            chip.setPadding(dp(9), dp(6), dp(9), dp(6));
+            chip.setBackground(rounded(chipBg, 10));
+            chip.setMaxLines(2);
+            chip.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            chip.setContentDescription(value);
+            flow.addView(chip, new ViewGroup.LayoutParams(-2, -2));
+        }
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = dp(3);
+        cell.addView(flow, lp);
+    }
+
+    /** A small dependency-free flow layout for the variable number of user-created tag chips. */
+    private final class TagFlowLayout extends ViewGroup {
+        private final int horizontalGap = dp(6);
+        private final int verticalGap = dp(5);
+
+        TagFlowLayout() {
+            super(HistoryActivity.this);
+            setClipChildren(false);
+        }
+
+        @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            int width = MeasureSpec.getSize(widthMeasureSpec);
+            int available = Math.max(0, width - getPaddingLeft() - getPaddingRight());
+            int lineWidth = 0;
+            int lineHeight = 0;
+            int height = getPaddingTop() + getPaddingBottom();
+            for (int i = 0; i < getChildCount(); i++) {
+                View child = getChildAt(i);
+                child.measure(MeasureSpec.makeMeasureSpec(available, MeasureSpec.AT_MOST),
+                    MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
+                int childWidth = child.getMeasuredWidth();
+                int childHeight = child.getMeasuredHeight();
+                if (lineWidth > 0 && lineWidth + horizontalGap + childWidth > available) {
+                    height += lineHeight + verticalGap;
+                    lineWidth = 0;
+                    lineHeight = 0;
+                }
+                if (lineWidth > 0) lineWidth += horizontalGap;
+                lineWidth += childWidth;
+                lineHeight = Math.max(lineHeight, childHeight);
+            }
+            height += lineHeight;
+            setMeasuredDimension(resolveSize(width, widthMeasureSpec),
+                resolveSize(height, heightMeasureSpec));
+        }
+
+        @Override protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+            int available = getWidth() - getPaddingLeft() - getPaddingRight();
+            int x = 0;
+            int y = getPaddingTop();
+            int lineHeight = 0;
+            boolean rtl = isRtl();
+            for (int i = 0; i < getChildCount(); i++) {
+                View child = getChildAt(i);
+                int childWidth = child.getMeasuredWidth();
+                int childHeight = child.getMeasuredHeight();
+                if (x > 0 && x + horizontalGap + childWidth > available) {
+                    y += lineHeight + verticalGap;
+                    x = 0;
+                    lineHeight = 0;
+                }
+                int lineX = rtl
+                    ? getWidth() - getPaddingRight() - x - childWidth
+                    : getPaddingLeft() + x;
+                child.layout(lineX, y, lineX + childWidth, y + childHeight);
+                if (x > 0) x += horizontalGap;
+                x += childWidth;
+                lineHeight = Math.max(lineHeight, childHeight);
+            }
+        }
+
+        @Override protected ViewGroup.LayoutParams generateDefaultLayoutParams() {
+            return new ViewGroup.LayoutParams(-2, -2);
+        }
+
+        @Override protected ViewGroup.LayoutParams generateLayoutParams(ViewGroup.LayoutParams p) {
+            return new ViewGroup.LayoutParams(p);
+        }
+
+        @Override protected boolean checkLayoutParams(ViewGroup.LayoutParams p) {
+            return p != null;
+        }
     }
 
     /** The note and tag editor for one transaction. Changes are staged in the dialog and only saved
@@ -3149,26 +3205,23 @@ public final class HistoryActivity extends Activity {
     /** Exact tag membership: a selected tag never matches a different tag merely because its name is
      *  a substring. Comparison is case-insensitive because tag names are user-entered labels. */
     static boolean matchesTags(Transaction t, Map<String, List<String>> tags,
-            Collection<String> selected, boolean matchAll) {
+            Collection<String> selected) {
         if (selected == null || selected.isEmpty()) return true;
         List<String> actual = tags == null || t == null ? null : tags.get(BalanceData.noteKey(t));
         if (actual == null || actual.isEmpty()) return false;
-        boolean found = false;
         for (String wanted : selected) {
-            boolean one = containsTag(actual, wanted);
-            if (matchAll && !one) return false;
-            if (!matchAll && one) found = true;
+            if (!containsTag(actual, wanted)) return false;
         }
-        return matchAll || found;
+        return true;
     }
 
     /** Keeps transactions with exact selected-tag membership, preserving input order. */
     static List<Transaction> applyTagFilter(List<Transaction> txs,
-            Map<String, List<String>> tags, Collection<String> selected, boolean matchAll) {
+            Map<String, List<String>> tags, Collection<String> selected) {
         List<Transaction> out = new ArrayList<>(txs == null ? 0 : txs.size());
         if (txs == null) return out;
         for (Transaction t : txs) {
-            if (matchesTags(t, tags, selected, matchAll)) out.add(t);
+            if (matchesTags(t, tags, selected)) out.add(t);
         }
         return out;
     }

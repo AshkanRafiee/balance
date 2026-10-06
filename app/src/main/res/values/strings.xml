@@ -64,7 +64,6 @@
     <string name="tag_none">No tags yet</string>
     <string name="tag_clear">Clear tags</string>
     <string name="tag_remove">Remove tag %1$s</string>
-    <string name="tag_more">+%1$d more tags</string>
     <string name="row_fact_tags">Your tags: %1$s.</string>
     <string name="reason_topup">Phone top-up</string>
     <string name="reason_bill_payment">Bill payment</string>
@@ -243,8 +242,6 @@
     <string name="history_filter_tags_accessibility">Filter by %1$s</string>
     <string name="history_filter_tags_title">Filter by tags</string>
     <string name="history_filter_tags_empty">Add tags to transactions first, then you can filter history by them.</string>
-    <string name="history_filter_tags_all">Match all selected tags</string>
-    <string name="history_filter_tags_any">Match any selected tag</string>
     <string name="history_filter_tags_clear">Clear tag filter</string>
     <string name="history_filter_apply">Apply</string>
     <string name="history_filter_pick_from">Choose the From date</string>
