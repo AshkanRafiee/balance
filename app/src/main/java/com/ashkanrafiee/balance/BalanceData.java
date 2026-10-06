@@ -129,7 +129,7 @@ final class BalanceData {
      *  ("-200,000,000" on its own line, resulting balance on the last). The explicit sign tells the
      *  direction, so no label or keyword is needed. */
     private static final Pattern signedAmount = Pattern.compile(
-        "^\\s*([+-])\\s*([0-9][0-9,]*)", Pattern.MULTILINE);
+        "(?m)^[ \\t\\u202A-\\u202E]*([+-])[ \\t]*([0-9][0-9,]*)[ \\t\\u202A-\\u202E]*$");
     /** A bare, signed amount on its own line with the sign after the number, as Mehr Iran writes it
      *  ("400,000-" on its own line, resulting balance on the last). Allowing RTL bidi marks around
      *  the amount and holding the whole line to the shape "digits, optional sign" keeps unsigned
@@ -1494,8 +1494,17 @@ final class BalanceData {
         int sign = 0;
         int labelDir = 0;
 
+        // A signed amount on its own line is unambiguous. Resolve it before broad "مبلغ" scans:
+        // a later explanatory sentence can contain that word and a following date, which must never
+        // be mistaken for the movement amount.
+        Matcher leadingSigned = signedAmount.matcher(n);
+        if (leadingSigned.find()) {
+            sign = leadingSigned.group(1).equals("-") ? -1 : 1;
+            amount = toLong(leadingSigned.group(2));
+        }
+
         // 1) Amount following the "مبلغ" label, with an optional explicit sign.
-        String g = lastGroup(amountLabel, n);
+        String g = amount > 0 ? null : lastGroup(amountLabel, n);
         if (g != null) {
             String t = g.trim();
             if (t.startsWith("-") || t.endsWith("-")) sign = -1;

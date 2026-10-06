@@ -61,6 +61,7 @@
     <string name="reason_refund">Refund</string>
     <string name="reason_transfer_in">Instant transfer in</string>
     <string name="reason_transfer_out">Instant transfer out</string>
+    <string name="reason_balance_increase">Balance increase</string>
     <string name="row_fact_reason">Reason the bank gave: %1$s.</string>
     <string name="channel_shetab">Shetab</string>
     <string name="channel_sep">Instant payment service</string>
