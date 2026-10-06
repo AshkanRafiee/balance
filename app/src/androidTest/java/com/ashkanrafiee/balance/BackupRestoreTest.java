@@ -1057,4 +1057,22 @@ public class BackupRestoreTest {
             BalanceData.getTags(ctx, txByContent(out, "content-C")));
         assertTrue(BalanceData.getTags(ctx, txByContent(out, "content-B")).isEmpty());
     }
+
+    @Test public void restore_legacyTagKey_followsTheSurvivingContentTransaction() throws Exception {
+        Transaction local = new Transaction("Tejarat", null, T + 100, 200_000L, "sig-A", "content-A");
+        BalanceData.writeTransactions(ctx, Arrays.asList(local));
+        BalanceData.setTags(ctx, local, Arrays.asList("local"));
+
+        String legacyPayload = "{\"payloadFormat\":6,\"balances\":{},"
+            + "\"transactions\":{\"transactions\":[{\"bank\":\"Tejarat\",\"date\":" + (T + 100)
+            + ",\"amount\":200000,\"sig\":\"sig-A\"}]},"
+            + "\"txNotes\":{},\"txReasons\":{},\"txChannels\":{},"
+            + "\"txTags\":{\"s:sig-A\":[\"backup\"]}}";
+        File f = file("tags-legacy-key.balance");
+        writeLegacyBackup(f, legacyPayload, PASSWORD);
+
+        BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
+        assertEquals(Arrays.asList("local", "backup"), BalanceData.getTags(ctx, local));
+        assertTrue(BalanceData.readTags(ctx).get("s:sig-A") == null);
+    }
 }

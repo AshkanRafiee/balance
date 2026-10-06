@@ -2806,6 +2806,11 @@ public final class HistoryActivity extends Activity {
         selectedTagHost.setHorizontalScrollBarEnabled(true);
         selectedTagHost.setScrollbarFadingEnabled(true);
         selectedTagHost.setPadding(0, dp(2), 0, dp(2));
+        android.widget.HorizontalScrollView selectedTagScroll =
+            new android.widget.HorizontalScrollView(this);
+        selectedTagScroll.setHorizontalScrollBarEnabled(false);
+        selectedTagScroll.addView(selectedTagHost,
+            new android.widget.FrameLayout.LayoutParams(-2, -1));
 
         EditText tagInput = new EditText(this);
         tagInput.setSingleLine(true);
@@ -2845,6 +2850,11 @@ public final class HistoryActivity extends Activity {
         LinearLayout suggestions = new LinearLayout(this);
         suggestions.setGravity(Gravity.CENTER_VERTICAL);
         suggestions.setHorizontalScrollBarEnabled(true);
+        android.widget.HorizontalScrollView suggestionsScroll =
+            new android.widget.HorizontalScrollView(this);
+        suggestionsScroll.setHorizontalScrollBarEnabled(false);
+        suggestionsScroll.addView(suggestions,
+            new android.widget.FrameLayout.LayoutParams(-2, -1));
         List<String> suggestionsList = BalanceData.readTagNames(this);
         int suggestionCount = Math.min(20, suggestionsList.size());
         for (int i = 0; i < suggestionCount; i++) {
@@ -2878,11 +2888,11 @@ public final class HistoryActivity extends Activity {
         wrap.setPadding(dp(20), dp(10), dp(20), 0);
         wrap.addView(input);
         wrap.addView(text(getString(R.string.tag_label), 13, muted, MEDIUM), margin(0, 8, 0, 2));
-        wrap.addView(selectedTagHost, new LinearLayout.LayoutParams(-1, dp(38)));
+        wrap.addView(selectedTagScroll, new LinearLayout.LayoutParams(-1, dp(38)));
         wrap.addView(addRow, margin(0, 2, 0, 0));
         if (suggestionCount > 0) {
             wrap.addView(text(getString(R.string.tag_existing), 11, muted), margin(0, 6, 0, 0));
-            wrap.addView(suggestions, new LinearLayout.LayoutParams(-1, dp(34)));
+            wrap.addView(suggestionsScroll, new LinearLayout.LayoutParams(-1, dp(34)));
         }
         wrap.addView(clearTags, margin(0, 2, 0, 0));
         renderTagEditor(selectedTagHost, editedTags);

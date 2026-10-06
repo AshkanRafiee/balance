@@ -339,7 +339,9 @@ final class BackupManager {
         // created on either device survives; an older backup without txTags leaves local tags alone.
         if (!backupTags.isEmpty()) {
             Map<String, List<String>> currentTags = BalanceData.readTags(context);
-            if (BalanceData.unionTags(currentTags, backupTags))
+            boolean tagsChanged = remapTagKeys(backupTags, tagKeyAliases(currentTxs, backupTxs));
+            tagsChanged |= BalanceData.unionTags(currentTags, backupTags);
+            if (tagsChanged)
                 BalanceData.writeTags(context, currentTags);
         }
         return result;
@@ -355,6 +357,42 @@ final class BackupManager {
             if (current.containsKey(e.getKey())) continue;
             current.put(e.getKey(), e.getValue());
             changed = true;
+        }
+        return changed;
+    }
+
+    /** Maps a backup's legacy identity key to the current content key when both files contain the
+     *  same physical movement. This is needed when a pre-content-digest transaction is deduped by its
+     *  signature during restore: its tags must follow the surviving row rather than stay orphaned. */
+    private static Map<String, String> tagKeyAliases(List<Transaction> current, List<Transaction> backup) {
+        Map<String, String> aliases = new LinkedHashMap<>();
+        for (Transaction incoming : backup) {
+            for (Transaction existing : current) {
+                if (!sameMovement(incoming, existing)) continue;
+                String from = BalanceData.noteKey(incoming);
+                String to = BalanceData.noteKey(existing);
+                if (!from.equals(to)) aliases.put(from, to);
+                break;
+            }
+        }
+        return aliases;
+    }
+
+    private static boolean sameMovement(Transaction a, Transaction b) {
+        if (a.sig != null && b.sig != null && a.sig.equals(b.sig)) return true;
+        return BalanceData.txIdentityKey(a).equals(BalanceData.txIdentityKey(b));
+    }
+
+    /** Applies identity aliases to a metadata map, unioning if a destination already has tags. */
+    private static boolean remapTagKeys(Map<String, List<String>> tags,
+            Map<String, String> aliases) {
+        boolean changed = false;
+        for (Map.Entry<String, String> alias : aliases.entrySet()) {
+            List<String> moved = tags.remove(alias.getKey());
+            if (moved == null) continue;
+            changed = true;
+            BalanceData.unionTags(tags,
+                java.util.Collections.singletonMap(alias.getValue(), moved));
         }
         return changed;
     }
