@@ -51,10 +51,10 @@ final class BackupManager {
     private static final byte[] MAGIC = {'B', 'A', 'L', 'N', 'C', 'E', 'B', 'K'};
     private static final int FORMAT_VERSION = 1;
     /** Payload shape: 1 = balances only, 2 = balances + transactions, 3 = balances + transactions +
-     *  notes, 4 = those plus the reasons the banks stated, 5 = those plus the channels they stated.
-     *  Older backups (1 to 4) are still read; those carry no reasons or channels, which a restore
-     *  leaves to the next scan to re-read from the inbox. */
-    private static final int PAYLOAD_FORMAT = 5;
+     *  notes, 4 = those plus the reasons the banks stated, 5 = those plus the channels they stated,
+     *  6 = those plus user-created transaction tags. Older backups are still read and missing
+     *  metadata sections are left untouched during restore. */
+    private static final int PAYLOAD_FORMAT = 6;
     private static final String KDF_ALGORITHM = "PBKDF2WithHmacSHA256";
     private static final String CIPHER_ALGORITHM = "AES/GCM/NoPadding";
     private static final int ITERATIONS = 600_000;
@@ -113,6 +113,8 @@ final class BackupManager {
                     BalanceData.serializeTextMap(BalanceData.readReasons(context))))
                 .put("txChannels", new JSONObject(
                     BalanceData.serializeTextMap(BalanceData.readChannels(context))))
+                .put("txTags", new JSONObject(
+                    BalanceData.serializeTagsMap(BalanceData.readTags(context))))
                 .toString();
         }
 
@@ -241,6 +243,7 @@ final class BackupManager {
         Map<String, String> backupNotes = new LinkedHashMap<>();
         Map<String, String> backupReasons = new LinkedHashMap<>();
         Map<String, String> backupChannels = new LinkedHashMap<>();
+        Map<String, List<String>> backupTags = new LinkedHashMap<>();
         try {
             JSONObject payload = new JSONObject(plain);
             if (payload.has("balances"))
@@ -258,6 +261,8 @@ final class BackupManager {
             if (payload.has("txChannels"))
                 backupChannels = BalanceData.deserializeTextMap(
                     payload.getJSONObject("txChannels").toString());
+            if (payload.has("txTags"))
+                backupTags = BalanceData.deserializeTagsMap(payload.getJSONObject("txTags").toString());
         } catch (Throwable e) {
             // A validly-decrypted but hostile payload can nest its JSON so deeply that parsing
             // exhausts the stack; that must land on the same "wrong password or corrupted backup"
@@ -328,6 +333,14 @@ final class BackupManager {
             Map<String, String> currentChannels = BalanceData.readChannels(context);
             if (unionLocalFirst(currentChannels, backupChannels))
                 BalanceData.writeChannels(context, currentChannels);
+        }
+
+        // Tags are user-owned and can be multiple per movement. Restore unions both sides so a tag
+        // created on either device survives; an older backup without txTags leaves local tags alone.
+        if (!backupTags.isEmpty()) {
+            Map<String, List<String>> currentTags = BalanceData.readTags(context);
+            if (BalanceData.unionTags(currentTags, backupTags))
+                BalanceData.writeTags(context, currentTags);
         }
         return result;
     }

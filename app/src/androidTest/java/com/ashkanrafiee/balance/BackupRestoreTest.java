@@ -999,4 +999,62 @@ public class BackupRestoreTest {
         assertEquals("my private note", BalanceData.getNote(ctx, t));
         assertEquals(SHETAB, BalanceData.readChannels(ctx).get(BalanceData.noteKey(t)));
     }
+
+    // ============================================================
+    // User-created transaction tags in backups (payload format 6)
+    // ============================================================
+
+    @Test public void roundTrip_tags_restoredWithTheirTransactions() throws Exception {
+        Transaction t = new Transaction("Tejarat", null, T + 100, 200_000L, "sig-A", "content-A");
+        BalanceData.writeTransactions(ctx, Arrays.asList(t));
+        BalanceData.setTags(ctx, t, Arrays.asList("groceries", "reimbursable"));
+        Uri u = uri("tags-roundtrip.balance");
+        BackupManager.create(ctx, u, PASSWORD);
+
+        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+
+        BackupManager.restore(ctx, u, PASSWORD);
+        Transaction out = txByContent(BalanceData.readTransactions(ctx), "content-A");
+        assertEquals(Arrays.asList("groceries", "reimbursable"), BalanceData.getTags(ctx, out));
+    }
+
+    @Test public void restore_backupWithoutTags_preservesLocalTags() throws Exception {
+        Transaction t = new Transaction("Tejarat", null, T + 100, 200_000L, "sig-A", "content-A");
+        BalanceData.writeTransactions(ctx, Arrays.asList(t));
+        BalanceData.setTags(ctx, t, Arrays.asList("keep"));
+
+        String legacyPayload = "{\"payloadFormat\":5,\"balances\":{},"
+            + "\"transactions\":{\"transactions\":[{\"bank\":\"Tejarat\",\"date\":" + (T + 100)
+            + ",\"amount\":200000,\"sig\":\"sig-A\",\"content\":\"content-A\"}]},"
+            + "\"txNotes\":{},\"txReasons\":{},\"txChannels\":{}}";
+        File f = file("tags-legacy.balance");
+        writeLegacyBackup(f, legacyPayload, PASSWORD);
+
+        BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
+        assertEquals(Arrays.asList("keep"), BalanceData.getTags(ctx, t));
+    }
+
+    @Test public void restore_tags_unionsLocalAndBackupAssignments() throws Exception {
+        Transaction backupA = new Transaction("Tejarat", null, T + 100, 200_000L, "sig-A", "content-A");
+        Transaction backupC = new Transaction("Pasargad", null, T + 400, 300_000L, "sig-C", "content-C");
+        BalanceData.writeTransactions(ctx, Arrays.asList(backupA, backupC));
+        BalanceData.setTags(ctx, backupA, Arrays.asList("backup", "shared"));
+        BalanceData.setTags(ctx, backupC, Arrays.asList("travel"));
+        Uri u = uri("tags-merge.balance");
+        BackupManager.create(ctx, u, PASSWORD);
+
+        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        Transaction localA = new Transaction("Tejarat", null, T + 100, 200_000L, "sig-A", "content-A");
+        Transaction localB = new Transaction("Melat", null, T + 200, -50_000L, "sig-B", "content-B");
+        BalanceData.writeTransactions(ctx, Arrays.asList(localA, localB));
+        BalanceData.setTags(ctx, localA, Arrays.asList("local", "SHARED"));
+
+        BackupManager.restore(ctx, u, PASSWORD);
+        List<Transaction> out = BalanceData.readTransactions(ctx);
+        assertEquals(Arrays.asList("local", "SHARED", "backup"),
+            BalanceData.getTags(ctx, txByContent(out, "content-A")));
+        assertEquals(Arrays.asList("travel"),
+            BalanceData.getTags(ctx, txByContent(out, "content-C")));
+        assertTrue(BalanceData.getTags(ctx, txByContent(out, "content-B")).isEmpty());
+    }
 }

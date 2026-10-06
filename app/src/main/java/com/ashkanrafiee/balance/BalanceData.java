@@ -14,11 +14,13 @@ import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -42,8 +44,14 @@ final class BalanceData {
      *  own, for the same reason: a stated channel is a fact about the message, never something the user
      *  wrote, and a note must be able to clear without taking it with it. */
     static final String KEY_TX_CHANNELS = "transaction_channels";
+    /** User-created tags keyed exactly like notes, with each transaction holding an ordered list. */
+    static final String KEY_TX_TAGS = "transaction_tags";
     /** Upper bound on one transaction note, so a huge paste cannot bloat the encrypted store. */
     static final int MAX_NOTE_LENGTH = 500;
+    /** Bounds on user-created tag data, applied both at the UI boundary and while reading backups. */
+    static final int MAX_TAG_LENGTH = 64;
+    static final int MAX_TAGS_PER_TRANSACTION = 32;
+    static final int MAX_TAG_ENTRIES = 100_000;
     static final String PREFS_PREF = "balance_preferences";
     static final String KEY_HIDDEN = "balances_hidden";
     static final String KEY_WIDGET_HIDDEN = "widget_balances_hidden";
@@ -394,6 +402,164 @@ final class BalanceData {
         writeTextStore(context, KEY_TX_CHANNELS, channels);
     }
 
+    /** Reads every saved tag assignment ({@code noteKey → ordered tag names}). */
+    static Map<String, List<String>> readTags(Context context) {
+        try {
+            String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
+                .getString(KEY_TX_TAGS, null);
+            if (stored == null) return new LinkedHashMap<>();
+            String json = stored.indexOf('{') == 0 ? stored : decrypt(stored);
+            return deserializeTagsMap(json);
+        } catch (Exception e) {
+            Log.w(TAG, "tag store read failed", e);
+            return new LinkedHashMap<>();
+        }
+    }
+
+    /** Persists tag assignments encrypted under {@link #KEY_TX_TAGS}. */
+    static void writeTags(Context context, Map<String, List<String>> tags) {
+        try {
+            android.content.SharedPreferences.Editor e =
+                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit();
+            if (tags == null || tags.isEmpty()) {
+                e.remove(KEY_TX_TAGS).apply();
+                return;
+            }
+            e.putString(KEY_TX_TAGS, encrypt(serializeTagsMap(tags))).apply();
+        } catch (Exception ex) {
+            Log.w(TAG, "tag store write failed", ex);
+        }
+    }
+
+    /** Returns all distinct tag names in first-seen order for a picker or filter. */
+    static List<String> readTagNames(Context context) {
+        LinkedHashMap<String, String> names = new LinkedHashMap<>();
+        for (List<String> tags : readTags(context).values()) {
+            for (String tag : tags) {
+                String identity = tag.toLowerCase(Locale.ROOT);
+                if (!names.containsKey(identity)) names.put(identity, tag);
+            }
+        }
+        return new ArrayList<>(names.values());
+    }
+
+    /** Tags assigned to one transaction, never null and safe for callers to modify. */
+    static List<String> getTags(Context context, Transaction t) {
+        List<String> tags = readTags(context).get(noteKey(t));
+        return tags == null ? new ArrayList<>() : new ArrayList<>(tags);
+    }
+
+    /** Saves a bounded, trimmed, duplicate-free tag list for one transaction. */
+    static void setTags(Context context, Transaction t, Collection<String> input) {
+        Map<String, List<String>> tags = readTags(context);
+        List<String> normalized = normalizeTags(input);
+        String key = noteKey(t);
+        if (normalized.isEmpty()) tags.remove(key);
+        else tags.put(key, normalized);
+        writeTags(context, tags);
+    }
+
+    /** Returns true when two tag names represent the same user tag. */
+    static boolean sameTag(String a, String b) {
+        return a != null && b != null && a.trim().equalsIgnoreCase(b.trim());
+    }
+
+    /** Serializes tag assignments as JSON arrays, preserving assignment order. */
+    static String serializeTagsMap(Map<String, List<String>> tags) throws Exception {
+        JSONObject out = new JSONObject();
+        if (tags != null) {
+            int entries = 0;
+            for (Map.Entry<String, List<String>> e : tags.entrySet()) {
+                if (entries++ >= MAX_TAG_ENTRIES) break;
+                List<String> normalized = normalizeTags(e.getValue());
+                if (e.getKey() != null && !e.getKey().isEmpty() && !normalized.isEmpty()) {
+                    JSONArray values = new JSONArray();
+                    for (String tag : normalized) values.put(tag);
+                    out.put(e.getKey(), values);
+                }
+            }
+        }
+        return out.toString();
+    }
+
+    /** Parses bounded tag assignments from local storage or a backup payload. */
+    static Map<String, List<String>> deserializeTagsMap(String json) {
+        Map<String, List<String>> out = new LinkedHashMap<>();
+        try {
+            JSONObject obj = new JSONObject(json);
+            Iterator<String> it = obj.keys();
+            int entries = 0;
+            while (it.hasNext() && entries++ < MAX_TAG_ENTRIES) {
+                String key = it.next();
+                JSONArray values = obj.optJSONArray(key);
+                if (values == null) continue;
+                List<String> tags = new ArrayList<>();
+                for (int i = 0; i < values.length() && tags.size() < MAX_TAGS_PER_TRANSACTION; i++) {
+                    if (!values.isNull(i)) tags.add(values.optString(i, null));
+                }
+                tags = normalizeTags(tags);
+                if (!tags.isEmpty() && key != null && !key.isEmpty()) out.put(key, tags);
+            }
+        } catch (Exception ex) {
+            Log.w(TAG, "deserializeTagsMap failed");
+        }
+        return out;
+    }
+
+    /** Adds backup-only tag assignments and unions assignments for the same transaction. */
+    static boolean unionTags(Map<String, List<String>> current, Map<String, List<String>> incoming) {
+        if (incoming == null || incoming.isEmpty()) return false;
+        boolean changed = false;
+        for (Map.Entry<String, List<String>> e : incoming.entrySet()) {
+            List<String> existing = current.get(e.getKey());
+            if (existing == null) {
+                List<String> copy = normalizeTags(e.getValue());
+                if (!copy.isEmpty()) {
+                    current.put(e.getKey(), copy);
+                    changed = true;
+                }
+                continue;
+            }
+            List<String> merged = new ArrayList<>(existing);
+            for (String tag : normalizeTags(e.getValue())) {
+                boolean present = false;
+                for (String old : merged) if (sameTag(old, tag)) { present = true; break; }
+                if (!present && merged.size() < MAX_TAGS_PER_TRANSACTION) {
+                    merged.add(tag);
+                    changed = true;
+                }
+            }
+            if (merged.size() != existing.size()) current.put(e.getKey(), merged);
+        }
+        return changed;
+    }
+
+    private static List<String> normalizeTags(Collection<String> input) {
+        List<String> out = new ArrayList<>();
+        if (input == null) return out;
+        for (String raw : input) {
+            if (raw == null) continue;
+            String tag = raw.trim();
+            if (tag.isEmpty()) continue;
+            tag = capTagLength(tag);
+            if (tag.isEmpty()) continue;
+            boolean duplicate = false;
+            for (String old : out) if (sameTag(old, tag)) { duplicate = true; break; }
+            if (!duplicate) {
+                out.add(tag);
+                if (out.size() >= MAX_TAGS_PER_TRANSACTION) break;
+            }
+        }
+        return out;
+    }
+
+    private static String capTagLength(String s) {
+        if (s.length() <= MAX_TAG_LENGTH) return s;
+        int end = MAX_TAG_LENGTH;
+        while (end > 0 && Character.isLowSurrogate(s.charAt(end))) end--;
+        return s.substring(0, end).trim();
+    }
+
     /** Reads one encrypted {@code key → text} store, or an empty map when it holds nothing or cannot
      *  be read. A value left in plaintext by an older build is still accepted. */
     private static Map<String, String> readTextStore(Context context, String key) {
@@ -537,6 +703,8 @@ final class BalanceData {
         if (migrateTextKeys(reasons, replaced)) writeReasons(context, reasons);
         Map<String, String> channels = readChannels(context);
         if (migrateTextKeys(channels, replaced)) writeChannels(context, channels);
+        Map<String, List<String>> tags = readTags(context);
+        if (migrateTagKeys(tags, replaced)) writeTags(context, tags);
     }
 
     /** Moves the text of every replaced entry to its replacement's key, in place. Returns whether
@@ -559,6 +727,24 @@ final class BalanceData {
             changed = true;
             if (text.containsKey(to)) continue;
             text.put(to, value);
+        }
+        return changed;
+    }
+
+    /** Moves tag assignments to a replacement key while preserving tags from both sides. */
+    private static boolean migrateTagKeys(Map<String, List<String>> tags,
+            Map<Transaction, Transaction> replaced) {
+        boolean changed = false;
+        for (Map.Entry<Transaction, Transaction> e : replaced.entrySet()) {
+            String from = noteKey(e.getKey());
+            String to = noteKey(e.getValue());
+            if (from.equals(to)) continue;
+            List<String> moved = tags.remove(from);
+            if (moved == null) continue;
+            changed = true;
+            List<String> destination = tags.get(to);
+            if (destination == null) tags.put(to, normalizeTags(moved));
+            else if (unionTags(tags, java.util.Collections.singletonMap(to, moved))) changed = true;
         }
         return changed;
     }
@@ -593,7 +779,7 @@ final class BalanceData {
             context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
                 .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).remove(KEY_HISTORY_LAST_BALANCE)
                 .remove(KEY_RECENT_MOVEMENTS).remove(KEY_TX_REASONS).remove(KEY_TX_CHANNELS);
-        if (alsoNotes) data.remove(KEY_TX_NOTES);
+        if (alsoNotes) data.remove(KEY_TX_NOTES).remove(KEY_TX_TAGS);
         data.apply();
         context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
             .remove(KEY_SCANNED_THROUGH)
