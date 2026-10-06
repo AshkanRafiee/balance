@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
+import org.json.JSONArray;
 
 /**
  * Builds the UTF-8 CSV export of the transaction history. The columns stay machine-readable — an
@@ -20,10 +21,11 @@ import java.util.TimeZone;
  * stated about the movement. Only RFC-4180 quoting is applied; the caller writes the text through the
  * Storage Access Framework, so nothing leaves the device until the user picks a location.
  *
- * <p>The {@code note} column carries the user's own words, the {@code reason} and {@code channel}
- * columns the bank's: they are separate stores, so a movement that has any combination shows all of
- * them, and none ever stands in for another. An unaccounted row has none — there is no message behind
- * it for any of them to describe.
+ * <p>The {@code note} column carries the user's own words, the {@code tags} column carries the user's
+ * ordered multi-value labels as a JSON array, and the {@code reason} and {@code channel} columns carry
+ * the bank's words. They are separate stores, so a movement that has any combination shows all of them,
+ * and none ever stands in for another. An unaccounted row has none — there is no message behind it for
+ * any of them to describe.
  *
  * <p>The trailing {@code kind} column says what each row actually is. A {@code movement} row came
  * from one bank message; an {@code unaccounted} row is money the bank reported moving for which no
@@ -41,7 +43,7 @@ final class CsvExport {
      *  the file regardless of the app's language. */
     static final String[] HEADER = {
         "bank", "account", "date", "date_local", "time", "amount_rial", "amount_display", "currency",
-        "note", "reason", "channel", "kind"
+        "note", "reason", "channel", "kind", "tags"
     };
 
     /** {@code kind} value for a row parsed from one bank message. */
@@ -51,23 +53,30 @@ final class CsvExport {
 
     /** The per-transaction text an export carries, one map per kind of text, each keyed by the
      *  transaction identity so the columns stay in step with the rows. Grouped in one place because
-     *  they are always the same three stores, read together from {@link BalanceData#readNotes},
-     *  {@link BalanceData#readReasons} and {@link BalanceData#readChannels} and written to the same
-     *  file: passing a fourth fact as a fourth argument is how an export silently drops a column. */
+     *  they are the four metadata stores, read together from {@link BalanceData#readNotes},
+     *  {@link BalanceData#readReasons}, {@link BalanceData#readChannels} and {@link BalanceData#readTags}
+     *  and written to the same file. */
     static final class Text {
         final Map<String, String> notes;
         final Map<String, String> reasons;
         final Map<String, String> channels;
+        final Map<String, List<String>> tags;
 
         Text(Map<String, String> notes, Map<String, String> reasons, Map<String, String> channels) {
+            this(notes, reasons, channels, null);
+        }
+
+        Text(Map<String, String> notes, Map<String, String> reasons, Map<String, String> channels,
+                Map<String, List<String>> tags) {
             this.notes = notes;
             this.reasons = reasons;
             this.channels = channels;
+            this.tags = tags;
         }
 
         /** The "caller has none of it loaded" case: every text column comes out empty. */
         static Text none() {
-            return new Text(null, null, null);
+            return new Text(null, null, null, null);
         }
     }
 
@@ -148,7 +157,8 @@ final class CsvExport {
             "",
             "",
             "",
-            KIND_UNACCOUNTED
+            KIND_UNACCOUNTED,
+            ""
         };
     }
 
@@ -166,6 +176,11 @@ final class CsvExport {
         String reason = text.reasons == null ? null : BankRules.reasonCaption(context, text.reasons.get(key));
         String channel = text.channels == null ? null
             : BankRules.channelCaption(context, text.channels.get(key));
+        String tagJson = "";
+        if (text.tags != null) {
+            List<String> values = text.tags.get(key);
+            if (values != null && !values.isEmpty()) tagJson = new JSONArray(values).toString();
+        }
         return new String[]{
             BankRules.displayName(context, t.bank),
             t.account == null ? "" : t.account,
@@ -178,7 +193,8 @@ final class CsvExport {
             note == null ? "" : note,
             reason == null ? "" : reason,
             channel == null ? "" : channel,
-            KIND_MOVEMENT
+            KIND_MOVEMENT,
+            tagJson
         };
     }
 

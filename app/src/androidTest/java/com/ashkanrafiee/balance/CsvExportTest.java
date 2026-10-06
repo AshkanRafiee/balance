@@ -63,6 +63,10 @@ public class CsvExportTest {
         return new CsvExport.Text(notes, reasons, null);
     }
 
+    private static CsvExport.Text withTags(java.util.Map<String, java.util.List<String>> tags) {
+        return new CsvExport.Text(null, null, null, tags);
+    }
+
     private static String line(String csv, int index) {
         return csv.split("\n")[index];
     }
@@ -107,7 +111,7 @@ public class CsvExportTest {
         // A UTF-8 BOM leads the file so spreadsheets (Excel first) read Persian text as UTF-8 instead
         // of mis-decoding it; the header itself follows right after it.
         assertTrue(csv.startsWith("\uFEFF"));
-        assertEquals("bank,account,date,date_local,time,amount_rial,amount_display,currency,note,reason,channel,kind",
+         assertEquals("bank,account,date,date_local,time,amount_rial,amount_display,currency,note,reason,channel,kind,tags",
             line(csv, 0).substring(1));
         assertEquals(1, csv.split("\n").length);
     }
@@ -128,7 +132,7 @@ public class CsvExportTest {
         Transaction t = new Transaction("bank_melli", "910251846", DATE_2026, 1_250_000L, "sig");
         String row = line(CsvExport.csv(ctx, Arrays.asList(t), noText()), 1);
         List<String> cells = parse(row);
-        assertEquals(12, cells.size());
+         assertEquals(13, cells.size());
         assertEquals(BankRules.displayName(ctx, "bank_melli"), cells.get(0));
         assertEquals("910251846", cells.get(1));
         assertEquals("2026-01-01T00:00:00Z", cells.get(2));
@@ -181,13 +185,36 @@ public class CsvExportTest {
         assertTrue(row.contains("\"picked up from the cashier, watch out, \"\"late\"\"\""));
         // …and a plain parser sees the original text unquoted in the last cell.
         List<String> cells = parse(row);
-        assertEquals(12, cells.size());
+         assertEquals(13, cells.size());
         assertEquals("picked up from the cashier, watch out, \"late\"", cells.get(8));
         // The reason is the bank's own statement, read out of the message; a movement with no
         // detected reason carries an empty cell rather than borrowing the note's words.
         assertEquals("", cells.get(9));
         assertEquals("", cells.get(10));
         assertEquals(CsvExport.KIND_MOVEMENT, cells.get(11));
+    }
+
+    @Test public void row_withMultipleTags_writesLosslessJsonArray() {
+        Transaction t = new Transaction("bank_melli", null, DATE_2026, 1_250_000L, "sig",
+            "content-tags");
+        java.util.Map<String, java.util.List<String>> tags = new java.util.HashMap<>();
+        tags.put(BalanceData.noteKey(t), Arrays.asList("groceries", "needs, review", "say \"later\""));
+
+        List<String> cells = parse(line(CsvExport.csv(ctx, Arrays.asList(t), withTags(tags)), 1));
+        assertEquals(13, cells.size());
+        assertEquals("[\"groceries\",\"needs, review\",\"say \\\"later\\\"\"]", cells.get(12));
+        assertEquals(CsvExport.KIND_MOVEMENT, cells.get(11));
+    }
+
+    @Test public void row_tagsForAnotherTransaction_areNotAttached() {
+        Transaction t = new Transaction("bank_melli", null, DATE_2026, 1_250_000L, "sig",
+            "content-tags");
+        Transaction other = new Transaction("bank_melli", null, DATE_2026, 1_250_000L, "sig",
+            "other-tags");
+        java.util.Map<String, java.util.List<String>> tags = new java.util.HashMap<>();
+        tags.put(BalanceData.noteKey(other), Arrays.asList("unrelated"));
+        List<String> cells = parse(line(CsvExport.csv(ctx, Arrays.asList(t), withTags(tags)), 1));
+        assertEquals("", cells.get(12));
     }
 
     @Test public void csv_persianNote_survivesUtf8RoundTripAfterTheBom() {
@@ -227,7 +254,7 @@ public class CsvExportTest {
         String row = line(CsvExport.csv(ctx, Arrays.asList(t), withText(notes, reasons)), 1);
 
         List<String> cells = parse(row);
-        assertEquals(12, cells.size());
+         assertEquals(13, cells.size());
         assertEquals("topped up my number", cells.get(8));
         assertEquals("Phone top-up", cells.get(9));
         // A movement the bank named no channel for carries an empty cell there rather than borrowing
@@ -300,7 +327,7 @@ public class CsvExportTest {
             new CsvExport.Text(notes, reasons, channelsOf(t, SHETAB))), 1);
 
         List<String> cells = parse(row);
-        assertEquals(12, cells.size());
+         assertEquals(13, cells.size());
         assertEquals("for the shop", cells.get(8));
         assertEquals("Phone top-up", cells.get(9));
         assertEquals("Shetab", cells.get(10));
@@ -366,7 +393,7 @@ public class CsvExportTest {
         assertEquals(3, csv.split("\n").length);
 
         List<String> cells = parse(line(csv, 2));
-        assertEquals(12, cells.size());
+         assertEquals(13, cells.size());
         assertEquals(CsvExport.KIND_UNACCOUNTED, cells.get(11));
         // It carries the same amount columns a movement does, because it moves the totals the same
         // way — a spreadsheet sum over the file has to reconcile with the app and the bank.

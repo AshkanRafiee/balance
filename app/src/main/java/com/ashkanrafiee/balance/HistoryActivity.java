@@ -755,6 +755,8 @@ public final class HistoryActivity extends Activity {
      *  mid-write. */
     private void writeExport(Uri uri) {
         final String query = searchQuery == null ? "" : searchQuery.trim();
+        final List<String> tagSelection = new ArrayList<>(selectedTags);
+        final boolean tagMatchAll = matchAllTags;
         new Thread(() -> {
             final int[] error = {0};
             try {
@@ -762,12 +764,14 @@ public final class HistoryActivity extends Activity {
                 final java.util.Map<String, String> notes;
                 final java.util.Map<String, String> reasons;
                 final java.util.Map<String, String> channels;
+                final java.util.Map<String, List<String>> tagsNow;
                 final List<Residual> residuals;
                 synchronized (BalanceData.class) {
                     txs = BalanceData.readTransactions(getApplicationContext());
                     notes = BalanceData.readNotes(getApplicationContext());
                     reasons = BalanceData.readReasons(getApplicationContext());
                     channels = BalanceData.readChannels(getApplicationContext());
+                    tagsNow = BalanceData.readTags(getApplicationContext());
                     // Detected before narrowing, exactly as on screen, so the file reconciles with
                     // the totals the user just looked at.
                     residuals = Residual.between(txs);
@@ -784,14 +788,16 @@ public final class HistoryActivity extends Activity {
                 }
                 List<Residual> residualOut = applyResidualFilters(residualScope, filter, iranCalendar);
                 scope = applyFilters(scope, filter, iranCalendar);
+                scope = applyTagFilter(scope, tagsNow, tagSelection, tagMatchAll);
+                if (!tagSelection.isEmpty()) residualOut = new ArrayList<>();
                 if (!query.isEmpty()) {
                     final SearchPass pass =
-                        new SearchPass(this, iranCalendar, notes, reasons, channels, null);
+                        new SearchPass(this, iranCalendar, notes, reasons, channels, tagsNow);
                     scope = filterBySearch(scope, query, t -> txHaystack(pass, t));
                     residualOut = filterBySearch(residualOut, query, r -> residualHaystack(pass, r));
                 }
                 String csv = CsvExport.csv(getApplicationContext(), scope, residualOut,
-                    new CsvExport.Text(notes, reasons, channels));
+                    new CsvExport.Text(notes, reasons, channels, tagsNow));
                 OutputStream out = getContentResolver().openOutputStream(uri, "w");
                 if (out == null) throw new IOException("no output stream");
                 try {
