@@ -45,10 +45,12 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -191,6 +193,14 @@ public final class HistoryActivity extends Activity {
      *  so the way a movement happened stays as separate from what the user wrote about it as the bank's
      *  reason for it is. */
     private Map<String, String> channels;
+
+    /** User-created tags keyed by transaction identity, loaded once per render like other metadata. */
+    private Map<String, List<String>> tags;
+
+    /** Exact tag selection applied in addition to the direction/date filter and text search. */
+    private final List<String> selectedTags = new ArrayList<>();
+    private boolean matchAllTags = true;
+    private List<String> availableTags = new ArrayList<>();
 
     /** An account number is sensitive: it is copied to the clipboard only for the paste window,
      *  then cleared again unless the user copied something else in the meantime; the clear is keyed
@@ -427,6 +437,9 @@ public final class HistoryActivity extends Activity {
             expandedSeeded = state.getBoolean(KEY_EXPANDED_SEEDED, false);
             pendingScroll = state.getInt(KEY_SCROLL_Y, 0);
             restoreFilter(state);
+            java.util.ArrayList<String> savedTags = state.getStringArrayList(KEY_FILTER_TAGS);
+            if (savedTags != null) selectedTags.addAll(savedTags);
+            matchAllTags = state.getBoolean(KEY_FILTER_TAG_MODE_ALL, true);
             searchQuery = state.getString(KEY_SEARCH_QUERY, "");
             searchExpandedFor = state.getString(KEY_SEARCH_EXPANDED_FOR, null);
             preSearchYears = stringSet(state, KEY_PRE_SEARCH_YEARS);
@@ -773,7 +786,7 @@ public final class HistoryActivity extends Activity {
                 scope = applyFilters(scope, filter, iranCalendar);
                 if (!query.isEmpty()) {
                     final SearchPass pass =
-                        new SearchPass(this, iranCalendar, notes, reasons, channels);
+                        new SearchPass(this, iranCalendar, notes, reasons, channels, null);
                     scope = filterBySearch(scope, query, t -> txHaystack(pass, t));
                     residualOut = filterBySearch(residualOut, query, r -> residualHaystack(pass, r));
                 }
@@ -823,12 +836,37 @@ public final class HistoryActivity extends Activity {
         dateLp.topMargin = dp(8);
         filterBar.addView(dateRow, dateLp);
 
+        LinearLayout tagRow = new LinearLayout(this);
+        tagRow.setOrientation(LinearLayout.HORIZONTAL);
+        addTagFilterChip(tagRow);
+        LinearLayout.LayoutParams tagLp = new LinearLayout.LayoutParams(-1, -2);
+        tagLp.topMargin = dp(8);
+        filterBar.addView(tagRow, tagLp);
+
         if (filter.rangePreset == RANGE_CUSTOM && (filter.from != null || filter.to != null)) {
             TextView summary = text(customRangeSummary(), 12, muted);
             LinearLayout.LayoutParams sumLp = new LinearLayout.LayoutParams(-1, -2);
             sumLp.topMargin = dp(6);
             filterBar.addView(summary, sumLp);
         }
+    }
+
+    /** One compact tag-filter action; the picker keeps the potentially long selection out of the
+     *  permanent filter bar while still showing how many exact tags narrow the list. */
+    private void addTagFilterChip(LinearLayout host) {
+        String label = selectedTags.isEmpty()
+            ? getString(R.string.history_filter_tags)
+            : getString(R.string.history_filter_tags_count, selectedTags.size());
+        TextView chip = text(label, 12, selectedTags.isEmpty() ? fg : Color.WHITE, MEDIUM);
+        chip.setGravity(Gravity.CENTER);
+        chip.setSingleLine(true);
+        chip.setPadding(dp(12), dp(7), dp(12), dp(7));
+        chip.setBackground(rounded(selectedTags.isEmpty() ? chipBg : accent, 10));
+        chip.setContentDescription(getString(R.string.history_filter_tags_accessibility, label));
+        chip.setClickable(true);
+        chip.setFocusable(true);
+        chip.setOnClickListener(v -> tagFilterDialog());
+        host.addView(chip, new LinearLayout.LayoutParams(-2, -2));
     }
 
     /** Rebuilds the per-bank account chips: "All accounts" plus one chip per account the bank has
@@ -889,6 +927,108 @@ public final class HistoryActivity extends Activity {
     private void applyDirection(int direction) {
         filter = filter.withDirection(direction);
         render();
+    }
+
+    /** Lets the user stage several reusable tags and choose exact all/any matching before applying. */
+    private void tagFilterDialog() {
+        final List<String> choices = new ArrayList<>(BalanceData.readTagNames(this));
+        final LinkedHashSet<String> staged = new LinkedHashSet<>();
+        for (String selected : selectedTags) {
+            for (String choice : choices) {
+                if (BalanceData.sameTag(selected, choice)) {
+                    staged.add(choice);
+                    break;
+                }
+            }
+        }
+
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(dp(20), dp(8), dp(20), 0);
+        if (choices.isEmpty()) {
+            wrap.addView(text(getString(R.string.history_filter_tags_empty), 14, muted),
+                new LinearLayout.LayoutParams(-1, -2));
+        } else {
+            LinearLayout mode = new LinearLayout(this);
+            mode.setOrientation(LinearLayout.HORIZONTAL);
+            android.widget.RadioButton all = new android.widget.RadioButton(this);
+            all.setText(getString(R.string.history_filter_tags_all));
+            all.setTextColor(fg);
+            all.setTextSize(13);
+            all.setChecked(matchAllTags);
+            android.widget.RadioButton any = new android.widget.RadioButton(this);
+            any.setText(getString(R.string.history_filter_tags_any));
+            any.setTextColor(fg);
+            any.setTextSize(13);
+            any.setChecked(!matchAllTags);
+            mode.addView(all, new LinearLayout.LayoutParams(0, -2, 1));
+            mode.addView(any, new LinearLayout.LayoutParams(0, -2, 1));
+            // Keep the two mode choices mutually exclusive without introducing another dependency.
+            all.setOnClickListener(v -> { all.setChecked(true); any.setChecked(false); });
+            any.setOnClickListener(v -> { any.setChecked(true); all.setChecked(false); });
+            wrap.addView(mode, new LinearLayout.LayoutParams(-1, -2));
+
+            for (String choice : choices) {
+                android.widget.CheckBox check = new android.widget.CheckBox(this);
+                check.setText(choice);
+                check.setTextColor(fg);
+                check.setTextSize(14);
+                check.setChecked(containsTag(staged, choice));
+                check.setOnCheckedChangeListener((button, checked) -> {
+                    if (checked) staged.add(choice);
+                    else removeTag(staged, choice);
+                });
+                wrap.addView(check, new LinearLayout.LayoutParams(-1, -2));
+            }
+            android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.history_filter_tags_title)
+                .setView(wrap)
+                .setPositiveButton(R.string.history_filter_apply, null)
+                .setNegativeButton(R.string.lock_cancel, null)
+                .setNeutralButton(R.string.history_filter_tags_clear, null)
+                .create();
+            dlg.setOnShowListener(v -> {
+                dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
+                    selectedTags.clear();
+                    selectedTags.addAll(staged);
+                    matchAllTags = all.isChecked();
+                    dlg.dismiss();
+                    render();
+                });
+                dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(button -> {
+                    selectedTags.clear();
+                    dlg.dismiss();
+                    render();
+                });
+            });
+            dlg.show();
+            return;
+        }
+
+        android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.history_filter_tags_title)
+            .setView(wrap)
+            .setPositiveButton(R.string.lock_cancel, null)
+            .setNeutralButton(R.string.history_filter_tags_clear, null)
+            .create();
+        dlg.setOnShowListener(v -> dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL)
+            .setOnClickListener(button -> {
+                selectedTags.clear();
+                dlg.dismiss();
+                render();
+            }));
+        dlg.show();
+    }
+
+    private static boolean containsTag(Collection<String> tags, String wanted) {
+        if (tags == null) return false;
+        for (String tag : tags) if (BalanceData.sameTag(tag, wanted)) return true;
+        return false;
+    }
+
+    private static void removeTag(Collection<String> tags, String wanted) {
+        if (tags == null) return;
+        tags.removeIf(tag -> BalanceData.sameTag(tag, wanted));
     }
 
     // ====================================================================
@@ -1296,6 +1436,8 @@ public final class HistoryActivity extends Activity {
     private static final String KEY_FILTER_TO_YEAR = "filter_to_year";
     private static final String KEY_FILTER_TO_MONTH = "filter_to_month";
     private static final String KEY_FILTER_TO_DAY = "filter_to_day";
+    private static final String KEY_FILTER_TAGS = "filter_tags";
+    private static final String KEY_FILTER_TAG_MODE_ALL = "filter_tag_mode_all";
     private static final String KEY_SEARCH_QUERY = "search_query";
     private static final String KEY_SEARCH_EXPANDED_FOR = "search_expanded_for";
     private static final String KEY_PRE_SEARCH_YEARS = "pre_search_years";
@@ -1359,6 +1501,17 @@ public final class HistoryActivity extends Activity {
         return CalDate.today(iranCalendar);
     }
 
+    /** Gives tag narrowing its own expansion identity, so changing or clearing it restores the
+     *  same collapsed groups as text search does. */
+    private String expansionQuery(String query) {
+        String base = query == null ? "" : query;
+        if (selectedTags.isEmpty()) return base;
+        StringBuilder key = new StringBuilder(base).append("\u0000tags:")
+            .append(matchAllTags ? "all:" : "any:");
+        for (String tag : selectedTags) key.append(tag).append('|');
+        return key.toString();
+    }
+
     /** Opens every matching year, month and day for a fresh query, so a match never hides inside a
      *  collapsed group the query itself did not open. The expansion the search started from is
      *  remembered and restored when the search is cleared, so searching never leaves the whole
@@ -1405,6 +1558,8 @@ public final class HistoryActivity extends Activity {
         if (scrollView != null) outState.putInt(KEY_SCROLL_Y, scrollView.getScrollY());
         outState.putInt(KEY_FILTER_DIRECTION, filter.direction);
         outState.putInt(KEY_FILTER_RANGE, filter.rangePreset);
+        outState.putStringArrayList(KEY_FILTER_TAGS, new java.util.ArrayList<>(selectedTags));
+        outState.putBoolean(KEY_FILTER_TAG_MODE_ALL, matchAllTags);
         outState.putString(KEY_SEARCH_QUERY, searchQuery == null ? "" : searchQuery);
         outState.putString(KEY_SEARCH_EXPANDED_FOR, searchExpandedFor);
         putStringSet(outState, KEY_PRE_SEARCH_YEARS, preSearchYears);
@@ -1540,6 +1695,7 @@ public final class HistoryActivity extends Activity {
         private final Map<String, String> notes;
         private final Map<String, String> reasons;
         private final Map<String, String> channels;
+        private final Map<String, List<String>> tags;
         private final boolean toman;
         private final boolean persian;
         private final String depositText;
@@ -1551,12 +1707,14 @@ public final class HistoryActivity extends Activity {
         private final Map<Long, String> amountCache = new HashMap<>();
 
         SearchPass(Context context, boolean iran, Map<String, String> notes,
-                Map<String, String> reasons, Map<String, String> channels) {
+                Map<String, String> reasons, Map<String, String> channels,
+                Map<String, List<String>> tags) {
             this.context = context;
             this.iran = iran;
             this.notes = notes;
             this.reasons = reasons;
             this.channels = channels;
+            this.tags = tags;
             this.toman = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(context));
             this.persian = LocaleHelper.isPersian(context);
             this.depositText = context.getString(R.string.history_deposit);
@@ -1609,6 +1767,7 @@ public final class HistoryActivity extends Activity {
         String note = pass.notes == null ? null : pass.notes.get(key);
         String reasonRaw = pass.reasons == null ? null : pass.reasons.get(key);
         String channelRaw = pass.channels == null ? null : pass.channels.get(key);
+        List<String> tagValues = pass.tags == null ? null : pass.tags.get(key);
         int[] g = gDate(t.date);
         CalDate d = CalDate.fromGregorian(g[0], g[1], g[2], pass.iran);
         return transactionSearchText(t, pass.display(t.bank), note,
@@ -1616,7 +1775,7 @@ public final class HistoryActivity extends Activity {
             channelRaw, pass.channel(channelRaw),
             pass.amount(t.amount), pass.direction(t.amount),
             dateText(d, pass.persian), timeText(t.date, pass.persian),
-            monthName(d.month, pass.persian), compactDate(d, pass.persian));
+            monthName(d.month, pass.persian), compactDate(d, pass.persian), tagValues);
     }
 
     /** One gap's searchable text in the current language, mirroring {@link #txHaystack}. */
@@ -1645,6 +1804,8 @@ public final class HistoryActivity extends Activity {
         final String acct = accountFilter;
         final boolean iran = iranCalendar;
         final String query = searchQuery == null ? "" : searchQuery.trim();
+        final List<String> tagSelection = new ArrayList<>(selectedTags);
+        final boolean tagMatchAll = matchAllTags;
         new Thread(() -> {
             try {
                 List<Transaction> txs = BalanceData.readTransactions(getApplicationContext());
@@ -1661,9 +1822,14 @@ public final class HistoryActivity extends Activity {
                     BalanceData.readReasons(getApplicationContext());
                 final Map<String, String> channelsNow =
                     BalanceData.readChannels(getApplicationContext());
+                final Map<String, List<String>> tagsNow =
+                    BalanceData.readTags(getApplicationContext());
+                final List<String> tagNamesNow = BalanceData.readTagNames(getApplicationContext());
+                filtered = applyTagFilter(filtered, tagsNow, tagSelection, tagMatchAll);
+                if (!tagSelection.isEmpty()) residuals = new ArrayList<>();
                 if (!query.isEmpty()) {
                     final SearchPass pass =
-                        new SearchPass(this, iran, notesNow, reasonsNow, channelsNow);
+                        new SearchPass(this, iran, notesNow, reasonsNow, channelsNow, tagsNow);
                     filtered = filterBySearch(filtered, query, t -> txHaystack(pass, t));
                     residuals = filterBySearch(residuals, query, r -> residualHaystack(pass, r));
                 }
@@ -1676,6 +1842,8 @@ public final class HistoryActivity extends Activity {
                     notes = notesNow;
                     reasons = reasonsNow;
                     channels = channelsNow;
+                    tags = tagsNow;
+                    availableTags = tagNamesNow;
                     refreshDates();
                     rebuildFilterBar();
                     stopShimmer();
@@ -1688,14 +1856,14 @@ public final class HistoryActivity extends Activity {
                     body.setVisibility(View.GONE);
                     body.removeAllViews();
                     if (lists.years.isEmpty()) {
-                        expandForSearch(query, lists.years);
+                        expandForSearch(expansionQuery(query), lists.years);
                         emptyState();
                     } else {
                         body.addView(heroCard(lists), margin(0, 0, 0, 6));
                         body.addView(breakdownHeading(shown.size()), margin(0, 16, 0, 12));
                         allYears = lists.years;
                         seedExpanded();
-                        expandForSearch(query, lists.years);
+                        expandForSearch(expansionQuery(query), lists.years);
                         renderYears(body, allYears);
                     }
                     body.setVisibility(View.VISIBLE);
@@ -1774,7 +1942,7 @@ public final class HistoryActivity extends Activity {
             // A search that matches nothing says what it looked for, so the dead end reads as an
             // answer rather than a blank screen.
             empty = getString(R.string.history_empty_search, searchQuery.trim());
-        } else if (filter.isActive()) {
+        } else if (filter.isActive() || !selectedTags.isEmpty()) {
             // A filter may hide every transaction even though history exists.
             empty = getString(R.string.history_empty_filtered);
         } else if (accountFilter != null) {
@@ -2544,19 +2712,34 @@ public final class HistoryActivity extends Activity {
         if (channel != null) addChip(cell, channel, false, chipBg, muted, MEDIUM, inset);
         String note = notes == null ? null : notes.get(key);
         if (note != null) addChip(cell, note, true, badgeBg, badgeFg, null, inset);
+        List<String> tagValues = tags == null ? null : tags.get(key);
+        if (tagValues != null && !tagValues.isEmpty()) {
+            int shown = Math.min(4, tagValues.size());
+            for (int i = 0; i < shown; i++) {
+                addChip(cell, "#" + tagValues.get(i), false, chipBg, muted, MEDIUM, inset);
+            }
+            if (tagValues.size() > shown) {
+                addChip(cell, getString(R.string.tag_more, tagValues.size() - shown), false,
+                    chipBg, muted, MEDIUM, inset);
+            }
+        }
         // The row is a single clickable node, so a screen reader announces this description and never
         // reaches the chips below it. Everything the row says therefore belongs here rather than on a
         // chip of its own: a row carrying only a channel would otherwise be heard as nothing but the
         // invitation to add a note, and a note — the user's own words, the one thing here that no
         // rescan can bring back — would never be heard at all. Each clause is a whole sentence, so they
         // read in order in either language rather than running into each other.
-        List<String> said = new ArrayList<>(4);
+        List<String> said = new ArrayList<>(5);
         if (caption != null) said.add(getString(R.string.row_fact_reason, caption));
         if (channel != null) said.add(getString(R.string.row_fact_channel, channel));
         if (note != null) said.add(getString(R.string.row_fact_note, note));
+        if (tagValues != null && !tagValues.isEmpty()) {
+            said.add(getString(R.string.row_fact_tags,
+                android.text.TextUtils.join(", ", tagValues)));
+        }
         // A row that already carries a note needs no invitation to add one, so it is offered only the
         // edit it really has.
-        said.add(note != null
+        said.add(note != null || (tagValues != null && !tagValues.isEmpty())
             ? getString(R.string.row_hint_edit_note) : getString(R.string.note_row_hint));
         cell.setContentDescription(android.text.TextUtils.join(" ", said));
         return cell;
@@ -2594,9 +2777,8 @@ public final class HistoryActivity extends Activity {
         return chip;
     }
 
-    /** The note editor for one transaction: a free-text field seeded with the current note, with
-     *  Save (persists and re-renders), Clear (removes the note) and Cancel. Editing from any filter
-     *  or view updates the same shared note, because notes are keyed to the transaction itself. */
+    /** The note and tag editor for one transaction. Changes are staged in the dialog and only saved
+     *  together when Save is pressed; Clear note remains deliberately separate from Clear tags. */
     private void noteDialog(final Transaction t) {
         final EditText input = new EditText(this);
         input.setSingleLine(false);
@@ -2612,10 +2794,92 @@ public final class HistoryActivity extends Activity {
         input.setText(existing == null ? "" : existing);
         input.setSelection(input.getText().length());
 
+        final List<String> editedTags = new ArrayList<>(BalanceData.getTags(this, t));
+        LinearLayout selectedTagHost = new LinearLayout(this);
+        selectedTagHost.setGravity(Gravity.CENTER_VERTICAL);
+        selectedTagHost.setHorizontalScrollBarEnabled(true);
+        selectedTagHost.setScrollbarFadingEnabled(true);
+        selectedTagHost.setPadding(0, dp(2), 0, dp(2));
+
+        EditText tagInput = new EditText(this);
+        tagInput.setSingleLine(true);
+        tagInput.setHint(getString(R.string.tag_add_hint));
+        tagInput.setTextColor(fg);
+        tagInput.setHintTextColor(muted);
+        tagInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+            | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        tagInput.setPadding(dp(2), dp(6), dp(2), dp(6));
+        TextView addTag = text(getString(R.string.tag_add), 13, accent, MEDIUM);
+        addTag.setGravity(Gravity.CENTER);
+        addTag.setPadding(dp(10), dp(6), dp(10), dp(6));
+        addTag.setBackground(ripple(rounded(chipBg, 10)));
+        addTag.setClickable(true);
+        addTag.setFocusable(true);
+        Runnable addTypedTag = () -> {
+            String value = tagInput.getText().toString().trim();
+            if (value.isEmpty()) return;
+            if (!containsTag(editedTags, value)) editedTags.add(value);
+            tagInput.setText("");
+            renderTagEditor(selectedTagHost, editedTags);
+        };
+        addTag.setOnClickListener(v -> addTypedTag.run());
+        tagInput.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                addTypedTag.run();
+                return true;
+            }
+            return false;
+        });
+
+        LinearLayout addRow = new LinearLayout(this);
+        addRow.setGravity(Gravity.CENTER_VERTICAL);
+        addRow.addView(tagInput, new LinearLayout.LayoutParams(0, -2, 1));
+        addRow.addView(addTag, new LinearLayout.LayoutParams(-2, -2));
+
+        LinearLayout suggestions = new LinearLayout(this);
+        suggestions.setGravity(Gravity.CENTER_VERTICAL);
+        suggestions.setHorizontalScrollBarEnabled(true);
+        List<String> suggestionsList = BalanceData.readTagNames(this);
+        int suggestionCount = Math.min(20, suggestionsList.size());
+        for (int i = 0; i < suggestionCount; i++) {
+            String suggestion = suggestionsList.get(i);
+            TextView chip = text("#" + suggestion, 11, muted, MEDIUM);
+            chip.setPadding(dp(8), dp(4), dp(8), dp(4));
+            chip.setBackground(rounded(chipBg, 9));
+            chip.setClickable(true);
+            chip.setFocusable(true);
+            chip.setContentDescription(getString(R.string.tag_add_existing, suggestion));
+            chip.setOnClickListener(v -> {
+                if (!containsTag(editedTags, suggestion)) editedTags.add(suggestion);
+                renderTagEditor(selectedTagHost, editedTags);
+            });
+            LinearLayout.LayoutParams chipLp = new LinearLayout.LayoutParams(-2, -2);
+            chipLp.setMarginEnd(dp(6));
+            suggestions.addView(chip, chipLp);
+        }
+
+        TextView clearTags = text(getString(R.string.tag_clear), 12, muted, MEDIUM);
+        clearTags.setPadding(0, dp(7), 0, dp(7));
+        clearTags.setClickable(true);
+        clearTags.setFocusable(true);
+        clearTags.setOnClickListener(v -> {
+            editedTags.clear();
+            renderTagEditor(selectedTagHost, editedTags);
+        });
+
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setPadding(dp(20), dp(10), dp(20), 0);
         wrap.addView(input);
+        wrap.addView(text(getString(R.string.tag_label), 13, muted, MEDIUM), margin(0, 8, 0, 2));
+        wrap.addView(selectedTagHost, new LinearLayout.LayoutParams(-1, dp(38)));
+        wrap.addView(addRow, margin(0, 2, 0, 0));
+        if (suggestionCount > 0) {
+            wrap.addView(text(getString(R.string.tag_existing), 11, muted), margin(0, 6, 0, 0));
+            wrap.addView(suggestions, new LinearLayout.LayoutParams(-1, dp(34)));
+        }
+        wrap.addView(clearTags, margin(0, 2, 0, 0));
+        renderTagEditor(selectedTagHost, editedTags);
 
         android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.note_edit_title))
@@ -2625,9 +2889,10 @@ public final class HistoryActivity extends Activity {
             .setNeutralButton(getString(R.string.note_clear), null)
             .create();
         dlg.setOnShowListener(d -> {
-            dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
+                dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
                 .setOnClickListener(v -> {
                     BalanceData.setNote(this, t, input.getText().toString());
+                    BalanceData.setTags(this, t, editedTags);
                     dlg.dismiss();
                     render();
                 });
@@ -2639,6 +2904,32 @@ public final class HistoryActivity extends Activity {
                 });
         });
         dlg.show();
+    }
+
+    /** Rebuilds the compact, horizontally scrollable selected-tag row in the editor. */
+    private void renderTagEditor(LinearLayout host, List<String> values) {
+        host.removeAllViews();
+        if (values == null || values.isEmpty()) {
+            host.addView(text(getString(R.string.tag_none), 12, muted),
+                new LinearLayout.LayoutParams(-2, -2));
+            return;
+        }
+        for (int i = 0; i < values.size(); i++) {
+            final int index = i;
+            TextView chip = text("#" + values.get(i) + " ×", 11, badgeFg, MEDIUM);
+            chip.setPadding(dp(8), dp(5), dp(8), dp(5));
+            chip.setBackground(rounded(badgeBg, 9));
+            chip.setClickable(true);
+            chip.setFocusable(true);
+            chip.setContentDescription(getString(R.string.tag_remove, values.get(i)));
+            chip.setOnClickListener(v -> {
+                if (index < values.size()) values.remove(index);
+                renderTagEditor(host, values);
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.setMarginEnd(dp(6));
+            host.addView(chip, lp);
+        }
     }
 
     /** A small neutral chip with a count, for transaction-count density. */
@@ -2839,6 +3130,33 @@ public final class HistoryActivity extends Activity {
         }
     }
 
+    /** Exact tag membership: a selected tag never matches a different tag merely because its name is
+     *  a substring. Comparison is case-insensitive because tag names are user-entered labels. */
+    static boolean matchesTags(Transaction t, Map<String, List<String>> tags,
+            Collection<String> selected, boolean matchAll) {
+        if (selected == null || selected.isEmpty()) return true;
+        List<String> actual = tags == null || t == null ? null : tags.get(BalanceData.noteKey(t));
+        if (actual == null || actual.isEmpty()) return false;
+        boolean found = false;
+        for (String wanted : selected) {
+            boolean one = containsTag(actual, wanted);
+            if (matchAll && !one) return false;
+            if (!matchAll && one) found = true;
+        }
+        return matchAll || found;
+    }
+
+    /** Keeps transactions with exact selected-tag membership, preserving input order. */
+    static List<Transaction> applyTagFilter(List<Transaction> txs,
+            Map<String, List<String>> tags, Collection<String> selected, boolean matchAll) {
+        List<Transaction> out = new ArrayList<>(txs == null ? 0 : txs.size());
+        if (txs == null) return out;
+        for (Transaction t : txs) {
+            if (matchesTags(t, tags, selected, matchAll)) out.add(t);
+        }
+        return out;
+    }
+
     /** Keeps the transactions whose movement direction and calendar date fall inside {@code f}; a
      *  transaction on a boundary day is included. Never mutates the caller's list, so it composes
      *  safely after the per-bank filter for both the full and the per-bank screens. */
@@ -2967,6 +3285,16 @@ public final class HistoryActivity extends Activity {
             String reasonRaw, String reasonCaption, String channelRaw, String channelCaption,
             String amountFormatted, String directionText, String dateText, String timeText,
             String monthName, String compactDate) {
+        return transactionSearchText(t, bankDisplay, note, reasonRaw, reasonCaption, channelRaw,
+            channelCaption, amountFormatted, directionText, dateText, timeText, monthName,
+            compactDate, null);
+    }
+
+    /** Same searchable movement text with user-created tags included as whole display labels. */
+    static String transactionSearchText(Transaction t, String bankDisplay, String note,
+            String reasonRaw, String reasonCaption, String channelRaw, String channelCaption,
+            String amountFormatted, String directionText, String dateText, String timeText,
+            String monthName, String compactDate, List<String> tags) {
         StringBuilder hay = new StringBuilder();
         if (t != null) {
             searchField(hay, t.bank);
@@ -2982,6 +3310,7 @@ public final class HistoryActivity extends Activity {
         searchField(hay, reasonCaption);
         searchField(hay, channelRaw);
         searchField(hay, channelCaption);
+        if (tags != null) for (String tag : tags) searchField(hay, tag);
         searchField(hay, dateText);
         searchField(hay, timeText);
         searchField(hay, monthName);
