@@ -189,9 +189,9 @@
     <string name="commitments_payable">Payable</string>
     <string name="commitments_receivable">Receivable</string>
     <string name="commitments_window_this_month">This month + overdue</string>
-    <string name="commitments_card_empty">Track payments and receipts here — tap to add a commitment. You can hide this card in Display.</string>
-    <string name="commitments_card_payments">Payments</string>
-    <string name="commitments_card_receipts">Receipts</string>
+    <string name="commitments_card_empty">Track payables and receivables here.</string>
+    <string name="commitments_card_empty_action">Tap to add a commitment.</string>
+    <string name="commitments_card_empty_settings">Hide it in Display.</string>
     <string name="settings_commitments_card_label">Show commitments card on the dashboard</string>
     <string name="commitments_mark_paid">Mark paid</string>
     <string name="commitments_mark_received">Mark received</string>
@@ -199,8 +199,10 @@
     <string name="commitments_manage">Manage</string>
     <string name="commitments_manage_title">Manage commitments</string>
     <string name="commitments_manage_empty">Nothing to manage yet — add your first commitment.</string>
-    <string name="commitments_total_amount">Total %1$s</string>
     <string name="commitments_each_amount">%1$s each</string>
+    <string name="commitments_total_each_amount">Total %1$s · %2$s each</string>
+    <string name="commitments_show_settled">Show %1$d older settled dues</string>
+    <string name="commitments_hide_settled">Hide older settled dues</string>
     <string name="commitments_series_ends">ends %1$s</string>
     <string name="commitments_series_open">open-ended</string>
     <string name="commitments_new">New commitment</string>

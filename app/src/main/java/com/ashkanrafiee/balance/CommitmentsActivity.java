@@ -68,6 +68,7 @@ public final class CommitmentsActivity extends Activity {
      *  the current month's share the hero reports together with the overdue dues. */
     static final class Summary {
         final List<Row> overdue = new ArrayList<>();
+        final List<Row> settledOverdue = new ArrayList<>();
         final List<MonthGroup> months = new ArrayList<>();
         long overduePay;
         long overdueReceive;
@@ -85,23 +86,33 @@ public final class CommitmentsActivity extends Activity {
         Summary summary = new Summary();
         if (commitments == null || cal == null) return summary;
         long today = Commitment.startOfDay(nowMs);
+        int[] currentCivil = Commitment.civilDay(today, cal);
+        long currentMonthStart = Commitment.millisOf(currentCivil[0], currentCivil[1], 1, cal);
         for (Commitment c : commitments) {
             if (c == null) continue;
             for (long at : Commitment.occurrences(c, cal, Math.min(c.start, today - 366L * 86400000L),
                     today - 1)) {
-                if (c.isSettled(at)) continue;
-                summary.overdue.add(new Row(c, at, false));
-                if (c.isPayment()) summary.overduePay += c.amount;
-                else summary.overdueReceive += c.amount;
+                if (c.isSettled(at)) {
+                    // The current month already owns its settled rows. Keep only older settled
+                    // dues here so expanding this section never duplicates a month-card row.
+                    if (at < currentMonthStart) summary.settledOverdue.add(new Row(c, at, true));
+                } else {
+                    summary.overdue.add(new Row(c, at, false));
+                    if (c.isPayment()) summary.overduePay += c.amount;
+                    else summary.overdueReceive += c.amount;
+                }
             }
         }
         summary.overdue.sort((x, y) -> {
             int byDate = Long.compare(y.date, x.date);
             return byDate != 0 ? byDate : x.commitment.name.compareTo(y.commitment.name);
         });
-        int[] civil = Commitment.civilDay(today, cal);
-        int year = civil[0];
-        int month = civil[1];
+        summary.settledOverdue.sort((x, y) -> {
+            int byDate = Long.compare(y.date, x.date);
+            return byDate != 0 ? byDate : x.commitment.name.compareTo(y.commitment.name);
+        });
+        int year = currentCivil[0];
+        int month = currentCivil[1];
         for (int i = 0; i < upcomingMonths; i++) {
             MonthGroup group = new MonthGroup(year, month);
             long monthStart = Commitment.millisOf(year, month, 1, cal);
@@ -118,7 +129,6 @@ public final class CommitmentsActivity extends Activity {
                 }
             }
             group.rows.sort((x, y) -> {
-                if (x.settled != y.settled) return x.settled ? 1 : -1;
                 int byDate = Long.compare(x.date, y.date);
                 return byDate != 0 ? byDate : x.commitment.name.compareTo(y.commitment.name);
             });
@@ -135,9 +145,8 @@ public final class CommitmentsActivity extends Activity {
             summary.payTotal += group.pay;
             summary.receiveTotal += group.receive;
         }
-        int[] current = Commitment.civilDay(today, cal);
         for (MonthGroup group : summary.months) {
-            if (group.year == current[0] && group.month == current[1]) {
+            if (group.year == currentCivil[0] && group.month == currentCivil[1]) {
                 summary.thisMonthPay = group.pay;
                 summary.thisMonthReceive = group.receive;
                 break;
@@ -151,6 +160,7 @@ public final class CommitmentsActivity extends Activity {
     private boolean iran;
     private boolean persian;
     private LinearLayout root;
+    private AlertDialog manageDialogWindow;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -234,7 +244,7 @@ public final class CommitmentsActivity extends Activity {
             root.addView(empty, margin(8, 24, 8, 0));
             return;
         }
-        if (!summary.overdue.isEmpty()) overdueCard(summary);
+        if (!summary.overdue.isEmpty() || !summary.settledOverdue.isEmpty()) overdueCard(summary);
         int lastYear = -1;
         for (MonthGroup group : summary.months) {
             if (group.year != lastYear) {
@@ -323,11 +333,13 @@ public final class CommitmentsActivity extends Activity {
             TextView name = text(c.name, 15, fg, medium());
             name.setSingleLine(true);
             name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            applyUserTextDirection(name, c.name);
             heading.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
             Long total = Commitment.totalAmount(c, cal);
             String amountLabel = total == null
                 ? getString(R.string.commitments_each_amount, signedAmount(c.amount))
-                : getString(R.string.commitments_total_amount, signedAmount(total));
+                : getString(R.string.commitments_total_each_amount, signedAmount(total),
+                    signedAmount(c.amount));
             TextView amount = bold(amountLabel, 14, valueColor(total == null ? c.amount : total));
             amount.setGravity(Gravity.END);
             amount.setMaxLines(2);
@@ -342,7 +354,13 @@ public final class CommitmentsActivity extends Activity {
             details.setPadding(0, dp(4), 0, 0);
             row.addView(details, new LinearLayout.LayoutParams(-1, -2));
             final String id = c.id;
-            row.setOnClickListener(v -> editorDialog(id));
+            row.setOnClickListener(v -> {
+                if (manageDialogWindow != null) {
+                    manageDialogWindow.dismiss();
+                    manageDialogWindow = null;
+                }
+                editorDialog(id);
+            });
             LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(-1, -2);
             rowLp.setMargins(0, 0, 0, dp(8));
             list.addView(row, rowLp);
@@ -350,11 +368,12 @@ public final class CommitmentsActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         scroll.setClipToPadding(false);
         scroll.addView(list, new LinearLayout.LayoutParams(-1, -2));
-        new AlertDialog.Builder(this)
+        manageDialogWindow = new AlertDialog.Builder(this)
             .setTitle(getString(R.string.commitments_manage_title))
             .setView(scroll)
             .setPositiveButton(android.R.string.ok, null)
             .show();
+        manageDialogWindow.setOnDismissListener(d -> manageDialogWindow = null);
     }
 
     private String freqLabel(int frequency) {
@@ -374,17 +393,39 @@ public final class CommitmentsActivity extends Activity {
         box.setPadding(dp(14), dp(12), dp(14), dp(12));
         box.addView(text(getString(R.string.commitments_overdue), 15, warnFg, medium()),
             new LinearLayout.LayoutParams(-2, -2));
-        box.addView(text(getString(R.string.commitments_payable) + " "
-                + signedAmount(summary.overduePay), 16, negativeColor, medium()),
-            new LinearLayout.LayoutParams(-2, -2));
-        box.addView(text(getString(R.string.commitments_receivable) + " "
-                + signedAmount(summary.overdueReceive), 16, accent, medium()),
-            new LinearLayout.LayoutParams(-2, -2));
+        if (!summary.overdue.isEmpty()) {
+            box.addView(text(getString(R.string.commitments_payable) + " "
+                    + signedAmount(summary.overduePay), 16, negativeColor, medium()),
+                new LinearLayout.LayoutParams(-2, -2));
+            box.addView(text(getString(R.string.commitments_receivable) + " "
+                    + signedAmount(summary.overdueReceive), 16, accent, medium()),
+                new LinearLayout.LayoutParams(-2, -2));
+        }
         int shown = Math.min(summary.overdue.size(), MAX_OVERDUE_ROWS);
         for (int i = 0; i < shown; i++) box.addView(occurrenceRow(summary.overdue.get(i)));
         if (summary.overdue.size() > shown) {
             box.addView(text(getString(R.string.commitments_older, summary.overdue.size() - shown),
                 12, warnFg), new LinearLayout.LayoutParams(-2, -2));
+        }
+        if (!summary.settledOverdue.isEmpty()) {
+            final boolean[] expanded = {false};
+            TextView toggle = text(getString(R.string.commitments_show_settled,
+                summary.settledOverdue.size()), 12, warnFg, medium());
+            toggle.setPadding(dp(10), dp(9), dp(10), dp(9));
+            LinearLayout settled = new LinearLayout(this);
+            settled.setOrientation(LinearLayout.VERTICAL);
+            settled.setVisibility(View.GONE);
+            for (Row row : summary.settledOverdue) settled.addView(occurrenceRow(row));
+            toggle.setOnClickListener(v -> {
+                expanded[0] = !expanded[0];
+                settled.setVisibility(expanded[0] ? View.VISIBLE : View.GONE);
+                toggle.setText(expanded[0]
+                    ? getString(R.string.commitments_hide_settled)
+                    : getString(R.string.commitments_show_settled,
+                        summary.settledOverdue.size()));
+            });
+            box.addView(toggle, new LinearLayout.LayoutParams(-1, -2));
+            box.addView(settled, new LinearLayout.LayoutParams(-1, -2));
         }
         root.addView(box, margin(0, 0, 0, 12));
     }
@@ -435,10 +476,11 @@ public final class CommitmentsActivity extends Activity {
         LinearLayout info = new LinearLayout(this);
         info.setOrientation(LinearLayout.VERTICAL);
         TextView name = text(row.commitment.name, 14, row.settled ? muted : fg);
+        applyUserTextDirection(name, row.commitment.name);
         if (row.settled) {
             name.setPaintFlags(name.getPaintFlags() | android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
         }
-        info.addView(name, new LinearLayout.LayoutParams(-2, -2));
+        info.addView(name, new LinearLayout.LayoutParams(-1, -2));
         info.addView(text(dateText(row.date), 12, muted), new LinearLayout.LayoutParams(-2, -2));
         line.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
         TextView figure = bold(signedAmount(row.commitment.amount), 15,
@@ -538,6 +580,7 @@ public final class CommitmentsActivity extends Activity {
         name.setHint(getString(R.string.commitments_name_hint));
         if (existing != null) name.setText(existing.name);
         name.setTypeface(Fonts.text(this), Typeface.NORMAL);
+        applyUserTextDirection(name, name.getText());
         form.addView(name, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout amountRow = new LinearLayout(this);
@@ -682,6 +725,7 @@ public final class CommitmentsActivity extends Activity {
             @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
             @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
             @Override public void afterTextChanged(Editable s) {
+                applyUserTextDirection(name, s);
                 dlg.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(canSave(name, amount));
             }
         };
@@ -699,6 +743,11 @@ public final class CommitmentsActivity extends Activity {
             });
         });
         dlg.show();
+        if (existing != null) {
+            int titleId = getResources().getIdentifier("alertTitle", "id", "android");
+            View title = titleId == 0 ? null : dlg.findViewById(titleId);
+            if (title instanceof TextView) applyUserTextDirection((TextView) title, existing.name);
+        }
         if (existing != null && existing.remind && needsNotificationPermission()) {
             requestNotificationPermission();
         }
@@ -997,6 +1046,27 @@ public final class CommitmentsActivity extends Activity {
     private boolean isRtl() {
         return getResources().getConfiguration().getLayoutDirection()
             == View.LAYOUT_DIRECTION_RTL;
+    }
+
+    /** Aligns a user-entered name by the name's own first strong character, not the app locale. */
+    static boolean isRtlText(CharSequence value) {
+        if (value == null) return false;
+        for (int i = 0; i < value.length();) {
+            int codePoint = Character.codePointAt(value, i);
+            byte direction = Character.getDirectionality(codePoint);
+            if (direction == Character.DIRECTIONALITY_RIGHT_TO_LEFT
+                    || direction == Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC) return true;
+            if (direction == Character.DIRECTIONALITY_LEFT_TO_RIGHT) return false;
+            i += Character.charCount(codePoint);
+        }
+        return false;
+    }
+
+    private void applyUserTextDirection(TextView view, CharSequence value) {
+        boolean rtl = isRtlText(value);
+        view.setTextDirection(rtl ? View.TEXT_DIRECTION_RTL : View.TEXT_DIRECTION_LTR);
+        int vertical = view.getGravity() & Gravity.VERTICAL_GRAVITY_MASK;
+        view.setGravity(vertical | (rtl ? Gravity.RIGHT : Gravity.LEFT));
     }
 
     private TextView text(String s, float size, int color) {

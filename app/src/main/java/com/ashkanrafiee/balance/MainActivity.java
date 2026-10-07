@@ -1981,17 +1981,22 @@ public class MainActivity extends Activity {
             long pay = summary.overduePay + summary.thisMonthPay;
             long receive = summary.overdueReceive + summary.thisMonthReceive;
             if (pay == 0 && receive == 0) {
+                Paint.Align emptyAlign = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
+                float emptyX = rtl ? right : left;
                 text(c, fit(getString(R.string.commitments_card_empty), 11, w - 96),
-                    rtl ? right : left, top + 48, 11, muted,
-                    rtl ? Paint.Align.RIGHT : Paint.Align.LEFT);
+                    emptyX, top + 43, 11, muted, emptyAlign);
+                text(c, fit(getString(R.string.commitments_card_empty_action), 11, w - 96),
+                    emptyX, top + 61, 11, muted, emptyAlign);
+                text(c, fit(getString(R.string.commitments_card_empty_settings), 11, w - 96),
+                    emptyX, top + 79, 11, muted, emptyAlign);
                 return;
             }
             p.setColor(muted);
             p.setStrokeWidth(1);
             c.drawLine(middle, top + 31, middle, top + DashboardLayout.COMMITMENTS_H - 11, p);
-            text(c, fit(getString(R.string.commitments_card_payments), 10, columnWidth),
+            text(c, fit(getString(R.string.commitments_payable), 10, columnWidth),
                 payCenter, top + 41, 10, muted, Paint.Align.CENTER);
-            text(c, fit(getString(R.string.commitments_card_receipts), 10, columnWidth),
+            text(c, fit(getString(R.string.commitments_receivable), 10, columnWidth),
                 receiveCenter, top + 41, 10, muted, Paint.Align.CENTER);
             text(c, fit(displayAmount(Math.abs(pay)), 11, columnWidth),
                 payCenter, top + 60, 11, resColor(R.color.negative), Paint.Align.CENTER);

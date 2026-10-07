@@ -1,6 +1,7 @@
 package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -93,6 +94,8 @@ public class CommitmentsViewTest {
         CommitmentsActivity.Summary resettled = CommitmentsActivity.summarize(
             settled, CalendarSystem.GREGORIAN, OCT_7_NOON, 12);
         assertEquals(7, resettled.overdue.size());
+        assertEquals(1, resettled.settledOverdue.size());
+        assertEquals("rent", resettled.settledOverdue.get(0).commitment.name);
         assertEquals(-600, resettled.overduePay);
     }
 
@@ -114,9 +117,10 @@ public class CommitmentsViewTest {
         assertTrue(october != null);
         assertEquals(3, october.rows.size());
         assertEquals(-5000, october.pay);
+        assertTrue(summary.settledOverdue.isEmpty());
     }
 
-    @Test public void settledRows_sinkBelowUnpaidOnes() {
+    @Test public void settledRows_stayInChronologicalOrder() {
         List<Commitment> commitments = sample();
         List<Commitment> settled = new ArrayList<>();
         for (Commitment c : commitments) {
@@ -138,8 +142,8 @@ public class CommitmentsViewTest {
         }
         assertTrue(october != null);
         assertEquals(3, october.rows.size());
-        assertEquals("rent", october.rows.get(0).commitment.name);
-        assertEquals("salary", october.rows.get(1).commitment.name);
+        assertEquals("salary", october.rows.get(0).commitment.name);
+        assertEquals("rent", october.rows.get(1).commitment.name);
         assertEquals("gift", october.rows.get(2).commitment.name);
         assertEquals(-5000, october.pay);
         assertEquals(0, october.receive);
@@ -152,5 +156,11 @@ public class CommitmentsViewTest {
         assertEquals(9000, summary.overdueReceive);
         assertEquals(-7000, summary.thisMonthPay);
         assertEquals(9000, summary.thisMonthReceive);
+    }
+
+    @Test public void userEnteredNames_followTheirOwnDirection() {
+        assertTrue(CommitmentsActivity.isRtlText("اجاره"));
+        assertFalse(CommitmentsActivity.isRtlText("rent"));
+        assertTrue(CommitmentsActivity.isRtlText("2026 اجاره"));
     }
 }
