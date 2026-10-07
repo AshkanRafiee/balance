@@ -84,9 +84,10 @@ public class CommitmentsViewTest {
         List<Commitment> settled = new ArrayList<>();
         for (Commitment c : commitments) {
             if (c.name.equals("rent")) {
+                List<Long> rentPaid = new ArrayList<>();
+                rentPaid.add(Commitment.millisOf(2026, 9, 15, CalendarSystem.GREGORIAN));
                 settled.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
-                    c.done, Commitment.millisOf(2026, 9, 30, CalendarSystem.GREGORIAN),
-                    c.remind, c.remindBeforeMs));
+                    c.done, rentPaid, c.remind, c.remindBeforeMs));
             } else settled.add(c);
         }
         CommitmentsActivity.Summary resettled = CommitmentsActivity.summarize(
@@ -101,7 +102,7 @@ public class CommitmentsViewTest {
         for (Commitment c : commitments) {
             if (c.name.equals("gift")) {
                 settled.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
-                    true, 0, false, 0));
+                    true, null, false, 0));
             } else settled.add(c);
         }
         CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
@@ -113,5 +114,43 @@ public class CommitmentsViewTest {
         assertTrue(october != null);
         assertEquals(3, october.rows.size());
         assertEquals(-5000, october.pay);
+    }
+
+    @Test public void settledRows_sinkBelowUnpaidOnes() {
+        List<Commitment> commitments = sample();
+        List<Commitment> settled = new ArrayList<>();
+        for (Commitment c : commitments) {
+            if (c.name.equals("salary")) {
+                List<Long> salaryPaid = new ArrayList<>();
+                salaryPaid.add(Commitment.millisOf(2026, 10, 1, CalendarSystem.GREGORIAN));
+                settled.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
+                    c.done, salaryPaid, c.remind, c.remindBeforeMs));
+            } else if (c.name.equals("gift")) {
+                settled.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
+                    true, null, false, 0));
+            } else settled.add(c);
+        }
+        CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
+            settled, CalendarSystem.GREGORIAN, OCT_7_NOON, 12);
+        CommitmentsActivity.MonthGroup october = null;
+        for (CommitmentsActivity.MonthGroup group : summary.months) {
+            if (group.year == 2026 && group.month == 10) october = group;
+        }
+        assertTrue(october != null);
+        assertEquals(3, october.rows.size());
+        assertEquals("rent", october.rows.get(0).commitment.name);
+        assertEquals("salary", october.rows.get(1).commitment.name);
+        assertEquals("gift", october.rows.get(2).commitment.name);
+        assertEquals(-5000, october.pay);
+        assertEquals(0, october.receive);
+    }
+
+    @Test public void heroTotal_coversThisMonthPlusOverdue() {
+        CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
+            sample(), CalendarSystem.GREGORIAN, OCT_7_NOON, 12);
+        assertEquals(-5000, summary.overduePay);
+        assertEquals(9000, summary.overdueReceive);
+        assertEquals(-7000, summary.thisMonthPay);
+        assertEquals(9000, summary.thisMonthReceive);
     }
 }

@@ -16,7 +16,9 @@ import android.content.pm.PackageManager;
  *  launching an activity. */
 final class DashboardLayout {
     static final float TOTAL_TOP = 120f, TOTAL_BOTTOM = 270f;
-    /** The strip sits in the gap under the total card, clear of both it and the section header. */
+    /** The optional commitments card sits in the gap below the total card. */
+    static final float COMMITMENTS_TOP = 284f, COMMITMENTS_H = 70f;
+    /** The strip sits below the total card and optional commitments card, clear of the section header. */
     static final float BANNER_TOP = 284f, BANNER_H = 56f;
     static final float SECTION_HEADER_Y = 320f;
     static final float LIST_TOP = 352f;
@@ -45,12 +47,28 @@ final class DashboardLayout {
     /** How far the banks section is pushed down by the strip, if it is showing. */
     static float shift(boolean banner) { return banner ? BANNER_H : 0f; }
 
+    static float shift(boolean banner, boolean commitments) {
+        return (commitments ? COMMITMENTS_H : 0f) + (banner ? BANNER_H : 0f);
+    }
+
     static float sectionHeaderY(boolean banner) { return SECTION_HEADER_Y + shift(banner); }
+
+    static float sectionHeaderY(boolean banner, boolean commitments) {
+        return SECTION_HEADER_Y + shift(banner, commitments);
+    }
 
     static float listTop(boolean banner) { return LIST_TOP + shift(banner); }
 
+    static float listTop(boolean banner, boolean commitments) {
+        return LIST_TOP + shift(banner, commitments);
+    }
+
     /** The non-scrolling height the list is measured against when deciding how far it can scroll. */
     static float chromeH(boolean banner) { return CHROME_H + shift(banner); }
+
+    static float chromeH(boolean banner, boolean commitments) {
+        return CHROME_H + shift(banner, commitments);
+    }
 
     /** Whether a touch at {@code y} landed on the sort button's side of the section header. */
     static boolean inSortBand(float y, boolean banner) {
@@ -58,9 +76,27 @@ final class DashboardLayout {
         return y > base - SORT_BAND && y < base + SORT_BAND;
     }
 
+    static boolean inSortBand(float y, boolean banner, boolean commitments) {
+        float base = sectionHeaderY(banner, commitments);
+        return y > base - SORT_BAND && y < base + SORT_BAND;
+    }
+
     /** Whether a touch at {@code y} landed on the strip. False whenever the strip is not up, so a
      *  tap can never reach a strip that was never drawn. */
     static boolean inBanner(float y, boolean banner) {
         return banner && y >= BANNER_TOP && y <= BANNER_TOP + BANNER_H;
+    }
+
+    static float bannerTop(boolean commitments) {
+        return BANNER_TOP + (commitments ? COMMITMENTS_H : 0f);
+    }
+
+    static boolean inBanner(float y, boolean banner, boolean commitments) {
+        float top = bannerTop(commitments);
+        return banner && y >= top && y <= top + BANNER_H;
+    }
+
+    static boolean inCommitments(float y, boolean visible) {
+        return visible && y >= COMMITMENTS_TOP && y <= COMMITMENTS_TOP + COMMITMENTS_H;
     }
 }

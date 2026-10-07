@@ -18,12 +18,13 @@ import java.util.Set;
 
 /** Reminder alarms for commitments.
  *
- *  <p>One inexact alarm per reminding commitment, set for its next unsettled due minus the lead
- *  time the user chose. Inexact on purpose: a day-scale finance reminder gains nothing from
- *  waking the phone at an exact minute, and the exact-alarm permission (a settings-page grant
- *  on Android 12+) would gate the whole feature behind a second system screen. When an alarm
+ *  <p>One alarm per reminding commitment, set for its next unsettled due minus the lead
+ *  time the user chose — exact where the system allows exact alarms, inexact otherwise
+ *  (which still fires the same day for these day-scale lead times). When an alarm
  *  fires, the receiver notifies and re-arms for the following due, so a monthly series reminds
- *  every month with no ledger of past firings.
+ *  every month with no ledger of past firings. Battery savers cannot silently eat a series:
+ *  everything is re-derived from the stored commitments on boot, on app open and on every
+ *  commitment write, so a killed alarm is at most delayed until the next one of those.
  *
  *  <p>Which alarms are armed lives in a tiny private prefs file of scheduled ids, so deletions
  *  and switched-off reminders cancel their alarm instead of haunting the clock. Everything is
@@ -35,6 +36,7 @@ final class CommitmentReminders {
     static final String CHANNEL_ID = "commitment_reminders";
     private static final String PREFS = "commitment_reminders";
     private static final String KEY_SCHEDULED = "scheduled_ids";
+    private static final String KEY_FIRED = "fired_due";
     static final String ACTION_REMIND = "com.ashkanrafiee.balance.COMMITMENT_REMIND";
     static final String EXTRA_ID = "commitment_id";
 
@@ -47,6 +49,14 @@ final class CommitmentReminders {
             context.getString(R.string.commitments_channel), NotificationManager.IMPORTANCE_DEFAULT));
     }
 
+    /** Whether exact alarms may be used: below Android 12 there is nothing to ask, above it
+     *  the system grants the permission unless the user revoked it. */
+    static boolean canScheduleExact(Context context) {
+        if (Build.VERSION.SDK_INT < 31) return true;
+        AlarmManager alarms = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        return alarms != null && alarms.canScheduleExactAlarms();
+    }
+
     /** Re-arms every reminder from the stored commitments: schedules what is due ahead, cancels
      *  whatever is no longer wanted (deleted, settled, switched off, or rescheduled). */
     static void scheduleAll(Context context) {
@@ -56,17 +66,31 @@ final class CommitmentReminders {
         CalendarSystem cal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
         long now = System.currentTimeMillis();
         Set<String> wanted = new HashSet<>();
+        SharedPreferences prefs =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         for (Commitment c : BalanceData.readCommitments(context)) {
-            Long at = Commitment.reminderAt(c, cal, now);
+            Long due = reminderDue(context, c, cal, now);
+            Long at = due == null ? null : due - Math.max(0, c.remindBeforeMs);
             if (at == null) continue;
             wanted.add(c.id);
             // A due already inside its lead window reports now: nudge it a minute out so the
-            // alarm still fires instead of being set in the past.
-            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,
-                at <= now ? now + 60_000L : at, alarm(context, c.id));
+            // alarm still fires instead of being set in the past. Exact where the system
+            // allows it, so a due-day reminder cannot slide; inexact otherwise, which still
+            // fires the same day for these day-scale lead times.
+            long trigger = at <= now ? now + 60_000L : at;
+            try {
+                if (canScheduleExact(context)) {
+                    alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger,
+                        alarm(context, c.id));
+                } else {
+                    alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger,
+                        alarm(context, c.id));
+                }
+            } catch (SecurityException exactPermissionChanged) {
+                alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger,
+                    alarm(context, c.id));
+            }
         }
-        SharedPreferences prefs =
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         Set<String> previous = prefs.getStringSet(KEY_SCHEDULED, new HashSet<String>());
         for (String id : previous) {
             if (!wanted.contains(id)) alarms.cancel(alarm(context, id));
@@ -91,17 +115,62 @@ final class CommitmentReminders {
         if (found != null && found.remind) {
             boolean iran = RegionHelper.isIran(context);
             CalendarSystem cal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
-            Long due = Commitment.nextDue(found, cal, System.currentTimeMillis());
-            if (due != null && !found.isSettled(due)) notifyDue(context, found, due, iran);
+            Long due = reminderDue(context, found, cal, System.currentTimeMillis());
+            if (due != null && !found.isSettled(due)
+                    && notifyDue(context, found, due, iran)) {
+                rememberFired(context, found.id, due);
+            }
         }
         scheduleAll(context);
     }
 
-    private static void notifyDue(Context context, Commitment c, long due, boolean iran) {
+    /** Finds the next unsettled due that has not already produced a notification. Overdue dues
+     *  are considered first; once one fires, its {id,due} token prevents a killed/reopened app
+     *  from producing the same reminder every minute. */
+    private static Long reminderDue(Context context, Commitment c, CalendarSystem cal, long now) {
+        if (c == null || !c.remind) return null;
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        for (long at : Commitment.occurrences(c, cal,
+                Math.min(c.start, Commitment.startOfDay(now) - 366L * 86400000L),
+                Commitment.startOfDay(now) - 1)) {
+            if (!c.isSettled(at) && !wasFired(prefs, c.id, at)) return at;
+        }
+        for (long at : Commitment.occurrences(c, cal, Commitment.startOfDay(now),
+                Commitment.startOfDay(now) + 730L * 86400000L)) {
+            if (!c.isSettled(at) && !wasFired(prefs, c.id, at)) return at;
+        }
+        return null;
+    }
+
+    private static String firedKey(String id, long due) {
+        return id + "|" + due;
+    }
+
+    private static boolean wasFired(SharedPreferences prefs, String id, long due) {
+        return prefs.getStringSet(KEY_FIRED, new HashSet<String>()).contains(firedKey(id, due));
+    }
+
+    private static void rememberFired(Context context, String id, long due) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        Set<String> fired = new HashSet<>(prefs.getStringSet(KEY_FIRED, new HashSet<String>()));
+        fired.add(firedKey(id, due));
+        while (fired.size() > Commitment.MAX_COMMITMENTS * 4) {
+            String first = fired.iterator().next();
+            fired.remove(first);
+        }
+        prefs.edit().putStringSet(KEY_FIRED, fired).apply();
+    }
+
+    private static boolean notifyDue(Context context, Commitment c, long due, boolean iran) {
+        if (Build.VERSION.SDK_INT >= 33
+                && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            return false;
+        }
         ensureChannel(context);
         NotificationManager manager =
             (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager == null) return;
+        if (manager == null) return false;
         boolean persian = LocaleHelper.isPersian(context);
         CalendarSystem cal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
         int[] civil = Commitment.civilDay(due, cal);
@@ -120,6 +189,7 @@ final class CommitmentReminders {
             .setAutoCancel(true)
             .build();
         manager.notify("commitment:" + c.id, 1, notification);
+        return true;
     }
 
     private static String faDigits(String s) {
@@ -135,28 +205,5 @@ final class CommitmentReminders {
     static List<String> scheduledIds(Context context) {
         return new ArrayList<>(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getStringSet(KEY_SCHEDULED, new HashSet<String>()));
-    }
-}
-
-/** The alarm endpoint: hands the due id to {@link CommitmentReminders}. */
-final class CommitmentAlarmReceiver extends BroadcastReceiver {
-    @Override public void onReceive(Context context, Intent intent) {
-        if (intent == null
-                || !CommitmentReminders.ACTION_REMIND.equals(intent.getAction())) {
-            return;
-        }
-        String id = intent.getStringExtra(CommitmentReminders.EXTRA_ID);
-        if (id == null) return;
-        CommitmentReminders.fire(context, id);
-    }
-}
-
-/** Re-arms every reminder after a reboot, when all alarms are gone with the clock. */
-final class CommitmentBootReceiver extends BroadcastReceiver {
-    @Override public void onReceive(Context context, Intent intent) {
-        if (intent == null || !Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
-            return;
-        }
-        CommitmentReminders.scheduleAll(context);
     }
 }

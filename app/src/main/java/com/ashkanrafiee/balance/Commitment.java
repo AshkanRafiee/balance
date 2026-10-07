@@ -13,11 +13,10 @@ import org.json.JSONObject;
  *  figures and the reminders. The amount is signed in rials: negative is money the user pays
  *  out, positive is money the user receives.
  *
- *  <p>One-time commitments settle with {@link #done}; recurring ones settle forward with
- *  {@link #paidThrough}, the watermark every occurrence on or before it counts as settled, so
- *  marking the current due paid surfaces the next one with no per-occurrence ledger. A null
- *  {@link #end} is open-ended; setting one later (or clearing it) only moves the window the
- *  occurrences below expand into.
+ *  <p>One-time commitments settle with {@link #done}; recurring ones settle per occurrence in
+ *  {@link #paid}, the exact due days the user marked, so marking a later due never settles an
+ *  older one. A null {@link #end} is open-ended; setting one later (or clearing it) only moves
+ *  the window the occurrences below expand into.
  *
  *  <p>Occurrences expand in whole civil days in the viewing calendar (a monthly commitment due
  *  on the 31st lands on the last day of short months), so daylight-saving transitions can
@@ -31,13 +30,15 @@ final class Commitment {
     static final int YEARLY = 4;
 
     /** Bounds applied at the write boundary (mirroring the tag store): names trim and cap, the
-     *  amount must be non-zero and bounded, the end must not precede the start, and the store
-     *  itself caps how many commitments one device keeps, so one runaway import cannot bloat
-     *  the encrypted store or the alarm table. */
+     *  amount must be non-zero and bounded, the end must not precede the start, the settled-day
+     *  list caps so a hostile backup cannot bloat it, and the store itself caps how many
+     *  commitments one device keeps, so one runaway import cannot bloat the encrypted store or
+     *  the alarm table. */
     static final int MAX_NAME_LENGTH = 64;
     static final long MAX_AMOUNT = 999_999_999_999L;
     static final long MAX_REMIND_BEFORE_MS = 365L * 86400000L;
     static final int MAX_COMMITMENTS = 500;
+    static final int MAX_SETTLED_DAYS = 2000;
 
     final String id;
     final String name;
@@ -49,15 +50,25 @@ final class Commitment {
     final Long end;
     /** A one-time commitment that was paid or received. Only meaningful for {@link #ONCE}. */
     final boolean done;
-    /** Recurring watermark: every occurrence on or before it counts as settled. */
-    final long paidThrough;
+    /** Recurring due days the user marked settled, as start-of-day millis. */
+    final List<Long> paid;
+    /** Compatibility with the first commitment build, which stored one recurring watermark.
+     *  New marks always use {@link #paid}; this is retained only so an existing user's old
+     *  settled history does not suddenly reappear as unpaid after upgrading. */
+    final long legacyPaidThrough;
     /** Whether a reminder is scheduled for the next unsettled occurrence. */
     final boolean remind;
     /** How far before the due moment the reminder fires. */
     final long remindBeforeMs;
 
     Commitment(String id, String name, long amount, int frequency, long start, Long end,
-            boolean done, long paidThrough, boolean remind, long remindBeforeMs) {
+            boolean done, List<Long> paid, boolean remind, long remindBeforeMs) {
+        this(id, name, amount, frequency, start, end, done, paid, 0, remind, remindBeforeMs);
+    }
+
+    Commitment(String id, String name, long amount, int frequency, long start, Long end,
+            boolean done, List<Long> paid, long legacyPaidThrough, boolean remind,
+            long remindBeforeMs) {
         this.id = id;
         this.name = name;
         this.amount = amount;
@@ -65,7 +76,10 @@ final class Commitment {
         this.start = start;
         this.end = end;
         this.done = done;
-        this.paidThrough = paidThrough;
+        this.paid = paid == null
+            ? java.util.Collections.<Long>emptyList()
+            : java.util.Collections.unmodifiableList(new ArrayList<>(paid));
+        this.legacyPaidThrough = Math.max(0, legacyPaidThrough);
         this.remind = remind;
         this.remindBeforeMs = remindBeforeMs;
     }
@@ -74,12 +88,13 @@ final class Commitment {
     static Commitment create(String name, long amount, int frequency, long start, Long end,
             boolean remind, long remindBeforeMs) {
         return normalized(new Commitment(UUID.randomUUID().toString(), name, amount, frequency,
-            start, end, false, 0, remind, remindBeforeMs));
+            start, end, false, null, remind, remindBeforeMs));
     }
 
     /** The write-boundary form: trims and caps the name, clamps the amount, lead time and
-     *  frequency into range, and drops an end that precedes the start. Returns null when there
-     *  is nothing worth keeping (a blank name or a zero amount), so the store never holds one. */
+     *  frequency into range, drops an end that precedes the start, and keeps the settled-day
+     *  list to positive days within its cap. Returns null when there is nothing worth keeping
+     *  (a blank name or a zero amount), so the store never holds one. */
     static Commitment normalized(Commitment c) {
         if (c == null || c.id == null || c.id.isEmpty()) return null;
         String name = c.name == null ? "" : c.name.trim();
@@ -90,17 +105,26 @@ final class Commitment {
         if (c.start <= 0) return null;
         Long end = c.end;
         if (end != null && end < startOfDay(c.start)) end = null;
+        List<Long> paid = new ArrayList<>();
+        if (c.paid != null) {
+            for (Long day : c.paid) {
+                if (day == null || day <= 0 || paid.contains(day)) continue;
+                paid.add(day);
+            }
+            paid.sort(null);
+            // The recent marks are the live ones (undo, reminders); the oldest fall off first.
+            while (paid.size() > MAX_SETTLED_DAYS) paid.remove(0);
+        }
         long remindBefore = Math.max(0, Math.min(c.remindBeforeMs, MAX_REMIND_BEFORE_MS));
         return new Commitment(c.id, name, c.amount, frequency, c.start, end,
-            frequency == ONCE && c.done, Math.max(0, c.paidThrough),
-            c.remind, remindBefore);
+            frequency == ONCE && c.done, paid, c.legacyPaidThrough, c.remind, remindBefore);
     }
 
     /** Whether the occurrence due at {@code dateMs} (an occurrence this class expanded) is
-     *  settled: a finished one-time commitment, or a recurring watermark that covers it. */
+     *  settled: a finished one-time commitment, or a recurring due the user marked. */
     boolean isSettled(long dateMs) {
         if (frequency == ONCE) return done;
-        return dateMs <= paidThrough;
+        return paid.contains(dateMs) || (legacyPaidThrough > 0 && dateMs <= legacyPaidThrough);
     }
 
     /** True for money the user pays out, false for money the user receives. */
@@ -118,7 +142,12 @@ final class Commitment {
             e.put("start", start);
             if (end != null) e.put("end", end.longValue());
             if (done) e.put("done", true);
-            if (paidThrough > 0) e.put("paidThrough", paidThrough);
+            if (paid != null && !paid.isEmpty()) {
+                org.json.JSONArray settled = new org.json.JSONArray();
+                for (Long day : paid) settled.put(day.longValue());
+                e.put("paid", settled);
+            }
+            if (legacyPaidThrough > 0) e.put("paidThrough", legacyPaidThrough);
             if (remind) e.put("remind", true);
             if (remindBeforeMs > 0) e.put("remindBefore", remindBeforeMs);
         } catch (Exception ex) {
@@ -136,8 +165,17 @@ final class Commitment {
             int frequency = e.optInt("freq", ONCE);
             long start = e.getLong("start");
             Long end = e.has("end") && !e.isNull("end") ? e.getLong("end") : null;
+            List<Long> paid = new ArrayList<>();
+            org.json.JSONArray settled = e.optJSONArray("paid");
+            if (settled != null) {
+                for (int i = 0; i < settled.length(); i++) {
+                    long day = settled.optLong(i, 0);
+                    if (day > 0) paid.add(day);
+                }
+            }
+            long legacyPaidThrough = e.optLong("paidThrough", 0);
             return normalized(new Commitment(id, name, amount, frequency, start, end,
-                e.optBoolean("done", false), e.optLong("paidThrough", 0),
+                e.optBoolean("done", false), paid, legacyPaidThrough,
                 e.optBoolean("remind", false), e.optLong("remindBefore", 0)));
         } catch (Exception ex) {
             return null;

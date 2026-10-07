@@ -1081,7 +1081,7 @@ public class BackupRestoreTest {
     // ============================================================
 
     private static Commitment commitment(String id, String name) {
-        return new Commitment(id, name, -5000, Commitment.MONTHLY, T + 100, null, false, 0,
+        return new Commitment(id, name, -5000, Commitment.MONTHLY, T + 100, null, false, null,
             true, 86400000L);
     }
 

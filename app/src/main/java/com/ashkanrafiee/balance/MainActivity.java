@@ -520,6 +520,18 @@ public class MainActivity extends Activity {
         expandLp.topMargin = dp(18);
         box.addView(expandAll, expandLp);
 
+        CheckBox showCommitments = new CheckBox(this);
+        showCommitments.setText(getString(R.string.settings_commitments_card_label));
+        showCommitments.setChecked(BalanceData.getShowCommitments(MainActivity.this));
+        showCommitments.setOnCheckedChangeListener((b, on) -> {
+            BalanceData.setShowCommitments(MainActivity.this, on);
+            if (view != null) view.updateSmsBanner();
+            if (view != null) view.invalidate();
+        });
+        LinearLayout.LayoutParams commitmentsLp = new LinearLayout.LayoutParams(-1, -2);
+        commitmentsLp.topMargin = dp(18);
+        box.addView(showCommitments, commitmentsLp);
+
         showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.footer_display))
             .setView(box)
@@ -1245,6 +1257,7 @@ public class MainActivity extends Activity {
          *  on screen and SMS access is gone, and it shifts the banks section down by its height, so
          *  every geometry question is asked of {@link DashboardLayout} against this flag. */
         boolean smsBanner;
+        boolean commitmentsCard;
         int insetsTop, insetsBottom;
         int sortMode;
         float scrollY = 0, lastY, downY;
@@ -1348,8 +1361,7 @@ public class MainActivity extends Activity {
         String status = getString(R.string.status_reading_sms);
         long total;
         float footerAboutStart, footerAboutEnd, footerLangStart, footerLangEnd,
-            footerBackupStart, footerBackupEnd, footerReportStart, footerReportEnd,
-            footerCommitStart, footerCommitEnd, footerY;
+            footerBackupStart, footerBackupEnd, footerReportStart, footerReportEnd, footerY;
         final int fg = resColor(R.color.fg);
         final int muted = resColor(R.color.muted);
         final int accent = resColor(R.color.accent);
@@ -1384,7 +1396,8 @@ public class MainActivity extends Activity {
         /** The farthest the list can be scrolled (dp), i.e. its content height minus the viewport
          *  minus the fixed non-list chrome; never below zero. */
         float maxScroll() {
-            return Math.max(0, bankListHeight - (listViewH() - DashboardLayout.chromeH(smsBanner)));
+            return Math.max(0, bankListHeight - (listViewH()
+                - DashboardLayout.chromeH(smsBanner, commitmentsCard)));
         }
 
         /** Advances the inertia of a finished drag, redrawing each frame until it settles at a
@@ -1547,8 +1560,11 @@ public class MainActivity extends Activity {
         void updateSmsBanner() {
             boolean visible = DashboardLayout.smsBannerVisible(!banks.isEmpty(),
                 checkSelfPermission(Manifest.permission.READ_SMS));
-            if (visible == smsBanner) return;
+            boolean showCommitments = BalanceData.getShowCommitments(MainActivity.this);
+            boolean layoutChanged = visible != smsBanner || showCommitments != commitmentsCard;
+            if (!layoutChanged) return;
             smsBanner = visible;
+            commitmentsCard = showCommitments;
             rows();
             scrollY = Math.max(0, Math.min(scrollY, maxScroll()));
             invalidate();
@@ -1822,9 +1838,10 @@ public class MainActivity extends Activity {
                 else c.drawLine(w - 77, 142, w - 43, 170, p);
             }
 
+            if (commitmentsCard) drawCommitmentsCard(c, w, rtl);
             if (smsBanner) drawSmsBanner(c, w, rtl);
 
-            float sectionHeaderY = DashboardLayout.sectionHeaderY(smsBanner);
+            float sectionHeaderY = DashboardLayout.sectionHeaderY(smsBanner, commitmentsCard);
             float banksHeaderX = rtl ? w - 28 : 28;
             text(c, getString(R.string.section_banks), banksHeaderX, sectionHeaderY, 22, fg, edgeAlign);
             float sortX = rtl ? 28 : w - 28;
@@ -1832,7 +1849,7 @@ public class MainActivity extends Activity {
             text(c, sortLabel(), sortX, sectionHeaderY, 14, accent, sortAlign);
 
             float by = (getHeight() - top - bottom) / d - 32;
-            float listTop = DashboardLayout.listTop(smsBanner);
+            float listTop = DashboardLayout.listTop(smsBanner, commitmentsCard);
             c.save();
             c.clipRect(0, listTop, w, by - 42);
             float y = listTop - scrollY;
@@ -1892,13 +1909,11 @@ public class MainActivity extends Activity {
             String langText = getString(R.string.footer_display);
             String backupText = getString(R.string.footer_data);
             String reportText = getString(R.string.footer_report);
-            String commitText = getString(R.string.footer_commitments);
             String sep = "  \u00b7  ";
             float aboutW = measure(aboutText, 13), langW = measure(langText, 13),
                 backupW = measure(backupText, 13), reportW = measure(reportText, 13),
-                commitW = measure(commitText, 13),
                 sepW = measure(sep, 13);
-            float totalW = aboutW + langW + backupW + reportW + commitW + sepW * 4;
+            float totalW = aboutW + langW + backupW + reportW + sepW * 3;
             float scale = Math.min(1, (w - 64) / totalW);
             float x0 = (w - totalW * scale) / 2;
             if (!rtl) {
@@ -1908,13 +1923,9 @@ public class MainActivity extends Activity {
                 text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
                 footerLangStart = x0; text(c, langText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += langW * scale; footerLangEnd = x0;
                 text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
-                footerCommitStart = x0; text(c, commitText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += commitW * scale; footerCommitEnd = x0;
-                text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
                 footerAboutStart = x0; text(c, aboutText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += aboutW * scale; footerAboutEnd = x0;
             } else {
                 footerAboutStart = x0; text(c, aboutText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += aboutW * scale; footerAboutEnd = x0;
-                text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
-                footerCommitStart = x0; text(c, commitText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += commitW * scale; footerCommitEnd = x0;
                 text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
                 footerLangStart = x0; text(c, langText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += langW * scale; footerLangEnd = x0;
                 text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
@@ -1933,7 +1944,7 @@ public class MainActivity extends Activity {
          *  between the total card and the banks section, in the same warning colours as the per-row
          *  stale badge, and the text carries the action because the whole strip is the tap target. */
         void drawSmsBanner(Canvas c, int w, boolean rtl) {
-            float top = DashboardLayout.BANNER_TOP;
+            float top = DashboardLayout.bannerTop(commitmentsCard);
             float bottom = top + DashboardLayout.BANNER_H;
             round(c, 24, top, w - 24, bottom, 16, warn_bg);
             roundStroke(c, 24, top, w - 24, bottom, 16, 1.2f, warn);
@@ -1942,6 +1953,44 @@ public class MainActivity extends Activity {
             float max = w - 80;
             text(c, fit(getString(R.string.banner_stale_title), 13, max), textX, top + 22, 13, warn, align);
             text(c, fit(getString(R.string.banner_stale_action), 12, max), textX, top + 40, 12, warn, align);
+        }
+
+        /** Optional, compact commitment summary below the balance card. It is deliberately a
+         *  separate card and keeps payable/receivable separate: those are obligations in opposite
+         *  directions and must never look like one net balance. */
+        void drawCommitmentsCard(Canvas c, int w, boolean rtl) {
+            float top = DashboardLayout.COMMITMENTS_TOP;
+            round(c, 24, top, w - 24, top + DashboardLayout.COMMITMENTS_H, 18, panel);
+            float edge = rtl ? w - 48 : 48;
+            Paint.Align align = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
+            text(c, getString(R.string.section_commitments), edge, top + 22, 14, fg, align);
+            CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
+                BalanceData.readCommitments(MainActivity.this),
+                RegionHelper.isIran(MainActivity.this) ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN,
+                System.currentTimeMillis(), CommitmentsActivity.WINDOW_MONTHS);
+            long pay = summary.overduePay + summary.thisMonthPay;
+            long receive = summary.overdueReceive + summary.thisMonthReceive;
+            if (pay == 0 && receive == 0) {
+                text(c, fit(getString(R.string.commitments_card_empty), 11, w - 96),
+                    edge, top + 48, 11, muted, align);
+                return;
+            }
+            String payText = getString(R.string.commitments_card_payments) + " "
+                + displayAmount(Math.abs(pay));
+            String receiveText = getString(R.string.commitments_card_receipts) + " "
+                + displayAmount(Math.abs(receive));
+            if (rtl) {
+                text(c, receiveText, edge, top + 48, 11, accent, align);
+                text(c, payText, w / 2f, top + 48, 11, resColor(R.color.negative), Paint.Align.CENTER);
+            } else {
+                text(c, payText, edge, top + 48, 11, resColor(R.color.negative), align);
+                text(c, receiveText, w / 2f, top + 48, 11, accent, Paint.Align.CENTER);
+            }
+        }
+
+        String displayAmount(long rial) {
+            return CurrencyHelper.amount(MainActivity.this, rial) + " "
+                + CurrencyHelper.label(MainActivity.this);
         }
 
         /** The pull-to-refresh arrow: a small chip with a circular arrow that follows the finger down
@@ -2046,7 +2095,7 @@ public class MainActivity extends Activity {
          *  Re-derived on every call (the lists are tiny) so drawing and touch always agree. */
         java.util.List<BankRow> rows() {
             java.util.List<BankRow> out = new java.util.ArrayList<>();
-            float top = DashboardLayout.listTop(smsBanner);
+            float top = DashboardLayout.listTop(smsBanner, commitmentsCard);
             float cursor = top;
             for (java.util.List<Bank> block : BalanceData.groupedForDisplay(banks, excluded, sortMode)) {
                 for (Bank b : block) {
@@ -2263,7 +2312,7 @@ public class MainActivity extends Activity {
                 if (lockArmed) handler.postDelayed(lockLongProbe, 480);
                 else if (eyeArmed) handler.postDelayed(eyeLongProbe, 500);
                 else if (totalArmed) handler.postDelayed(totalLongProbe, 500);
-                else if (y >= DashboardLayout.listTop(smsBanner) && y < byForTouch(h)
+                else if (y >= DashboardLayout.listTop(smsBanner, commitmentsCard) && y < byForTouch(h)
                         && (rtl ? x >= 56 : x <= getWidth() / d - 56)) {
                     // On a bank or account row, off the 3-dot menu: a long-press copies that row's
                     // balance, mirroring the total card.
@@ -2348,8 +2397,6 @@ public class MainActivity extends Activity {
                     MainActivity.this.displayDialog();
                 } else if (x >= footerBackupStart - 10 && x <= footerBackupEnd + 10) {
                     MainActivity.this.dataDialog();
-                } else if (x >= footerCommitStart - 10 && x <= footerCommitEnd + 10) {
-                    startActivity(new Intent(MainActivity.this, CommitmentsActivity.class));
                 } else if (x >= footerReportStart - 10 && x <= footerReportEnd + 10) {
                     startActivity(new Intent(MainActivity.this, ScanDiagnosticsActivity.class));
                 }
@@ -2360,17 +2407,19 @@ public class MainActivity extends Activity {
                 MainActivity.this.getSharedPreferences(BalanceData.PREFS_PREF, MODE_PRIVATE)
                     .edit().putBoolean(BalanceData.KEY_HIDDEN, hidden).apply();
                 invalidate();
-            } else if (DashboardLayout.inBanner(y, smsBanner)) {
+            } else if (DashboardLayout.inCommitments(y, commitmentsCard)) {
+                startActivity(new Intent(MainActivity.this, CommitmentsActivity.class));
+            } else if (DashboardLayout.inBanner(y, smsBanner, commitmentsCard)) {
                 // Re-ask rather than jumping straight to settings: a first-time denial can still be
                 // granted by the system dialog in one tap, and onRequestPermissionsResult already
                 // falls back to the settings deep link when the denial is permanent.
                 requestSms();
             } else if (y >= DashboardLayout.TOTAL_TOP && y <= DashboardLayout.TOTAL_BOTTOM) {
                 startActivity(new Intent(MainActivity.this, HistoryActivity.class));
-            } else if (DashboardLayout.inSortBand(y, smsBanner)
+            } else if (DashboardLayout.inSortBand(y, smsBanner, commitmentsCard)
                     && (rtl ? x < 150 : x > getWidth() / d - 150)) {
                 showSortDialog();
-            } else if (y >= DashboardLayout.listTop(smsBanner) && y < byForTouch(h)) {
+            } else if (y >= DashboardLayout.listTop(smsBanner, commitmentsCard) && y < byForTouch(h)) {
                 if (banks.isEmpty()) {
                     // No balances at all: the empty card is the app's main entry point again. Without
                     // SMS permission (e.g. after a permanent denial, which no runtime re-request can

@@ -75,6 +75,10 @@ final class BalanceData {
     static final String KEY_SORT = "sort_mode";
     static final String KEY_STALE_DAYS = "stale_days";
     static final String KEY_EXPAND_ALL_HISTORY = "expand_all_history";
+    /** Whether the optional commitments summary card is shown below the balance card. It is on
+     *  by default so the empty state can introduce the feature without forcing the full screen
+     *  on users who never add a commitment. */
+    static final String KEY_SHOW_COMMITMENTS = "show_commitments";
     static final int DEFAULT_STALE_DAYS = 14;
     static final String KEY_ONBOARDING_SEEN = "onboarding_seen";
 
@@ -1035,6 +1039,16 @@ final class BalanceData {
     static void setExpandAllHistory(Context context, boolean on) {
         context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
             .edit().putBoolean(KEY_EXPAND_ALL_HISTORY, on).apply();
+    }
+
+    static boolean getShowCommitments(Context context) {
+        return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SHOW_COMMITMENTS, true);
+    }
+
+    static void setShowCommitments(Context context, boolean on) {
+        context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_SHOW_COMMITMENTS, on).apply();
     }
 
     /** How many whole days a balance has gone without a refresh, or 0 when its SMS date is unknown

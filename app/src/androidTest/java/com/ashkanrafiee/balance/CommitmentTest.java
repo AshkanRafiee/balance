@@ -103,6 +103,20 @@ public class CommitmentTest {
         assertTrue(BalanceData.deserializeCommitments("{\"nope\": []}").isEmpty());
     }
 
+    @Test public void json_settledDaysRoundTrip() throws Exception {
+        long start = Commitment.millisOf(2026, 10, 7, CalendarSystem.GREGORIAN);
+        Commitment c = commitment("daily", -100, Commitment.DAILY, start);
+        List<Long> paid = new ArrayList<>();
+        paid.add(start);
+        Commitment marked = new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
+            false, paid, false, 0);
+        List<Commitment> back =
+            BalanceData.deserializeCommitments(BalanceData.serializeCommitments(list(marked)));
+        assertEquals(1, back.size());
+        assertEquals(paid, back.get(0).paid);
+        assertTrue(back.get(0).isSettled(start));
+    }
+
     private static List<Commitment> list(Commitment c) {
         List<Commitment> out = new ArrayList<>();
         out.add(c);
@@ -215,16 +229,31 @@ public class CommitmentTest {
 
     // ---- settlement -----------------------------------------------------------------
 
-    @Test public void nextDue_advancesPastPaidWatermark() {
+    @Test public void nextDue_advancesPastMarkedDays() {
         long now = System.currentTimeMillis();
         long start = day(now, -10);
         Commitment c = commitment("daily", -100, Commitment.DAILY, start);
         assertEquals(day(now, 0), (long) Commitment.nextDue(c, CalendarSystem.GREGORIAN, now));
+        List<Long> paid = new ArrayList<>();
+        paid.add(day(now, 0));
         List<Commitment> stored = new ArrayList<>();
         stored.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end, false,
-            day(now, 0), c.remind, c.remindBeforeMs));
+            paid, c.remind, c.remindBeforeMs));
         assertEquals(day(now, 1),
             (long) Commitment.nextDue(stored.get(0), CalendarSystem.GREGORIAN, now));
+    }
+
+    @Test public void markingLaterDue_leavesOlderDuesUnsettled() {
+        long now = System.currentTimeMillis();
+        Commitment c = commitment("daily", -100, Commitment.DAILY, day(now, -10));
+        List<Long> paid = new ArrayList<>();
+        paid.add(day(now, 0));
+        Commitment marked = new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
+            false, paid, c.remind, c.remindBeforeMs);
+        assertTrue(marked.isSettled(day(now, 0)));
+        assertFalse(marked.isSettled(day(now, -5)));
+        assertEquals(day(now, 1),
+            (long) Commitment.nextDue(marked, CalendarSystem.GREGORIAN, now));
     }
 
     @Test public void nextDue_onceFinishesAndEndedScheduleEnds() {
@@ -233,12 +262,14 @@ public class CommitmentTest {
         Commitment open = commitment("once", -100, Commitment.ONCE, start);
         assertEquals(start, (long) Commitment.nextDue(open, CalendarSystem.GREGORIAN, now));
         Commitment finished = new Commitment(open.id, open.name, open.amount, open.frequency,
-            open.start, open.end, true, 0, false, 0);
+            open.start, open.end, true, null, false, 0);
         assertNull(Commitment.nextDue(finished, CalendarSystem.GREGORIAN, now));
         Commitment ended = Commitment.create("ended", -100, Commitment.DAILY, day(now, -10),
             day(now, -5), false, 0);
+        List<Long> paid = Commitment.occurrences(ended, CalendarSystem.GREGORIAN,
+            day(now, -10), day(now, -5));
         assertNull(Commitment.nextDue(new Commitment(ended.id, ended.name, ended.amount,
-            ended.frequency, ended.start, ended.end, false, day(now, 0), false, 0),
+            ended.frequency, ended.start, ended.end, false, paid, false, 0),
             CalendarSystem.GREGORIAN, now));
     }
 
@@ -254,7 +285,7 @@ public class CommitmentTest {
         assertNull(Commitment.reminderAt(quiet, CalendarSystem.GREGORIAN, now));
         Commitment overdue = commitment("overdue", -5000, Commitment.ONCE, day(now, -2));
         Commitment reminding = new Commitment(overdue.id, overdue.name, overdue.amount,
-            overdue.frequency, overdue.start, overdue.end, false, 0, true, 86400000L);
+            overdue.frequency, overdue.start, overdue.end, false, null, true, 86400000L);
         Long at = Commitment.reminderAt(reminding, CalendarSystem.GREGORIAN, now);
         assertNotNull(at);
         assertTrue(at >= now);
