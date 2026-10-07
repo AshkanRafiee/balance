@@ -44,7 +44,7 @@
     <string name="footer_data">داده‌ها</string>
 
     <string name="dialog_hard_refresh_title">بازنشانی موجودی‌ها و خواندن دوباره؟</string>
-    <string name="dialog_hard_refresh_message">با انجام این کار همهٔ موجودی‌های ذخیره‌شده حذف و فقط پیامک‌هایی که هم‌اکنون در صندوق پیامک این دستگاه هستند دوباره خوانده می‌شوند. بانکی که پیامک موجودی آن دیگر در دسترس نباشد از فهرست حذف می‌شود. این کار قابل بازگشت نیست.</string>
+    <string name="dialog_hard_refresh_message">با انجام این کار همهٔ موجودی‌ها، تراکنش‌ها و تعهدهای ذخیره‌شده حذف و فقط پیامک‌هایی که هم‌اکنون در صندوق پیامک این دستگاه هستند دوباره خوانده می‌شوند. بانکی که پیامک موجودی آن دیگر در دسترس نباشد از فهرست حذف می‌شود. این کار قابل بازگشت نیست.</string>
     <string name="dialog_hard_refresh_confirm">بازنشانی و خواندن</string>
     <string name="dialog_hard_refresh_cancel">انصراف</string>
     <string name="dialog_hard_refresh_notes_label">یادداشت‌ها و برچسب‌های تراکنش‌ها هم حذف شوند</string>
@@ -150,7 +150,7 @@
     <string name="backup_create_failed">پشتیبان‌گیری ناموفق بود</string>
     <string name="backup_restored">بازیابی انجام شد</string>
     <string name="backup_restore_failed">بازیابی ناموفق بود</string>
-    <string name="backup_restore_summary">%1$d بانک اضافه و %2$d بانک به‌روزرسانی شد</string>
+    <string name="backup_restore_summary">%1$d بانک اضافه، %2$d بانک به‌روزرسانی و %3$d تعهد اضافه شد</string>
     <string name="backup_restore_summary_none">پشتیبان موجودی جدیدتری ندارد</string>
     <string name="backup_restore_confirm">بازیابی</string>
     <string name="backup_validate_empty">رمز عبور را وارد کنید</string>
@@ -227,6 +227,8 @@
     <string name="commitments_bad_date">تاریخ معتبر وارد کنید</string>
     <string name="commitments_end_before_start">تاریخ پایان قبل از شروع است</string>
     <string name="commitments_channel">یادآور تعهدات</string>
+    <string name="commitments_notification_title">یادآوری تعهد</string>
+    <string name="commitments_notification_text">یک تعهد سررسید شده است. برای جزئیات Balance را باز کنید.</string>
     <string name="commitments_remind">یادآور</string>
     <string name="commitments_remind_me">یادآوری کن</string>
     <string name="commitments_unit_minutes">دقیقه</string>

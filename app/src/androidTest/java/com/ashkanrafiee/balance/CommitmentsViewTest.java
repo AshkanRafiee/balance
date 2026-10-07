@@ -52,6 +52,8 @@ public class CommitmentsViewTest {
         assertEquals("gift", october.rows.get(2).commitment.name);
         assertEquals(-7000, october.pay);
         assertEquals(9000, october.receive);
+        assertEquals("current-month dues are not duplicated as overdue", 1, summary.overdue.size());
+        assertEquals(0, summary.overdueReceive);
     }
 
     @Test public void series_continueThroughTheWindowAndAcrossYears() {
@@ -67,7 +69,7 @@ public class CommitmentsViewTest {
         assertEquals(2, summary.months.get(11).rows.size());
         // Twelve monthly rents, the one-time gift, and the September rent sitting overdue.
         assertEquals(-5000 * 13 - 2000, summary.payTotal);
-        assertEquals(9000 * 13, summary.receiveTotal);
+        assertEquals(9000 * 12, summary.receiveTotal);
     }
 
     @Test public void overdue_collectsUnsettledPastDues() {
@@ -77,10 +79,11 @@ public class CommitmentsViewTest {
             Commitment.millisOf(2026, 9, 25, CalendarSystem.GREGORIAN), false, 0));
         CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
             commitments, CalendarSystem.GREGORIAN, OCT_7_NOON, 12);
-        // Six September daily dues plus the September rent plus the October salary.
-        assertEquals(8, summary.overdue.size());
+        // Six September daily dues plus the September rent. The October salary belongs only to
+        // the current-month group, not to overdue as well.
+        assertEquals(7, summary.overdue.size());
         assertEquals(-100 * 6 - 5000, summary.overduePay);
-        assertEquals(9000, summary.overdueReceive);
+        assertEquals(0, summary.overdueReceive);
         // Settling the rent leaves only the daily dues overdue.
         List<Commitment> settled = new ArrayList<>();
         for (Commitment c : commitments) {
@@ -93,7 +96,7 @@ public class CommitmentsViewTest {
         }
         CommitmentsActivity.Summary resettled = CommitmentsActivity.summarize(
             settled, CalendarSystem.GREGORIAN, OCT_7_NOON, 12);
-        assertEquals(7, resettled.overdue.size());
+        assertEquals(6, resettled.overdue.size());
         assertEquals(1, resettled.settledMonths.size());
         assertEquals("rent", resettled.settledMonths.get(0).rows.get(0).commitment.name);
         assertEquals(-600, resettled.overduePay);
@@ -180,7 +183,7 @@ public class CommitmentsViewTest {
         CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
             sample(), CalendarSystem.GREGORIAN, OCT_7_NOON, 12);
         assertEquals(-5000, summary.overduePay);
-        assertEquals(9000, summary.overdueReceive);
+        assertEquals(0, summary.overdueReceive);
         assertEquals(-7000, summary.thisMonthPay);
         assertEquals(9000, summary.thisMonthReceive);
     }

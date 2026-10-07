@@ -21,7 +21,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Long-press the total card to copy the combined total, or long-press a bank or account card to copy that balance; long-press the eye to switch auto-mask on or off (balances start hidden on every open), and long-press the lock icon for the lock settings
 - Bank sorting by balance or update time, mirrored in the list and the home-screen widget
 - Home-screen widget with the same bank order, totals, and privacy mask as the app, in its own color theme
-- Password-encrypted backup and restore (balances, transaction history, notes, tags, commitments and the reasons read from the SMS); the same Data menu holds a full reset — deleting every balance and transaction (and optionally every note and tag) needs a second confirmation so it can never be triggered by a stray tap
+- Password-encrypted backup and restore (balances, transaction history, notes, tags, commitments and the reasons read from the SMS); the same Data menu holds a full reset — deleting every balance, transaction and commitment (and optionally every note and tag) needs a second confirmation so it can never be triggered by a stray tap
 - Auto light/dark theme (following the device or forced either way), persistent masked-balance and currency display preference
 - Automatic refresh as bank SMS arrive, plus pull-to-refresh from the top of the bank list or the history screen (full, per-bank or per-account) — a pull there scans the SMS inbox, the balances and the history together
 - Data-freshness warning: a bank whose last balance SMS is older than a configurable number of days is highlighted with an amber ring, an amber amount and an "N days" badge on its card, and an amber amount in the home-screen widget, so you see how fresh today's totals are before trusting them
@@ -66,7 +66,7 @@ Keep the keystore and passwords outside version control (`signing.properties` an
 
 ## Privacy
 
-Balance requests `READ_SMS` to read existing messages, and declares `RECEIVE_BOOT_COMPLETED` plus the fingerprint/BIOMETRIC permissions required for its optional in-app lock. It declares no `INTERNET` permission and performs no network requests. SMS and balances remain on the device.
+Balance requests `READ_SMS` to read existing messages, notification permission for optional commitment reminders, and declares `RECEIVE_BOOT_COMPLETED` plus the fingerprint/BIOMETRIC permissions required for its optional in-app lock. Exact reminder timing may also use Android's optional exact-alarm access. It declares no `INTERNET` permission and performs no network requests. SMS and balances remain on the device.
 
 Revoking `READ_SMS` deletes nothing. Every balance, transaction and note already parsed stays in the encrypted store, and the dashboard, history screen and home-screen widget keep showing it. Because the app can no longer read new bank SMS, the dashboard adds an amber strip under the total card saying the balances may be out of date; tapping it re-requests SMS access (falling back to the app's settings page when the denial is permanent) and refreshes on the spot.
 

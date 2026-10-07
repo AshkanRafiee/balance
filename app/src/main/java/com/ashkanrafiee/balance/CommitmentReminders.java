@@ -9,6 +9,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Build;
 
 import java.util.ArrayList;
@@ -68,6 +69,14 @@ final class CommitmentReminders {
         Set<String> wanted = new HashSet<>();
         SharedPreferences prefs =
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        if (Build.VERSION.SDK_INT >= 33
+                && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            for (String id : prefs.getStringSet(KEY_SCHEDULED, new HashSet<String>()))
+                alarms.cancel(alarm(context, id));
+            prefs.edit().putStringSet(KEY_SCHEDULED, new HashSet<String>()).apply();
+            return;
+        }
         for (Commitment c : BalanceData.readCommitments(context)) {
             Long due = reminderDue(context, c, cal, now);
             Long at = due == null ? null : due - Math.max(0, c.remindBeforeMs);
@@ -101,6 +110,7 @@ final class CommitmentReminders {
     private static PendingIntent alarm(Context context, String id) {
         Intent intent = new Intent(context, CommitmentAlarmReceiver.class)
             .setAction(ACTION_REMIND)
+            .setData(Uri.parse("balance://commitment/" + Uri.encode(id)))
             .putExtra(EXTRA_ID, id);
         return PendingIntent.getBroadcast(context, id.hashCode(), intent,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
@@ -171,21 +181,21 @@ final class CommitmentReminders {
         NotificationManager manager =
             (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager == null) return false;
-        boolean persian = LocaleHelper.isPersian(context);
-        CalendarSystem cal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
-        int[] civil = Commitment.civilDay(due, cal);
-        String when = (persian ? faDigits(String.valueOf(civil[2])) : String.valueOf(civil[2]))
-            + " " + CalDate.monthName(civil[1], iran, persian);
-        String mag = CurrencyHelper.amount(context, Math.abs(c.amount));
-        String signed = (c.amount < 0 ? "−" : "+") + mag;
         Intent open = new Intent(context, CommitmentsActivity.class);
+        open.setData(Uri.parse("balance://commitment/" + Uri.encode(c.id)));
         PendingIntent tap = PendingIntent.getActivity(context, c.id.hashCode(), open,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification notification = new Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_balance_monochrome)
-            .setContentTitle(c.name)
-            .setContentText(signed + " · " + when)
+            .setContentTitle(context.getString(R.string.commitments_notification_title))
+            .setContentText(context.getString(R.string.commitments_notification_text))
             .setContentIntent(tap)
+            .setVisibility(Notification.VISIBILITY_PRIVATE)
+            .setPublicVersion(new Notification.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_balance_monochrome)
+                .setContentTitle(context.getString(R.string.commitments_notification_title))
+                .setContentText(context.getString(R.string.commitments_notification_text))
+                .build())
             .setAutoCancel(true)
             .build();
         manager.notify("commitment:" + c.id, 1, notification);

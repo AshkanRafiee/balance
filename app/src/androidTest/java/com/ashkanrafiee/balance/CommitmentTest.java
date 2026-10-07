@@ -67,14 +67,13 @@ public class CommitmentTest {
             start, null, false, 0));
     }
 
-    @Test public void normalized_repairsFrequencyAndEnd() {
+    @Test public void normalized_rejectsInvalidFrequencyAndEnd() {
         long start = Commitment.millisOf(2026, 10, 7, CalendarSystem.GREGORIAN);
         Commitment c = Commitment.create("rent", -5000, 99, start,
             Commitment.millisOf(2026, 10, 1, CalendarSystem.GREGORIAN), false, -5);
-        assertNotNull(c);
-        assertEquals(Commitment.ONCE, c.frequency);
-        assertNull(c.end);
-        assertEquals(0, c.remindBeforeMs);
+        assertNull(c);
+        assertNull(Commitment.create("invalid", Long.MIN_VALUE, Commitment.MONTHLY,
+            start, null, false, 0));
     }
 
     // ---- JSON ---------------------------------------------------------------------

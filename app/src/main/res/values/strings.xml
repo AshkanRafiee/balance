@@ -44,7 +44,7 @@
     <string name="footer_data">Data</string>
 
     <string name="dialog_hard_refresh_title">Reset balances and rescan?</string>
-    <string name="dialog_hard_refresh_message">This deletes every saved balance and rescans only the bank SMS currently in this device\'s inbox. Any bank whose SMS is no longer available will be removed from the list. This cannot be undone.</string>
+    <string name="dialog_hard_refresh_message">This deletes every saved balance, transaction, and commitment, then rescans only the bank SMS currently in this device\'s inbox. Any bank whose SMS is no longer available will be removed from the list. This cannot be undone.</string>
     <string name="dialog_hard_refresh_confirm">Reset and rescan</string>
     <string name="dialog_hard_refresh_cancel">Cancel</string>
     <string name="dialog_hard_refresh_notes_label">Also delete the notes and tags on transactions</string>
@@ -150,7 +150,7 @@
     <string name="backup_create_failed">Backup failed</string>
     <string name="backup_restored">Restore finished</string>
     <string name="backup_restore_failed">Restore failed</string>
-    <string name="backup_restore_summary">%1$d banks added, %2$d banks updated</string>
+    <string name="backup_restore_summary">%1$d banks added, %2$d banks updated, %3$d commitments added</string>
     <string name="backup_restore_summary_none">The backup holds no newer balances</string>
     <string name="backup_restore_confirm">Restore</string>
     <string name="backup_validate_empty">Enter a password</string>
@@ -227,6 +227,8 @@
     <string name="commitments_bad_date">Enter a valid date</string>
     <string name="commitments_end_before_start">The end date is before the start</string>
     <string name="commitments_channel">Commitment reminders</string>
+    <string name="commitments_notification_title">Commitment reminder</string>
+    <string name="commitments_notification_text">A commitment is due. Open Balance for details.</string>
     <string name="commitments_remind">Reminder</string>
     <string name="commitments_remind_me">Remind me</string>
     <string name="commitments_unit_minutes">Minutes</string>

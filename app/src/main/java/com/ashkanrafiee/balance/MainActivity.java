@@ -138,6 +138,7 @@ public class MainActivity extends Activity {
             view.hidden = true;
             view.invalidate();
         }
+        if (view != null) view.stopMonthRefresh();
         if (LockManager.isEnabled(this)) {
             // A dialog is a separate window and would otherwise stay on top of the lock, still
             // clickable, when the app is re-opened; drop whatever is up as we leave the foreground.
@@ -179,6 +180,7 @@ public class MainActivity extends Activity {
         if (view != null) {
             view.handler.removeCallbacks(view.clearClipRunnable);
             view.handler.removeCallbacks(view.refreshTicker);
+            view.stopMonthRefresh();
             if (view.clearClipRunnable != null) view.clearClipRunnable.run();
         }
         super.onDestroy();
@@ -193,7 +195,9 @@ public class MainActivity extends Activity {
         CommitmentReminders.scheduleAll(this);
         if (view != null) {
             view.enforceAutoHide();
+            view.invalidateCommitmentSummary();
             view.refresh();
+            view.scheduleMonthRefresh();
         }
         registerSmsObserver();
         // A fresh install that skipped or finished the introduction returns here without ever
@@ -1163,7 +1167,8 @@ public class MainActivity extends Activity {
                 } else {
                     view.loadSaved();
                     String summary = res.changed()
-                        ? getString(R.string.backup_restore_summary, res.added, res.updated)
+                        ? getString(R.string.backup_restore_summary, res.added, res.updated,
+                            res.commitmentsAdded)
                         : getString(R.string.backup_restore_summary_none);
                     Toast.makeText(MainActivity.this,
                         getString(R.string.backup_restored) + "\n" + summary,
@@ -1259,6 +1264,9 @@ public class MainActivity extends Activity {
          *  every geometry question is asked of {@link DashboardLayout} against this flag. */
         boolean smsBanner;
         boolean commitmentsCard;
+        boolean commitmentSummaryLoaded;
+        boolean hasCommitments;
+        CommitmentsActivity.Summary commitmentSummary;
         int insetsTop, insetsBottom;
         int sortMode;
         float scrollY = 0, lastY, downY;
@@ -1292,6 +1300,11 @@ public class MainActivity extends Activity {
          *  {@link #copyBalance}); while set, the clipboard holds sensitive data we placed there. */
         Runnable clearClipRunnable;
         final Handler handler = new Handler(Looper.getMainLooper());
+        final Runnable monthRefresh = () -> {
+            commitmentSummaryLoaded = false;
+            invalidate();
+            scheduleMonthRefresh();
+        };
         final Runnable lockLongProbe = () -> {
             lockProbeFired = true;
             if (MainActivity.this.isFinishing() || MainActivity.this.isDestroyed()) return;
@@ -1497,6 +1510,22 @@ public class MainActivity extends Activity {
         }
 
         void refresh() { refresh(false, false, false); }
+
+        void scheduleMonthRefresh() {
+            handler.removeCallbacks(monthRefresh);
+            java.util.Calendar next = java.util.Calendar.getInstance();
+            next.set(java.util.Calendar.HOUR_OF_DAY, 0);
+            next.set(java.util.Calendar.MINUTE, 0);
+            next.set(java.util.Calendar.SECOND, 0);
+            next.set(java.util.Calendar.MILLISECOND, 0);
+            next.add(java.util.Calendar.DAY_OF_MONTH, 1);
+            handler.postDelayed(monthRefresh,
+                Math.max(1000L, next.getTimeInMillis() - System.currentTimeMillis()));
+        }
+
+        void stopMonthRefresh() {
+            handler.removeCallbacks(monthRefresh);
+        }
         void refreshSilent() { refresh(false, false, true); }
 
         /** When auto-mask is on, the balances must start (and stay) masked; call this from the
@@ -1573,8 +1602,14 @@ public class MainActivity extends Activity {
 
         /** Reloads the saved balances (e.g. after a restore) without re-scanning SMS. */
         void loadSaved() {
+            invalidateCommitmentSummary();
             applySaved(BalanceData.read(MainActivity.this), MainActivity.this,
                 getString(R.string.status_loaded_from_saved));
+        }
+
+        void invalidateCommitmentSummary() {
+            commitmentSummaryLoaded = false;
+            invalidate();
         }
 
         void refresh(boolean hard, boolean alsoNotes) { refresh(hard, alsoNotes, false); }
@@ -1609,6 +1644,7 @@ public class MainActivity extends Activity {
                 refreshing = true;
                 new Thread(() -> {
                     final Context app = MainActivity.this.getApplicationContext();
+                    if (hard) BalanceData.reset(app, alsoNotes);
                     final LinkedHashMap<String, Bank> saved = BalanceData.read(app);
                     // Nothing stored yet (a fresh install, or a reset): the empty card wants the
                     // plain "permission is needed" wording, and there is no strip to explain it.
@@ -1975,14 +2011,20 @@ public class MainActivity extends Activity {
             float columnWidth = Math.min(leftWidth, rightWidth);
             text(c, getString(R.string.commitments_card_title, commitmentMonthLabel()),
                 middle, top + 22, 14, fg, Paint.Align.CENTER);
-            List<Commitment> commitments = BalanceData.readCommitments(MainActivity.this);
-            CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
-                commitments,
-                RegionHelper.isIran(MainActivity.this) ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN,
-                System.currentTimeMillis(), CommitmentsActivity.WINDOW_MONTHS);
+            if (!commitmentSummaryLoaded) {
+                List<Commitment> commitments = BalanceData.readCommitments(MainActivity.this);
+                commitmentSummary = CommitmentsActivity.summarize(
+                    commitments,
+                    RegionHelper.isIran(MainActivity.this)
+                        ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN,
+                    System.currentTimeMillis(), CommitmentsActivity.WINDOW_MONTHS);
+                hasCommitments = !commitments.isEmpty();
+                commitmentSummaryLoaded = true;
+            }
+            CommitmentsActivity.Summary summary = commitmentSummary;
             long pay = summary.overduePay + summary.thisMonthPay;
             long receive = summary.overdueReceive + summary.thisMonthReceive;
-            if (commitments.isEmpty()) {
+            if (!hasCommitments) {
                 Paint.Align emptyAlign = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
                 float emptyX = rtl ? right : left;
                 text(c, fit(getString(R.string.commitments_card_empty), 11, w - 96),

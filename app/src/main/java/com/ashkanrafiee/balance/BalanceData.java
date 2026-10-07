@@ -634,14 +634,13 @@ final class BalanceData {
         try {
             JSONArray arr = new JSONObject(json).optJSONArray(KEY_COMMITMENTS);
             if (arr == null) return out;
-            for (int i = 0; i < arr.length(); i++) {
+            java.util.Set<String> ids = new HashSet<>();
+            for (int i = 0; i < arr.length() && out.size() < Commitment.MAX_COMMITMENTS; i++) {
                 JSONObject e = arr.optJSONObject(i);
                 if (e == null) continue;
                 Commitment c = Commitment.fromJson(e);
                 if (c == null) continue;
-                boolean duplicate = false;
-                for (Commitment k : out) if (k.id.equals(c.id)) { duplicate = true; break; }
-                if (!duplicate) out.add(c);
+                if (ids.add(c.id)) out.add(c);
             }
         } catch (Exception ex) {
             Log.w(TAG, "deserializeCommitments failed");
@@ -866,10 +865,11 @@ final class BalanceData {
     static void reset(Context context, boolean alsoNotes) {
         android.content.SharedPreferences.Editor data =
             context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-                .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).remove(KEY_HISTORY_LAST_BALANCE)
+                .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).remove(KEY_COMMITMENTS)
+                .remove(KEY_HISTORY_LAST_BALANCE)
                 .remove(KEY_RECENT_MOVEMENTS).remove(KEY_TX_REASONS).remove(KEY_TX_CHANNELS);
         if (alsoNotes) data.remove(KEY_TX_NOTES).remove(KEY_TX_TAGS);
-        data.apply();
+        data.commit();
         context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
             .remove(KEY_SCANNED_THROUGH)
             .remove(KEY_RULES_VERSION)
@@ -877,7 +877,8 @@ final class BalanceData {
             .remove(KEY_HISTORY_RULES_VERSION)
             .remove(KEY_HISTORY_SCHEMA)
             .remove(KEY_EXCLUDED)
-            .apply();
+            .commit();
+        CommitmentReminders.scheduleAll(context);
     }
 
     static boolean isHidden(Context context) {

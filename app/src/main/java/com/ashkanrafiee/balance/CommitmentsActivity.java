@@ -7,6 +7,8 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
@@ -14,6 +16,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -90,8 +93,9 @@ public final class CommitmentsActivity extends Activity {
         long currentMonthStart = Commitment.millisOf(currentCivil[0], currentCivil[1], 1, cal);
         for (Commitment c : commitments) {
             if (c == null) continue;
+            long overdueEnd = currentMonthStart - 1;
             for (long at : Commitment.occurrences(c, cal, Math.min(c.start, today - 366L * 86400000L),
-                    today - 1)) {
+                    overdueEnd)) {
                 if (c.isSettled(at)) {
                     // The current month already owns its settled rows. Keep older paid rows in
                     // their original month so they never appear in the overdue section.
@@ -199,6 +203,13 @@ public final class CommitmentsActivity extends Activity {
     private boolean persian;
     private LinearLayout root;
     private AlertDialog manageDialogWindow;
+    private AlertDialog activeDialog;
+    private LockOverlay lockOverlay;
+    private final Handler monthHandler = new Handler(Looper.getMainLooper());
+    private final Runnable monthRefresh = () -> {
+        render();
+        scheduleMonthRefresh();
+    };
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -240,7 +251,15 @@ public final class CommitmentsActivity extends Activity {
             return i;
         });
         scroll.addView(root, new LinearLayout.LayoutParams(-1, -2));
-        setContentView(scroll);
+        FrameLayout host = new FrameLayout(this);
+        setContentView(host);
+        host.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
+        lockOverlay = new LockOverlay(this);
+        lockOverlay.setUnlockListener(this::updateSecureFlag);
+        lockOverlay.setCancelListener(() -> lockOverlay.hide());
+        host.addView(lockOverlay, new FrameLayout.LayoutParams(-1, -1));
+        lockOverlay.setVisibility(View.GONE);
+        updateSecureFlag();
     }
 
     @Override
@@ -248,8 +267,86 @@ public final class CommitmentsActivity extends Activity {
         super.onResume();
         // Re-arm reminders whenever the screen is seen: edits elsewhere, a restored backup or
         // a granted permission all land here before the next due.
+        LockManager.cancelPendingLock();
         CommitmentReminders.scheduleAll(this);
         render();
+        scheduleMonthRefresh();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        LockManager.registerActivityStart(this);
+        if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) {
+            lockOverlay.showLock();
+        } else {
+            lockOverlay.hide();
+        }
+        updateSecureFlag();
+    }
+
+    @Override
+    protected void onPause() {
+        monthHandler.removeCallbacks(monthRefresh);
+        dismissActiveDialog();
+        if (LockManager.isEnabled(this)) {
+            LockManager.scheduleLock(this);
+            if (LockManager.isSessionLocked()) {
+                lockOverlay.showLock();
+                lockOverlay.setAutoFingerprintEnabled(false);
+            }
+        }
+        updateSecureFlag();
+        super.onPause();
+    }
+
+    @Override
+    protected void onStop() {
+        if (LockManager.isEnabled(this) && LockManager.registerActivityStop()) {
+            lockOverlay.showLock();
+            lockOverlay.setAutoFingerprintEnabled(false);
+        } else {
+            lockOverlay.hide();
+        }
+        updateSecureFlag();
+        super.onStop();
+    }
+
+    @Override
+    protected void onDestroy() {
+        monthHandler.removeCallbacks(monthRefresh);
+        super.onDestroy();
+    }
+
+    private void scheduleMonthRefresh() {
+        monthHandler.removeCallbacks(monthRefresh);
+        Calendar next = Calendar.getInstance();
+        next.set(Calendar.HOUR_OF_DAY, 0);
+        next.set(Calendar.MINUTE, 0);
+        next.set(Calendar.SECOND, 0);
+        next.set(Calendar.MILLISECOND, 0);
+        next.add(Calendar.DAY_OF_MONTH, 1);
+        monthHandler.postDelayed(monthRefresh,
+            Math.max(1000L, next.getTimeInMillis() - System.currentTimeMillis()));
+    }
+
+    private void updateSecureFlag() {
+        if (LockManager.isEnabled(this)) {
+            getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+        } else {
+            getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+        }
+    }
+
+    private void dismissActiveDialog() {
+        if (activeDialog != null) {
+            activeDialog.dismiss();
+            activeDialog = null;
+        }
+        if (manageDialogWindow != null) {
+            manageDialogWindow.dismiss();
+            manageDialogWindow = null;
+        }
     }
 
     private void render() {
@@ -411,7 +508,11 @@ public final class CommitmentsActivity extends Activity {
             .setView(scroll)
             .setPositiveButton(android.R.string.ok, null)
             .show();
-        manageDialogWindow.setOnDismissListener(d -> manageDialogWindow = null);
+        activeDialog = manageDialogWindow;
+        manageDialogWindow.setOnDismissListener(d -> {
+            if (activeDialog == manageDialogWindow) activeDialog = null;
+            manageDialogWindow = null;
+        });
     }
 
     private String freqLabel(int frequency) {
@@ -589,12 +690,19 @@ public final class CommitmentsActivity extends Activity {
             reschedule |= c.remind;
             if (c.frequency == Commitment.ONCE) {
                 kept.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
-                    true, c.paid, c.remind, c.remindBeforeMs));
+                    true, c.paid, c.legacyPaidThrough, c.remind, c.remindBeforeMs));
             } else {
                 List<Long> paid = new ArrayList<>(c.paid);
                 if (!paid.contains(row.date)) paid.add(row.date);
+                if (c.legacyPaidThrough > 0) {
+                    CalendarSystem legacyCal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
+                    for (long at : Commitment.occurrences(c, legacyCal, c.start, c.legacyPaidThrough)) {
+                        if (at != row.date && !paid.contains(at)) paid.add(at);
+                    }
+                    paid.remove(Long.valueOf(row.date));
+                }
                 kept.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
-                    c.done, paid, c.remind, c.remindBeforeMs));
+                    c.done, paid, 0, c.remind, c.remindBeforeMs));
             }
         }
         BalanceData.writeCommitments(this, kept);
@@ -816,6 +924,10 @@ public final class CommitmentsActivity extends Activity {
             });
         });
         dlg.show();
+        activeDialog = dlg;
+        dlg.setOnDismissListener(d -> {
+            if (activeDialog == dlg) activeDialog = null;
+        });
         if (existing != null) {
             int titleId = getResources().getIdentifier("alertTitle", "id", "android");
             View title = titleId == 0 ? null : dlg.findViewById(titleId);
@@ -956,7 +1068,7 @@ public final class CommitmentsActivity extends Activity {
                     continue;
                 }
                 kept.add(new Commitment(c.id, title, signed, frequency, start, end, c.done,
-                    c.paid, remind, remindBeforeMs));
+                    c.paid, c.legacyPaidThrough, remind, remindBeforeMs));
             }
         }
         BalanceData.writeCommitments(this, kept);
@@ -966,7 +1078,7 @@ public final class CommitmentsActivity extends Activity {
     }
 
     private void confirmDelete(String commitmentId) {
-        new AlertDialog.Builder(this)
+        activeDialog = new AlertDialog.Builder(this)
             .setTitle(getString(R.string.commitments_delete_title))
             .setMessage(getString(R.string.commitments_delete_message))
             .setPositiveButton(getString(R.string.commitments_delete), (d, w) -> {
@@ -979,6 +1091,7 @@ public final class CommitmentsActivity extends Activity {
             })
             .setNegativeButton(getString(R.string.lock_cancel), null)
             .show();
+        activeDialog.setOnDismissListener(d -> activeDialog = null);
     }
 
     /** A series in one line for the editor: how many of its dues around now are still
@@ -1082,7 +1195,8 @@ public final class CommitmentsActivity extends Activity {
     private String dateText(long millis) {
         CalendarSystem cal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
         int[] civil = Commitment.civilDay(millis, cal);
-        return yearText(civil[2]) + " " + CalDate.monthName(civil[1], iran, persian);
+        String day = persian ? faDigits(String.valueOf(civil[2])) : String.valueOf(civil[2]);
+        return day + " " + CalDate.monthName(civil[1], iran, persian) + " " + yearText(civil[0]);
     }
 
     private String yearText(int year) {

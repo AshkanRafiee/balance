@@ -35,6 +35,7 @@ final class Commitment {
      *  commitments one device keeps, so one runaway import cannot bloat the encrypted store or
      *  the alarm table. */
     static final int MAX_NAME_LENGTH = 64;
+    static final int MAX_ID_LENGTH = 128;
     static final long MAX_AMOUNT = 999_999_999_999L;
     static final long MAX_REMIND_BEFORE_MS = 365L * 86400000L;
     static final int MAX_COMMITMENTS = 500;
@@ -96,15 +97,15 @@ final class Commitment {
      *  list to positive days within its cap. Returns null when there is nothing worth keeping
      *  (a blank name or a zero amount), so the store never holds one. */
     static Commitment normalized(Commitment c) {
-        if (c == null || c.id == null || c.id.isEmpty()) return null;
+        if (c == null || c.id == null || c.id.isEmpty() || c.id.length() > MAX_ID_LENGTH) return null;
         String name = c.name == null ? "" : c.name.trim();
         if (name.length() > MAX_NAME_LENGTH) name = name.substring(0, MAX_NAME_LENGTH).trim();
         if (name.isEmpty()) return null;
-        if (c.amount == 0 || Math.abs(c.amount) > MAX_AMOUNT) return null;
+        if (c.amount == 0 || c.amount < -MAX_AMOUNT || c.amount > MAX_AMOUNT) return null;
         int frequency = c.frequency < ONCE || c.frequency > YEARLY ? ONCE : c.frequency;
         if (c.start <= 0) return null;
         Long end = c.end;
-        if (end != null && end < startOfDay(c.start)) end = null;
+        if (end != null && end < startOfDay(c.start)) return null;
         List<Long> paid = new ArrayList<>();
         if (c.paid != null) {
             for (Long day : c.paid) {
@@ -185,7 +186,8 @@ final class Commitment {
             List<Long> paid = new ArrayList<>();
             org.json.JSONArray settled = e.optJSONArray("paid");
             if (settled != null) {
-                for (int i = 0; i < settled.length(); i++) {
+                int first = Math.max(0, settled.length() - MAX_SETTLED_DAYS);
+                for (int i = first; i < settled.length(); i++) {
                     long day = settled.optLong(i, 0);
                     if (day > 0) paid.add(day);
                 }

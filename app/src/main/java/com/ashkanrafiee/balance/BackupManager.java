@@ -93,7 +93,8 @@ final class BackupManager {
     static final class RestoreResult {
         int added;
         int updated;
-        boolean changed() { return added > 0 || updated > 0; }
+        int commitmentsAdded;
+        boolean changed() { return added > 0 || updated > 0 || commitmentsAdded > 0; }
     }
 
     private BackupManager() {}
@@ -364,8 +365,10 @@ final class BackupManager {
                 ids.add(c.id);
                 currentCommitments.add(c);
                 commitmentsChanged = true;
+                result.commitmentsAdded++;
             }
             if (commitmentsChanged) BalanceData.writeCommitments(context, currentCommitments);
+            if (commitmentsChanged) CommitmentReminders.scheduleAll(context);
         }
         return result;
     }

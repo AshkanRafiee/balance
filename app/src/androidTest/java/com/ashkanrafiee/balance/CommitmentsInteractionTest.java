@@ -203,6 +203,10 @@ public class CommitmentsInteractionTest {
                 hidden.setAccessible(true);
                 boolean previousHidden = hidden.getBoolean(view);
                 hidden.setBoolean(view, masked);
+                Method invalidateSummary = view.getClass().getDeclaredMethod(
+                    "invalidateCommitmentSummary");
+                invalidateSummary.setAccessible(true);
+                invalidateSummary.invoke(view);
                 Method draw = view.getClass().getDeclaredMethod("drawCommitmentsCard",
                     Canvas.class, int.class, boolean.class);
                 draw.setAccessible(true);
