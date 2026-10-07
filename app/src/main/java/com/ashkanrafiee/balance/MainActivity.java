@@ -187,6 +187,9 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         LockManager.cancelPendingLock();
+        // Re-arm commitment reminders from the stored series: edits, a restored backup or a
+        // newly granted notification permission all land here before the next due.
+        CommitmentReminders.scheduleAll(this);
         if (view != null) {
             view.enforceAutoHide();
             view.refresh();

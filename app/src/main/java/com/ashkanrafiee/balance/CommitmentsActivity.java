@@ -185,6 +185,9 @@ public final class CommitmentsActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        // Re-arm reminders whenever the screen is seen: edits elsewhere, a restored backup or
+        // a granted permission all land here before the next due.
+        CommitmentReminders.scheduleAll(this);
         render();
     }
 
@@ -351,6 +354,7 @@ public final class CommitmentsActivity extends Activity {
             }
         }
         BalanceData.writeCommitments(this, kept);
+        CommitmentReminders.scheduleAll(this);
         render();
     }
 
@@ -444,6 +448,48 @@ public final class CommitmentsActivity extends Activity {
             endRow.setVisibility(checked ? View.GONE : View.VISIBLE));
         form.addView(endRow, margin(0, 0, 0, 0));
 
+        form.addView(text(getString(R.string.commitments_remind), 13, muted, medium()),
+            margin(0, 12, 0, 2));
+        CheckBox remindBox = new CheckBox(this);
+        remindBox.setText(getString(R.string.commitments_remind_me));
+        remindBox.setTypeface(Fonts.text(this), Typeface.NORMAL);
+        remindBox.setChecked(existing != null && existing.remind);
+        form.addView(remindBox, new LinearLayout.LayoutParams(-2, -2));
+        LinearLayout leadRow = new LinearLayout(this);
+        leadRow.setOrientation(LinearLayout.HORIZONTAL);
+        leadRow.setGravity(Gravity.CENTER_VERTICAL);
+        EditText leadNumber = new EditText(this);
+        leadNumber.setInputType(InputType.TYPE_CLASS_NUMBER);
+        leadNumber.setTypeface(Fonts.text(this), Typeface.NORMAL);
+        leadNumber.setGravity(Gravity.CENTER);
+        long[] decomposed = decomposeLead(existing != null ? existing.remindBeforeMs : 86400000L);
+        leadNumber.setText(String.valueOf(decomposed[0]));
+        leadRow.addView(leadNumber, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView[] unitChips = {
+            text(getString(R.string.commitments_unit_minutes), 12, fg, medium()),
+            text(getString(R.string.commitments_unit_hours), 12, fg, medium()),
+            text(getString(R.string.commitments_unit_days), 12, fg, medium()),
+            text(getString(R.string.commitments_unit_weeks), 12, fg, medium())};
+        final int[] unitSelected = {(int) decomposed[1]};
+        Runnable[] unitActions = new Runnable[4];
+        for (int i = 0; i < 4; i++) {
+            final int index = i;
+            unitActions[i] = () -> {
+                unitSelected[0] = index;
+                refreshChips(unitChips, index);
+            };
+        }
+        LinearLayout unitRow = chipRow(unitChips, unitSelected[0], unitActions);
+        LinearLayout.LayoutParams unitLp = new LinearLayout.LayoutParams(0, -2, 3);
+        unitLp.setMarginStart(dp(8));
+        leadRow.addView(unitRow, unitLp);
+        leadRow.setVisibility(remindBox.isChecked() ? View.VISIBLE : View.GONE);
+        remindBox.setOnCheckedChangeListener((v, checked) -> {
+            leadRow.setVisibility(checked ? View.VISIBLE : View.GONE);
+            if (checked && needsNotificationPermission()) requestNotificationPermission();
+        });
+        form.addView(leadRow, margin(0, 4, 0, 0));
+
         if (existing != null) {
             form.addView(text(seriesSummary(existing, cal), 12, muted), margin(0, 12, 0, 0));
         }
@@ -472,13 +518,52 @@ public final class CommitmentsActivity extends Activity {
         dlg.setOnShowListener(d -> {
             dlg.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(canSave(name, amount));
             dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                long leadMs = parseLead(leadNumber.getText().toString(), unitSelected[0]);
                 if (saveFromForm(existing, name, amount, pay[0], freqSelected[0], startFields,
-                        openEnded.isChecked() ? null : endFields, cal)) {
+                        openEnded.isChecked() ? null : endFields, cal, remindBox.isChecked(),
+                        leadMs)) {
                     dlg.dismiss();
                 }
             });
         });
         dlg.show();
+    }
+
+    private static final long[] UNIT_MS = {60_000L, 3600_000L, 86400_000L, 604800_000L};
+    private static final int REQUEST_NOTIFY = 41;
+
+    /** Splits a lead time into the largest whole unit that divides it (weeks down to minutes),
+     *  defaulting a fresh editor to one day. Returns {number, unitIndex}. */
+    private static long[] decomposeLead(long ms) {
+        if (ms <= 0) return new long[]{1, 2};
+        if (ms % UNIT_MS[3] == 0) return new long[]{ms / UNIT_MS[3], 3};
+        if (ms % UNIT_MS[2] == 0) return new long[]{ms / UNIT_MS[2], 2};
+        if (ms % UNIT_MS[1] == 0) return new long[]{ms / UNIT_MS[1], 1};
+        return new long[]{Math.max(1, ms / UNIT_MS[0]), 0};
+    }
+
+    private boolean needsNotificationPermission() {
+        return android.os.Build.VERSION.SDK_INT >= 33
+            && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void requestNotificationPermission() {
+        requestPermissions(
+            new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, REQUEST_NOTIFY);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grants) {
+        super.onRequestPermissionsResult(requestCode, permissions, grants);
+        if (requestCode != REQUEST_NOTIFY) return;
+        if (grants.length == 0
+                || grants[0] != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            // The choice stays saved: enabling notifications later just works, since every
+            // resume re-arms from the stored commitments.
+            Toast.makeText(this, getString(R.string.commitments_notifications_off),
+                Toast.LENGTH_LONG).show();
+        }
     }
 
     private Commitment lookupCommitment(String commitmentId) {
@@ -505,8 +590,21 @@ public final class CommitmentsActivity extends Activity {
         }
     }
 
+    private long parseLead(String raw, int unit) {
+        try {
+            long n = Long.parseLong(BalanceData.digits(raw.trim()));
+            if (n < 0) n = 0;
+            long step = UNIT_MS[Math.max(0, Math.min(unit, UNIT_MS.length - 1))];
+            if (n > Commitment.MAX_REMIND_BEFORE_MS / step) return Commitment.MAX_REMIND_BEFORE_MS;
+            return n * step;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
     private boolean saveFromForm(Commitment existing, EditText name, EditText amount, boolean pay,
-            int frequency, EditText[] startFields, EditText[] endFields, CalendarSystem cal) {
+            int frequency, EditText[] startFields, EditText[] endFields, CalendarSystem cal,
+            boolean remind, long remindBeforeMs) {
         String title = name.getText().toString().trim();
         long magnitude = parseAmount(amount.getText().toString());
         if (title.isEmpty() || magnitude == 0) return false;
@@ -536,7 +634,7 @@ public final class CommitmentsActivity extends Activity {
         if (existing == null) {
             kept.addAll(commitments);
             kept.add(new Commitment(java.util.UUID.randomUUID().toString(), title, signed,
-                frequency, start, end, false, 0, false, 0));
+                frequency, start, end, false, 0, remind, remindBeforeMs));
         } else {
             for (Commitment c : commitments) {
                 if (!c.id.equals(existing.id)) {
@@ -544,10 +642,11 @@ public final class CommitmentsActivity extends Activity {
                     continue;
                 }
                 kept.add(new Commitment(c.id, title, signed, frequency, start, end, c.done,
-                    c.paidThrough, c.remind, c.remindBeforeMs));
+                    c.paidThrough, remind, remindBeforeMs));
             }
         }
         BalanceData.writeCommitments(this, kept);
+        CommitmentReminders.scheduleAll(this);
         render();
         return true;
     }
@@ -561,6 +660,7 @@ public final class CommitmentsActivity extends Activity {
                 for (Commitment c : BalanceData.readCommitments(this))
                     if (!c.id.equals(commitmentId)) kept.add(c);
                 BalanceData.writeCommitments(this, kept);
+                CommitmentReminders.scheduleAll(this);
                 render();
             })
             .setNegativeButton(getString(R.string.lock_cancel), null)

@@ -210,6 +210,14 @@
     <string name="commitments_delete_message">این تعهد با همه اقساطش حذف می‌شود.</string>
     <string name="commitments_bad_date">تاریخ معتبر وارد کنید</string>
     <string name="commitments_end_before_start">تاریخ پایان قبل از شروع است</string>
+    <string name="commitments_channel">یادآور تعهدات</string>
+    <string name="commitments_remind">یادآور</string>
+    <string name="commitments_remind_me">یادآوری کن</string>
+    <string name="commitments_unit_minutes">دقیقه</string>
+    <string name="commitments_unit_hours">ساعت</string>
+    <string name="commitments_unit_days">روز</string>
+    <string name="commitments_unit_weeks">هفته</string>
+    <string name="commitments_notifications_off">یادآور به مجوز اعلان نیاز دارد — برای دریافت آن را در تنظیمات بدهید.</string>
 
     <string name="scan_diag_title">تشخیص اسکن پیامک</string>
     <string name="scan_diag_reading">در حال خواندن پیامک‌های این دستگاه…</string>

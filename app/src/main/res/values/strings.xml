@@ -210,6 +210,14 @@
     <string name="commitments_delete_message">This commitment and all of its dues go away.</string>
     <string name="commitments_bad_date">Enter a valid date</string>
     <string name="commitments_end_before_start">The end date is before the start</string>
+    <string name="commitments_channel">Commitment reminders</string>
+    <string name="commitments_remind">Reminder</string>
+    <string name="commitments_remind_me">Remind me</string>
+    <string name="commitments_unit_minutes">Minutes</string>
+    <string name="commitments_unit_hours">Hours</string>
+    <string name="commitments_unit_days">Days</string>
+    <string name="commitments_unit_weeks">Weeks</string>
+    <string name="commitments_notifications_off">Reminders need notification permission — allow it in Settings to get them.</string>
 
     <string name="scan_diag_title">Scan diagnostics</string>
     <string name="scan_diag_reading">Reading SMS on this device…</string>
