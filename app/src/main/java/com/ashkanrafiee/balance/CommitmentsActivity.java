@@ -134,13 +134,33 @@ public final class CommitmentsActivity extends Activity {
         });
         int year = currentCivil[0];
         int month = currentCivil[1];
+        List<MonthGroup> windowMonths = new ArrayList<>();
         for (int i = 0; i < upcomingMonths; i++) {
-            MonthGroup group = new MonthGroup(year, month);
-            long monthStart = Commitment.millisOf(year, month, 1, cal);
-            long monthEnd = Commitment.millisOf(year, month, cal.daysInMonth(year, month), cal);
+            windowMonths.add(new MonthGroup(year, month));
+            month++;
+            if (month > 12) {
+                month = 1;
+                year++;
+            }
+        }
+        if (!windowMonths.isEmpty()) {
+            MonthGroup last = windowMonths.get(windowMonths.size() - 1);
+            long windowStart = Commitment.millisOf(windowMonths.get(0).year,
+                windowMonths.get(0).month, 1, cal);
+            long windowEnd = Commitment.millisOf(last.year, last.month,
+                cal.daysInMonth(last.year, last.month), cal);
             for (Commitment c : commitments) {
                 if (c == null) continue;
-                for (long at : Commitment.occurrences(c, cal, monthStart, monthEnd)) {
+                for (long at : Commitment.occurrences(c, cal, windowStart, windowEnd)) {
+                    int[] dueCivil = Commitment.civilDay(at, cal);
+                    MonthGroup group = null;
+                    for (MonthGroup candidate : windowMonths) {
+                        if (candidate.year == dueCivil[0] && candidate.month == dueCivil[1]) {
+                            group = candidate;
+                            break;
+                        }
+                    }
+                    if (group == null) continue;
                     boolean settled = c.isSettled(at);
                     group.rows.add(new Row(c, at, settled));
                     if (!settled) {
@@ -149,16 +169,13 @@ public final class CommitmentsActivity extends Activity {
                     }
                 }
             }
+        }
+        for (MonthGroup group : windowMonths) {
             group.rows.sort((x, y) -> {
                 int byDate = Long.compare(x.date, y.date);
                 return byDate != 0 ? byDate : x.commitment.name.compareTo(y.commitment.name);
             });
             if (!group.rows.isEmpty()) summary.months.add(group);
-            month++;
-            if (month > 12) {
-                month = 1;
-                year++;
-            }
         }
         summary.payTotal = summary.overduePay;
         summary.receiveTotal = summary.overdueReceive;
@@ -224,7 +241,6 @@ public final class CommitmentsActivity extends Activity {
         });
         scroll.addView(root, new LinearLayout.LayoutParams(-1, -2));
         setContentView(scroll);
-        render();
     }
 
     @Override
@@ -445,14 +461,18 @@ public final class CommitmentsActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setBackground(rounded(chipBg, 14));
         final boolean[] expanded = {false};
+        final boolean[] built = {false};
         TextView toggle = text(getString(R.string.commitments_show_older_paid, olderCount), 14, fg, medium());
         toggle.setPadding(dp(14), dp(13), dp(14), dp(13));
         LinearLayout months = new LinearLayout(this);
         months.setOrientation(LinearLayout.VERTICAL);
         months.setVisibility(View.GONE);
-        for (MonthGroup group : summary.settledMonths) months.addView(settledMonthCard(group));
         toggle.setOnClickListener(v -> {
             expanded[0] = !expanded[0];
+            if (expanded[0] && !built[0]) {
+                for (MonthGroup group : summary.settledMonths) months.addView(settledMonthCard(group));
+                built[0] = true;
+            }
             months.setVisibility(expanded[0] ? View.VISIBLE : View.GONE);
             toggle.setText(expanded[0]
                 ? getString(R.string.commitments_hide_older_paid)
@@ -560,11 +580,13 @@ public final class CommitmentsActivity extends Activity {
     private void markSettled(Row row) {
         List<Commitment> commitments = BalanceData.readCommitments(this);
         List<Commitment> kept = new ArrayList<>();
+        boolean reschedule = !CommitmentReminders.scheduledIds(this).isEmpty();
         for (Commitment c : commitments) {
             if (!c.id.equals(row.commitment.id)) {
                 kept.add(c);
                 continue;
             }
+            reschedule |= c.remind;
             if (c.frequency == Commitment.ONCE) {
                 kept.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
                     true, c.paid, c.remind, c.remindBeforeMs));
@@ -576,7 +598,7 @@ public final class CommitmentsActivity extends Activity {
             }
         }
         BalanceData.writeCommitments(this, kept);
-        CommitmentReminders.scheduleAll(this);
+        if (reschedule) CommitmentReminders.scheduleAll(this);
         render();
     }
 
@@ -585,11 +607,13 @@ public final class CommitmentsActivity extends Activity {
     private void undoSettled(Row row) {
         List<Commitment> commitments = BalanceData.readCommitments(this);
         List<Commitment> kept = new ArrayList<>();
+        boolean reschedule = !CommitmentReminders.scheduledIds(this).isEmpty();
         for (Commitment c : commitments) {
             if (!c.id.equals(row.commitment.id)) {
                 kept.add(c);
                 continue;
             }
+            reschedule |= c.remind;
             if (c.frequency == Commitment.ONCE) {
                 kept.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
                     false, c.paid, c.remind, c.remindBeforeMs));
@@ -601,7 +625,7 @@ public final class CommitmentsActivity extends Activity {
             }
         }
         BalanceData.writeCommitments(this, kept);
-        CommitmentReminders.scheduleAll(this);
+        if (reschedule) CommitmentReminders.scheduleAll(this);
         render();
     }
 

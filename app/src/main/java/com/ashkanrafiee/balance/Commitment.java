@@ -213,20 +213,69 @@ final class Commitment {
         if (c == null || cal == null || toMs < fromMs) return out;
         int[] anchor = civilDay(c.start, cal);
         int[] end = c.end == null ? null : civilDay(c.end, cal);
-        int[] cursor = {anchor[0], anchor[1], anchor[2]};
+        long fromDay = startOfDay(fromMs);
+        long toDay = startOfDay(toMs);
         if (c.frequency == ONCE) {
-            long at = millisOf(cursor[0], cursor[1], cursor[2], cal);
-            if (at >= startOfDay(fromMs) && at <= startOfDay(toMs)) out.add(at);
+            long at = millisOf(anchor[0], anchor[1], anchor[2], cal);
+            if (at >= fromDay && at <= toDay) out.add(at);
             return out;
         }
-        int[] last = civilDay(toMs, cal);
+        int[] cursor = firstCursor(c, cal, anchor, fromDay);
+        int[] last = civilDay(toDay, cal);
         while (compare(cursor, last) <= 0) {
             if (end != null && compare(cursor, end) > 0) break;
             long at = millisOf(cursor[0], cursor[1], cursor[2], cal);
-            if (at >= startOfDay(fromMs)) out.add(at);
+            if (at >= fromDay && at <= toDay) out.add(at);
             step(cursor, c.frequency, cal, anchor[2]);
         }
         return out;
+    }
+
+    /** Positions the recurrence cursor at the first possible due day in the requested window. */
+    private static int[] firstCursor(Commitment c, CalendarSystem cal, int[] anchor,
+            long fromDay) {
+        int[] cursor = {anchor[0], anchor[1], anchor[2]};
+        long anchorAt = millisOf(anchor[0], anchor[1], anchor[2], cal);
+        if (fromDay <= anchorAt) return cursor;
+        int[] target = civilDay(fromDay, cal);
+        if (c.frequency == DAILY || c.frequency == WEEKLY) {
+            int stepDays = c.frequency == WEEKLY ? 7 : 1;
+            long distance = Math.max(0, (fromDay - anchorAt) / 86400000L);
+            long high = Math.max(1, distance / stepDays + 2);
+            while (high < Integer.MAX_VALUE / (long) stepDays
+                    && dailyStepAt(anchor, cal, high, stepDays) < fromDay) high *= 2;
+            long low = 0;
+            while (low < high) {
+                long middle = (low + high) >>> 1;
+                if (dailyStepAt(anchor, cal, middle, stepDays) < fromDay) low = middle + 1;
+                else high = middle;
+            }
+            return civilDay(dailyStepAt(anchor, cal, low, stepDays), cal);
+        }
+        if (c.frequency == MONTHLY) {
+            long months = (target[0] - anchor[0]) * 12L + target[1] - anchor[1];
+            if (months > 0) cursor = monthCursor(anchor, months, cal);
+        } else if (c.frequency == YEARLY && target[0] > anchor[0]) {
+            cursor[0] = target[0];
+            cursor[2] = Math.min(anchor[2], cal.daysInMonth(cursor[0], cursor[1]));
+        }
+        while (millisOf(cursor[0], cursor[1], cursor[2], cal) < fromDay)
+            step(cursor, c.frequency, cal, anchor[2]);
+        return cursor;
+    }
+
+    private static long dailyStepAt(int[] anchor, CalendarSystem cal, long steps, int stepDays) {
+        Calendar g = Calendar.getInstance();
+        g.setTimeInMillis(millisOf(anchor[0], anchor[1], anchor[2], cal));
+        g.add(Calendar.DAY_OF_MONTH, (int) (steps * stepDays));
+        return startOfDay(g.getTimeInMillis());
+    }
+
+    private static int[] monthCursor(int[] anchor, long months, CalendarSystem cal) {
+        long index = anchor[0] * 12L + anchor[1] - 1 + months;
+        int year = (int) (index / 12);
+        int month = (int) (index % 12) + 1;
+        return new int[]{year, month, Math.min(anchor[2], cal.daysInMonth(year, month))};
     }
 
     /** The next unsettled due day: the earliest unsettled occurrence on or after today, or the
