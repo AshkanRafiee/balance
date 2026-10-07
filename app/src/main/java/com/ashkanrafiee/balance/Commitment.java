@@ -132,6 +132,23 @@ final class Commitment {
         return amount < 0;
     }
 
+    /**
+     * The signed total of every child in a finite series. A recurring commitment without an end
+     * date has no finite total and returns {@code null}; its per-occurrence amount remains useful
+     * to show in the management list. A finite total that cannot fit the stored amount type also
+     * returns {@code null} rather than overflowing into a misleading value.
+     */
+    static Long totalAmount(Commitment c, CalendarSystem cal) {
+        if (c == null || cal == null || c.end == null && c.frequency != ONCE) return null;
+        long end = c.end == null ? c.start : c.end;
+        long count = occurrences(c, cal, c.start, end).size();
+        try {
+            return Math.multiplyExact(count, c.amount);
+        } catch (ArithmeticException overflow) {
+            return null;
+        }
+    }
+
     JSONObject toJson() {
         JSONObject e = new JSONObject();
         try {

@@ -302,28 +302,53 @@ public final class CommitmentsActivity extends Activity {
      *  the editor on tap, so a whole series is managed here instead of due by due. */
     private void manageDialog() {
         List<Commitment> commitments = BalanceData.readCommitments(this);
+        CalendarSystem cal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(dp(8), dp(4), dp(8), dp(4));
         if (commitments.isEmpty()) {
             TextView hint = text(getString(R.string.commitments_manage_empty), 14, muted);
-            hint.setPadding(dp(4), dp(8), dp(4), dp(8));
+            hint.setPadding(dp(8), dp(16), dp(8), dp(16));
             list.addView(hint, new LinearLayout.LayoutParams(-1, -2));
         }
         for (Commitment c : commitments) {
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.VERTICAL);
-            row.setPadding(dp(4), dp(9), dp(4), dp(9));
-            row.addView(text(c.name, 15, fg, medium()),
-                new LinearLayout.LayoutParams(-2, -2));
-            String meta = freqLabel(c.frequency) + " · " + signedAmount(c.amount) + " · "
-                + (c.end == null ? getString(R.string.commitments_series_open)
-                    : getString(R.string.commitments_series_ends, dateText(c.end)));
-            row.addView(text(meta, 12, muted), new LinearLayout.LayoutParams(-2, -2));
+            row.setPadding(dp(14), dp(12), dp(14), dp(12));
+            row.setBackground(rounded(card, 14));
+
+            LinearLayout heading = new LinearLayout(this);
+            heading.setOrientation(LinearLayout.HORIZONTAL);
+            heading.setGravity(Gravity.CENTER_VERTICAL);
+            TextView name = text(c.name, 15, fg, medium());
+            name.setSingleLine(true);
+            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            heading.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+            Long total = Commitment.totalAmount(c, cal);
+            String amountLabel = total == null
+                ? getString(R.string.commitments_each_amount, signedAmount(c.amount))
+                : getString(R.string.commitments_total_amount, signedAmount(total));
+            TextView amount = bold(amountLabel, 14, valueColor(total == null ? c.amount : total));
+            amount.setGravity(Gravity.END);
+            amount.setMaxLines(2);
+            LinearLayout.LayoutParams amountLp = new LinearLayout.LayoutParams(-2, -2);
+            amountLp.setMarginStart(dp(12));
+            heading.addView(amount, amountLp);
+            row.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+
+            String ending = c.end == null ? getString(R.string.commitments_series_open)
+                : getString(R.string.commitments_series_ends, dateText(c.end));
+            TextView details = text(freqLabel(c.frequency) + " · " + ending, 12, muted);
+            details.setPadding(0, dp(4), 0, 0);
+            row.addView(details, new LinearLayout.LayoutParams(-1, -2));
             final String id = c.id;
             row.setOnClickListener(v -> editorDialog(id));
-            list.addView(row, new LinearLayout.LayoutParams(-1, -2));
+            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(-1, -2);
+            rowLp.setMargins(0, 0, 0, dp(8));
+            list.addView(row, rowLp);
         }
         ScrollView scroll = new ScrollView(this);
+        scroll.setClipToPadding(false);
         scroll.addView(list, new LinearLayout.LayoutParams(-1, -2));
         new AlertDialog.Builder(this)
             .setTitle(getString(R.string.commitments_manage_title))

@@ -1961,9 +1961,19 @@ public class MainActivity extends Activity {
         void drawCommitmentsCard(Canvas c, int w, boolean rtl) {
             float top = DashboardLayout.COMMITMENTS_TOP;
             round(c, 24, top, w - 24, top + DashboardLayout.COMMITMENTS_H, 18, panel);
-            float edge = rtl ? w - 48 : 48;
-            Paint.Align align = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
-            text(c, getString(R.string.section_commitments), edge, top + 22, 14, fg, align);
+            float left = 48;
+            float right = w - 48;
+            float middle = w / 2f;
+            float gutter = 10;
+            float leftWidth = middle - gutter - left;
+            float rightWidth = right - middle - gutter;
+            float leftCenter = left + leftWidth / 2f;
+            float rightCenter = middle + gutter + rightWidth / 2f;
+            float payCenter = rtl ? rightCenter : leftCenter;
+            float receiveCenter = rtl ? leftCenter : rightCenter;
+            float columnWidth = Math.min(leftWidth, rightWidth);
+            text(c, getString(R.string.section_commitments), rtl ? right : left,
+                top + 22, 14, fg, rtl ? Paint.Align.RIGHT : Paint.Align.LEFT);
             CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
                 BalanceData.readCommitments(MainActivity.this),
                 RegionHelper.isIran(MainActivity.this) ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN,
@@ -1972,20 +1982,21 @@ public class MainActivity extends Activity {
             long receive = summary.overdueReceive + summary.thisMonthReceive;
             if (pay == 0 && receive == 0) {
                 text(c, fit(getString(R.string.commitments_card_empty), 11, w - 96),
-                    edge, top + 48, 11, muted, align);
+                    rtl ? right : left, top + 48, 11, muted,
+                    rtl ? Paint.Align.RIGHT : Paint.Align.LEFT);
                 return;
             }
-            String payText = getString(R.string.commitments_card_payments) + " "
-                + displayAmount(Math.abs(pay));
-            String receiveText = getString(R.string.commitments_card_receipts) + " "
-                + displayAmount(Math.abs(receive));
-            if (rtl) {
-                text(c, receiveText, edge, top + 48, 11, accent, align);
-                text(c, payText, w / 2f, top + 48, 11, resColor(R.color.negative), Paint.Align.CENTER);
-            } else {
-                text(c, payText, edge, top + 48, 11, resColor(R.color.negative), align);
-                text(c, receiveText, w / 2f, top + 48, 11, accent, Paint.Align.CENTER);
-            }
+            p.setColor(muted);
+            p.setStrokeWidth(1);
+            c.drawLine(middle, top + 31, middle, top + DashboardLayout.COMMITMENTS_H - 11, p);
+            text(c, fit(getString(R.string.commitments_card_payments), 10, columnWidth),
+                payCenter, top + 41, 10, muted, Paint.Align.CENTER);
+            text(c, fit(getString(R.string.commitments_card_receipts), 10, columnWidth),
+                receiveCenter, top + 41, 10, muted, Paint.Align.CENTER);
+            text(c, fit(displayAmount(Math.abs(pay)), 11, columnWidth),
+                payCenter, top + 60, 11, resColor(R.color.negative), Paint.Align.CENTER);
+            text(c, fit(displayAmount(Math.abs(receive)), 11, columnWidth),
+                receiveCenter, top + 60, 11, accent, Paint.Align.CENTER);
         }
 
         String displayAmount(long rial) {

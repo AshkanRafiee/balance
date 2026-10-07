@@ -199,6 +199,8 @@
     <string name="commitments_manage">مدیریت</string>
     <string name="commitments_manage_title">مدیریت تعهدات</string>
     <string name="commitments_manage_empty">هنوز چیزی برای مدیریت نیست — اولین تعهد را اضافه کنید.</string>
+    <string name="commitments_total_amount">جمع %1$s</string>
+    <string name="commitments_each_amount">هر بار %1$s</string>
     <string name="commitments_series_ends">پایان %1$s</string>
     <string name="commitments_series_open">بدون پایان</string>
     <string name="commitments_new">تعهد جدید</string>

@@ -199,6 +199,8 @@
     <string name="commitments_manage">Manage</string>
     <string name="commitments_manage_title">Manage commitments</string>
     <string name="commitments_manage_empty">Nothing to manage yet — add your first commitment.</string>
+    <string name="commitments_total_amount">Total %1$s</string>
+    <string name="commitments_each_amount">%1$s each</string>
     <string name="commitments_series_ends">ends %1$s</string>
     <string name="commitments_series_open">open-ended</string>
     <string name="commitments_new">New commitment</string>

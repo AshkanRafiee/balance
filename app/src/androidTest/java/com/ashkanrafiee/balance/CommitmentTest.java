@@ -227,6 +227,25 @@ public class CommitmentTest {
             start, Commitment.millisOf(2026, 10, 31, CalendarSystem.GREGORIAN)).size());
     }
 
+    @Test public void totalAmount_sumsEveryFiniteChildAndIgnoresSettlement() {
+        long start = Commitment.millisOf(2026, 10, 7, CalendarSystem.GREGORIAN);
+        Commitment c = Commitment.create("daily", -20, Commitment.DAILY, start,
+            Commitment.millisOf(2026, 10, 9, CalendarSystem.GREGORIAN), false, 0);
+        assertEquals(Long.valueOf(-60), Commitment.totalAmount(c, CalendarSystem.GREGORIAN));
+
+        List<Long> paid = new ArrayList<>();
+        paid.add(start);
+        Commitment settled = new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
+            false, paid, c.remind, c.remindBeforeMs);
+        assertEquals(Long.valueOf(-60), Commitment.totalAmount(settled, CalendarSystem.GREGORIAN));
+    }
+
+    @Test public void totalAmount_openEndedHasNoFiniteTotal() {
+        long start = Commitment.millisOf(2026, 10, 7, CalendarSystem.GREGORIAN);
+        Commitment c = commitment("open", 20, Commitment.DAILY, start);
+        assertNull(Commitment.totalAmount(c, CalendarSystem.GREGORIAN));
+    }
+
     // ---- settlement -----------------------------------------------------------------
 
     @Test public void nextDue_advancesPastMarkedDays() {
