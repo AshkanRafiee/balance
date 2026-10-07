@@ -102,6 +102,13 @@ public class DashboardLayoutTest {
             DashboardLayout.BANNER_TOP + DashboardLayout.BANNER_H + 1f, true));
     }
 
+    @Test public void commitments_onlyHeaderOpensTheCommitmentsScreen() {
+        assertTrue(DashboardLayout.inCommitmentsHeader(DashboardLayout.COMMITMENTS_TOP, true));
+        assertTrue(DashboardLayout.inCommitmentsHeader(DashboardLayout.COMMITMENTS_TOP + 30f, true));
+        assertFalse(DashboardLayout.inCommitmentsHeader(DashboardLayout.COMMITMENTS_TOP + 31f, true));
+        assertFalse(DashboardLayout.inCommitmentsHeader(DashboardLayout.COMMITMENTS_TOP, false));
+    }
+
     @Test public void inSortBand_withoutStrip_keepsItsOriginalRange() {
         // The sort button's band used to be a hardcoded 290..350; pinning it guards the header tap
         // target against drifting when the strip shifts things down.

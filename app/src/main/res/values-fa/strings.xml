@@ -190,8 +190,8 @@
     <string name="commitments_receivable">دریافتنی</string>
     <string name="commitments_window_this_month">این ماه + معوقه</string>
     <string name="commitments_card_empty">پرداختنی‌ها و دریافتنی‌هایتان را اینجا ثبت کنید.</string>
-    <string name="commitments_card_empty_action">برای افزودن تعهد بزنید.</string>
-    <string name="commitments_card_empty_settings">آن را از «نمایش» پنهان کنید.</string>
+    <string name="commitments_card_empty_action">برای افزودن تعهد روی «تعهدات» بزنید. آن را از «نمایش» پنهان کنید.</string>
+    <string name="commitments_card_title">تعهدات (%1$s)</string>
     <string name="settings_commitments_card_label">نمایش کارت تعهدات در صفحهٔ اصلی</string>
     <string name="commitments_mark_paid">پرداخت شد</string>
     <string name="commitments_mark_received">دریافت شد</string>
@@ -201,8 +201,8 @@
     <string name="commitments_manage_empty">هنوز چیزی برای مدیریت نیست — اولین تعهد را اضافه کنید.</string>
     <string name="commitments_each_amount">هر بار %1$s</string>
     <string name="commitments_total_each_amount">جمع %1$s · هر بار %2$s</string>
-    <string name="commitments_show_settled">نمایش %1$d تعهد قدیمیِ تسویه‌شده</string>
-    <string name="commitments_hide_settled">پنهان کردن تعهدهای تسویه‌شده</string>
+    <string name="commitments_show_older_paid">تعهدهای پرداخت‌شدهٔ قدیمی (%1$d)</string>
+    <string name="commitments_hide_older_paid">پنهان کردن تعهدهای پرداخت‌شدهٔ قدیمی</string>
     <string name="commitments_series_ends">پایان %1$s</string>
     <string name="commitments_series_open">بدون پایان</string>
     <string name="commitments_new">تعهد جدید</string>

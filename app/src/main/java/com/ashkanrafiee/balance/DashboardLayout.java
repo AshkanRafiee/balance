@@ -17,7 +17,7 @@ import android.content.pm.PackageManager;
 final class DashboardLayout {
     static final float TOTAL_TOP = 120f, TOTAL_BOTTOM = 270f;
     /** The optional commitments card sits in the gap below the total card. */
-    static final float COMMITMENTS_TOP = 284f, COMMITMENTS_H = 94f;
+    static final float COMMITMENTS_TOP = 284f, COMMITMENTS_H = 70f;
     /** The strip sits below the total card and optional commitments card, clear of the section header. */
     static final float BANNER_TOP = 284f, BANNER_H = 56f;
     static final float SECTION_HEADER_Y = 320f;
@@ -98,5 +98,9 @@ final class DashboardLayout {
 
     static boolean inCommitments(float y, boolean visible) {
         return visible && y >= COMMITMENTS_TOP && y <= COMMITMENTS_TOP + COMMITMENTS_H;
+    }
+
+    static boolean inCommitmentsHeader(float y, boolean visible) {
+        return visible && y >= COMMITMENTS_TOP && y <= COMMITMENTS_TOP + 30f;
     }
 }

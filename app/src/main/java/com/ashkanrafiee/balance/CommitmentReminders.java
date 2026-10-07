@@ -182,7 +182,7 @@ final class CommitmentReminders {
         PendingIntent tap = PendingIntent.getActivity(context, c.id.hashCode(), open,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification notification = new Notification.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            .setSmallIcon(R.drawable.ic_balance_monochrome)
             .setContentTitle(c.name)
             .setContentText(signed + " · " + when)
             .setContentIntent(tap)

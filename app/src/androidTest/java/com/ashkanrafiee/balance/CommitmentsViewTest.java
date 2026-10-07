@@ -1,7 +1,6 @@
 package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -94,8 +93,8 @@ public class CommitmentsViewTest {
         CommitmentsActivity.Summary resettled = CommitmentsActivity.summarize(
             settled, CalendarSystem.GREGORIAN, OCT_7_NOON, 12);
         assertEquals(7, resettled.overdue.size());
-        assertEquals(1, resettled.settledOverdue.size());
-        assertEquals("rent", resettled.settledOverdue.get(0).commitment.name);
+        assertEquals(1, resettled.settledMonths.size());
+        assertEquals("rent", resettled.settledMonths.get(0).rows.get(0).commitment.name);
         assertEquals(-600, resettled.overduePay);
     }
 
@@ -117,7 +116,7 @@ public class CommitmentsViewTest {
         assertTrue(october != null);
         assertEquals(3, october.rows.size());
         assertEquals(-5000, october.pay);
-        assertTrue(summary.settledOverdue.isEmpty());
+        assertTrue(summary.settledMonths.isEmpty());
     }
 
     @Test public void settledRows_stayInChronologicalOrder() {
@@ -158,9 +157,4 @@ public class CommitmentsViewTest {
         assertEquals(9000, summary.thisMonthReceive);
     }
 
-    @Test public void userEnteredNames_followTheirOwnDirection() {
-        assertTrue(CommitmentsActivity.isRtlText("اجاره"));
-        assertFalse(CommitmentsActivity.isRtlText("rent"));
-        assertTrue(CommitmentsActivity.isRtlText("2026 اجاره"));
-    }
 }

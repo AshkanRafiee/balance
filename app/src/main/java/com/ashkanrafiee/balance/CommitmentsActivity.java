@@ -68,7 +68,7 @@ public final class CommitmentsActivity extends Activity {
      *  the current month's share the hero reports together with the overdue dues. */
     static final class Summary {
         final List<Row> overdue = new ArrayList<>();
-        final List<Row> settledOverdue = new ArrayList<>();
+        final List<MonthGroup> settledMonths = new ArrayList<>();
         final List<MonthGroup> months = new ArrayList<>();
         long overduePay;
         long overdueReceive;
@@ -93,9 +93,24 @@ public final class CommitmentsActivity extends Activity {
             for (long at : Commitment.occurrences(c, cal, Math.min(c.start, today - 366L * 86400000L),
                     today - 1)) {
                 if (c.isSettled(at)) {
-                    // The current month already owns its settled rows. Keep only older settled
-                    // dues here so expanding this section never duplicates a month-card row.
-                    if (at < currentMonthStart) summary.settledOverdue.add(new Row(c, at, true));
+                    // The current month already owns its settled rows. Keep older paid rows in
+                    // their original month so they never appear in the overdue section.
+                    if (at < currentMonthStart) {
+                        int[] settledCivil = Commitment.civilDay(at, cal);
+                        MonthGroup settledMonth = null;
+                        for (MonthGroup candidate : summary.settledMonths) {
+                            if (candidate.year == settledCivil[0]
+                                    && candidate.month == settledCivil[1]) {
+                                settledMonth = candidate;
+                                break;
+                            }
+                        }
+                        if (settledMonth == null) {
+                            settledMonth = new MonthGroup(settledCivil[0], settledCivil[1]);
+                            summary.settledMonths.add(settledMonth);
+                        }
+                        settledMonth.rows.add(new Row(c, at, true));
+                    }
                 } else {
                     summary.overdue.add(new Row(c, at, false));
                     if (c.isPayment()) summary.overduePay += c.amount;
@@ -107,9 +122,15 @@ public final class CommitmentsActivity extends Activity {
             int byDate = Long.compare(y.date, x.date);
             return byDate != 0 ? byDate : x.commitment.name.compareTo(y.commitment.name);
         });
-        summary.settledOverdue.sort((x, y) -> {
-            int byDate = Long.compare(y.date, x.date);
-            return byDate != 0 ? byDate : x.commitment.name.compareTo(y.commitment.name);
+        for (MonthGroup group : summary.settledMonths) {
+            group.rows.sort((x, y) -> {
+                int byDate = Long.compare(x.date, y.date);
+                return byDate != 0 ? byDate : x.commitment.name.compareTo(y.commitment.name);
+            });
+        }
+        summary.settledMonths.sort((x, y) -> {
+            if (x.year != y.year) return Integer.compare(y.year, x.year);
+            return Integer.compare(y.month, x.month);
         });
         int year = currentCivil[0];
         int month = currentCivil[1];
@@ -244,7 +265,8 @@ public final class CommitmentsActivity extends Activity {
             root.addView(empty, margin(8, 24, 8, 0));
             return;
         }
-        if (!summary.overdue.isEmpty() || !summary.settledOverdue.isEmpty()) overdueCard(summary);
+        if (!summary.overdue.isEmpty()) overdueCard(summary);
+        if (!summary.settledMonths.isEmpty()) olderPaidMenu(summary);
         int lastYear = -1;
         for (MonthGroup group : summary.months) {
             if (group.year != lastYear) {
@@ -333,7 +355,7 @@ public final class CommitmentsActivity extends Activity {
             TextView name = text(c.name, 15, fg, medium());
             name.setSingleLine(true);
             name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            applyUserTextDirection(name, c.name);
+            applyUserTextDirection(name);
             heading.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
             Long total = Commitment.totalAmount(c, cal);
             String amountLabel = total == null
@@ -407,27 +429,45 @@ public final class CommitmentsActivity extends Activity {
             box.addView(text(getString(R.string.commitments_older, summary.overdue.size() - shown),
                 12, warnFg), new LinearLayout.LayoutParams(-2, -2));
         }
-        if (!summary.settledOverdue.isEmpty()) {
-            final boolean[] expanded = {false};
-            TextView toggle = text(getString(R.string.commitments_show_settled,
-                summary.settledOverdue.size()), 12, warnFg, medium());
-            toggle.setPadding(dp(10), dp(9), dp(10), dp(9));
-            LinearLayout settled = new LinearLayout(this);
-            settled.setOrientation(LinearLayout.VERTICAL);
-            settled.setVisibility(View.GONE);
-            for (Row row : summary.settledOverdue) settled.addView(occurrenceRow(row));
-            toggle.setOnClickListener(v -> {
-                expanded[0] = !expanded[0];
-                settled.setVisibility(expanded[0] ? View.VISIBLE : View.GONE);
-                toggle.setText(expanded[0]
-                    ? getString(R.string.commitments_hide_settled)
-                    : getString(R.string.commitments_show_settled,
-                        summary.settledOverdue.size()));
-            });
-            box.addView(toggle, new LinearLayout.LayoutParams(-1, -2));
-            box.addView(settled, new LinearLayout.LayoutParams(-1, -2));
-        }
         root.addView(box, margin(0, 0, 0, 12));
+    }
+
+    /** Previous paid months stay out of the overdue card and are available from one collapsed menu. */
+    private void olderPaidMenu(Summary summary) {
+        int count = 0;
+        for (MonthGroup group : summary.settledMonths) count += group.rows.size();
+        final int olderCount = count;
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setBackground(rounded(chipBg, 14));
+        final boolean[] expanded = {false};
+        TextView toggle = text(getString(R.string.commitments_show_older_paid, olderCount), 14, fg, medium());
+        toggle.setPadding(dp(14), dp(13), dp(14), dp(13));
+        LinearLayout months = new LinearLayout(this);
+        months.setOrientation(LinearLayout.VERTICAL);
+        months.setVisibility(View.GONE);
+        for (MonthGroup group : summary.settledMonths) months.addView(settledMonthCard(group));
+        toggle.setOnClickListener(v -> {
+            expanded[0] = !expanded[0];
+            months.setVisibility(expanded[0] ? View.VISIBLE : View.GONE);
+            toggle.setText(expanded[0]
+                ? getString(R.string.commitments_hide_older_paid)
+                : getString(R.string.commitments_show_older_paid, olderCount));
+        });
+        box.addView(toggle, new LinearLayout.LayoutParams(-1, -2));
+        box.addView(months, new LinearLayout.LayoutParams(-1, -2));
+        root.addView(box, margin(0, 0, 0, 12));
+    }
+
+    private LinearLayout settledMonthCard(MonthGroup group) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(14), dp(10), dp(14), dp(10));
+        TextView head = text(CalDate.monthName(group.month, iran, persian) + " "
+            + yearText(group.year), 15, fg, medium());
+        box.addView(head, new LinearLayout.LayoutParams(-1, -2));
+        for (Row row : group.rows) box.addView(occurrenceRow(row));
+        return box;
     }
 
     private LinearLayout yearHeader(int year, long pay, long receive) {
@@ -476,7 +516,7 @@ public final class CommitmentsActivity extends Activity {
         LinearLayout info = new LinearLayout(this);
         info.setOrientation(LinearLayout.VERTICAL);
         TextView name = text(row.commitment.name, 14, row.settled ? muted : fg);
-        applyUserTextDirection(name, row.commitment.name);
+        applyUserTextDirection(name);
         if (row.settled) {
             name.setPaintFlags(name.getPaintFlags() | android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
         }
@@ -580,7 +620,7 @@ public final class CommitmentsActivity extends Activity {
         name.setHint(getString(R.string.commitments_name_hint));
         if (existing != null) name.setText(existing.name);
         name.setTypeface(Fonts.text(this), Typeface.NORMAL);
-        applyUserTextDirection(name, name.getText());
+        applyUserTextDirection(name);
         form.addView(name, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout amountRow = new LinearLayout(this);
@@ -725,7 +765,7 @@ public final class CommitmentsActivity extends Activity {
             @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
             @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
             @Override public void afterTextChanged(Editable s) {
-                applyUserTextDirection(name, s);
+                applyUserTextDirection(name);
                 dlg.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(canSave(name, amount));
             }
         };
@@ -746,7 +786,7 @@ public final class CommitmentsActivity extends Activity {
         if (existing != null) {
             int titleId = getResources().getIdentifier("alertTitle", "id", "android");
             View title = titleId == 0 ? null : dlg.findViewById(titleId);
-            if (title instanceof TextView) applyUserTextDirection((TextView) title, existing.name);
+            if (title instanceof TextView) applyUserTextDirection((TextView) title);
         }
         if (existing != null && existing.remind && needsNotificationPermission()) {
             requestNotificationPermission();
@@ -1048,22 +1088,8 @@ public final class CommitmentsActivity extends Activity {
             == View.LAYOUT_DIRECTION_RTL;
     }
 
-    /** Aligns a user-entered name by the name's own first strong character, not the app locale. */
-    static boolean isRtlText(CharSequence value) {
-        if (value == null) return false;
-        for (int i = 0; i < value.length();) {
-            int codePoint = Character.codePointAt(value, i);
-            byte direction = Character.getDirectionality(codePoint);
-            if (direction == Character.DIRECTIONALITY_RIGHT_TO_LEFT
-                    || direction == Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC) return true;
-            if (direction == Character.DIRECTIONALITY_LEFT_TO_RIGHT) return false;
-            i += Character.charCount(codePoint);
-        }
-        return false;
-    }
-
-    private void applyUserTextDirection(TextView view, CharSequence value) {
-        boolean rtl = isRtlText(value);
+    private void applyUserTextDirection(TextView view) {
+        boolean rtl = isRtl();
         view.setTextDirection(rtl ? View.TEXT_DIRECTION_RTL : View.TEXT_DIRECTION_LTR);
         int vertical = view.getGravity() & Gravity.VERTICAL_GRAVITY_MASK;
         view.setGravity(vertical | (rtl ? Gravity.RIGHT : Gravity.LEFT));

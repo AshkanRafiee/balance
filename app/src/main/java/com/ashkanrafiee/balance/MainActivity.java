@@ -1972,7 +1972,8 @@ public class MainActivity extends Activity {
             float payCenter = rtl ? rightCenter : leftCenter;
             float receiveCenter = rtl ? leftCenter : rightCenter;
             float columnWidth = Math.min(leftWidth, rightWidth);
-            text(c, getString(R.string.section_commitments), rtl ? right : left,
+            text(c, getString(R.string.commitments_card_title, commitmentMonthLabel()),
+                rtl ? right : left,
                 top + 22, 14, fg, rtl ? Paint.Align.RIGHT : Paint.Align.LEFT);
             CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
                 BalanceData.readCommitments(MainActivity.this),
@@ -1985,10 +1986,8 @@ public class MainActivity extends Activity {
                 float emptyX = rtl ? right : left;
                 text(c, fit(getString(R.string.commitments_card_empty), 11, w - 96),
                     emptyX, top + 43, 11, muted, emptyAlign);
-                text(c, fit(getString(R.string.commitments_card_empty_action), 11, w - 96),
+                text(c, fit(getString(R.string.commitments_card_empty_action), 10, w - 96),
                     emptyX, top + 61, 11, muted, emptyAlign);
-                text(c, fit(getString(R.string.commitments_card_empty_settings), 11, w - 96),
-                    emptyX, top + 79, 11, muted, emptyAlign);
                 return;
             }
             p.setColor(muted);
@@ -2002,6 +2001,15 @@ public class MainActivity extends Activity {
                 payCenter, top + 60, 11, resColor(R.color.negative), Paint.Align.CENTER);
             text(c, fit(displayAmount(Math.abs(receive)), 11, columnWidth),
                 receiveCenter, top + 60, 11, accent, Paint.Align.CENTER);
+        }
+
+        String commitmentMonthLabel() {
+            boolean iran = RegionHelper.isIran(MainActivity.this);
+            boolean persian = LocaleHelper.isPersian(MainActivity.this);
+            int[] civil = Commitment.civilDay(System.currentTimeMillis(),
+                iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN);
+            String year = persian ? faDigits(String.valueOf(civil[0])) : String.valueOf(civil[0]);
+            return CalDate.monthName(civil[1], iran, persian) + " " + year;
         }
 
         String displayAmount(long rial) {
@@ -2423,7 +2431,7 @@ public class MainActivity extends Activity {
                 MainActivity.this.getSharedPreferences(BalanceData.PREFS_PREF, MODE_PRIVATE)
                     .edit().putBoolean(BalanceData.KEY_HIDDEN, hidden).apply();
                 invalidate();
-            } else if (DashboardLayout.inCommitments(y, commitmentsCard)) {
+            } else if (DashboardLayout.inCommitmentsHeader(y, commitmentsCard)) {
                 startActivity(new Intent(MainActivity.this, CommitmentsActivity.class));
             } else if (DashboardLayout.inBanner(y, smsBanner, commitmentsCard)) {
                 // Re-ask rather than jumping straight to settings: a first-time denial can still be
