@@ -158,6 +158,11 @@ final class BalanceData {
      *  even though "حواله" is a withdrawal keyword. */
     private static final Pattern labeledSignedAmount = Pattern.compile(
         "(?m)^([^\\r\\n:0-9][^\\r\\n:]{0,39}):[ \\t]*([0-9][0-9,]*)[ \\t]*([+-])[ \\t]*$");
+    /** Refah's glued purchase/card labels, whose trailing sign gives the direction ("خرید…-" /
+     *  "کارت…-"). Restricting this matcher to the observed movement labels keeps arbitrary signed
+     *  account or balance lines from being read as an amount. */
+    private static final Pattern gluedLabeledSignedAmount = Pattern.compile(
+        "(?m)^[ \\t]*(?:خرید|کارت)[ \\t]*([0-9][0-9,]*)[ \\t]*([+-])[ \\t]*$");
     private static final String[] DEPOSIT_KEYWORDS = {
         "\u0648\u0627\u0631\u06cc\u0632", "\u062f\u0631\u06cc\u0627\u0641\u062a",
         "\u0628\u0633\u062a\u0627\u0646\u06a9\u0627\u0631", "\u0627\u0641\u0632\u0627\u06cc\u0634",
@@ -1821,6 +1826,17 @@ final class BalanceData {
             if (ml.find()) {
                 amount = toLong(ml.group(2));
                 sign = ml.group(3).equals("-") ? -1 : 1;
+            }
+        }
+
+        // 3b) A label glued directly to a signed amount, as Refah does for purchases and card
+        // movements. The explicit sign decides the direction and the allowlisted labels keep the
+        // account, balance, date, and time lines out.
+        if (amount <= 0) {
+            Matcher mg = gluedLabeledSignedAmount.matcher(n);
+            if (mg.find()) {
+                amount = toLong(mg.group(1));
+                sign = mg.group(2).equals("-") ? -1 : 1;
             }
         }
 

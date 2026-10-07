@@ -356,6 +356,7 @@ final class BankRules {
      *  bounds, with "" meaning unbounded (or unused by that shape). */
     private static final String[][] ACCOUNT_RULES = {
         {"Mellat",   "label-glued",     "6",  ""},
+        {"Refah",    "label-glued",     "6",  ""},
         {"Melli",    "label-colon",     "3",  "12"},
         {"Tejarat",  "label-colon",     "6",  "24"},
         {"Saderat",  "label-colon-line","4",  "10"},
