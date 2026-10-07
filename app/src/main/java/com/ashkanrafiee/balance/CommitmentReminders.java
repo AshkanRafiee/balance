@@ -80,6 +80,8 @@ final class CommitmentReminders {
         for (Commitment c : BalanceData.readCommitments(context)) {
             Long due = reminderDue(context, c, cal, now);
             Long at = due == null ? null : due - Math.max(0, c.remindBeforeMs);
+            if (at == null && c.remind && hasDueBeyondWindow(c, cal, now))
+                at = now + 365L * 86400000L;
             if (at == null) continue;
             wanted.add(c.id);
             // A due already inside its lead window reports now: nudge it a minute out so the
@@ -150,6 +152,15 @@ final class CommitmentReminders {
             if (!c.isSettled(at) && !wasFired(prefs, c.id, at)) return at;
         }
         return null;
+    }
+
+    /** Keeps long-range reminders alive until their real due date enters the planning window. */
+    private static boolean hasDueBeyondWindow(Commitment c, CalendarSystem cal, long now) {
+        long horizon = Commitment.startOfDay(now) + 730L * 86400000L;
+        if (c.frequency == Commitment.ONCE)
+            return !c.done && c.start >= horizon;
+        if (c.end != null && c.end < horizon) return false;
+        return !Commitment.occurrences(c, cal, horizon, horizon + 730L * 86400000L).isEmpty();
     }
 
     private static String firedKey(String id, long due) {

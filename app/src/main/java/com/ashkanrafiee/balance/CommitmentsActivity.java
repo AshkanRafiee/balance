@@ -91,11 +91,20 @@ public final class CommitmentsActivity extends Activity {
         long today = Commitment.startOfDay(nowMs);
         int[] currentCivil = Commitment.civilDay(today, cal);
         long currentMonthStart = Commitment.millisOf(currentCivil[0], currentCivil[1], 1, cal);
+        long historyStart = today - 366L * 86400000L;
         for (Commitment c : commitments) {
             if (c == null) continue;
+            if (c.frequency == Commitment.ONCE && c.done && c.start < historyStart
+                    && c.start < currentMonthStart) {
+                addSettledMonth(summary, c, Commitment.startOfDay(c.start), cal);
+            } else if (c.frequency != Commitment.ONCE) {
+                for (Long paidDay : c.paid) {
+                    if (paidDay != null && paidDay < historyStart && paidDay < currentMonthStart)
+                        addSettledMonth(summary, c, paidDay, cal);
+                }
+            }
             long overdueEnd = currentMonthStart - 1;
-            for (long at : Commitment.occurrences(c, cal, Math.min(c.start, today - 366L * 86400000L),
-                    overdueEnd)) {
+            for (long at : Commitment.occurrences(c, cal, historyStart, overdueEnd)) {
                 if (c.isSettled(at)) {
                     // The current month already owns its settled rows. Keep older paid rows in
                     // their original month so they never appear in the overdue section.
@@ -195,6 +204,24 @@ public final class CommitmentsActivity extends Activity {
             }
         }
         return summary;
+    }
+
+    private static void addSettledMonth(Summary summary, Commitment c, long at, CalendarSystem cal) {
+        int[] civil = Commitment.civilDay(at, cal);
+        MonthGroup month = null;
+        for (MonthGroup candidate : summary.settledMonths) {
+            if (candidate.year == civil[0] && candidate.month == civil[1]) {
+                month = candidate;
+                break;
+            }
+        }
+        if (month == null) {
+            month = new MonthGroup(civil[0], civil[1]);
+            summary.settledMonths.add(month);
+        }
+        for (Row existing : month.rows)
+            if (existing.date == at && existing.commitment.id.equals(c.id)) return;
+        month.rows.add(new Row(c, at, true));
     }
 
     private int fg, muted, accent, card, chipBg, depBg, warnBg, warnFg, negativeColor,
