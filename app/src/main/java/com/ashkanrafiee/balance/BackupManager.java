@@ -52,9 +52,10 @@ final class BackupManager {
     private static final int FORMAT_VERSION = 1;
     /** Payload shape: 1 = balances only, 2 = balances + transactions, 3 = balances + transactions +
      *  notes, 4 = those plus the reasons the banks stated, 5 = those plus the channels they stated,
-     *  6 = those plus user-created transaction tags. Older backups are still read and missing
+     *  6 = those plus user-created transaction tags, 7 = those plus user-created commitments.
+     *  Older backups are still read and missing
      *  metadata sections are left untouched during restore. */
-    private static final int PAYLOAD_FORMAT = 6;
+    private static final int PAYLOAD_FORMAT = 7;
     private static final String KDF_ALGORITHM = "PBKDF2WithHmacSHA256";
     private static final String CIPHER_ALGORITHM = "AES/GCM/NoPadding";
     private static final int ITERATIONS = 600_000;
@@ -115,6 +116,8 @@ final class BackupManager {
                     BalanceData.serializeTextMap(BalanceData.readChannels(context))))
                 .put("txTags", new JSONObject(
                     BalanceData.serializeTagsMap(BalanceData.readTags(context))))
+                .put("commitments", new JSONObject(
+                    BalanceData.serializeCommitments(BalanceData.readCommitments(context))))
                 .toString();
         }
 
@@ -244,6 +247,7 @@ final class BackupManager {
         Map<String, String> backupReasons = new LinkedHashMap<>();
         Map<String, String> backupChannels = new LinkedHashMap<>();
         Map<String, List<String>> backupTags = new LinkedHashMap<>();
+        List<Commitment> backupCommitments = new ArrayList<>();
         try {
             JSONObject payload = new JSONObject(plain);
             if (payload.has("balances"))
@@ -263,6 +267,9 @@ final class BackupManager {
                     payload.getJSONObject("txChannels").toString());
             if (payload.has("txTags"))
                 backupTags = BalanceData.deserializeTagsMap(payload.getJSONObject("txTags").toString());
+            if (payload.has("commitments"))
+                backupCommitments = BalanceData.deserializeCommitments(
+                    payload.getJSONObject("commitments").toString());
         } catch (Throwable e) {
             // A validly-decrypted but hostile payload can nest its JSON so deeply that parsing
             // exhausts the stack; that must land on the same "wrong password or corrupted backup"
@@ -343,6 +350,22 @@ final class BackupManager {
             tagsChanged |= BalanceData.unionTags(currentTags, backupTags);
             if (tagsChanged)
                 BalanceData.writeTags(context, currentTags);
+        }
+        // Commitments are user-owned like tags: a restore unions both sides by id, so a series
+        // created on either device survives, and an older backup without the section leaves local
+        // commitments alone. The local series always wins an id collision.
+        if (!backupCommitments.isEmpty()) {
+            List<Commitment> currentCommitments = BalanceData.readCommitments(context);
+            Set<String> ids = new HashSet<>();
+            for (Commitment c : currentCommitments) ids.add(c.id);
+            boolean commitmentsChanged = false;
+            for (Commitment c : backupCommitments) {
+                if (ids.contains(c.id)) continue;
+                ids.add(c.id);
+                currentCommitments.add(c);
+                commitmentsChanged = true;
+            }
+            if (commitmentsChanged) BalanceData.writeCommitments(context, currentCommitments);
         }
         return result;
     }
