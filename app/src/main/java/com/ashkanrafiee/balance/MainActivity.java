@@ -1998,9 +1998,9 @@ public class MainActivity extends Activity {
                 payCenter, top + 41, 10, muted, Paint.Align.CENTER);
             text(c, fit(getString(R.string.commitments_remaining_receivable), 10, columnWidth),
                 receiveCenter, top + 41, 10, muted, Paint.Align.CENTER);
-            text(c, fit(displayAmount(Math.abs(pay)), 11, columnWidth),
+            text(c, fit(hidden ? "••••••" : displayAmount(Math.abs(pay)), 11, columnWidth),
                 payCenter, top + 60, 11, resColor(R.color.negative), Paint.Align.CENTER);
-            text(c, fit(displayAmount(Math.abs(receive)), 11, columnWidth),
+            text(c, fit(hidden ? "••••••" : displayAmount(Math.abs(receive)), 11, columnWidth),
                 receiveCenter, top + 60, 11, accent, Paint.Align.CENTER);
         }
 

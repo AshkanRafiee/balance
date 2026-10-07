@@ -161,6 +161,11 @@ public class CommitmentsInteractionTest {
         BalanceData.writeCommitments(ctx, singleton(settled));
         List<String> allSettled = drawCommitmentsCard();
         assertRemainingZeroes(allSettled);
+        List<String> masked = drawCommitmentsCard(true);
+        assertEquals("both dashboard commitment amounts must be masked", 2,
+            count(masked, "••••••"));
+        assertFalse(masked.contains(CurrencyHelper.amount(ctx, 0) + " "
+            + CurrencyHelper.label(LocaleHelper.wrap(ctx))));
 
         Commitment future = Commitment.create("future", 200_000L, Commitment.MONTHLY,
             nextMonthDate(), null, false, 0);
@@ -184,16 +189,28 @@ public class CommitmentsInteractionTest {
     }
 
     private List<String> drawCommitmentsCard() {
+        return drawCommitmentsCard(false);
+    }
+
+    private List<String> drawCommitmentsCard(boolean masked) {
         final TextCanvas recording = new TextCanvas();
         mainScenario.onActivity(activity -> {
             try {
                 Field field = MainActivity.class.getDeclaredField("view");
                 field.setAccessible(true);
                 Object view = field.get(activity);
+                Field hidden = view.getClass().getDeclaredField("hidden");
+                hidden.setAccessible(true);
+                boolean previousHidden = hidden.getBoolean(view);
+                hidden.setBoolean(view, masked);
                 Method draw = view.getClass().getDeclaredMethod("drawCommitmentsCard",
                     Canvas.class, int.class, boolean.class);
                 draw.setAccessible(true);
-                draw.invoke(view, recording, 800, false);
+                try {
+                    draw.invoke(view, recording, 800, false);
+                } finally {
+                    hidden.setBoolean(view, previousHidden);
+                }
             } catch (Exception e) {
                 throw new AssertionError("could not render the dashboard commitments card", e);
             }
