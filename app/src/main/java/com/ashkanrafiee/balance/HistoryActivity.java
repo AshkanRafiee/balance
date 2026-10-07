@@ -3620,36 +3620,7 @@ public final class HistoryActivity extends Activity {
     /** Flag-taking core of {@link #monthName(int)}, so a pass over many rows resolves the language
      *  once instead of once per row. */
     private String monthName(int month, boolean fa) {
-        if (iranCalendar) {
-            switch (month) {
-                case 1: return fa ? "\u0641\u0631\u0648\u0631\u062f\u06cc\u0646" : "Farvardin";
-                case 2: return fa ? "\u0627\u0631\u062f\u06cc\u0628\u0647\u0634\u062a" : "Ordibehesht";
-                case 3: return fa ? "\u062e\u0631\u062f\u0627\u062f" : "Khordad";
-                case 4: return fa ? "\u062a\u06cc\u0631" : "Tir";
-                case 5: return fa ? "\u0645\u0631\u062f\u0627\u062f" : "Mordad";
-                case 6: return fa ? "\u0634\u0647\u0631\u06cc\u0648\u0631" : "Shahrivar";
-                case 7: return fa ? "\u0645\u0647\u0631" : "Mehr";
-                case 8: return fa ? "\u0622\u0628\u0627\u0646" : "Aban";
-                case 9: return fa ? "\u0622\u0630\u0631" : "Azar";
-                case 10: return fa ? "\u062f\u06cc" : "Dey";
-                case 11: return fa ? "\u0628\u0647\u0645\u0646" : "Bahman";
-                default: return fa ? "\u0627\u0633\u0641\u0646\u062f" : "Esfand";
-            }
-        }
-        switch (month) {
-            case 1: return fa ? "\u0698\u0627\u0646\u0648\u06cc\u0647" : "January";
-            case 2: return fa ? "\u0641\u0648\u0631\u06cc\u0647" : "February";
-            case 3: return fa ? "\u0645\u0627\u0631\u0633" : "March";
-            case 4: return fa ? "\u0622\u0648\u0631\u06cc\u0644" : "April";
-            case 5: return fa ? "\u0645\u0647" : "May";
-            case 6: return fa ? "\u0698\u0648\u0626\u0646" : "June";
-            case 7: return fa ? "\u0698\u0648\u0626\u06cc\u0647" : "July";
-            case 8: return fa ? "\u0627\u0648\u062a" : "August";
-            case 9: return fa ? "\u0633\u067e\u062a\u0627\u0645\u0628\u0631" : "September";
-            case 10: return fa ? "\u0627\u06a9\u062a\u0628\u0631" : "October";
-            case 11: return fa ? "\u0646\u0648\u0627\u0645\u0628\u0631" : "November";
-            default: return fa ? "\u062f\u0633\u0627\u0645\u0628\u0631" : "December";
-        }
+        return CalDate.monthName(month, iranCalendar, fa);
     }
 
     /** The 7 weekday grid headings in the app language. The Iran region leads with Saturday, the

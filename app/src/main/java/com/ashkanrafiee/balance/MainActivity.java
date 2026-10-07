@@ -1345,7 +1345,8 @@ public class MainActivity extends Activity {
         String status = getString(R.string.status_reading_sms);
         long total;
         float footerAboutStart, footerAboutEnd, footerLangStart, footerLangEnd,
-            footerBackupStart, footerBackupEnd, footerReportStart, footerReportEnd, footerY;
+            footerBackupStart, footerBackupEnd, footerReportStart, footerReportEnd,
+            footerCommitStart, footerCommitEnd, footerY;
         final int fg = resColor(R.color.fg);
         final int muted = resColor(R.color.muted);
         final int accent = resColor(R.color.accent);
@@ -1888,11 +1889,13 @@ public class MainActivity extends Activity {
             String langText = getString(R.string.footer_display);
             String backupText = getString(R.string.footer_data);
             String reportText = getString(R.string.footer_report);
+            String commitText = getString(R.string.footer_commitments);
             String sep = "  \u00b7  ";
             float aboutW = measure(aboutText, 13), langW = measure(langText, 13),
                 backupW = measure(backupText, 13), reportW = measure(reportText, 13),
+                commitW = measure(commitText, 13),
                 sepW = measure(sep, 13);
-            float totalW = aboutW + langW + backupW + reportW + sepW * 3;
+            float totalW = aboutW + langW + backupW + reportW + commitW + sepW * 4;
             float scale = Math.min(1, (w - 64) / totalW);
             float x0 = (w - totalW * scale) / 2;
             if (!rtl) {
@@ -1902,9 +1905,13 @@ public class MainActivity extends Activity {
                 text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
                 footerLangStart = x0; text(c, langText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += langW * scale; footerLangEnd = x0;
                 text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
+                footerCommitStart = x0; text(c, commitText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += commitW * scale; footerCommitEnd = x0;
+                text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
                 footerAboutStart = x0; text(c, aboutText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += aboutW * scale; footerAboutEnd = x0;
             } else {
                 footerAboutStart = x0; text(c, aboutText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += aboutW * scale; footerAboutEnd = x0;
+                text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
+                footerCommitStart = x0; text(c, commitText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += commitW * scale; footerCommitEnd = x0;
                 text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
                 footerLangStart = x0; text(c, langText, x0, by + 4, 13 * scale, purple, Paint.Align.LEFT); x0 += langW * scale; footerLangEnd = x0;
                 text(c, sep, x0, by + 4, 13 * scale, muted, Paint.Align.LEFT); x0 += sepW * scale;
@@ -2338,6 +2345,8 @@ public class MainActivity extends Activity {
                     MainActivity.this.displayDialog();
                 } else if (x >= footerBackupStart - 10 && x <= footerBackupEnd + 10) {
                     MainActivity.this.dataDialog();
+                } else if (x >= footerCommitStart - 10 && x <= footerCommitEnd + 10) {
+                    startActivity(new Intent(MainActivity.this, CommitmentsActivity.class));
                 } else if (x >= footerReportStart - 10 && x <= footerReportEnd + 10) {
                     startActivity(new Intent(MainActivity.this, ScanDiagnosticsActivity.class));
                 }
