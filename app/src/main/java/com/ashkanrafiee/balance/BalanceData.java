@@ -46,6 +46,9 @@ final class BalanceData {
     static final String KEY_TX_CHANNELS = "transaction_channels";
     /** User-created tags keyed exactly like notes, with each transaction holding an ordered list. */
     static final String KEY_TX_TAGS = "transaction_tags";
+    /** User-created commitments (loans, debts, subscriptions and the like), stored as one JSON
+     *  array under this key. */
+    static final String KEY_COMMITMENTS = "commitments";
     /** Upper bound on one transaction note, so a huge paste cannot bloat the encrypted store. */
     static final int MAX_NOTE_LENGTH = 500;
     /** Bounds on user-created tag data, applied both at the UI boundary and while reading backups. */
@@ -558,6 +561,88 @@ final class BalanceData {
         int end = MAX_TAG_LENGTH;
         while (end > 0 && Character.isLowSurrogate(s.charAt(end))) end--;
         return s.substring(0, end).trim();
+    }
+
+    // ====================================================================
+    // Commitments
+    // ====================================================================
+
+    /** Reads every saved commitment in stored order, or an empty list when there are none or the
+     *  store cannot be read. Entries that no longer validate are dropped on read, so a corrupt
+     *  row can never poison the list. */
+    static List<Commitment> readCommitments(Context context) {
+        try {
+            String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
+                .getString(KEY_COMMITMENTS, null);
+            if (stored == null) return new ArrayList<>();
+            String json = stored.indexOf('{') == 0 ? stored : decrypt(stored);
+            return deserializeCommitments(json);
+        } catch (Exception e) {
+            Log.w(TAG, "commitment store read failed", e);
+            return new ArrayList<>();
+        }
+    }
+
+    /** Persists the supplied commitments encrypted under {@link #KEY_COMMITMENTS}. Entries are
+     *  normalized at the boundary and the list caps at {@link Commitment#MAX_COMMITMENTS}, so a
+     *  runaway import cannot bloat the store; an empty list removes the key, so a device with
+     *  no commitments stores nothing at all. */
+    static void writeCommitments(Context context, List<Commitment> commitments) {
+        try {
+            android.content.SharedPreferences.Editor e =
+                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit();
+            List<Commitment> kept = new ArrayList<>();
+            if (commitments != null) {
+                for (Commitment c : commitments) {
+                    Commitment n = Commitment.normalized(c);
+                    if (n == null) continue;
+                    boolean duplicate = false;
+                    for (Commitment k : kept) if (k.id.equals(n.id)) { duplicate = true; break; }
+                    if (!duplicate) kept.add(n);
+                    if (kept.size() >= Commitment.MAX_COMMITMENTS) break;
+                }
+            }
+            if (kept.isEmpty()) {
+                e.remove(KEY_COMMITMENTS).apply();
+                return;
+            }
+            e.putString(KEY_COMMITMENTS, encrypt(serializeCommitments(kept))).apply();
+        } catch (Exception ex) {
+            Log.w(TAG, "commitment store write failed", ex);
+        }
+    }
+
+    /** Serializes commitments to the JSON shape used for the local store and the backup payload. */
+    static String serializeCommitments(List<Commitment> commitments) throws Exception {
+        JSONArray arr = new JSONArray();
+        if (commitments != null) {
+            for (Commitment c : commitments) {
+                Commitment n = Commitment.normalized(c);
+                if (n != null) arr.put(n.toJson());
+            }
+        }
+        return new JSONObject().put(KEY_COMMITMENTS, arr).toString();
+    }
+
+    /** Parses a commitment JSON (as produced by {@link #serializeCommitments}) into a fresh list. */
+    static List<Commitment> deserializeCommitments(String json) {
+        List<Commitment> out = new ArrayList<>();
+        try {
+            JSONArray arr = new JSONObject(json).optJSONArray(KEY_COMMITMENTS);
+            if (arr == null) return out;
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject e = arr.optJSONObject(i);
+                if (e == null) continue;
+                Commitment c = Commitment.fromJson(e);
+                if (c == null) continue;
+                boolean duplicate = false;
+                for (Commitment k : out) if (k.id.equals(c.id)) { duplicate = true; break; }
+                if (!duplicate) out.add(c);
+            }
+        } catch (Exception ex) {
+            Log.w(TAG, "deserializeCommitments failed");
+        }
+        return out;
     }
 
     /** Reads one encrypted {@code key → text} store, or an empty map when it holds nothing or cannot
