@@ -65,9 +65,6 @@ public class MainActivity extends Activity {
      *  so re-tapping the lock button or options can not open a second flow over the first. */
     private boolean lockChangeBusy = false;
     private ContentObserver smsObserver;
-    /** Canvas text font; created once and reused, so drawing frames never fabricate a new font. */
-    private static final android.graphics.Typeface SANS = android.graphics.Typeface.create("sans",
-        android.graphics.Typeface.NORMAL);
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -1226,6 +1223,10 @@ public class MainActivity extends Activity {
     private final class BalanceView extends View {
         static final int ICON_NONE = 0, ICON_LOCK = 1, ICON_EYE = 2;
         final Paint p = new Paint(3);
+        /** The amount-figure paint: the same look as {@link #p} in English, Vazirmatn Bold in
+         *  Persian, so figures gain weight exactly where the digits needed it. Created once and
+         *  reused like {@link #p}, so drawing frames never fabricate a font. */
+        final Paint a = new Paint(3);
         final LinkedHashMap<String, Bank> banks = new LinkedHashMap<>();
         final java.util.Set<String> excluded = new java.util.HashSet<>();
         final float d = getResources().getDisplayMetrics().density;
@@ -1360,7 +1361,8 @@ public class MainActivity extends Activity {
             autoHide = BalanceData.isAutoHide(MainActivity.this);
             if (autoHide) hidden = true;
             sortMode = BalanceData.getSort(MainActivity.this);
-            p.setTypeface(SANS);
+            p.setTypeface(Fonts.paint(MainActivity.this));
+            a.setTypeface(Fonts.amount(MainActivity.this));
             scroller = new OverScroller(MainActivity.this);
         }
 
@@ -1641,11 +1643,11 @@ public class MainActivity extends Activity {
             }
             String number = CurrencyHelper.amount(MainActivity.this, n);
             float current = size;
-            while (current > 10 && measure(number, current) > width) current -= 1;
-            text(c, number, x, baseline, current, accent, align);
+            while (current > 10 && measureAmount(number, current) > width) current -= 1;
+            amountText(c, number, x, baseline, current, accent, align);
             text(c, CurrencyHelper.label(MainActivity.this), x, baseline + 19, 11, muted, align);
             if (strikethrough) {
-                float numW = measure(number, current);
+                float numW = measureAmount(number, current);
                 float lineX1 = align == Paint.Align.RIGHT ? x - numW : x;
                 float lineX2 = align == Paint.Align.RIGHT ? x : x + numW;
                 p.setColor(muted);
@@ -1669,8 +1671,8 @@ public class MainActivity extends Activity {
             }
             String number = CurrencyHelper.amount(MainActivity.this, n);
             float current = size;
-            while (current > 10 && measure(number, current) > width) current -= 1;
-            text(c, number, x, baseline, current, color, align);
+            while (current > 10 && measureAmount(number, current) > width) current -= 1;
+            amountText(c, number, x, baseline, current, color, align);
             text(c, CurrencyHelper.label(MainActivity.this), x, baseline + 19, 11, muted, align);
         }
 
@@ -1684,9 +1686,9 @@ public class MainActivity extends Activity {
             String unit = CurrencyHelper.label(MainActivity.this);
             float unitSize = 13, unitGap = 10, unitWidth = measure(unit, unitSize);
             float current = 34;
-            while (current > 16 && measure(number, current) + unitGap + unitWidth > width) current -= 1;
-            float numberWidth = measure(number, current);
-            text(c, number, x, baseline, current, fg, anchor);
+            while (current > 16 && measureAmount(number, current) + unitGap + unitWidth > width) current -= 1;
+            float numberWidth = measureAmount(number, current);
+            amountText(c, number, x, baseline, current, fg, anchor);
             float unitX = rtl ? x - numberWidth - unitGap : x + numberWidth + unitGap;
             text(c, unit, unitX, baseline - 2, unitSize, muted, anchor);
         }
@@ -1694,6 +1696,12 @@ public class MainActivity extends Activity {
         float measure(String value, float size) {
             p.setTextSize(size * fs);
             return p.measureText(value);
+        }
+
+        /** Measures an amount figure in the amount paint, which is the paint that draws it. */
+        float measureAmount(String value, float size) {
+            a.setTextSize(size * fs);
+            return a.measureText(value);
         }
 
         /** A small amber pill right after the bank name showing how many days old the balance is.
@@ -1732,6 +1740,15 @@ public class MainActivity extends Activity {
             p.setColor(color);
             p.setTextAlign(align);
             c.drawText(s, x, y, p);
+        }
+
+        /** Same as {@link #text} but in the amount-figure paint. */
+        void amountText(Canvas c, String s, float x, float y, float size,
+                        int color, Paint.Align align) {
+            a.setTextSize(size * fs);
+            a.setColor(color);
+            a.setTextAlign(align);
+            c.drawText(s, x, y, a);
         }
 
         void round(Canvas c, float l, float t, float r, float b,

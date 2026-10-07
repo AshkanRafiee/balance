@@ -129,7 +129,7 @@ public final class AboutActivity extends Activity {
         hero.setBackground(rounded(heroColor, 22));
         TextView mark = text("B", 25, bg);
         mark.setGravity(Gravity.CENTER);
-        mark.setTypeface(null, Typeface.BOLD);
+        mark.setTypeface(Fonts.text(mark.getContext()), Typeface.BOLD);
         mark.setBackground(rounded(accent, 16));
         hero.addView(mark, new LinearLayout.LayoutParams(dp(56), dp(56)));
         TextView title = text(getString(R.string.app_name), 24, fg);

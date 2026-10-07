@@ -233,7 +233,11 @@ public final class HistoryActivity extends Activity {
         return getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
     }
 
-    private static final Typeface MEDIUM = Typeface.create("sans-serif-medium", Typeface.NORMAL);
+    /** The medium family for titles and chips: Vazirmatn Medium in Persian, the same system
+     *  medium as before otherwise. */
+    Typeface medium() {
+        return Fonts.medium(this);
+    }
 
     TextView text(String s, float size, int color) {
         return text(s, size, color, null);
@@ -244,15 +248,17 @@ public final class HistoryActivity extends Activity {
         v.setText(s);
         v.setTextSize(size);
         v.setTextColor(color);
+        // A null family keeps whatever the view had (the theme), so English renders exactly as
+        // before and only Persian swaps in Vazirmatn.
         if (tf != null) v.setTypeface(tf);
-        else v.setTypeface(null, Typeface.NORMAL);
+        else v.setTypeface(Fonts.text(this), Typeface.NORMAL);
         v.setIncludeFontPadding(false);
         return v;
     }
 
     TextView bold(String s, float size, int color) {
         TextView v = text(s, size, color);
-        v.setTypeface(null, Typeface.BOLD);
+        v.setTypeface(Fonts.text(this), Typeface.BOLD);
         return v;
     }
 
@@ -623,14 +629,14 @@ public final class HistoryActivity extends Activity {
             LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(dp(32), dp(32));
             badgeLp.setMarginStart(dp(4));
             bar.addView(badge, badgeLp);
-            TextView title = text(BankRules.displayName(this, bankFilter), 22, fg, MEDIUM);
+            TextView title = text(BankRules.displayName(this, bankFilter), 22, fg, medium());
             title.setMaxLines(1);
             title.setEllipsize(android.text.TextUtils.TruncateAt.END);
             bar.addView(title, titleParams);
             String chipText = accountFilter != null
                 ? getString(R.string.account_label) + " " + digits(accountFilter)
                 : getString(R.string.history_bank_chip);
-            TextView chip = text(chipText, 11, badgeFg, MEDIUM);
+            TextView chip = text(chipText, 11, badgeFg, medium());
             chip.setMaxLines(1);
             chip.setEllipsize(android.text.TextUtils.TruncateAt.END);
             chip.setMinWidth(0);
@@ -652,7 +658,7 @@ public final class HistoryActivity extends Activity {
             chipParams.setMarginStart(dp(8));
             bar.addView(chip, chipParams);
         } else {
-            TextView title = text(getString(R.string.history_title), 22, fg, MEDIUM);
+            TextView title = text(getString(R.string.history_title), 22, fg, medium());
             bar.addView(title, titleParams);
             // With nothing else before the action, keep the title apart from the export button with
             // a flex spacer so the button still sits at the far end of the bar.
@@ -660,7 +666,7 @@ public final class HistoryActivity extends Activity {
             bar.addView(new View(this), barSpacer);
         }
 
-        TextView export = text(getString(R.string.history_export_label), 14, muted, MEDIUM);
+        TextView export = text(getString(R.string.history_export_label), 14, muted, medium());
         export.setGravity(Gravity.CENTER);
         export.setContentDescription(getString(R.string.history_export));
         export.setPadding(dp(14), 0, dp(14), 0);
@@ -868,7 +874,7 @@ public final class HistoryActivity extends Activity {
         String label = selectedTags.isEmpty()
             ? getString(R.string.history_filter_tags)
             : getString(R.string.history_filter_tags_count, selectedTags.size());
-        TextView chip = text(label, 12, selectedTags.isEmpty() ? fg : Color.WHITE, MEDIUM);
+        TextView chip = text(label, 12, selectedTags.isEmpty() ? fg : Color.WHITE, medium());
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
         chip.setPadding(dp(12), dp(7), dp(12), dp(7));
@@ -899,7 +905,7 @@ public final class HistoryActivity extends Activity {
 
     private void addSegmentChip(LinearLayout host, String label, int id, Runnable action) {
         boolean selected = filter.direction == id;
-        TextView chip = text(label, 12, selected ? Color.WHITE : fg, MEDIUM);
+        TextView chip = text(label, 12, selected ? Color.WHITE : fg, medium());
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
         chip.setAutoSizeTextTypeWithDefaults(android.widget.TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM);
@@ -916,7 +922,7 @@ public final class HistoryActivity extends Activity {
      *  a quiet toggle. The chips share the row width, so labels stay on-screen at any font scale. */
     private void addFilterChip(LinearLayout host, String label, int id, boolean weight, Runnable action) {
         boolean selected = filter.rangePreset == id;
-        TextView chip = text(label, 12, selected ? Color.WHITE : fg, MEDIUM);
+        TextView chip = text(label, 12, selected ? Color.WHITE : fg, medium());
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
         chip.setAutoSizeTextTypeWithDefaults(android.widget.TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM);
@@ -1036,7 +1042,7 @@ public final class HistoryActivity extends Activity {
         bar.setBackground(rounded(chipBg, 14));
         bar.setPadding(dp(4), dp(2), dp(4), dp(2));
 
-        TextView icon = text("\u2315", 16, muted, MEDIUM);
+        TextView icon = text("\u2315", 16, muted, medium());
         icon.setGravity(Gravity.CENTER);
         icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         bar.addView(icon, new LinearLayout.LayoutParams(dp(36), dp(44)));
@@ -1087,7 +1093,7 @@ public final class HistoryActivity extends Activity {
         });
         bar.addView(searchInput, new LinearLayout.LayoutParams(0, -2, 1));
 
-        searchClear = text("\u00D7", 18, muted, MEDIUM);
+        searchClear = text("\u00D7", 18, muted, medium());
         searchClear.setGravity(Gravity.CENTER);
         searchClear.setContentDescription(getString(R.string.history_search_clear));
         searchClear.setBackground(ripple(rounded(chipBg, 12)));
@@ -1184,7 +1190,7 @@ public final class HistoryActivity extends Activity {
     private final class RangePicker {
         final CalDate[] picked = new CalDate[]{filter.from, filter.to};
         final LinearLayout grid = new LinearLayout(HistoryActivity.this);
-        final TextView title = text("", 14, fg, MEDIUM);
+        final TextView title = text("", 14, fg, medium());
         final TextView status = text("", 12.5f, muted);
         final TextView prev = navButton("\u2039");
         final TextView next = navButton("\u203A");
@@ -1272,7 +1278,7 @@ public final class HistoryActivity extends Activity {
         }
 
         TextView navButton(String arrow) {
-            TextView b = text(arrow, 18, fg, MEDIUM);
+            TextView b = text(arrow, 18, fg, medium());
             b.setGravity(Gravity.CENTER);
             b.setPadding(dp(12), dp(2), dp(12), dp(2));
             b.setBackground(rounded(chipBg, 10));
@@ -1961,7 +1967,7 @@ public final class HistoryActivity extends Activity {
         top.addView(railView, railLp);
         LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-2, -2);
         labelParams.setMarginStart(dp(9));
-        TextView label = text(getString(R.string.history_total), 12, muted, MEDIUM);
+        TextView label = text(getString(R.string.history_total), 12, muted, medium());
         label.setLetterSpacing(label.getResources().getConfiguration().getLayoutDirection()
             == View.LAYOUT_DIRECTION_LTR ? 0.08f : 0f);
         top.addView(label, labelParams);
@@ -2010,7 +2016,7 @@ public final class HistoryActivity extends Activity {
         LinearLayout cell = new LinearLayout(this);
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setGravity(Gravity.CENTER_HORIZONTAL);
-        TextView l = text(label, 12, color, MEDIUM);
+        TextView l = text(label, 12, color, medium());
         l.setGravity(Gravity.CENTER_HORIZONTAL);
         fitToWidth(l, 12, 9, 0);
         cell.addView(l, new LinearLayout.LayoutParams(-1, -2));
@@ -2026,7 +2032,7 @@ public final class HistoryActivity extends Activity {
     /** A list-style section header. Letter-spaced only in left-to-right layouts: in the Persian
      *  interface extra letter spacing would break the joining of the script's characters. */
     private TextView sectionLabel(String s) {
-        TextView t = text(s, 12, muted, MEDIUM);
+        TextView t = text(s, 12, muted, medium());
         t.setLetterSpacing(t.getResources().getConfiguration().getLayoutDirection()
             == View.LAYOUT_DIRECTION_LTR ? 0.09f : 0f);
         return t;
@@ -2049,11 +2055,11 @@ public final class HistoryActivity extends Activity {
         // How much history is on screen. Without it the size of an account is a guess, and the cost
         // of the breakdown below grows with it.
         row.addView(text(getResources().getQuantityString(
-            R.plurals.history_n_tx, shown, shown), 12, muted, MEDIUM));
+            R.plurals.history_n_tx, shown, shown), 12, muted, medium()));
 
         if (allResiduals.isEmpty()) return row;
 
-        TextView ask = text("?", 12, warnFg, MEDIUM);
+        TextView ask = text("?", 12, warnFg, medium());
         ask.setGravity(Gravity.CENTER);
         ask.setContentDescription(getString(R.string.residual_explainer_cd));
         ask.setBackground(ripple(rounded(warnBg, 11)));
@@ -2349,7 +2355,7 @@ public final class HistoryActivity extends Activity {
         });
         head.addView(caret(open, 14), new LinearLayout.LayoutParams(dp(22), -2));
 
-        TextView date = text(monthName(m.month), 15, fg, MEDIUM);
+        TextView date = text(monthName(m.month), 15, fg, medium());
         LinearLayout.LayoutParams dateLp = new LinearLayout.LayoutParams(-2, -2);
         dateLp.setMarginStart(dp(5));
         head.addView(date, dateLp);
@@ -2437,12 +2443,12 @@ public final class HistoryActivity extends Activity {
         dateWrap.setGravity(Gravity.CENTER_VERTICAL);
         dateWrap.setOrientation(LinearLayout.HORIZONTAL);
         if (g.date.sameDay(today)) {
-            TextView tag = text(getString(R.string.history_today), 11, badgeFg, MEDIUM);
+            TextView tag = text(getString(R.string.history_today), 11, badgeFg, medium());
             tag.setPadding(dp(6), dp(2), dp(6), dp(2));
             tag.setBackground(rounded(badgeBg, 8));
             dateWrap.addView(tag);
         } else if (g.date.sameDay(yesterday)) {
-            TextView tag = text(getString(R.string.history_yesterday), 11, muted, MEDIUM);
+            TextView tag = text(getString(R.string.history_yesterday), 11, muted, medium());
             tag.setPadding(dp(6), dp(2), dp(6), dp(2));
             tag.setBackground(rounded(chipBg, 8));
             dateWrap.addView(tag);
@@ -2549,7 +2555,7 @@ public final class HistoryActivity extends Activity {
 
         // A question mark, not a bank badge: there is no sender to attribute this to, and showing a
         // bank icon there would imply a message we never received.
-        TextView ask = text("?", 13, warnFg, MEDIUM);
+        TextView ask = text("?", 13, warnFg, medium());
         ask.setGravity(Gravity.CENTER);
         ask.setBackground(roundedStroke(Color.TRANSPARENT, 12, warnFg));
         row.addView(ask, new LinearLayout.LayoutParams(dp(24), dp(24)));
@@ -2692,9 +2698,9 @@ public final class HistoryActivity extends Activity {
         int inset = perBank ? 0 : 39;
         String key = BalanceData.noteKey(t);
         String caption = BankRules.reasonCaption(this, reasons == null ? null : reasons.get(key));
-        if (caption != null) addChip(cell, caption, false, chipBg, muted, MEDIUM, inset);
+        if (caption != null) addChip(cell, caption, false, chipBg, muted, medium(), inset);
         String channel = BankRules.channelCaption(this, channels == null ? null : channels.get(key));
-        if (channel != null) addChip(cell, channel, false, chipBg, muted, MEDIUM, inset);
+        if (channel != null) addChip(cell, channel, false, chipBg, muted, medium(), inset);
         String note = notes == null ? null : notes.get(key);
         if (note != null) addChip(cell, note, true, badgeBg, badgeFg, null, inset);
         List<String> tagValues = tags == null ? null : tags.get(key);
@@ -2759,7 +2765,7 @@ public final class HistoryActivity extends Activity {
         TagFlowLayout flow = new TagFlowLayout();
         flow.setPaddingRelative(dp(inset), dp(3), dp(4), dp(3));
         for (String value : values) {
-            TextView chip = text("#" + value, 11, muted, MEDIUM);
+            TextView chip = text("#" + value, 11, muted, medium());
             chip.setPadding(dp(9), dp(6), dp(9), dp(6));
             chip.setBackground(rounded(chipBg, 10));
             chip.setMaxLines(2);
@@ -2883,7 +2889,7 @@ public final class HistoryActivity extends Activity {
         tagInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT
             | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         tagInput.setPadding(dp(2), dp(6), dp(2), dp(6));
-        TextView addTag = text(getString(R.string.tag_add), 13, accent, MEDIUM);
+        TextView addTag = text(getString(R.string.tag_add), 13, accent, medium());
         addTag.setGravity(Gravity.CENTER);
         addTag.setPadding(dp(10), dp(6), dp(10), dp(6));
         addTag.setBackground(ripple(rounded(chipBg, 10)));
@@ -2922,7 +2928,7 @@ public final class HistoryActivity extends Activity {
         int suggestionCount = Math.min(20, suggestionsList.size());
         for (int i = 0; i < suggestionCount; i++) {
             String suggestion = suggestionsList.get(i);
-            TextView chip = text("#" + suggestion, 11, muted, MEDIUM);
+            TextView chip = text("#" + suggestion, 11, muted, medium());
             chip.setPadding(dp(8), dp(4), dp(8), dp(4));
             chip.setBackground(rounded(chipBg, 9));
             chip.setClickable(true);
@@ -2937,7 +2943,7 @@ public final class HistoryActivity extends Activity {
             suggestions.addView(chip, chipLp);
         }
 
-        TextView clearTags = text(getString(R.string.tag_clear), 12, muted, MEDIUM);
+        TextView clearTags = text(getString(R.string.tag_clear), 12, muted, medium());
         clearTags.setPadding(0, dp(7), 0, dp(7));
         clearTags.setClickable(true);
         clearTags.setFocusable(true);
@@ -2950,7 +2956,7 @@ public final class HistoryActivity extends Activity {
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setPadding(dp(20), dp(10), dp(20), 0);
         wrap.addView(input);
-        wrap.addView(text(getString(R.string.tag_label), 13, muted, MEDIUM), margin(0, 8, 0, 2));
+        wrap.addView(text(getString(R.string.tag_label), 13, muted, medium()), margin(0, 8, 0, 2));
         wrap.addView(selectedTagScroll, new LinearLayout.LayoutParams(-1, dp(38)));
         wrap.addView(addRow, margin(0, 2, 0, 0));
         if (suggestionCount > 0) {
@@ -2995,7 +3001,7 @@ public final class HistoryActivity extends Activity {
         }
         for (int i = 0; i < values.size(); i++) {
             final int index = i;
-            TextView chip = text("#" + values.get(i) + " ×", 11, badgeFg, MEDIUM);
+            TextView chip = text("#" + values.get(i) + " ×", 11, badgeFg, medium());
             chip.setPadding(dp(8), dp(5), dp(8), dp(5));
             chip.setBackground(rounded(badgeBg, 9));
             chip.setClickable(true);
@@ -3014,7 +3020,7 @@ public final class HistoryActivity extends Activity {
     /** A small neutral chip with a count, for transaction-count density. */
     private TextView countChip(int n) {
         TextView t = text(String.valueOf(n), 11, muted);
-        t.setTypeface(null, Typeface.BOLD);
+        t.setTypeface(Fonts.text(this), Typeface.BOLD);
         t.setBackground(rounded(chipBg, 8));
         t.setPadding(dp(7), dp(3), dp(7), dp(3));
         t.setContentDescription(getResources().getQuantityString(R.plurals.history_n_tx, n, n));
@@ -3024,7 +3030,7 @@ public final class HistoryActivity extends Activity {
     /** The collapse/expand caret: a round chip showing a down caret when the group is open and a
      *  side caret when collapsed (rippling to mirror direction in RTL), unambiguous at a glance. */
     private TextView caret(boolean open, int sp) {
-        TextView t = text(open ? "\u25be" : (isRtl() ? "\u25c2" : "\u25b8"), sp, caretColor(open), MEDIUM);
+        TextView t = text(open ? "\u25be" : (isRtl() ? "\u25c2" : "\u25b8"), sp, caretColor(open), medium());
         t.setGravity(Gravity.CENTER);
         t.setBackground(rounded(chipBg, 14));
         return t;
@@ -3056,7 +3062,7 @@ public final class HistoryActivity extends Activity {
     }
 
     private TextView chip(String s, int bgColor, int fgColor, String desc) {
-        TextView t = text(s, 11, fgColor, MEDIUM);
+        TextView t = text(s, 11, fgColor, medium());
         t.setBackground(rounded(bgColor, 9));
         t.setPadding(dp(9), dp(4), dp(9), dp(4));
         t.setContentDescription(desc);
@@ -3108,7 +3114,7 @@ public final class HistoryActivity extends Activity {
         sq.setBackground(bg);
         sq.setContentDescription(BankRules.displayName(this, canonicalName));
         TextView init = text(BankBadge.initials(canonicalName), 11, Color.WHITE);
-        init.setTypeface(null, Typeface.BOLD);
+        init.setTypeface(Fonts.text(this), Typeface.BOLD);
         sq.addView(init);
         return sq;
     }

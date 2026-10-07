@@ -167,7 +167,7 @@ public final class LockOverlay extends FrameLayout {
         unlock.setMinimumHeight(dp(52));
         unlock.setOnClickListener(v -> submit());
         unlockLabel = text(getString(R.string.lock_action_unlock), 16, Color.WHITE);
-        unlockLabel.setTypeface(null, Typeface.BOLD);
+        unlockLabel.setTypeface(Fonts.text(unlockLabel.getContext()), Typeface.BOLD);
         unlockLabel.setGravity(Gravity.CENTER);
         unlockLabel.setPadding(dp(16), dp(14), dp(16), dp(14));
         unlock.addView(unlockLabel, new FrameLayout.LayoutParams(-1, -1));
@@ -231,7 +231,7 @@ public final class LockOverlay extends FrameLayout {
         root.addView(headerBadge, new LinearLayout.LayoutParams(dp(96), dp(96)));
 
         title = text(getString(R.string.lock_title), 22, fg);
-        title.setTypeface(null, Typeface.BOLD);
+        title.setTypeface(Fonts.text(title.getContext()), Typeface.BOLD);
         LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(-2, -2);
         titleLp.topMargin = dp(14);
         root.addView(title, titleLp);
@@ -265,7 +265,7 @@ public final class LockOverlay extends FrameLayout {
         pwHeader.addView(badge, new LinearLayout.LayoutParams(dp(76), dp(76)));
 
         pwTitle = text(getString(R.string.lock_title), 20, fg);
-        pwTitle.setTypeface(null, Typeface.BOLD);
+        pwTitle.setTypeface(Fonts.text(pwTitle.getContext()), Typeface.BOLD);
         LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(-2, -2);
         titleLp.topMargin = dp(10);
         pwHeader.addView(pwTitle, titleLp);
@@ -678,7 +678,7 @@ public final class LockOverlay extends FrameLayout {
         k.setTextSize(26);
         k.setGravity(Gravity.CENTER);
         k.setTextColor(fg);
-        k.setTypeface(null, Typeface.NORMAL);
+        k.setTypeface(Fonts.text(k.getContext()), Typeface.NORMAL);
         k.setBackground(rippleMask());
         return k;
     }
@@ -742,7 +742,7 @@ public final class LockOverlay extends FrameLayout {
         v.setText(s);
         v.setTextSize(size);
         v.setTextColor(color);
-        v.setTypeface(null, Typeface.NORMAL);
+        v.setTypeface(Fonts.text(v.getContext()), Typeface.NORMAL);
         return v;
     }
 

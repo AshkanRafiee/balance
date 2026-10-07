@@ -159,7 +159,7 @@ public final class SenderShareActivity extends Activity {
 
         if (bank != null) {
             TextView known = text(getString(R.string.sender_share_known_bank, bank), 13, accent);
-            known.setTypeface(null, Typeface.BOLD);
+            known.setTypeface(Fonts.text(known.getContext()), Typeface.BOLD);
             body.addView(known, margin(2, 0, 2, 6));
         }
         body.addView(section(getString(R.string.sender_share_note, bodies.size())), margin(2, 2, 2, 10));
@@ -299,7 +299,7 @@ public final class SenderShareActivity extends Activity {
 
         send = text(getString(R.string.sender_share_send, 0), 14, bg);
         send.setGravity(Gravity.CENTER);
-        send.setTypeface(null, Typeface.BOLD);
+        send.setTypeface(Fonts.text(send.getContext()), Typeface.BOLD);
         send.setPadding(dp(18), dp(11), dp(18), dp(11));
         send.setMinHeight(dp(48));
         LinearLayout.LayoutParams sendP = new LinearLayout.LayoutParams(0, -2, 1);

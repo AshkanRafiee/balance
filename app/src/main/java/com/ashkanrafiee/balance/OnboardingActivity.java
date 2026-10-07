@@ -125,7 +125,7 @@ public final class OnboardingActivity extends Activity {
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
         TextView name = text(getString(R.string.app_name), 18, fg);
-        name.setTypeface(null, Typeface.BOLD);
+        name.setTypeface(Fonts.text(name.getContext()), Typeface.BOLD);
         name.setGravity(Gravity.CENTER_VERTICAL
             | (getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL
                 ? Gravity.RIGHT : Gravity.LEFT));
@@ -154,7 +154,7 @@ public final class OnboardingActivity extends Activity {
 
         primary = new TextView(this);
         primary.setTextSize(15);
-        primary.setTypeface(null, Typeface.BOLD);
+        primary.setTypeface(Fonts.text(primary.getContext()), Typeface.BOLD);
         primary.setTextColor(fg);
         primary.setGravity(Gravity.CENTER);
         primary.setPadding(dp(16), dp(14), dp(16), dp(14));
@@ -236,18 +236,18 @@ public final class OnboardingActivity extends Activity {
         hero.setBackground(rounded(color(R.color.hero), 22));
         TextView mark = text("B", 25, bg);
         mark.setGravity(Gravity.CENTER);
-        mark.setTypeface(null, Typeface.BOLD);
+        mark.setTypeface(Fonts.text(mark.getContext()), Typeface.BOLD);
         mark.setBackground(rounded(accent, 16));
         hero.addView(mark, new LinearLayout.LayoutParams(dp(56), dp(56)));
         TextView title = text(getString(R.string.app_name), 22, fg);
-        title.setTypeface(null, Typeface.BOLD);
+        title.setTypeface(Fonts.text(title.getContext()), Typeface.BOLD);
         title.setPadding(0, dp(14), 0, dp(2));
         hero.addView(title);
         hero.addView(text(getString(R.string.tagline_offline_bank_balance), 13, subtitle));
         content.addView(hero, margin(0, dp(10), 0, dp(18)));
 
         TextView heading = text(getString(R.string.onboarding_welcome_title), 19, fg);
-        heading.setTypeface(null, Typeface.BOLD);
+        heading.setTypeface(Fonts.text(heading.getContext()), Typeface.BOLD);
         content.addView(heading, margin(0, 0, 0, dp(8)));
         TextView body = paragraph(getString(R.string.onboarding_welcome_body), 14, muted);
         body.setLineSpacing(2, 1.05f);
@@ -274,7 +274,7 @@ public final class OnboardingActivity extends Activity {
 
     private void buildPrivacy() {
         TextView heading = text(getString(R.string.onboarding_privacy_title), 19, fg);
-        heading.setTypeface(null, Typeface.BOLD);
+        heading.setTypeface(Fonts.text(heading.getContext()), Typeface.BOLD);
         content.addView(heading, margin(0, dp(10), 0, dp(8)));
         TextView body = paragraph(getString(R.string.onboarding_privacy_body), 14, muted);
         body.setLineSpacing(2, 1.05f);
@@ -298,7 +298,7 @@ public final class OnboardingActivity extends Activity {
 
     private void buildSms() {
         TextView heading = text(getString(R.string.onboarding_sms_title), 19, fg);
-        heading.setTypeface(null, Typeface.BOLD);
+        heading.setTypeface(Fonts.text(heading.getContext()), Typeface.BOLD);
         content.addView(heading, margin(0, dp(10), 0, dp(8)));
         TextView body = paragraph(getString(R.string.onboarding_sms_body), 14, muted);
         body.setLineSpacing(2, 1.05f);

@@ -229,7 +229,7 @@ public final class ScanDiagnosticsActivity extends Activity {
         box.setBackground(rounded(heroColor, 18));
         box.addView(text(getString(R.string.scan_diag_recognized), 13, muted));
         TextView v = text(count(s.parsedMessages), 26, fg);
-        v.setTypeface(null, Typeface.BOLD);
+        v.setTypeface(Fonts.text(v.getContext()), Typeface.BOLD);
         box.addView(v);
         box.addView(text(getString(R.string.scan_diag_summary, s.messages, s.unparsedMessages()), 12, muted));
         body.addView(box, margin(0, 0, 0, 14));
@@ -277,7 +277,7 @@ public final class ScanDiagnosticsActivity extends Activity {
         texts.setOrientation(LinearLayout.VERTICAL);
         if (knownBank) {
             TextView bank = text(BankRules.displayName(this, h.bank), 13, fg);
-            bank.setTypeface(null, Typeface.BOLD);
+            bank.setTypeface(Fonts.text(bank.getContext()), Typeface.BOLD);
             texts.addView(bank, new LinearLayout.LayoutParams(-1, -2));
         }
         TextView who = text(h.sender, 14, fg);
@@ -332,7 +332,7 @@ public final class ScanDiagnosticsActivity extends Activity {
     TextView button(String label, Runnable action) {
         TextView b = text(label, 14, fg);
         b.setGravity(Gravity.CENTER);
-        b.setTypeface(null, Typeface.BOLD);
+        b.setTypeface(Fonts.text(b.getContext()), Typeface.BOLD);
         b.setPadding(dp(16), dp(12), dp(16), dp(12));
         b.setBackground(rounded(accent, 14));
         b.setOnClickListener(v -> action.run());
