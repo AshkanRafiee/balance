@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The Persian twin of the default theme: identical in every item except the family, so
+         every view that never sets a typeface of its own (dialogs, menus, plain labels) reads
+         through Vazirmatn in Persian. Views that do set one are rewired through Fonts instead,
+         since setTypeface(null, …) would drop this family. Keep the items after the colon in
+         step with values/styles.xml. -->
+    <style name="AppTheme" parent="android:style/Theme.DeviceDefault.DayNight">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:fontFamily">@font/vazirmatn</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:windowLightStatusBar">@bool/is_light_status_bar</item>
+        <item name="android:statusBarColor">@color/status_bar</item>
+        <item name="android:navigationBarColor">@color/nav_bar</item>
+        <item name="android:windowLightNavigationBar">@bool/is_light_nav_bar</item>
+    </style>
+</resources>
