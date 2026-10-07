@@ -190,7 +190,7 @@
     <string name="commitments_receivable">Receivable</string>
     <string name="commitments_window_this_month">This month + overdue</string>
     <string name="commitments_card_empty">Track payables and receivables here.</string>
-    <string name="commitments_card_empty_action">Tap Commitments to add a commitment. Hide it in Display.</string>
+    <string name="commitments_card_empty_action">Tap to add a commitment. Hide it in Display.</string>
     <string name="commitments_card_title">Commitments (%1$s)</string>
     <string name="settings_commitments_card_label">Show commitments card on the dashboard</string>
     <string name="commitments_mark_paid">Mark paid</string>

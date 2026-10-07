@@ -100,7 +100,4 @@ final class DashboardLayout {
         return visible && y >= COMMITMENTS_TOP && y <= COMMITMENTS_TOP + COMMITMENTS_H;
     }
 
-    static boolean inCommitmentsHeader(float y, boolean visible) {
-        return visible && y >= COMMITMENTS_TOP && y <= COMMITMENTS_TOP + 30f;
-    }
 }

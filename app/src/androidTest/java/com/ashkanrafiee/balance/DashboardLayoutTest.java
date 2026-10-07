@@ -102,11 +102,16 @@ public class DashboardLayoutTest {
             DashboardLayout.BANNER_TOP + DashboardLayout.BANNER_H + 1f, true));
     }
 
-    @Test public void commitments_onlyHeaderOpensTheCommitmentsScreen() {
-        assertTrue(DashboardLayout.inCommitmentsHeader(DashboardLayout.COMMITMENTS_TOP, true));
-        assertTrue(DashboardLayout.inCommitmentsHeader(DashboardLayout.COMMITMENTS_TOP + 30f, true));
-        assertFalse(DashboardLayout.inCommitmentsHeader(DashboardLayout.COMMITMENTS_TOP + 31f, true));
-        assertFalse(DashboardLayout.inCommitmentsHeader(DashboardLayout.COMMITMENTS_TOP, false));
+    @Test public void commitments_wholeCardOpensTheCommitmentsScreen() {
+        float top = DashboardLayout.COMMITMENTS_TOP;
+        float bottom = top + DashboardLayout.COMMITMENTS_H;
+        assertTrue(DashboardLayout.inCommitments(top, true));
+        assertTrue(DashboardLayout.inCommitments(top + 41f, true));
+        assertTrue(DashboardLayout.inCommitments(top + 60f, true));
+        assertTrue(DashboardLayout.inCommitments(bottom, true));
+        assertFalse(DashboardLayout.inCommitments(top - 1f, true));
+        assertFalse(DashboardLayout.inCommitments(bottom + 1f, true));
+        assertFalse(DashboardLayout.inCommitments(top + 41f, false));
     }
 
     @Test public void inSortBand_withoutStrip_keepsItsOriginalRange() {

@@ -190,7 +190,7 @@
     <string name="commitments_receivable">دریافتنی</string>
     <string name="commitments_window_this_month">این ماه + معوقه</string>
     <string name="commitments_card_empty">پرداختنی‌ها و دریافتنی‌هایتان را اینجا ثبت کنید.</string>
-    <string name="commitments_card_empty_action">برای افزودن تعهد روی «تعهدات» بزنید. آن را از «نمایش» پنهان کنید.</string>
+    <string name="commitments_card_empty_action">برای افزودن تعهد بزنید. آن را از «نمایش» پنهان کنید.</string>
     <string name="commitments_card_title">تعهدات (%1$s)</string>
     <string name="settings_commitments_card_label">نمایش کارت تعهدات در صفحهٔ اصلی</string>
     <string name="commitments_mark_paid">پرداخت شد</string>

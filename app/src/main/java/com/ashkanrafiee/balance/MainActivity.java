@@ -1973,8 +1973,7 @@ public class MainActivity extends Activity {
             float receiveCenter = rtl ? leftCenter : rightCenter;
             float columnWidth = Math.min(leftWidth, rightWidth);
             text(c, getString(R.string.commitments_card_title, commitmentMonthLabel()),
-                rtl ? right : left,
-                top + 22, 14, fg, rtl ? Paint.Align.RIGHT : Paint.Align.LEFT);
+                middle, top + 22, 14, fg, Paint.Align.CENTER);
             CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
                 BalanceData.readCommitments(MainActivity.this),
                 RegionHelper.isIran(MainActivity.this) ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN,
@@ -2431,7 +2430,7 @@ public class MainActivity extends Activity {
                 MainActivity.this.getSharedPreferences(BalanceData.PREFS_PREF, MODE_PRIVATE)
                     .edit().putBoolean(BalanceData.KEY_HIDDEN, hidden).apply();
                 invalidate();
-            } else if (DashboardLayout.inCommitmentsHeader(y, commitmentsCard)) {
+            } else if (DashboardLayout.inCommitments(y, commitmentsCard)) {
                 startActivity(new Intent(MainActivity.this, CommitmentsActivity.class));
             } else if (DashboardLayout.inBanner(y, smsBanner, commitmentsCard)) {
                 // Re-ask rather than jumping straight to settings: a first-time denial can still be

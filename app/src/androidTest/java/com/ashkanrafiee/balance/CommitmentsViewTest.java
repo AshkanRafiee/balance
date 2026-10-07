@@ -148,6 +148,33 @@ public class CommitmentsViewTest {
         assertEquals(0, october.receive);
     }
 
+    @Test public void olderPaid_keepsPreviousRecurringAndOneTimeRowsOutOfOverdue() {
+        long oldRecurringStart = Commitment.millisOf(2025, 10, 15, CalendarSystem.GREGORIAN);
+        Commitment recurring = Commitment.create("old rent", -500, Commitment.MONTHLY,
+            oldRecurringStart, Commitment.millisOf(2025, 10, 15, CalendarSystem.GREGORIAN),
+            false, 0);
+        List<Long> paid = new ArrayList<>();
+        paid.add(oldRecurringStart);
+        recurring = new Commitment(recurring.id, recurring.name, recurring.amount,
+            recurring.frequency, recurring.start, recurring.end, false, paid,
+            recurring.remind, recurring.remindBeforeMs);
+        Commitment once = Commitment.create("old gift", 800, Commitment.ONCE,
+            Commitment.millisOf(2025, 9, 20, CalendarSystem.GREGORIAN), null, false, 0);
+        once = new Commitment(once.id, once.name, once.amount, once.frequency, once.start, once.end,
+            true, null, once.remind, once.remindBeforeMs);
+        List<Commitment> commitments = new ArrayList<>();
+        commitments.add(recurring);
+        commitments.add(once);
+
+        CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
+            commitments, CalendarSystem.GREGORIAN, OCT_7_NOON, 12);
+        assertTrue(summary.overdue.isEmpty());
+        assertEquals(2, summary.settledMonths.size());
+        assertEquals(1, summary.settledMonths.get(0).rows.size());
+        assertEquals(1, summary.settledMonths.get(1).rows.size());
+        assertEquals(0, summary.overduePay + summary.overdueReceive);
+    }
+
     @Test public void heroTotal_coversThisMonthPlusOverdue() {
         CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
             sample(), CalendarSystem.GREGORIAN, OCT_7_NOON, 12);
