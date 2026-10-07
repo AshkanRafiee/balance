@@ -71,6 +71,7 @@
     <string name="reason_transfer_in">دریافت پل</string>
     <string name="reason_transfer_out">انتقال پل</string>
     <string name="reason_balance_increase">افزایش موجودی</string>
+    <string name="reason_profit">واریز سود</string>
     <string name="row_fact_reason">دلیلی که بانک اعلام کرده: %1$s.</string>
     <string name="channel_shetab">شتاب</string>
     <string name="channel_sep">سامانه پل (پرداخت لحظه‌ای)</string>

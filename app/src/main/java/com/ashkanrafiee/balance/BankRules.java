@@ -364,6 +364,7 @@ final class BankRules {
         {"Resalat",  "dotted",          "",   ""},
         {"Pasargad", "dotted-line",     "",   ""},
         {"Middle East", "slash-line",   "",   ""},
+        {"Sepah",  "credit-line",    "6",  "24"},
     };
 
     /** Builds the matcher for one {@link #ACCOUNT_RULES} row. Each shape carries the guards — the
@@ -390,6 +391,11 @@ final class BankRules {
                 return Pattern.compile("(?m)^[0-9]{1,4}\\.[0-9]{1,6}\\.[0-9]{6,12}\\.[0-9]{1,3}(?![0-9.])\\s*\\r?$");
             case "slash-line":    // Middle East: branch/account identifier, e.g. 020/002863516
                 return Pattern.compile("(?m)^([0-9]{3}/[0-9]{9})[ \\t]*\\r?$");
+            case "credit-line":   // Sepah: the credited account, either on the profit-credit
+                // line ("واریز سود به: …") or behind "حساب:". Both alternatives are line-anchored,
+                // so a destination mention mid-line can never read as the account, and the bounds
+                // with the no-thousand-separator lookahead keep dates, codes and grouped figures out.
+                return Pattern.compile("(?m)^[ \\t]*(?:\u0648\u0627\u0631\u06CC\u0632[ \\t]+\u0633\u0648\u062F[ \\t]*\u0628\u0647|\u062D\u0633\u0627\u0628)[ \\t]*:[ \\t]*(" + d + ")(?![0-9,.])");
             default:
                 throw new IllegalArgumentException("unknown account shape '" + shape + "' for " + row[0]);
         }
@@ -408,12 +414,14 @@ final class BankRules {
 
     /** Returns the account number a message from the given bank belongs to, or null when the bank
      *  never states one in this message. Matching runs over ASCII digits only (Persian/Arabic digit
-     *  forms are folded in) so punctuation like ":", ".", and thousand separators keep their role. */
+     *  forms are folded in) so punctuation like ":", ".", and thousand separators keep their role,
+     *  and over one letter form (the Arabic yeh and kaf folded onto their Persian counterparts,
+     *  mirroring the channel matchers) so a bank that spells its label either way still matches. */
     static String extractAccount(String bank, String body) {
         if (bank == null || body == null) return null;
         Pattern p = ACCOUNT_PATTERNS.get(bank);
         if (p == null) return null;
-        Matcher m = p.matcher(digitsToAscii(body));
+        Matcher m = p.matcher(BalanceData.normalizeLetters(digitsToAscii(body)));
         if (!m.find()) return null;
         return m.groupCount() == 0 ? m.group(0) : m.group(1);
     }
@@ -436,6 +444,7 @@ final class BankRules {
     private static final String[][] REASON_RULES = {
         {"Blu", "title-line"},
         {"Middle East", "final-line"},
+        {"Sepah", "profit-line"},
     };
 
     /** Longest title line {@link #compileReason} will read as a reason. A bank names the event in a few
@@ -460,6 +469,7 @@ final class BankRules {
         REASON_CAPTION_RES.put("دریافت پل", R.string.reason_transfer_in);
         REASON_CAPTION_RES.put("انتقال پل", R.string.reason_transfer_out);
         REASON_CAPTION_RES.put("واریز مبلغ افزایش موجودی حساب", R.string.reason_balance_increase);
+        REASON_CAPTION_RES.put("واریز سود", R.string.reason_profit);
     }
 
     /** Builds the matcher for one {@link #REASON_RULES} row. Each shape carries the guards that keep a
@@ -484,6 +494,12 @@ final class BankRules {
             case "final-line":   // Middle East: the bank's movement explanation is the final line.
                 return Pattern.compile("(?s)(?:\\A|\\r?\\n)[ \\t]*([^\\d\\s\\r\\n][^\\d\\r\\n]{0,"
                     + (MAX_REASON_LENGTH - 2) + "}[^\\d\\s\\r\\n])[ \\t]*(?:\\r?\\n)?\\z");
+            case "profit-line":   // Sepah: the event on its profit-credit line ("واریز سود به: …").
+                // The phrase is literal — it names one event, so only it can ever be read here — and
+                // line-anchored, so a mention inside a longer sentence is not one. It is followed
+                // either by the "به:" account it credits or by nothing, which is also the shape the
+                // rules test probes the row with.
+                return Pattern.compile("(?m)^[ \\t]*(\u0648\u0627\u0631\u06CC\u0632[ \\t]+\u0633\u0648\u062F)(?=[ \\t]*\u0628\u0647[ \\t]*:[ \\t]*[0-9]|[ \\t]*\\r?$)");
             default:
                 throw new IllegalArgumentException("unknown reason shape '" + row[1] + "' for " + row[0]);
         }
@@ -504,7 +520,7 @@ final class BankRules {
         if (bank == null || body == null) return null;
         Pattern p = REASON_PATTERNS.get(bank);
         if (p == null) return null;
-        Matcher m = p.matcher(Digits.ascii(body));
+        Matcher m = p.matcher(BalanceData.normalizeLetters(Digits.ascii(body)));
         if (!m.find()) return null;
         String title = normalizeReason(m.group(1));
         return title.isEmpty() || !REASON_CAPTION_RES.containsKey(title) ? null : title;
