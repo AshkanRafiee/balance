@@ -46,6 +46,9 @@ final class BalanceData {
     static final String KEY_TX_CHANNELS = "transaction_channels";
     /** User-created tags keyed exactly like notes, with each transaction holding an ordered list. */
     static final String KEY_TX_TAGS = "transaction_tags";
+    /** User-created commitments (loans, debts, subscriptions and the like), stored as one JSON
+     *  array under this key. */
+    static final String KEY_COMMITMENTS = "commitments";
     /** Upper bound on one transaction note, so a huge paste cannot bloat the encrypted store. */
     static final int MAX_NOTE_LENGTH = 500;
     /** Bounds on user-created tag data, applied both at the UI boundary and while reading backups. */
@@ -72,6 +75,10 @@ final class BalanceData {
     static final String KEY_SORT = "sort_mode";
     static final String KEY_STALE_DAYS = "stale_days";
     static final String KEY_EXPAND_ALL_HISTORY = "expand_all_history";
+    /** Whether the optional commitments summary card is shown below the balance card. It is on
+     *  by default so the empty state can introduce the feature without forcing the full screen
+     *  on users who never add a commitment. */
+    static final String KEY_SHOW_COMMITMENTS = "show_commitments";
     static final int DEFAULT_STALE_DAYS = 14;
     static final String KEY_ONBOARDING_SEEN = "onboarding_seen";
 
@@ -560,6 +567,87 @@ final class BalanceData {
         return s.substring(0, end).trim();
     }
 
+    // ====================================================================
+    // Commitments
+    // ====================================================================
+
+    /** Reads every saved commitment in stored order, or an empty list when there are none or the
+     *  store cannot be read. Entries that no longer validate are dropped on read, so a corrupt
+     *  row can never poison the list. */
+    static List<Commitment> readCommitments(Context context) {
+        try {
+            String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
+                .getString(KEY_COMMITMENTS, null);
+            if (stored == null) return new ArrayList<>();
+            String json = stored.indexOf('{') == 0 ? stored : decrypt(stored);
+            return deserializeCommitments(json);
+        } catch (Exception e) {
+            Log.w(TAG, "commitment store read failed", e);
+            return new ArrayList<>();
+        }
+    }
+
+    /** Persists the supplied commitments encrypted under {@link #KEY_COMMITMENTS}. Entries are
+     *  normalized at the boundary and the list caps at {@link Commitment#MAX_COMMITMENTS}, so a
+     *  runaway import cannot bloat the store; an empty list removes the key, so a device with
+     *  no commitments stores nothing at all. */
+    static void writeCommitments(Context context, List<Commitment> commitments) {
+        try {
+            android.content.SharedPreferences.Editor e =
+                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit();
+            List<Commitment> kept = new ArrayList<>();
+            if (commitments != null) {
+                for (Commitment c : commitments) {
+                    Commitment n = Commitment.normalized(c);
+                    if (n == null) continue;
+                    boolean duplicate = false;
+                    for (Commitment k : kept) if (k.id.equals(n.id)) { duplicate = true; break; }
+                    if (!duplicate) kept.add(n);
+                    if (kept.size() >= Commitment.MAX_COMMITMENTS) break;
+                }
+            }
+            if (kept.isEmpty()) {
+                e.remove(KEY_COMMITMENTS).apply();
+                return;
+            }
+            e.putString(KEY_COMMITMENTS, encrypt(serializeCommitments(kept))).apply();
+        } catch (Exception ex) {
+            Log.w(TAG, "commitment store write failed", ex);
+        }
+    }
+
+    /** Serializes commitments to the JSON shape used for the local store and the backup payload. */
+    static String serializeCommitments(List<Commitment> commitments) throws Exception {
+        JSONArray arr = new JSONArray();
+        if (commitments != null) {
+            for (Commitment c : commitments) {
+                Commitment n = Commitment.normalized(c);
+                if (n != null) arr.put(n.toJson());
+            }
+        }
+        return new JSONObject().put(KEY_COMMITMENTS, arr).toString();
+    }
+
+    /** Parses a commitment JSON (as produced by {@link #serializeCommitments}) into a fresh list. */
+    static List<Commitment> deserializeCommitments(String json) {
+        List<Commitment> out = new ArrayList<>();
+        try {
+            JSONArray arr = new JSONObject(json).optJSONArray(KEY_COMMITMENTS);
+            if (arr == null) return out;
+            java.util.Set<String> ids = new HashSet<>();
+            for (int i = 0; i < arr.length() && out.size() < Commitment.MAX_COMMITMENTS; i++) {
+                JSONObject e = arr.optJSONObject(i);
+                if (e == null) continue;
+                Commitment c = Commitment.fromJson(e);
+                if (c == null) continue;
+                if (ids.add(c.id)) out.add(c);
+            }
+        } catch (Exception ex) {
+            Log.w(TAG, "deserializeCommitments failed");
+        }
+        return out;
+    }
+
     /** Reads one encrypted {@code key → text} store, or an empty map when it holds nothing or cannot
      *  be read. A value left in plaintext by an older build is still accepted. */
     private static Map<String, String> readTextStore(Context context, String key) {
@@ -777,10 +865,11 @@ final class BalanceData {
     static void reset(Context context, boolean alsoNotes) {
         android.content.SharedPreferences.Editor data =
             context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-                .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).remove(KEY_HISTORY_LAST_BALANCE)
+                .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS).remove(KEY_COMMITMENTS)
+                .remove(KEY_HISTORY_LAST_BALANCE)
                 .remove(KEY_RECENT_MOVEMENTS).remove(KEY_TX_REASONS).remove(KEY_TX_CHANNELS);
         if (alsoNotes) data.remove(KEY_TX_NOTES).remove(KEY_TX_TAGS);
-        data.apply();
+        data.commit();
         context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
             .remove(KEY_SCANNED_THROUGH)
             .remove(KEY_RULES_VERSION)
@@ -788,7 +877,8 @@ final class BalanceData {
             .remove(KEY_HISTORY_RULES_VERSION)
             .remove(KEY_HISTORY_SCHEMA)
             .remove(KEY_EXCLUDED)
-            .apply();
+            .commit();
+        CommitmentReminders.scheduleAll(context);
     }
 
     static boolean isHidden(Context context) {
@@ -950,6 +1040,16 @@ final class BalanceData {
     static void setExpandAllHistory(Context context, boolean on) {
         context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
             .edit().putBoolean(KEY_EXPAND_ALL_HISTORY, on).apply();
+    }
+
+    static boolean getShowCommitments(Context context) {
+        return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SHOW_COMMITMENTS, true);
+    }
+
+    static void setShowCommitments(Context context, boolean on) {
+        context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_SHOW_COMMITMENTS, on).apply();
     }
 
     /** How many whole days a balance has gone without a refresh, or 0 when its SMS date is unknown

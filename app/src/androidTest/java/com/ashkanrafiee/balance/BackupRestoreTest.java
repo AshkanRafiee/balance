@@ -1075,4 +1075,73 @@ public class BackupRestoreTest {
         assertEquals(Arrays.asList("local", "backup"), BalanceData.getTags(ctx, local));
         assertTrue(BalanceData.readTags(ctx).get("s:sig-A") == null);
     }
+
+    // ============================================================
+    // User-created commitments in backups (payload format 7)
+    // ============================================================
+
+    private static Commitment commitment(String id, String name) {
+        return new Commitment(id, name, -5000, Commitment.MONTHLY, T + 100, null, false, null,
+            true, 86400000L);
+    }
+
+    private static Commitment commitmentById(List<Commitment> commitments, String id) {
+        for (Commitment c : commitments) if (c.id.equals(id)) return c;
+        return null;
+    }
+
+    @Test public void roundTrip_commitments_restoredWithReminders() throws Exception {
+        List<Commitment> commitments = new ArrayList<>();
+        commitments.add(commitment("id-rent", "rent"));
+        commitments.add(commitment("id-gym", "gym"));
+        BalanceData.writeCommitments(ctx, commitments);
+        Uri u = uri("commitments-roundtrip.balance");
+        BackupManager.create(ctx, u, PASSWORD);
+
+        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+
+        BackupManager.restore(ctx, u, PASSWORD);
+        List<Commitment> out = BalanceData.readCommitments(ctx);
+        assertEquals(2, out.size());
+        assertEquals("rent", commitmentById(out, "id-rent").name);
+        assertEquals(-5000, commitmentById(out, "id-rent").amount);
+        assertTrue(commitmentById(out, "id-rent").remind);
+        assertEquals(86400000L, commitmentById(out, "id-rent").remindBeforeMs);
+    }
+
+    @Test public void restore_backupWithoutCommitments_preservesLocal() throws Exception {
+        BalanceData.writeCommitments(ctx,
+            new ArrayList<>(Arrays.asList(commitment("id-local", "local"))));
+
+        String legacyPayload = "{\"payloadFormat\":6,\"balances\":{},\"transactions\":"
+            + "{\"transactions\":[]},\"txNotes\":{},\"txReasons\":{},\"txChannels\":{},"
+            + "\"txTags\":{}}";
+        File f = file("commitments-legacy.balance");
+        writeLegacyBackup(f, legacyPayload, PASSWORD);
+
+        BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
+        List<Commitment> out = BalanceData.readCommitments(ctx);
+        assertEquals(1, out.size());
+        assertEquals("local", out.get(0).name);
+    }
+
+    @Test public void restore_commitments_unionByIdLocalWins() throws Exception {
+        List<Commitment> backup = new ArrayList<>();
+        backup.add(commitment("id-shared", "backup-name"));
+        backup.add(commitment("id-new", "new"));
+        BalanceData.writeCommitments(ctx, backup);
+        Uri u = uri("commitments-merge.balance");
+        BackupManager.create(ctx, u, PASSWORD);
+
+        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        List<Commitment> local = new ArrayList<>();
+        local.add(commitment("id-shared", "local-name"));
+        BalanceData.writeCommitments(ctx, local);
+
+        BackupManager.restore(ctx, u, PASSWORD);
+        List<Commitment> out = BalanceData.readCommitments(ctx);
+        assertEquals(2, out.size());
+        assertEquals("local-name", commitmentById(out, "id-shared").name);
+        assertEquals("new", commitmentById(out, "id-new").name);
+    }
 }

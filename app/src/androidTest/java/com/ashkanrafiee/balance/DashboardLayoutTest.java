@@ -102,6 +102,18 @@ public class DashboardLayoutTest {
             DashboardLayout.BANNER_TOP + DashboardLayout.BANNER_H + 1f, true));
     }
 
+    @Test public void commitments_wholeCardOpensTheCommitmentsScreen() {
+        float top = DashboardLayout.COMMITMENTS_TOP;
+        float bottom = top + DashboardLayout.COMMITMENTS_H;
+        assertTrue(DashboardLayout.inCommitments(top, true));
+        assertTrue(DashboardLayout.inCommitments(top + 41f, true));
+        assertTrue(DashboardLayout.inCommitments(top + 60f, true));
+        assertTrue(DashboardLayout.inCommitments(bottom, true));
+        assertFalse(DashboardLayout.inCommitments(top - 1f, true));
+        assertFalse(DashboardLayout.inCommitments(bottom + 1f, true));
+        assertFalse(DashboardLayout.inCommitments(top + 41f, false));
+    }
+
     @Test public void inSortBand_withoutStrip_keepsItsOriginalRange() {
         // The sort button's band used to be a hardcoded 290..350; pinning it guards the header tap
         // target against drifting when the strip shifts things down.

@@ -39,6 +39,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.List;
 import java.util.Set;
 
 public class MainActivity extends Activity {
@@ -137,6 +138,7 @@ public class MainActivity extends Activity {
             view.hidden = true;
             view.invalidate();
         }
+        if (view != null) view.stopMonthRefresh();
         if (LockManager.isEnabled(this)) {
             // A dialog is a separate window and would otherwise stay on top of the lock, still
             // clickable, when the app is re-opened; drop whatever is up as we leave the foreground.
@@ -178,6 +180,7 @@ public class MainActivity extends Activity {
         if (view != null) {
             view.handler.removeCallbacks(view.clearClipRunnable);
             view.handler.removeCallbacks(view.refreshTicker);
+            view.stopMonthRefresh();
             if (view.clearClipRunnable != null) view.clearClipRunnable.run();
         }
         super.onDestroy();
@@ -187,9 +190,14 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         LockManager.cancelPendingLock();
+        // Re-arm commitment reminders from the stored series: edits, a restored backup or a
+        // newly granted notification permission all land here before the next due.
+        CommitmentReminders.scheduleAll(this);
         if (view != null) {
             view.enforceAutoHide();
+            view.invalidateCommitmentSummary();
             view.refresh();
+            view.scheduleMonthRefresh();
         }
         registerSmsObserver();
         // A fresh install that skipped or finished the introduction returns here without ever
@@ -516,6 +524,18 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams expandLp = new LinearLayout.LayoutParams(-1, -2);
         expandLp.topMargin = dp(18);
         box.addView(expandAll, expandLp);
+
+        CheckBox showCommitments = new CheckBox(this);
+        showCommitments.setText(getString(R.string.settings_commitments_card_label));
+        showCommitments.setChecked(BalanceData.getShowCommitments(MainActivity.this));
+        showCommitments.setOnCheckedChangeListener((b, on) -> {
+            BalanceData.setShowCommitments(MainActivity.this, on);
+            if (view != null) view.updateSmsBanner();
+            if (view != null) view.invalidate();
+        });
+        LinearLayout.LayoutParams commitmentsLp = new LinearLayout.LayoutParams(-1, -2);
+        commitmentsLp.topMargin = dp(18);
+        box.addView(showCommitments, commitmentsLp);
 
         showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.footer_display))
@@ -1147,7 +1167,8 @@ public class MainActivity extends Activity {
                 } else {
                     view.loadSaved();
                     String summary = res.changed()
-                        ? getString(R.string.backup_restore_summary, res.added, res.updated)
+                        ? getString(R.string.backup_restore_summary, res.added, res.updated,
+                            res.commitmentsAdded)
                         : getString(R.string.backup_restore_summary_none);
                     Toast.makeText(MainActivity.this,
                         getString(R.string.backup_restored) + "\n" + summary,
@@ -1242,6 +1263,10 @@ public class MainActivity extends Activity {
          *  on screen and SMS access is gone, and it shifts the banks section down by its height, so
          *  every geometry question is asked of {@link DashboardLayout} against this flag. */
         boolean smsBanner;
+        boolean commitmentsCard;
+        boolean commitmentSummaryLoaded;
+        boolean hasCommitments;
+        CommitmentsActivity.Summary commitmentSummary;
         int insetsTop, insetsBottom;
         int sortMode;
         float scrollY = 0, lastY, downY;
@@ -1275,6 +1300,11 @@ public class MainActivity extends Activity {
          *  {@link #copyBalance}); while set, the clipboard holds sensitive data we placed there. */
         Runnable clearClipRunnable;
         final Handler handler = new Handler(Looper.getMainLooper());
+        final Runnable monthRefresh = () -> {
+            commitmentSummaryLoaded = false;
+            invalidate();
+            scheduleMonthRefresh();
+        };
         final Runnable lockLongProbe = () -> {
             lockProbeFired = true;
             if (MainActivity.this.isFinishing() || MainActivity.this.isDestroyed()) return;
@@ -1380,7 +1410,8 @@ public class MainActivity extends Activity {
         /** The farthest the list can be scrolled (dp), i.e. its content height minus the viewport
          *  minus the fixed non-list chrome; never below zero. */
         float maxScroll() {
-            return Math.max(0, bankListHeight - (listViewH() - DashboardLayout.chromeH(smsBanner)));
+            return Math.max(0, bankListHeight - (listViewH()
+                - DashboardLayout.chromeH(smsBanner, commitmentsCard)));
         }
 
         /** Advances the inertia of a finished drag, redrawing each frame until it settles at a
@@ -1479,6 +1510,22 @@ public class MainActivity extends Activity {
         }
 
         void refresh() { refresh(false, false, false); }
+
+        void scheduleMonthRefresh() {
+            handler.removeCallbacks(monthRefresh);
+            java.util.Calendar next = java.util.Calendar.getInstance();
+            next.set(java.util.Calendar.HOUR_OF_DAY, 0);
+            next.set(java.util.Calendar.MINUTE, 0);
+            next.set(java.util.Calendar.SECOND, 0);
+            next.set(java.util.Calendar.MILLISECOND, 0);
+            next.add(java.util.Calendar.DAY_OF_MONTH, 1);
+            handler.postDelayed(monthRefresh,
+                Math.max(1000L, next.getTimeInMillis() - System.currentTimeMillis()));
+        }
+
+        void stopMonthRefresh() {
+            handler.removeCallbacks(monthRefresh);
+        }
         void refreshSilent() { refresh(false, false, true); }
 
         /** When auto-mask is on, the balances must start (and stay) masked; call this from the
@@ -1543,8 +1590,11 @@ public class MainActivity extends Activity {
         void updateSmsBanner() {
             boolean visible = DashboardLayout.smsBannerVisible(!banks.isEmpty(),
                 checkSelfPermission(Manifest.permission.READ_SMS));
-            if (visible == smsBanner) return;
+            boolean showCommitments = BalanceData.getShowCommitments(MainActivity.this);
+            boolean layoutChanged = visible != smsBanner || showCommitments != commitmentsCard;
+            if (!layoutChanged) return;
             smsBanner = visible;
+            commitmentsCard = showCommitments;
             rows();
             scrollY = Math.max(0, Math.min(scrollY, maxScroll()));
             invalidate();
@@ -1552,8 +1602,14 @@ public class MainActivity extends Activity {
 
         /** Reloads the saved balances (e.g. after a restore) without re-scanning SMS. */
         void loadSaved() {
+            invalidateCommitmentSummary();
             applySaved(BalanceData.read(MainActivity.this), MainActivity.this,
                 getString(R.string.status_loaded_from_saved));
+        }
+
+        void invalidateCommitmentSummary() {
+            commitmentSummaryLoaded = false;
+            invalidate();
         }
 
         void refresh(boolean hard, boolean alsoNotes) { refresh(hard, alsoNotes, false); }
@@ -1588,6 +1644,7 @@ public class MainActivity extends Activity {
                 refreshing = true;
                 new Thread(() -> {
                     final Context app = MainActivity.this.getApplicationContext();
+                    if (hard) BalanceData.reset(app, alsoNotes);
                     final LinkedHashMap<String, Bank> saved = BalanceData.read(app);
                     // Nothing stored yet (a fresh install, or a reset): the empty card wants the
                     // plain "permission is needed" wording, and there is no strip to explain it.
@@ -1818,9 +1875,10 @@ public class MainActivity extends Activity {
                 else c.drawLine(w - 77, 142, w - 43, 170, p);
             }
 
+            if (commitmentsCard) drawCommitmentsCard(c, w, rtl);
             if (smsBanner) drawSmsBanner(c, w, rtl);
 
-            float sectionHeaderY = DashboardLayout.sectionHeaderY(smsBanner);
+            float sectionHeaderY = DashboardLayout.sectionHeaderY(smsBanner, commitmentsCard);
             float banksHeaderX = rtl ? w - 28 : 28;
             text(c, getString(R.string.section_banks), banksHeaderX, sectionHeaderY, 22, fg, edgeAlign);
             float sortX = rtl ? 28 : w - 28;
@@ -1828,7 +1886,7 @@ public class MainActivity extends Activity {
             text(c, sortLabel(), sortX, sectionHeaderY, 14, accent, sortAlign);
 
             float by = (getHeight() - top - bottom) / d - 32;
-            float listTop = DashboardLayout.listTop(smsBanner);
+            float listTop = DashboardLayout.listTop(smsBanner, commitmentsCard);
             c.save();
             c.clipRect(0, listTop, w, by - 42);
             float y = listTop - scrollY;
@@ -1923,7 +1981,7 @@ public class MainActivity extends Activity {
          *  between the total card and the banks section, in the same warning colours as the per-row
          *  stale badge, and the text carries the action because the whole strip is the tap target. */
         void drawSmsBanner(Canvas c, int w, boolean rtl) {
-            float top = DashboardLayout.BANNER_TOP;
+            float top = DashboardLayout.bannerTop(commitmentsCard);
             float bottom = top + DashboardLayout.BANNER_H;
             round(c, 24, top, w - 24, bottom, 16, warn_bg);
             roundStroke(c, 24, top, w - 24, bottom, 16, 1.2f, warn);
@@ -1932,6 +1990,74 @@ public class MainActivity extends Activity {
             float max = w - 80;
             text(c, fit(getString(R.string.banner_stale_title), 13, max), textX, top + 22, 13, warn, align);
             text(c, fit(getString(R.string.banner_stale_action), 12, max), textX, top + 40, 12, warn, align);
+        }
+
+        /** Optional, compact commitment summary below the balance card. It is deliberately a
+         *  separate card and keeps payable/receivable separate: those are obligations in opposite
+         *  directions and must never look like one net balance. */
+        void drawCommitmentsCard(Canvas c, int w, boolean rtl) {
+            float top = DashboardLayout.COMMITMENTS_TOP;
+            round(c, 24, top, w - 24, top + DashboardLayout.COMMITMENTS_H, 18, panel);
+            float left = 48;
+            float right = w - 48;
+            float middle = w / 2f;
+            float gutter = 10;
+            float leftWidth = middle - gutter - left;
+            float rightWidth = right - middle - gutter;
+            float leftCenter = left + leftWidth / 2f;
+            float rightCenter = middle + gutter + rightWidth / 2f;
+            float payCenter = rtl ? rightCenter : leftCenter;
+            float receiveCenter = rtl ? leftCenter : rightCenter;
+            float columnWidth = Math.min(leftWidth, rightWidth);
+            text(c, getString(R.string.commitments_card_title, commitmentMonthLabel()),
+                middle, top + 22, 14, fg, Paint.Align.CENTER);
+            if (!commitmentSummaryLoaded) {
+                List<Commitment> commitments = BalanceData.readCommitments(MainActivity.this);
+                commitmentSummary = CommitmentsActivity.summarize(
+                    commitments,
+                    RegionHelper.isIran(MainActivity.this)
+                        ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN,
+                    System.currentTimeMillis(), CommitmentsActivity.WINDOW_MONTHS);
+                hasCommitments = !commitments.isEmpty();
+                commitmentSummaryLoaded = true;
+            }
+            CommitmentsActivity.Summary summary = commitmentSummary;
+            long pay = summary.overduePay + summary.thisMonthPay;
+            long receive = summary.overdueReceive + summary.thisMonthReceive;
+            if (!hasCommitments) {
+                Paint.Align emptyAlign = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
+                float emptyX = rtl ? right : left;
+                text(c, fit(getString(R.string.commitments_card_empty), 11, w - 96),
+                    emptyX, top + 43, 11, muted, emptyAlign);
+                text(c, fit(getString(R.string.commitments_card_empty_action), 10, w - 96),
+                    emptyX, top + 61, 11, muted, emptyAlign);
+                return;
+            }
+            p.setColor(muted);
+            p.setStrokeWidth(1);
+            c.drawLine(middle, top + 31, middle, top + DashboardLayout.COMMITMENTS_H - 11, p);
+            text(c, fit(getString(R.string.commitments_remaining_payable), 10, columnWidth),
+                payCenter, top + 41, 10, muted, Paint.Align.CENTER);
+            text(c, fit(getString(R.string.commitments_remaining_receivable), 10, columnWidth),
+                receiveCenter, top + 41, 10, muted, Paint.Align.CENTER);
+            text(c, fit(hidden ? "••••••" : displayAmount(Math.abs(pay)), 11, columnWidth),
+                payCenter, top + 60, 11, resColor(R.color.negative), Paint.Align.CENTER);
+            text(c, fit(hidden ? "••••••" : displayAmount(Math.abs(receive)), 11, columnWidth),
+                receiveCenter, top + 60, 11, accent, Paint.Align.CENTER);
+        }
+
+        String commitmentMonthLabel() {
+            boolean iran = RegionHelper.isIran(MainActivity.this);
+            boolean persian = LocaleHelper.isPersian(MainActivity.this);
+            int[] civil = Commitment.civilDay(System.currentTimeMillis(),
+                iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN);
+            String year = persian ? faDigits(String.valueOf(civil[0])) : String.valueOf(civil[0]);
+            return CalDate.monthName(civil[1], iran, persian) + " " + year;
+        }
+
+        String displayAmount(long rial) {
+            return CurrencyHelper.amount(MainActivity.this, rial) + " "
+                + CurrencyHelper.label(MainActivity.this);
         }
 
         /** The pull-to-refresh arrow: a small chip with a circular arrow that follows the finger down
@@ -2036,7 +2162,7 @@ public class MainActivity extends Activity {
          *  Re-derived on every call (the lists are tiny) so drawing and touch always agree. */
         java.util.List<BankRow> rows() {
             java.util.List<BankRow> out = new java.util.ArrayList<>();
-            float top = DashboardLayout.listTop(smsBanner);
+            float top = DashboardLayout.listTop(smsBanner, commitmentsCard);
             float cursor = top;
             for (java.util.List<Bank> block : BalanceData.groupedForDisplay(banks, excluded, sortMode)) {
                 for (Bank b : block) {
@@ -2253,7 +2379,7 @@ public class MainActivity extends Activity {
                 if (lockArmed) handler.postDelayed(lockLongProbe, 480);
                 else if (eyeArmed) handler.postDelayed(eyeLongProbe, 500);
                 else if (totalArmed) handler.postDelayed(totalLongProbe, 500);
-                else if (y >= DashboardLayout.listTop(smsBanner) && y < byForTouch(h)
+                else if (y >= DashboardLayout.listTop(smsBanner, commitmentsCard) && y < byForTouch(h)
                         && (rtl ? x >= 56 : x <= getWidth() / d - 56)) {
                     // On a bank or account row, off the 3-dot menu: a long-press copies that row's
                     // balance, mirroring the total card.
@@ -2348,17 +2474,19 @@ public class MainActivity extends Activity {
                 MainActivity.this.getSharedPreferences(BalanceData.PREFS_PREF, MODE_PRIVATE)
                     .edit().putBoolean(BalanceData.KEY_HIDDEN, hidden).apply();
                 invalidate();
-            } else if (DashboardLayout.inBanner(y, smsBanner)) {
+            } else if (DashboardLayout.inCommitments(y, commitmentsCard)) {
+                startActivity(new Intent(MainActivity.this, CommitmentsActivity.class));
+            } else if (DashboardLayout.inBanner(y, smsBanner, commitmentsCard)) {
                 // Re-ask rather than jumping straight to settings: a first-time denial can still be
                 // granted by the system dialog in one tap, and onRequestPermissionsResult already
                 // falls back to the settings deep link when the denial is permanent.
                 requestSms();
             } else if (y >= DashboardLayout.TOTAL_TOP && y <= DashboardLayout.TOTAL_BOTTOM) {
                 startActivity(new Intent(MainActivity.this, HistoryActivity.class));
-            } else if (DashboardLayout.inSortBand(y, smsBanner)
+            } else if (DashboardLayout.inSortBand(y, smsBanner, commitmentsCard)
                     && (rtl ? x < 150 : x > getWidth() / d - 150)) {
                 showSortDialog();
-            } else if (y >= DashboardLayout.listTop(smsBanner) && y < byForTouch(h)) {
+            } else if (y >= DashboardLayout.listTop(smsBanner, commitmentsCard) && y < byForTouch(h)) {
                 if (banks.isEmpty()) {
                     // No balances at all: the empty card is the app's main entry point again. Without
                     // SMS permission (e.g. after a permanent denial, which no runtime re-request can

@@ -81,6 +81,42 @@ final class CalDate {
         return Integer.compare(day, o.day);
     }
 
+    /** Localized month name for the 1-based index: the Persian month names (Jalali script or the
+     *  "Farvardin"-style transliteration) for the Iran region, and the Gregorian month names
+     *  (Persian-scripted in the Persian UI) for International. */
+    static String monthName(int month, boolean iran, boolean fa) {
+        if (iran) {
+            switch (month) {
+                case 1: return fa ? "فروردین" : "Farvardin";
+                case 2: return fa ? "اردیبهشت" : "Ordibehesht";
+                case 3: return fa ? "خرداد" : "Khordad";
+                case 4: return fa ? "تیر" : "Tir";
+                case 5: return fa ? "مرداد" : "Mordad";
+                case 6: return fa ? "شهریور" : "Shahrivar";
+                case 7: return fa ? "مهر" : "Mehr";
+                case 8: return fa ? "آبان" : "Aban";
+                case 9: return fa ? "آذر" : "Azar";
+                case 10: return fa ? "دی" : "Dey";
+                case 11: return fa ? "بهمن" : "Bahman";
+                default: return fa ? "اسفند" : "Esfand";
+            }
+        }
+        switch (month) {
+            case 1: return fa ? "ژانویه" : "January";
+            case 2: return fa ? "فوریه" : "February";
+            case 3: return fa ? "مارس" : "March";
+            case 4: return fa ? "آوریل" : "April";
+            case 5: return fa ? "مه" : "May";
+            case 6: return fa ? "ژوئن" : "June";
+            case 7: return fa ? "ژوئیه" : "July";
+            case 8: return fa ? "اوت" : "August";
+            case 9: return fa ? "سپتامبر" : "September";
+            case 10: return fa ? "اکتبر" : "October";
+            case 11: return fa ? "نوامبر" : "November";
+            default: return fa ? "دسامبر" : "December";
+        }
+    }
+
     /** Stable group/expansion key "{year}/{month}/{day}". */
     String key() {
         return year + "/" + month + "/" + day;
