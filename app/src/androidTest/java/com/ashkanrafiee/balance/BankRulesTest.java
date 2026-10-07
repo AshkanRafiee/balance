@@ -322,6 +322,40 @@ public class BankRulesTest {
             " \u0627\u0646\u062A\u0642\u0627\u0644 \u0628\u0647 \u062D\u0633\u0627\u0628: 1,000,000"));
     }
 
+    @Test public void extractAccount_sepahProfitLine_returnsAccount() {
+        // Driven with the synthetic messages in {@link SepahMessages}, written in the shape the
+        // bank sends them, so the rule test and the scan test see the same bytes.
+        assertEquals(SepahMessages.ACCOUNT,
+            BankRules.extractAccount("Sepah", SepahMessages.PROFIT_A));
+        assertEquals(SepahMessages.ACCOUNT,
+            BankRules.extractAccount("Sepah", SepahMessages.PROFIT_B));
+        assertEquals(SepahMessages.ACCOUNT,
+            BankRules.extractAccount("Sepah",
+                SepahMessages.PROFIT_A.replace("\n", "\r\n")));
+    }
+
+    @Test public void extractAccount_sepahHesabLine_returnsAccount() {
+        // The bank's other layout states the credited account behind "حساب:", with no space
+        // after the colon.
+        assertEquals(SepahMessages.ACCOUNT_B,
+            BankRules.extractAccount("Sepah", SepahMessages.DEPOSIT));
+        assertEquals("02000000000002", BankRules.extractAccount("Sepah",
+            SepahMessages.DEPOSIT.replace("حساب:", "حساب: ")));
+    }
+
+    @Test public void extractAccount_sepahGuards_rejectNonAccounts() {
+        // Too short for an account, too long for one, a destination without the profit event and
+        // a bare balance: none of them is the credited account.
+        assertNull(BankRules.extractAccount("Sepah",
+            SepahMessages.PROFIT_A.replace(SepahMessages.ACCOUNT, "12345")));
+        assertNull(BankRules.extractAccount("Sepah",
+            SepahMessages.PROFIT_A.replace(SepahMessages.ACCOUNT,
+                "123456789012345678901234567890")));
+        assertNull(BankRules.extractAccount("Sepah",
+            "انتقال به حساب: 12345678\nمبلغ: 87,450ريال\nمانده: 9,876,543ريال"));
+        assertNull(BankRules.extractAccount("Sepah", "مانده: 9,876,543ريال"));
+    }
+
     @Test public void extractAccount_nullArguments_notCaptured() {
         assertNull(BankRules.extractAccount(null, "10.1234567.2"));
         assertNull(BankRules.extractAccount("Mellat", null));
@@ -332,7 +366,7 @@ public class BankRulesTest {
         java.util.Set<String> known = BankRules.supportedNames();
         java.util.Set<String> shapes = new java.util.HashSet<>(java.util.Arrays.asList(
             "label-glued", "label-colon", "label-colon-line", "bare-mablagh", "bare-bidi",
-            "dotted", "dotted-line", "slash-line"));
+            "dotted", "dotted-line", "slash-line", "credit-line"));
         java.util.Set<String> banksSeen = new java.util.HashSet<>();
         for (String[] row : BankRules.accountRulesTestOnly()) {
             assertEquals(4, row.length);
@@ -381,7 +415,7 @@ public class BankRulesTest {
             assertTrue("row bank not known: " + row[0], known.contains(row[0]));
             assertTrue("duplicate bank row: " + row[0], banksSeen.add(row[0]));
             assertTrue("unknown shape: " + row[1], row[1].equals("title-line")
-                || row[1].equals("final-line"));
+                || row[1].equals("final-line") || row[1].equals("profit-line"));
         }
     }
 
@@ -419,6 +453,23 @@ public class BankRulesTest {
         assertEquals("واریز مبلغ افزایش موجودی حساب", BankRules.extractReason("Middle East",
             "بانک خاورمیانه\n020/002863516\n+1,000,000\n07/13\n21:32\n"
                 + "مانده 1,000,000\nواریز مبلغ افزایش موجودی حساب\r\n"));
+    }
+
+    @Test public void extractReason_sepahProfitLine_returnsTheStatedReason() {
+        assertEquals(SepahMessages.PROFIT,
+            BankRules.extractReason("Sepah", SepahMessages.PROFIT_A));
+        assertEquals(SepahMessages.PROFIT,
+            BankRules.extractReason("Sepah", SepahMessages.PROFIT_B));
+        assertEquals(SepahMessages.PROFIT, BankRules.extractReason("Sepah",
+            SepahMessages.PROFIT_A.replace("\n", "\r\n")));
+    }
+
+    @Test public void extractReason_sepahWithoutTheProfitLine_statesNoReason() {
+        assertNull(BankRules.extractReason("Sepah", "مانده: 9,876,543ريال"));
+        assertNull(BankRules.extractReason("Sepah",
+            "متن واریز سود به: 12345678\nمانده: 9,876,543ريال"));
+        assertNull(BankRules.extractReason("Sepah", BluMessages.TOPUP));
+        assertNull(BankRules.extractReason("Sepah", SepahMessages.DEPOSIT));
     }
 
     @Test public void extractReason_plainDirectionTitle_statesNoReason() {
