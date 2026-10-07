@@ -550,7 +550,6 @@ public final class CommitmentsActivity extends Activity {
             pay.setOnClickListener(v -> markSettled(row));
             line.addView(pay, lp);
         }
-        line.setOnClickListener(v -> editorDialog(row.commitment.id));
         return line;
     }
 

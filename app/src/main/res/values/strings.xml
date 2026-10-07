@@ -188,6 +188,8 @@
     <string name="commitments_total">Remaining</string>
     <string name="commitments_payable">Payable</string>
     <string name="commitments_receivable">Receivable</string>
+    <string name="commitments_remaining_payable">Remaining payable</string>
+    <string name="commitments_remaining_receivable">Remaining receivable</string>
     <string name="commitments_window_this_month">This month + overdue</string>
     <string name="commitments_card_empty">Track payables and receivables here.</string>
     <string name="commitments_card_empty_action">Tap to add a commitment. Hide it in Display.</string>

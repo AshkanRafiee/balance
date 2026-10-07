@@ -188,6 +188,8 @@
     <string name="commitments_total">باقی‌مانده</string>
     <string name="commitments_payable">پرداختنی</string>
     <string name="commitments_receivable">دریافتنی</string>
+    <string name="commitments_remaining_payable">باقی‌ماندهٔ پرداختنی</string>
+    <string name="commitments_remaining_receivable">باقی‌ماندهٔ دریافتنی</string>
     <string name="commitments_window_this_month">این ماه + معوقه</string>
     <string name="commitments_card_empty">پرداختنی‌ها و دریافتنی‌هایتان را اینجا ثبت کنید.</string>
     <string name="commitments_card_empty_action">برای افزودن تعهد بزنید. آن را از «نمایش» پنهان کنید.</string>

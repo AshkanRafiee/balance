@@ -39,6 +39,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.List;
 import java.util.Set;
 
 public class MainActivity extends Activity {
@@ -1974,13 +1975,14 @@ public class MainActivity extends Activity {
             float columnWidth = Math.min(leftWidth, rightWidth);
             text(c, getString(R.string.commitments_card_title, commitmentMonthLabel()),
                 middle, top + 22, 14, fg, Paint.Align.CENTER);
+            List<Commitment> commitments = BalanceData.readCommitments(MainActivity.this);
             CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
-                BalanceData.readCommitments(MainActivity.this),
+                commitments,
                 RegionHelper.isIran(MainActivity.this) ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN,
                 System.currentTimeMillis(), CommitmentsActivity.WINDOW_MONTHS);
             long pay = summary.overduePay + summary.thisMonthPay;
             long receive = summary.overdueReceive + summary.thisMonthReceive;
-            if (pay == 0 && receive == 0) {
+            if (commitments.isEmpty()) {
                 Paint.Align emptyAlign = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
                 float emptyX = rtl ? right : left;
                 text(c, fit(getString(R.string.commitments_card_empty), 11, w - 96),
@@ -1992,9 +1994,9 @@ public class MainActivity extends Activity {
             p.setColor(muted);
             p.setStrokeWidth(1);
             c.drawLine(middle, top + 31, middle, top + DashboardLayout.COMMITMENTS_H - 11, p);
-            text(c, fit(getString(R.string.commitments_payable), 10, columnWidth),
+            text(c, fit(getString(R.string.commitments_remaining_payable), 10, columnWidth),
                 payCenter, top + 41, 10, muted, Paint.Align.CENTER);
-            text(c, fit(getString(R.string.commitments_receivable), 10, columnWidth),
+            text(c, fit(getString(R.string.commitments_remaining_receivable), 10, columnWidth),
                 receiveCenter, top + 41, 10, muted, Paint.Align.CENTER);
             text(c, fit(displayAmount(Math.abs(pay)), 11, columnWidth),
                 payCenter, top + 60, 11, resColor(R.color.negative), Paint.Align.CENTER);
