@@ -408,6 +408,10 @@ public final class CommitmentsActivity extends Activity {
         }
     }
 
+    static boolean endDateControlsVisible(int frequency) {
+        return frequency != Commitment.ONCE;
+    }
+
     private void overdueCard(Summary summary) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -650,6 +654,8 @@ public final class CommitmentsActivity extends Activity {
             margin(0, 8, 0, 0));
 
         final int[] frequency = {existing != null ? existing.frequency : Commitment.MONTHLY};
+        final LinearLayout endControls = new LinearLayout(this);
+        endControls.setOrientation(LinearLayout.VERTICAL);
         String[] freqLabels = {
             getString(R.string.commitments_freq_once), getString(R.string.commitments_freq_daily),
             getString(R.string.commitments_freq_weekly),
@@ -664,6 +670,7 @@ public final class CommitmentsActivity extends Activity {
             freqActions[i] = () -> {
                 freqSelected[0] = index;
                 refreshChips(freqChips, index);
+                endControls.setVisibility(endDateControlsVisible(index) ? View.VISIBLE : View.GONE);
             };
         }
         form.addView(chipRow(freqChips, freqSelected[0], freqActions), margin(0, 8, 0, 0));
@@ -676,13 +683,13 @@ public final class CommitmentsActivity extends Activity {
         EditText[] startFields = dateFields(startCivil);
         form.addView(dateRow(startFields), margin(0, 0, 0, 0));
 
-        form.addView(text(getString(R.string.commitments_end), 13, muted, medium()),
+        endControls.addView(text(getString(R.string.commitments_end), 13, muted, medium()),
             margin(0, 12, 0, 2));
         CheckBox openEnded = new CheckBox(this);
         openEnded.setText(getString(R.string.commitments_open_ended));
         openEnded.setTypeface(Fonts.text(this), Typeface.NORMAL);
         openEnded.setChecked(existing != null && existing.end == null);
-        form.addView(openEnded, new LinearLayout.LayoutParams(-2, -2));
+        endControls.addView(openEnded, new LinearLayout.LayoutParams(-2, -2));
         int[] endCivil = existing != null && existing.end != null
             ? Commitment.civilDay(existing.end, cal) : today;
         EditText[] endFields = dateFields(endCivil);
@@ -690,7 +697,9 @@ public final class CommitmentsActivity extends Activity {
         endRow.setVisibility(openEnded.isChecked() ? View.GONE : View.VISIBLE);
         openEnded.setOnCheckedChangeListener((v, checked) ->
             endRow.setVisibility(checked ? View.GONE : View.VISIBLE));
-        form.addView(endRow, margin(0, 0, 0, 0));
+        endControls.addView(endRow, margin(0, 0, 0, 0));
+        endControls.setVisibility(endDateControlsVisible(freqSelected[0]) ? View.VISIBLE : View.GONE);
+        form.addView(endControls, new LinearLayout.LayoutParams(-1, -2));
 
         form.addView(text(getString(R.string.commitments_remind), 13, muted, medium()),
             margin(0, 12, 0, 2));
@@ -774,8 +783,9 @@ public final class CommitmentsActivity extends Activity {
             dlg.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(canSave(name, amount));
             dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                 long leadMs = parseLead(leadNumber.getText().toString(), unitSelected[0]);
+                boolean saveEnd = endDateControlsVisible(freqSelected[0]) && !openEnded.isChecked();
                 if (saveFromForm(existing, name, amount, pay[0], freqSelected[0], startFields,
-                        openEnded.isChecked() ? null : endFields, cal, remindBox.isChecked(),
+                        saveEnd ? endFields : null, cal, remindBox.isChecked(),
                         leadMs)) {
                     dlg.dismiss();
                 }

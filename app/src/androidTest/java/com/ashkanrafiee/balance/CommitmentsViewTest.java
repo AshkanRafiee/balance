@@ -1,6 +1,7 @@
 package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -182,6 +183,12 @@ public class CommitmentsViewTest {
         assertEquals(9000, summary.overdueReceive);
         assertEquals(-7000, summary.thisMonthPay);
         assertEquals(9000, summary.thisMonthReceive);
+    }
+
+    @Test public void onceFrequency_hidesEndDateControls() {
+        assertFalse(CommitmentsActivity.endDateControlsVisible(Commitment.ONCE));
+        assertTrue(CommitmentsActivity.endDateControlsVisible(Commitment.DAILY));
+        assertTrue(CommitmentsActivity.endDateControlsVisible(Commitment.MONTHLY));
     }
 
 }
