@@ -5,8 +5,13 @@ import android.net.Uri;
 import android.util.Base64;
 import android.util.Log;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.spec.KeySpec;
@@ -18,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import javax.crypto.Cipher;
+import javax.crypto.CipherOutputStream;
 import javax.crypto.SecretKey;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.GCMParameterSpec;
@@ -109,25 +115,6 @@ final class BackupManager {
      *  {@code uri}. Synchronized on {@link BalanceData} like {@link #restore} so the snapshot can
      *  never interleave with a background {@link BalanceData#scanSms} scan. */
     static void create(Context context, Uri uri, String password) throws Exception {
-        String payload;
-        synchronized (BalanceData.class) {
-            payload = new JSONObject()
-                .put("payloadFormat", PAYLOAD_FORMAT)
-                .put("balances", new JSONObject(BalanceData.serialize(BalanceData.read(context))))
-                .put("transactions", new JSONObject(
-                    BalanceData.serializeTransactions(BalanceData.readTransactions(context))))
-                .put("txNotes", new JSONObject(BalanceData.serializeTextMap(BalanceData.readNotes(context))))
-                .put("txReasons", new JSONObject(
-                    BalanceData.serializeTextMap(BalanceData.readReasons(context))))
-                .put("txChannels", new JSONObject(
-                    BalanceData.serializeTextMap(BalanceData.readChannels(context))))
-                .put("txTags", new JSONObject(
-                    BalanceData.serializeTagsMap(BalanceData.readTags(context))))
-                .put("commitments", new JSONObject(
-                    BalanceData.serializeCommitments(BalanceData.readCommitments(context))))
-                .toString();
-        }
-
         byte[] salt = randomBytes(SALT_BYTES);
         byte[] iv = randomBytes(IV_BYTES);
 
@@ -145,22 +132,52 @@ final class BackupManager {
                 .put("iv", Base64.encodeToString(iv, Base64.NO_WRAP))
                 .put("tagBits", TAG_BITS));
         byte[] headerBytes = header.toString().getBytes(StandardCharsets.UTF_8);
+        File temp = File.createTempFile("balance-backup-", ".tmp", context.getCacheDir());
+        try {
+            synchronized (BalanceData.class) {
+                SecretKey key = deriveKey(KDF_ALGORITHM, password, salt, ITERATIONS, KEY_BITS);
+                Cipher cipher = Cipher.getInstance(CIPHER_ALGORITHM);
+                cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(TAG_BITS, iv));
+                cipher.updateAAD(headerBytes);
+                try (FileOutputStream raw = new FileOutputStream(temp)) {
+                    raw.write(MAGIC);
+                    raw.write(FORMAT_VERSION);
+                    raw.write(toIntBytes(headerBytes.length));
+                    raw.write(headerBytes);
+                    try (Writer writer = new OutputStreamWriter(
+                            new CipherOutputStream(raw, cipher), StandardCharsets.UTF_8)) {
+                        writeStreamingPayload(context, writer);
+                    }
+                }
+            }
+            if (temp.length() > MAX_BACKUP_BYTES) throw new Exception("backup too large");
+            copyFileToUri(context, temp, uri);
+        } finally {
+            temp.delete();
+        }
+    }
 
-        SecretKey key = deriveKey(KDF_ALGORITHM, password, salt, ITERATIONS, KEY_BITS);
-        Cipher cipher = Cipher.getInstance(CIPHER_ALGORITHM);
-        cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(TAG_BITS, iv));
-        cipher.updateAAD(headerBytes);
-        byte[] ct = cipher.doFinal(payload.getBytes(StandardCharsets.UTF_8));
-
-        ByteArrayOutputStream out = new ByteArrayOutputStream(headerBytes.length + ct.length + 13);
-        out.write(MAGIC);
-        out.write(FORMAT_VERSION);
-        out.write(toIntBytes(headerBytes.length));
-        out.write(headerBytes);
-        out.write(ct);
-        byte[] backup = out.toByteArray();
-        if (backup.length > MAX_BACKUP_BYTES) throw new Exception("backup too large");
-        writeUri(context, uri, backup);
+    private static void writeStreamingPayload(Context context, Writer writer) throws Exception {
+        writer.write("{\"payloadFormat\":" + PAYLOAD_FORMAT + ",\"balances\":");
+        writer.write(BalanceData.serialize(BalanceData.read(context)));
+        writer.write(",\"transactions\":{\"transactions\":[");
+        final boolean[] first = {true};
+        TransactionStore.forEach(context, 256, transaction -> {
+            if (!first[0]) writer.write(",");
+            first[0] = false;
+            writer.write(BalanceData.transactionJson(transaction).toString());
+        });
+        writer.write("]},\"txNotes\":");
+        writer.write(BalanceData.serializeTextMap(BalanceData.readNotes(context)));
+        writer.write(",\"txReasons\":");
+        writer.write(BalanceData.serializeTextMap(BalanceData.readReasons(context)));
+        writer.write(",\"txChannels\":");
+        writer.write(BalanceData.serializeTextMap(BalanceData.readChannels(context)));
+        writer.write(",\"txTags\":");
+        writer.write(BalanceData.serializeTagsMap(BalanceData.readTags(context)));
+        writer.write(",\"commitments\":");
+        writer.write(BalanceData.serializeCommitments(BalanceData.readCommitments(context)));
+        writer.write("}");
     }
 
     /** Reads an encrypted backup, merges it with the current balances (newest wins per bank) and
@@ -494,6 +511,16 @@ final class BackupManager {
         try (OutputStream os = context.getContentResolver().openOutputStream(uri, "w")) {
             if (os == null) throw new Exception("null output stream");
             os.write(data);
+        }
+    }
+
+    private static void copyFileToUri(Context context, File source, Uri uri) throws Exception {
+        try (InputStream in = new FileInputStream(source);
+                OutputStream out = context.getContentResolver().openOutputStream(uri, "w")) {
+            if (out == null) throw new Exception("null output stream");
+            byte[] buffer = new byte[8192];
+            int n;
+            while ((n = in.read(buffer)) >= 0) out.write(buffer, 0, n);
         }
     }
 
