@@ -1441,6 +1441,7 @@ final class BalanceData {
             Map<String, String> detectedChannels = new LinkedHashMap<>();
             String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
             String[] args = selection != null ? new String[]{Long.toString(hwm)} : null;
+            Map<String, Long> lastBalance = null;
             try (Cursor cursor = context.getContentResolver().query(
                 Telephony.Sms.Inbox.CONTENT_URI,
                 new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
@@ -1471,7 +1472,7 @@ final class BalanceData {
                 // the chain starts from the oldest kept message; on an incremental scan it is seeded
                 // from the last balance persisted by the previous scan.
                 rows.sort((a, b) -> Long.compare((Long) a[3], (Long) b[3]));
-                Map<String, Long> lastBalance = full ? new HashMap<>() : loadLastBalances(context);
+                lastBalance = full ? new HashMap<>() : loadLastBalances(context);
 
                 // Group this scan's rows by bank, merge each bank's movements into its recent-window,
                 // and reconcile the balance chains, so a fee and its transfer that arrived in the wrong
