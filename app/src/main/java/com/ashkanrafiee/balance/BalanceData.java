@@ -413,17 +413,21 @@ final class BalanceData {
     static String serializeTransactions(List<Transaction> txs) throws Exception {
         JSONArray arr = new JSONArray();
         for (Transaction t : txs) {
-            JSONObject e = new JSONObject()
-                .put("bank", t.bank)
-                .put("date", t.date)
-                .put("amount", t.amount);
-            if (t.account != null) e.put("account", t.account);
-            if (t.balance != null) e.put("bal", t.balance.longValue());
-            if (t.sig != null) e.put("sig", t.sig);
-            if (t.content != null) e.put("content", t.content);
-            arr.put(e);
+            arr.put(transactionJson(t));
         }
         return new JSONObject().put(KEY_TRANSACTIONS, arr).toString();
+    }
+
+    static JSONObject transactionJson(Transaction t) throws Exception {
+        JSONObject e = new JSONObject()
+            .put("bank", t.bank)
+            .put("date", t.date)
+            .put("amount", t.amount);
+        if (t.account != null) e.put("account", t.account);
+        if (t.balance != null) e.put("bal", t.balance.longValue());
+        if (t.sig != null) e.put("sig", t.sig);
+        if (t.content != null) e.put("content", t.content);
+        return e;
     }
 
     /** Parses a transaction JSON (as produced by {@link #serializeTransactions}) into a fresh list. */

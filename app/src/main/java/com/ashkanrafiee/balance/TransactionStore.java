@@ -38,6 +38,8 @@ final class TransactionStore {
         }
     }
 
+    interface Visitor { void accept(Transaction transaction) throws Exception; }
+
     static List<Transaction> read(Context context) throws Exception {
         try (Helper helper = new Helper(context)) {
             SQLiteDatabase db = helper.getReadableDatabase();
@@ -82,6 +84,21 @@ final class TransactionStore {
                 }
             }
             return new Page(rows, next, hasMore);
+        }
+    }
+
+    static void forEach(Context context, int pageSize, Visitor visitor) throws Exception {
+        Page first = page(context, -1, pageSize);
+        if (first == null) {
+            for (Transaction transaction : BalanceData.readTransactions(context)) visitor.accept(transaction);
+            return;
+        }
+        Page current = first;
+        while (true) {
+            for (Transaction transaction : current.rows) visitor.accept(transaction);
+            if (!current.hasMore) return;
+            current = page(context, current.nextOrdinal, pageSize);
+            if (current == null) throw new Exception("transaction store disappeared");
         }
     }
 
