@@ -83,6 +83,22 @@ public class TransactionStoreTest {
         assertEquals(9_002L, output.get(1).date);
     }
 
+    @Test public void pageReadsOnlyTheRequestedWindow() throws Exception {
+        List<Transaction> input = new ArrayList<>();
+        for (int i = 0; i < 2_050; i++)
+            input.add(new Transaction("Synthetic", 10_000L + i, i));
+        assertEquals(true, BalanceData.writeTransactions(context, input));
+
+        TransactionStore.Page first = TransactionStore.page(context, -1, 37);
+        assertEquals(37, first.rows.size());
+        assertEquals(10_036L, first.rows.get(36).date);
+        assertEquals(true, first.hasMore);
+
+        TransactionStore.Page second = TransactionStore.page(context, first.nextOrdinal, 37);
+        assertEquals(37, second.rows.size());
+        assertEquals(37, second.rows.get(0).amount);
+    }
+
     private static void assertTransactionEquals(Transaction expected, Transaction actual) {
         assertEquals(expected.bank, actual.bank);
         assertEquals(expected.account, actual.account);

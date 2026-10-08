@@ -26,6 +26,18 @@ final class TransactionStore {
 
     private TransactionStore() {}
 
+    static final class Page {
+        final List<Transaction> rows;
+        final int nextOrdinal;
+        final boolean hasMore;
+
+        Page(List<Transaction> rows, int nextOrdinal, boolean hasMore) {
+            this.rows = rows;
+            this.nextOrdinal = nextOrdinal;
+            this.hasMore = hasMore;
+        }
+    }
+
     static List<Transaction> read(Context context) throws Exception {
         try (Helper helper = new Helper(context)) {
             SQLiteDatabase db = helper.getReadableDatabase();
@@ -41,6 +53,35 @@ final class TransactionStore {
                 }
             }
             return out;
+        }
+    }
+
+    /** Reads one bounded page after {@code afterOrdinal}; no earlier rows are materialized. */
+    static Page page(Context context, int afterOrdinal, int limit) throws Exception {
+        if (limit <= 0) throw new IllegalArgumentException("page size must be positive");
+        try (Helper helper = new Helper(context)) {
+            SQLiteDatabase db = helper.getReadableDatabase();
+            if (!isReady(db) || !isOwnedBy(context, db)) return null;
+            List<Transaction> rows = new ArrayList<>();
+            int next = afterOrdinal;
+            boolean hasMore = false;
+            try (Cursor cursor = db.query(TABLE, new String[]{"ordinal", "payload"},
+                    "ordinal > ?", new String[]{Integer.toString(afterOrdinal)}, null, null,
+                    "ordinal ASC", Integer.toString(limit + 1))) {
+                while (cursor.moveToNext()) {
+                    int ordinal = cursor.getInt(0);
+                    if (rows.size() >= limit) {
+                        hasMore = true;
+                        break;
+                    }
+                    List<Transaction> decoded = BalanceData.deserializeTransactions(
+                        BalanceData.decryptStorePayload(cursor.getString(1)));
+                    if (decoded.size() != 1) throw new Exception("invalid transaction row");
+                    rows.add(decoded.get(0));
+                    next = ordinal;
+                }
+            }
+            return new Page(rows, next, hasMore);
         }
     }
 
