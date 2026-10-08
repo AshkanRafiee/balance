@@ -231,8 +231,7 @@ final class BalanceData {
     static LinkedHashMap<String, Bank> read(Context context) {
         LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
         try {
-            String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
-                .getString(KEY_BALANCES, null);
+            String stored = DataGeneration.dataPrefs(context).getString(KEY_BALANCES, null);
             if (stored == null) return map;
             boolean legacy = stored.indexOf('{') == 0;
             String json = legacy ? stored : decrypt(stored);
@@ -330,7 +329,7 @@ final class BalanceData {
     }
 
     private static List<Transaction> readPagedTransactions(Context context) throws Exception {
-        String encoded = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
+        String encoded = DataGeneration.dataPrefs(context)
             .getString(KEY_TRANSACTIONS_MANIFEST, null);
         if (encoded == null) return null;
         JSONObject manifest = new JSONObject(decrypt(encoded));
@@ -368,7 +367,7 @@ final class BalanceData {
     }
 
     private static void clearPagedTransactions(Context context) {
-        context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
+        DataGeneration.dataPrefs(context).edit()
             .remove(KEY_TRANSACTIONS_MANIFEST).commit();
         removeOldTransactionPages(context, null);
     }
@@ -682,8 +681,7 @@ final class BalanceData {
      *  be read. A value left in plaintext by an older build is still accepted. */
     private static Map<String, String> readTextStore(Context context, String key) {
         try {
-            String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
-                .getString(key, null);
+            String stored = DataGeneration.dataPrefs(context).getString(key, null);
             if (stored == null) return new LinkedHashMap<>();
             boolean legacy = stored.indexOf('{') == 0;
             Map<String, String> out = new LinkedHashMap<>(
@@ -700,8 +698,7 @@ final class BalanceData {
      *  so a device with nothing to say about this store keeps nothing at all. */
     private static void writeTextStore(Context context, String key, Map<String, String> map) {
         try {
-            android.content.SharedPreferences.Editor e =
-                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit();
+            android.content.SharedPreferences.Editor e = DataGeneration.dataPrefs(context).edit();
             if (map == null || map.isEmpty()) {
                 e.remove(key).apply();
                 return;
@@ -860,14 +857,13 @@ final class BalanceData {
 
     static void write(Context context, LinkedHashMap<String, Bank> map) {
         try {
-            String existing = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
-                .getString(KEY_BALANCES, null);
+            String existing = DataGeneration.dataPrefs(context).getString(KEY_BALANCES, null);
             if (map.isEmpty() && existing != null) {
                 Log.w(TAG, "refusing to persist empty balances over existing data");
                 return;
             }
             String json = serialize(map);
-            context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
+            DataGeneration.dataPrefs(context).edit()
                 .putString(KEY_BALANCES, encrypt(json)).apply();
         } catch (Exception e) {
             Log.w(TAG, "write failed", e);
@@ -890,7 +886,7 @@ final class BalanceData {
         try { MetadataStore.reset(context, alsoNotes); }
         catch (Exception e) { throw new IllegalStateException("metadata reset failed", e); }
         android.content.SharedPreferences.Editor data =
-            context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
+            DataGeneration.dataPrefs(context).edit()
                 .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS)
                 .remove(KEY_TRANSACTIONS_MANIFEST).remove(KEY_COMMITMENTS)
                 .remove(KEY_HISTORY_LAST_BALANCE)
@@ -2239,8 +2235,7 @@ final class BalanceData {
     private static Map<String, List<Reconcile.Entry>> loadRecentMovements(Context context) {
         Map<String, List<Reconcile.Entry>> map = new HashMap<>();
         try {
-            String raw = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
-                .getString(KEY_RECENT_MOVEMENTS, null);
+            String raw = DataGeneration.dataPrefs(context).getString(KEY_RECENT_MOVEMENTS, null);
             if (raw == null) return map;
             boolean legacy = raw.indexOf('{') == 0;
             String json = legacy ? raw : decrypt(raw);
@@ -2270,7 +2265,7 @@ final class BalanceData {
     private static void saveRecentMovements(Context context, Map<String, List<Reconcile.Entry>> map) {
         try {
             if (map.isEmpty()) {
-                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
+                DataGeneration.dataPrefs(context).edit()
                     .remove(KEY_RECENT_MOVEMENTS).apply();
                 return;
             }
@@ -2284,7 +2279,7 @@ final class BalanceData {
                 }
                 obj.put(e.getKey(), arr);
             }
-            context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
+            DataGeneration.dataPrefs(context).edit()
                 .putString(KEY_RECENT_MOVEMENTS, encrypt(obj.toString())).apply();
         } catch (Exception e) {
             Log.w(TAG, "saveRecentMovements failed", e);
@@ -2296,8 +2291,7 @@ final class BalanceData {
     private static Map<String, Long> loadLastBalances(Context context) {
         Map<String, Long> map = new HashMap<>();
         try {
-            String raw = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
-                .getString(KEY_HISTORY_LAST_BALANCE, null);
+            String raw = DataGeneration.dataPrefs(context).getString(KEY_HISTORY_LAST_BALANCE, null);
             if (raw == null) return map;
             boolean legacy = raw.indexOf('{') == 0;
             String json = legacy ? raw : decrypt(raw);
@@ -2319,11 +2313,11 @@ final class BalanceData {
             JSONObject obj = new JSONObject();
             for (Map.Entry<String, Long> e : map.entrySet()) obj.put(e.getKey(), e.getValue().longValue());
             if (map.isEmpty()) {
-                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
+                DataGeneration.dataPrefs(context).edit()
                     .remove(KEY_HISTORY_LAST_BALANCE).apply();
                 return;
             }
-            context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
+            DataGeneration.dataPrefs(context).edit()
                 .putString(KEY_HISTORY_LAST_BALANCE, encrypt(obj.toString())).apply();
         } catch (Exception ex) {
             Log.w(TAG, "saveLastBalances failed", ex);

@@ -1116,7 +1116,7 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             final int[] error = {0};
             try {
-                BackupManager.create(getApplicationContext(), uri, password);
+                BackupManager.createFramed(getApplicationContext(), uri, password);
             } catch (BackupManager.BackupException e) {
                 error[0] = e.resId;
             } catch (Exception e) {

@@ -6,6 +6,7 @@ import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
+import android.database.sqlite.SQLiteException;
 import android.util.Base64;
 
 import org.json.JSONArray;
@@ -253,6 +254,18 @@ final class MetadataStore {
         return mergeText(context, CHANNELS, values);
     }
 
+    static boolean mergeTextEntry(Context context, int kind, String key, String value)
+            throws Exception {
+        requireTextKind(kind);
+        requireKey(key);
+        String normalized = normalizeText(value);
+        if (normalized == null) return false;
+        return access(context, kind, true, true, s -> {
+            if (s.find(kind, key) != null) return false;
+            return s.put(kind, key, normalized, null);
+        });
+    }
+
     /** Additive local-first merge for scans and backup restore; false means no change. */
     static boolean mergeText(Context context, int kind, Map<String, String> values) throws Exception {
         requireTextKind(kind);
@@ -282,6 +295,18 @@ final class MetadataStore {
                 changed |= s.put(TAGS, entry.getKey(), null, tags);
             }
             return changed;
+        });
+    }
+
+    static boolean mergeTagsEntry(Context context, String key, Collection<String> values)
+            throws Exception {
+        requireKey(key);
+        List<String> incoming = normalizeTags(values);
+        if (incoming.isEmpty()) return false;
+        return access(context, TAGS, true, true, s -> {
+            Row row = s.find(TAGS, key);
+            List<String> merged = unionTags(row == null ? Collections.emptyList() : row.tags, incoming);
+            return s.put(TAGS, key, null, merged);
         });
     }
 
@@ -371,6 +396,7 @@ final class MetadataStore {
         // kind requires no plaintext key and therefore does not weaken the normal wrong-token
         // fail-closed path.
         synchronized (BalanceData.class) {
+            context = DataGeneration.context(context);
             SharedPreferences prefs = context.getSharedPreferences(BalanceData.PREFS_DATA,
                 Context.MODE_PRIVATE);
             try (Helper helper = new Helper(context)) {
@@ -410,6 +436,9 @@ final class MetadataStore {
     private static <T> T access(Context context, int kind, boolean write, boolean migrate,
             Work<T> work) throws Exception {
         synchronized (BalanceData.class) {
+            // Resolve once per public operation. A stage context is intentionally returned as-is,
+            // so restore merges cannot be redirected by a later manifest publication.
+            context = DataGeneration.context(context);
             SharedPreferences prefs = context.getSharedPreferences(
                 BalanceData.PREFS_DATA, Context.MODE_PRIVATE);
             Map<Integer, String> legacy = new LinkedHashMap<>();
@@ -789,7 +818,13 @@ final class MetadataStore {
     }
 
     private static final class Helper extends SQLiteOpenHelper {
-        Helper(Context context) { super(context, DB_NAME, null, DB_VERSION); }
+        Helper(Context context) {
+            // Preserve a corrupt authoritative file for recovery; Android's default handler
+            // deletes it before the store can fail closed.
+            super(context, DB_NAME, null, DB_VERSION, db -> {
+                throw new SQLiteException("metadata database is corrupt; preserved for recovery");
+            });
+        }
 
         @Override public void onCreate(SQLiteDatabase db) {
             db.execSQL("CREATE TABLE " + TABLE + " (id INTEGER PRIMARY KEY AUTOINCREMENT,"

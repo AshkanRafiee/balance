@@ -226,7 +226,7 @@ final class BackupManager {
         json.beginObject().name("bank").value(t.bank).name("date").value(t.date)
             .name("amount").value(t.amount);
         if (t.account != null) json.name("account").value(t.account);
-        if (t.balance != null) json.name("balance").value(t.balance);
+        if (t.balance != null) json.name("bal").value(t.balance);
         if (t.sig != null) json.name("sig").value(t.sig);
         if (t.content != null) json.name("content").value(t.content);
         json.endObject();
@@ -285,7 +285,23 @@ final class BackupManager {
      *  interleaving would let one of them persist a stale snapshot and silently drop the other's
      *  freshly scanned transactions. */
     static RestoreResult restore(Context context, Uri uri, String password) throws Exception {
+        if (isFramed(context, uri)) return BackupV2Restore.restore(context, uri, password);
         synchronized (BalanceData.class) { return restoreLocked(context, uri, password); }
+    }
+
+    private static boolean isFramed(Context context, Uri uri) throws Exception {
+        byte[] magic = new byte[8];
+        try (InputStream input = context.getContentResolver().openInputStream(uri)) {
+            if (input == null) throw new Exception("null input stream");
+            int offset = 0;
+            while (offset < magic.length) {
+                int count = input.read(magic, offset, magic.length - offset);
+                if (count < 0) return false;
+                if (count == 0) continue;
+                offset += count;
+            }
+            return java.util.Arrays.equals(magic, "BALFRM01".getBytes(StandardCharsets.US_ASCII));
+        }
     }
 
     private static RestoreResult restoreLocked(Context context, Uri uri, String password) throws Exception {

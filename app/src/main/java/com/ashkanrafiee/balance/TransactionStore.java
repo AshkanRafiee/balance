@@ -242,7 +242,7 @@ final class TransactionStore {
         if (Boolean.TRUE.equals(ACTIVE.get()))
             throw new IllegalStateException("transaction store callback cannot reenter the store");
         synchronized (BalanceData.class) {
-            clearLocked(context);
+            clearLocked(DataGeneration.context(context));
         }
     }
 
@@ -305,6 +305,8 @@ final class TransactionStore {
         if (failure != null) {
             throw new IllegalStateException("transaction store could not be cleared", failure);
         }
+        try { DataGeneration.refreshMarker(context); }
+        catch (Exception e) { throw new IllegalStateException("transaction generation marker could not be refreshed", e); }
     }
 
     /** Writes the legacy/backup JSON envelope incrementally; the caller owns the writer. */
@@ -368,7 +370,10 @@ final class TransactionStore {
     private static <T> T access(Context context, boolean write, boolean migrate, boolean allowMissing,
             Work<T> work) throws Exception {
         synchronized (BalanceData.class) {
-            return accessLocked(context, write, migrate, allowMissing, work);
+            // Resolve once. In particular, a staging context is pinned and must not jump to the
+            // selector that is published after this operation starts.
+            Context dataContext = DataGeneration.context(context);
+            return accessLocked(dataContext, write, migrate, allowMissing, work);
         }
     }
 

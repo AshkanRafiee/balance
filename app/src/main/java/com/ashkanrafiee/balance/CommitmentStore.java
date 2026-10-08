@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteException;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.util.Base64;
 import android.util.JsonWriter;
@@ -183,6 +184,12 @@ final class CommitmentStore {
         return access(context, true, s -> s.upsert(definition));
     }
 
+    /** Local-first definition merge; settlement marks from an incoming ID are unioned explicitly. */
+    static boolean mergeDefinition(Context context, Commitment incoming) throws Exception {
+        if (incoming == null) throw new NullPointerException("incoming");
+        return access(context, true, s -> s.mergeDefinition(incoming));
+    }
+
     static boolean delete(Context context, String id) throws Exception {
         requireId(id);
         return access(context, true, s -> s.delete(id));
@@ -224,6 +231,7 @@ final class CommitmentStore {
     /** Explicit clear also discards a malformed legacy source and resets store metadata. */
     static boolean clear(Context context) throws Exception {
         synchronized (BalanceData.class) {
+            context = DataGeneration.context(context);
             if (ACTIVE.get() != null) throw new IllegalStateException("use the transaction editor");
             SharedPreferences prefs = context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE);
             String legacy = prefs.getString(BalanceData.KEY_COMMITMENTS, null);
@@ -273,12 +281,19 @@ final class CommitmentStore {
             return found == null ? null : found.value;
         }
         boolean upsert(Commitment definition) throws Exception { return session().upsert(definition); }
+        boolean mergeDefinition(Commitment definition) throws Exception {
+            return session().mergeDefinition(definition);
+        }
         boolean delete(String id) throws Exception { requireId(id); return session().delete(id); }
         boolean settle(String id, long date) throws Exception {
             requireId(id); requireDate(date); return session().settle(id, date, true);
         }
         boolean undo(String id, long date) throws Exception {
             requireId(id); requireDate(date); return session().settle(id, date, false);
+        }
+        boolean mergeSettlementIfAbsent(String id, long date, boolean settled) throws Exception {
+            requireId(id); requireDate(date);
+            return session().mergeSettlementIfAbsent(id, date, settled);
         }
         boolean isSettled(String id, long date) throws Exception {
             requireId(id); requireDate(date); return session().isSettled(id, date);
@@ -503,6 +518,9 @@ final class CommitmentStore {
 
     private static <T> T access(Context context, boolean migrate, Work<T> work) throws Exception {
         synchronized (BalanceData.class) {
+            // Resolve once per operation. The stage wrapper is fixed and is never re-resolved to
+            // the live selector while a restore is being applied.
+            context = DataGeneration.context(context);
             if (ACTIVE.get() != null) throw new IllegalStateException("use the transaction editor");
             SharedPreferences prefs = context.getSharedPreferences(BalanceData.PREFS_DATA,
                 Context.MODE_PRIVATE);
@@ -746,6 +764,32 @@ final class CommitmentStore {
                     putMark(SETTLEMENTS, definition.rowId, date, settled);
                 }
             }
+            touch();
+            return true;
+        }
+
+        boolean mergeDefinition(Commitment incoming) throws Exception {
+            Definition existing = find(incoming.id, true);
+            boolean changed = false;
+            if (existing == null) {
+                upsert(incoming);
+                return true;
+            }
+            Commitment local = existing.value;
+            for (Long date : incoming.paid) {
+                if (!isSettled(incoming.id, date)) changed |= settle(incoming.id, date, true);
+            }
+            for (Long date : incoming.unpaid) {
+                if (isSettled(incoming.id, date)) changed |= settle(incoming.id, date, false);
+            }
+            return changed;
+        }
+
+        boolean mergeSettlementIfAbsent(String id, long date, boolean settled) throws Exception {
+            Definition definition = find(id, true);
+            if (definition == null || definition.value.frequency == Commitment.ONCE) return false;
+            if (mark(definition.rowId, date) != null) return false;
+            putMark(SETTLEMENTS, definition.rowId, date, settled);
             touch();
             return true;
         }
@@ -1068,7 +1112,13 @@ final class CommitmentStore {
     }
 
     private static final class Helper extends SQLiteOpenHelper {
-        Helper(Context context) { super(context, DB_NAME, null, 1); }
+        Helper(Context context) {
+            // Keep corrupt authoritative data available for diagnosis/recovery instead of allowing
+            // Android's default corruption handler to delete it.
+            super(context, DB_NAME, null, 1, db -> {
+                throw new SQLiteException("commitment database is corrupt; preserved for recovery");
+            });
+        }
         @Override public void onConfigure(SQLiteDatabase db) { db.setForeignKeyConstraintsEnabled(true); }
         @Override public void onCreate(SQLiteDatabase db) {
             db.execSQL("CREATE TABLE " + DEFINITIONS + " (id INTEGER PRIMARY KEY AUTOINCREMENT,"

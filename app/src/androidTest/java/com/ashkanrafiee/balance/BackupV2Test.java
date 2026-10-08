@@ -1,124 +1,315 @@
 package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import android.content.Context;
 import android.net.Uri;
-import android.util.JsonReader;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.InputStreamReader;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
 
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-/** Verifies that production v2 creation uses authenticated frames and streams every section. */
+/** Integration coverage for authenticated framed restore and its isolated merge generation. */
 @RunWith(AndroidJUnit4.class)
 public class BackupV2Test {
-    private Context context;
-    private File file;
+    private static final String PASSWORD = "correct horse battery staple";
+    private static final long DAY = 86_400_000L;
+    private static final long T = 1_700_000_000_000L;
 
-    @Before public void setUp() throws Exception {
+    private Context context;
+
+    @Before public void setUp() {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         BalanceData.reset(context, true);
-        file = new File(context.getCacheDir(), "backup-v2-test.bin");
-        file.delete();
     }
 
     @After public void tearDown() {
-        if (file != null) file.delete();
+        BalanceData.reset(context, true);
     }
 
-    @Test public void framedCreationStreamsAllRetainedSections() throws Exception {
-        BalanceData.write(context, new java.util.LinkedHashMap<String, Bank>() {{
-            put("Synthetic", new Bank("Synthetic", 123L, 456L, "sender", "account"));
-        }});
-        BalanceData.writeTransactions(context, Arrays.asList(
-            new Transaction("Synthetic", "account", 1L, -2L, 3L, "sig", "content")));
-        Transaction transaction = BalanceData.readTransactions(context).get(0);
-        BalanceData.setNote(context, transaction, "note");
-        BalanceData.mergeReasons(context,
-            java.util.Collections.singletonMap(BalanceData.noteKey(transaction), "reason"));
-        BalanceData.mergeChannels(context,
-            java.util.Collections.singletonMap(BalanceData.noteKey(transaction), "channel"));
-        BalanceData.setTags(context, transaction, Arrays.asList("tag"));
-        Commitment commitment = Commitment.create("rent", -100L, Commitment.MONTHLY,
-            Commitment.startOfDay(System.currentTimeMillis()), null, false, 0);
-        BalanceData.writeCommitments(context, Arrays.asList(commitment));
+    @Test public void roundTrip_preservesEveryFieldAndLargeIndividualMetadataValues()
+            throws Exception {
+        LinkedHashMap<String, Bank> balances = new LinkedHashMap<>();
+        balances.put("Mellat|1110000222", new Bank("Mellat", -12_345L, T + 3_000,
+            "bank-sender", "1110000222"));
+        BalanceData.write(context, balances);
 
-        BackupManager.createFramed(context, Uri.fromFile(file), "password");
-        byte[] bytes;
-        try (FileInputStream in = new FileInputStream(file)) {
-            bytes = new byte[8];
-            assertEquals(8, in.read(bytes));
-        }
-        assertEquals("BALFRM01", new String(bytes, StandardCharsets.US_ASCII));
+        Transaction transaction = new Transaction("Mellat", "1110000222", T + 4_000,
+            -500_000L, 1_234_567_890L, "signature", "content-digest");
+        BalanceData.writeTransactions(context, Collections.singletonList(transaction));
+        String key = BalanceData.noteKey(transaction);
+        String largeNote = repeated('n', 70_000);
+        String largeTag = repeated('t', 70_000);
+        BalanceData.setNote(context, transaction, largeNote);
+        BalanceData.mergeReasons(context, Collections.singletonMap(key, "bank reason"));
+        BalanceData.mergeChannels(context, Collections.singletonMap(key, "mobile channel"));
+        BalanceData.setTags(context, transaction, Arrays.asList("first tag", largeTag));
 
-        int balances = 0, transactions = 0, notes = 0, reasons = 0, channels = 0, tags = 0,
-            commitments = 0;
-        try (FileInputStream raw = new FileInputStream(file);
-                BackupFrames.AuthenticatedInputStream decrypted = BackupFrames.openInputStream(raw,
-                    "password".toCharArray());
-                JsonReader json = new JsonReader(new InputStreamReader(decrypted,
-                    StandardCharsets.UTF_8))) {
-            json.beginObject();
-            assertEquals("schema", json.nextName());
-            assertEquals(2, json.nextInt());
-            while (json.hasNext()) {
-                String name = json.nextName();
-                switch (name) {
-                    case "balances": balances = countObjects(json); break;
-                    case "transactions": transactions = countObjects(json); break;
-                    case "commitments": commitments = countObjects(json); break;
-                    case "metadata":
-                        json.beginObject();
-                        while (json.hasNext()) {
-                            String kind = json.nextName();
-                            int count = countObjects(json);
-                            if ("notes".equals(kind)) notes = count;
-                            else if ("reasons".equals(kind)) reasons = count;
-                            else if ("channels".equals(kind)) channels = count;
-                            else if ("tags".equals(kind)) tags = count;
-                        }
-                        json.endObject();
-                        break;
-                    default: json.skipValue();
-                }
-            }
-            json.endObject();
-        }
-        assertEquals(1, balances);
-        assertEquals(1, transactions);
-        assertEquals(1, notes);
-        assertEquals(1, reasons);
-        assertEquals(1, channels);
-        assertEquals(1, tags);
-        assertEquals(1, commitments);
-        assertTrue(file.length() > 0);
+        List<Long> paid = Arrays.asList(T + DAY, T + 2 * DAY);
+        List<Long> unpaid = Collections.singletonList(T + 3 * DAY);
+        Commitment recurring = new Commitment("rent-id", "Monthly rent", -1_000L,
+            Commitment.MONTHLY, T, T + 120 * DAY, false, paid, T + DAY, unpaid, true,
+            3_600_000L);
+        Commitment once = new Commitment("once-id", "One-time bill", 99L, Commitment.ONCE,
+            T, null, true, Collections.emptyList(), 0, Collections.emptyList(), false, 0);
+        BalanceData.writeCommitments(context, Arrays.asList(recurring, once));
+
+        File backup = file("v2-roundtrip.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+        BalanceData.reset(context, true);
+
+        BackupManager.RestoreResult result = BackupManager.restore(context,
+            Uri.fromFile(backup), PASSWORD);
+        assertEquals(1, result.added);
+        assertEquals(1, result.transactionsAdded);
+        assertEquals(2, result.commitmentsAdded);
+
+        Bank restoredBank = BalanceData.read(context).get("Mellat|1110000222");
+        assertNotNull(restoredBank);
+        assertEquals("Mellat", restoredBank.name);
+        assertEquals("1110000222", restoredBank.account);
+        assertEquals(-12_345L, restoredBank.amount);
+        assertEquals(T + 3_000, restoredBank.date);
+        assertEquals("bank-sender", restoredBank.sender);
+
+        Transaction restoredTransaction = BalanceData.readTransactions(context).get(0);
+        assertEquals("1110000222", restoredTransaction.account);
+        assertEquals(-500_000L, restoredTransaction.amount);
+        assertEquals(Long.valueOf(1_234_567_890L), restoredTransaction.balance);
+        assertEquals("signature", restoredTransaction.sig);
+        assertEquals("content-digest", restoredTransaction.content);
+        assertEquals(largeNote, BalanceData.getNote(context, restoredTransaction));
+        assertEquals("bank reason", BalanceData.readReasons(context).get(key));
+        assertEquals("mobile channel", BalanceData.readChannels(context).get(key));
+        assertEquals(Arrays.asList("first tag", largeTag),
+            BalanceData.getTags(context, restoredTransaction));
+
+        List<Commitment> commitments = BalanceData.readCommitments(context);
+        assertEquals(2, commitments.size());
+        Commitment restoredRecurring = commitments.get(0);
+        assertEquals("rent-id", restoredRecurring.id);
+        assertEquals("Monthly rent", restoredRecurring.name);
+        assertEquals(-1_000L, restoredRecurring.amount);
+        assertEquals(Commitment.MONTHLY, restoredRecurring.frequency);
+        assertEquals(T, restoredRecurring.start);
+        assertEquals(Long.valueOf(T + 120 * DAY), restoredRecurring.end);
+        assertTrue(restoredRecurring.remind);
+        assertEquals(3_600_000L, restoredRecurring.remindBeforeMs);
+        assertEquals(T + DAY, restoredRecurring.legacyPaidThrough);
+        assertTrue(restoredRecurring.paid.contains(T + 2 * DAY));
+        assertTrue(restoredRecurring.unpaid.contains(T + 3 * DAY));
+        assertTrue(commitments.get(1).done);
     }
 
-    private static int countObjects(JsonReader json) throws Exception {
-        int count = 0;
-        json.beginArray();
-        while (json.hasNext()) {
-            json.beginObject();
-            while (json.hasNext()) {
-                json.nextName();
-                json.skipValue();
-            }
-            json.endObject();
-            count++;
+    @Test public void restore_isUncappedForCommitmentsAndSettlementEvents() throws Exception {
+        List<Commitment> source = new ArrayList<>();
+        for (int i = 0; i < 501; i++) {
+            List<Long> paid = new ArrayList<>();
+            for (int j = 0; j < 5; j++) paid.add(T + i * 10 * DAY + j * DAY + 1);
+            source.add(new Commitment("large-" + i, "Definition " + i, -1L,
+                Commitment.DAILY, T + i * 10 * DAY, null, false, paid, 0,
+                Collections.emptyList(), false, 0));
         }
-        json.endArray();
-        return count;
+        BalanceData.writeCommitments(context, source);
+        File backup = file("v2-large.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+        BalanceData.reset(context, true);
+
+        BackupManager.RestoreResult result = BackupManager.restore(context,
+            Uri.fromFile(backup), PASSWORD);
+        assertEquals(501, result.commitmentsAdded);
+        assertEquals(501, BalanceData.readCommitments(context).size());
+
+        final long[] settlements = {0};
+        CommitmentStore.forEachDefinition(context, definition ->
+            CommitmentStore.forEachSettlement(context, definition.id, 256,
+                settlement -> settlements[0]++));
+        assertEquals(2_505L, settlements[0]);
+    }
+
+    @Test public void restore_remapsAllMetadataKindsThroughIncomingTransactionAliases()
+            throws Exception {
+        // The backup row has the legacy identity key. The local row is the same movement after a
+        // parser revision added a content digest, so TransactionStore reports a metadata alias.
+        Transaction backupTransaction = new Transaction("AliasBank", "account", T + 10,
+            -42L, null, null, null);
+        BalanceData.writeTransactions(context, Collections.singletonList(backupTransaction));
+        String incomingKey = BalanceData.noteKey(backupTransaction);
+        BalanceData.setNote(context, backupTransaction, "backup note");
+        BalanceData.mergeReasons(context, Collections.singletonMap(incomingKey, "backup reason"));
+        BalanceData.mergeChannels(context, Collections.singletonMap(incomingKey, "backup channel"));
+        BalanceData.setTags(context, backupTransaction, Collections.singletonList("backup tag"));
+        File backup = file("v2-alias.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+
+        BalanceData.reset(context, true);
+        Transaction localTransaction = new Transaction("AliasBank", "account", T + 10,
+            -42L, null, null, "new-content-digest");
+        BalanceData.writeTransactions(context, Collections.singletonList(localTransaction));
+        String localKey = BalanceData.noteKey(localTransaction);
+        BalanceData.setNote(context, localTransaction, "local note");
+        BalanceData.mergeReasons(context, Collections.singletonMap(localKey, "local reason"));
+        BalanceData.mergeChannels(context, Collections.singletonMap(localKey, "local channel"));
+        BalanceData.setTags(context, localTransaction, Collections.singletonList("local tag"));
+
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD);
+        assertEquals("local note", BalanceData.getNote(context, localTransaction));
+        assertEquals("local reason", BalanceData.readReasons(context).get(localKey));
+        assertEquals("local channel", BalanceData.readChannels(context).get(localKey));
+        assertEquals(Arrays.asList("local tag", "backup tag"),
+            BalanceData.getTags(context, localTransaction));
+        assertFalse(BalanceData.readNotes(context).containsKey(incomingKey));
+        assertFalse(BalanceData.readReasons(context).containsKey(incomingKey));
+        assertFalse(BalanceData.readChannels(context).containsKey(incomingKey));
+    }
+
+    @Test public void restore_unionsSettlementEventsAndPreservesLocalExplicitConflict()
+            throws Exception {
+        long first = T + DAY;
+        long second = T + 2 * DAY;
+        long third = T + 3 * DAY;
+        long fourth = T + 4 * DAY;
+        String id = "settlement-union";
+        Commitment backupDefinition = new Commitment(id, "Union", -5L, Commitment.DAILY, T,
+            null, false, Arrays.asList(first, second), 0,
+            Collections.singletonList(third), false, 0);
+        BalanceData.writeCommitments(context, Collections.singletonList(backupDefinition));
+        File backup = file("v2-settlement-union.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+
+        BalanceData.reset(context, true);
+        Commitment localDefinition = new Commitment(id, "Local definition", -5L,
+            Commitment.DAILY, T, null, false, Collections.singletonList(fourth), 0,
+            Collections.singletonList(first), false, 0);
+        BalanceData.writeCommitments(context, Collections.singletonList(localDefinition));
+
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD);
+        assertFalse(CommitmentStore.isSettled(context, id, first));
+        assertTrue(CommitmentStore.isSettled(context, id, second));
+        assertFalse(CommitmentStore.isSettled(context, id, third));
+        assertTrue(CommitmentStore.isSettled(context, id, fourth));
+        assertEquals("Local definition", CommitmentStore.get(context, id).name);
+    }
+
+    @Test public void wrongPasswordLateFrameTrailingAndMalformedInputLeaveLiveDataUnchanged()
+            throws Exception {
+        LinkedHashMap<String, Bank> live = new LinkedHashMap<>();
+        live.put("Live", new Bank("Live", 10L, T, "sender"));
+        BalanceData.write(context, live);
+        Transaction liveTransaction = new Transaction("Live", T + 1, -1L, "live-signature");
+        BalanceData.writeTransactions(context, Collections.singletonList(liveTransaction));
+        File valid = file("v2-invalid-base.bin");
+        BackupManager.createFramed(context, Uri.fromFile(valid), PASSWORD);
+
+        expectRestoreFailure(valid, "wrong password", "wrong password");
+        assertLiveData(liveTransaction);
+
+        byte[] late = read(valid);
+        late[late.length - 1] ^= 0x01;
+        File lateFile = file("v2-late-frame.bin");
+        write(lateFile, late);
+        expectRestoreFailure(lateFile, "damaged late frame", PASSWORD);
+        assertLiveData(liveTransaction);
+
+        byte[] trailing = Arrays.copyOf(read(valid), (int) valid.length() + 1);
+        trailing[trailing.length - 1] = 7;
+        File trailingFile = file("v2-trailing.bin");
+        write(trailingFile, trailing);
+        expectRestoreFailure(trailingFile, "trailing bytes", PASSWORD);
+        assertLiveData(liveTransaction);
+
+        File malformed = file("v2-malformed.bin");
+        writePayload(malformed, "{\"schema\":2,\"schema\":2}");
+        expectRestoreFailure(malformed, "malformed JSON", PASSWORD);
+        assertLiveData(liveTransaction);
+
+        File conflictingSettlements = file("v2-conflicting-settlements.bin");
+        writePayload(conflictingSettlements,
+            "{\"schema\":2,\"balances\":[],\"transactions\":[],"
+                + "\"metadata\":{\"notes\":[],\"reasons\":[],\"channels\":[],\"tags\":[]},"
+                + "\"commitments\":[{\"id\":\"conflict\",\"name\":\"Conflict\","
+                + "\"amount\":-1,\"freq\":1,\"start\":" + T
+                + ",\"paid\":[" + (T + DAY) + "],\"unpaid\":[" + (T + DAY) + "]}]}" );
+        expectRestoreFailure(conflictingSettlements, "conflicting settlement states", PASSWORD);
+        assertLiveData(liveTransaction);
+    }
+
+    private void expectRestoreFailure(File file, String description, String password)
+            throws Exception {
+        try {
+            BackupManager.restore(context, Uri.fromFile(file), password);
+            fail(description + " must be rejected");
+        } catch (Exception expected) {
+            // The important property is that the generation was never published. Wrong-password
+            // and frame failures are exposed as BackupException; structural failures may retain
+            // their precise parser exception for diagnostics.
+        }
+    }
+
+    private void assertLiveData(Transaction transaction) {
+        Bank bank = BalanceData.read(context).get("Live");
+        assertNotNull(bank);
+        assertEquals(10L, bank.amount);
+        assertEquals(1, BalanceData.readTransactions(context).size());
+        assertEquals(transaction.content, BalanceData.readTransactions(context).get(0).content);
+    }
+
+    private File file(String name) {
+        File file = new File(context.getCacheDir(), name);
+        file.delete();
+        return file;
+    }
+
+    private static String repeated(char value, int count) {
+        char[] chars = new char[count];
+        Arrays.fill(chars, value);
+        return new String(chars);
+    }
+
+    private static byte[] read(File file) throws Exception {
+        byte[] bytes = new byte[(int) file.length()];
+        try (FileInputStream input = new FileInputStream(file)) {
+            int offset = 0;
+            while (offset < bytes.length) {
+                int count = input.read(bytes, offset, bytes.length - offset);
+                if (count < 0) break;
+                offset += count;
+            }
+            assertEquals(bytes.length, offset);
+        }
+        return bytes;
+    }
+
+    private static void write(File file, byte[] bytes) throws Exception {
+        try (FileOutputStream output = new FileOutputStream(file)) {
+            output.write(bytes);
+        }
+    }
+
+    private static void writePayload(File file, String payload) throws Exception {
+        try (FileOutputStream output = new FileOutputStream(file)) {
+            BackupFrames.write((OutputStream plaintext) ->
+                plaintext.write(payload.getBytes(StandardCharsets.UTF_8)), output,
+                PASSWORD.toCharArray());
+        }
     }
 }
