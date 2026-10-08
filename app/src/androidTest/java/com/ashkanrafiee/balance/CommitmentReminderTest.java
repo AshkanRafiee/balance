@@ -23,15 +23,17 @@ public class CommitmentReminderTest {
 
     private Context ctx;
 
-    @Before public void setUp() {
+    @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        CommitmentStore.clear(ctx);
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear()
             .commit();
         ctx.getSharedPreferences("commitment_reminders", Context.MODE_PRIVATE).edit().clear()
             .commit();
     }
 
-    @After public void tearDown() {
+    @After public void tearDown() throws Exception {
+        CommitmentStore.clear(ctx);
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear()
             .commit();
         ctx.getSharedPreferences("commitment_reminders", Context.MODE_PRIVATE).edit().clear()

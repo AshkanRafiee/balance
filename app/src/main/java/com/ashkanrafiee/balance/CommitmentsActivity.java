@@ -22,9 +22,13 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
+import java.util.Locale;
 
 /** User-defined commitments: loans, debts, subscriptions and anything else the user names.
  *
@@ -714,69 +718,33 @@ public final class CommitmentsActivity extends Activity {
     }
 
     private void markSettled(Row row) {
-        List<Commitment> commitments = BalanceData.readCommitments(this);
-        List<Commitment> kept = new ArrayList<>();
-        boolean reschedule = !CommitmentReminders.scheduledIds(this).isEmpty();
-        for (Commitment c : commitments) {
-            if (!c.id.equals(row.commitment.id)) {
-                kept.add(c);
-                continue;
+        try {
+            if (!CommitmentStore.settle(this, row.commitment.id, row.date)) {
+                render();
+                return;
             }
-            reschedule |= c.remind;
-            CommitmentReminders.resetFired(this, c.id);
-            if (c.frequency == Commitment.ONCE) {
-                kept.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
-                    true, c.paid, c.legacyPaidThrough, c.remind, c.remindBeforeMs));
-            } else {
-                List<Long> paid = new ArrayList<>(c.paid);
-                if (!paid.contains(row.date)) paid.add(row.date);
-                if (c.legacyPaidThrough > 0) {
-                    CalendarSystem legacyCal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
-                    Commitment.visitOccurrences(c, legacyCal, c.start, c.legacyPaidThrough, at -> {
-                        if (at != row.date && !paid.contains(at)) paid.add(at);
-                    }, Commitment.MAX_SETTLED_DAYS);
-                }
-                kept.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
-                    c.done, paid, 0, c.remind, c.remindBeforeMs));
-            }
+            CommitmentReminders.resetFired(this, row.commitment.id);
+            CommitmentReminders.scheduleAll(this);
+            render();
+        } catch (Exception error) {
+            showCommitmentError(error);
         }
-        BalanceData.writeCommitments(this, kept);
-        if (reschedule) CommitmentReminders.scheduleAll(this);
-        render();
     }
 
     /** Reopens exactly the due the user settled: a one-time commitment goes back to unpaid,
      *  a recurring due leaves the settled-day list. Nothing else moves. */
     private void undoSettled(Row row) {
-        List<Commitment> commitments = BalanceData.readCommitments(this);
-        List<Commitment> kept = new ArrayList<>();
-        boolean reschedule = !CommitmentReminders.scheduledIds(this).isEmpty();
-        for (Commitment c : commitments) {
-            if (!c.id.equals(row.commitment.id)) {
-                kept.add(c);
-                continue;
+        try {
+            if (!CommitmentStore.undo(this, row.commitment.id, row.date)) {
+                render();
+                return;
             }
-            reschedule |= c.remind;
-            CommitmentReminders.resetFired(this, c.id);
-            if (c.frequency == Commitment.ONCE) {
-                kept.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
-                    false, c.paid, c.remind, c.remindBeforeMs));
-            } else {
-                List<Long> paid = new ArrayList<>(c.paid);
-                paid.remove(Long.valueOf(row.date));
-                if (c.legacyPaidThrough > 0) {
-                    CalendarSystem legacyCal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
-                    Commitment.visitOccurrences(c, legacyCal, c.start, c.legacyPaidThrough, at -> {
-                        if (at != row.date && !paid.contains(at)) paid.add(at);
-                    }, Commitment.MAX_SETTLED_DAYS);
-                }
-                kept.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
-                    c.done, paid, 0, c.remind, c.remindBeforeMs));
-            }
+            CommitmentReminders.resetFired(this, row.commitment.id);
+            CommitmentReminders.scheduleAll(this);
+            render();
+        } catch (Exception error) {
+            showCommitmentError(error);
         }
-        BalanceData.writeCommitments(this, kept);
-        if (reschedule) CommitmentReminders.scheduleAll(this);
-        render();
     }
 
     // ====================================================================
@@ -784,7 +752,21 @@ public final class CommitmentsActivity extends Activity {
     // ====================================================================
 
     private void editorDialog(String commitmentId) {
-        final Commitment existing = lookupCommitment(commitmentId);
+        final Commitment existing;
+        if (commitmentId == null) {
+            existing = null;
+        } else {
+            try {
+                existing = CommitmentStore.get(this, commitmentId);
+                if (existing == null) {
+                    showCommitmentError(null);
+                    return;
+                }
+            } catch (Exception error) {
+                showCommitmentError(error);
+                return;
+            }
+        }
         boolean iranNow = iran;
         CalendarSystem cal = iranNow ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
         int[] today = Commitment.civilDay(System.currentTimeMillis(), cal);
@@ -805,7 +787,7 @@ public final class CommitmentsActivity extends Activity {
         EditText amount = new EditText(this);
         amount.setHint(getString(R.string.commitments_amount_hint, CurrencyHelper.label(this)));
         amount.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        if (existing != null) amount.setText(formatMagnitude(Math.abs(existing.amount)));
+        if (existing != null) amount.setText(formatMagnitude(existing.amount));
         amount.setTypeface(Fonts.text(this), Typeface.NORMAL);
         amountRow.addView(amount, new LinearLayout.LayoutParams(0, -2, 1));
         form.addView(amountRow, margin(0, 8, 0, 0));
@@ -816,12 +798,14 @@ public final class CommitmentsActivity extends Activity {
             text(getString(R.string.commitments_receive), 13, fg, medium())};
         final int[] directionSelected = {pay[0] ? 0 : 1};
         Runnable[] directionActions = new Runnable[2];
+        final Runnable[] validateSave = {() -> {}};
         for (int i = 0; i < 2; i++) {
             final int index = i;
             directionActions[i] = () -> {
                 pay[0] = index == 0;
                 directionSelected[0] = index;
                 refreshChips(directionChips, index);
+                validateSave[0].run();
             };
         }
         form.addView(chipRow(directionChips, directionSelected[0], directionActions),
@@ -948,15 +932,27 @@ public final class CommitmentsActivity extends Activity {
             @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
             @Override public void afterTextChanged(Editable s) {
                 applyUserTextDirection(name);
-                dlg.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(canSave(name, amount));
+                dlg.getButton(AlertDialog.BUTTON_POSITIVE)
+                    .setEnabled(canSave(name, amount, pay[0]));
             }
         };
         name.addTextChangedListener(gate);
         amount.addTextChangedListener(gate);
+        validateSave[0] = () -> {
+            if (dlg.isShowing()) {
+                dlg.getButton(AlertDialog.BUTTON_POSITIVE)
+                    .setEnabled(canSave(name, amount, pay[0]));
+            }
+        };
         dlg.setOnShowListener(d -> {
-            dlg.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(canSave(name, amount));
+            dlg.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setEnabled(canSave(name, amount, pay[0]));
             dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                 long leadMs = parseLead(leadNumber.getText().toString(), unitSelected[0]);
+                if (leadMs < 0) {
+                    showCommitmentError(null);
+                    return;
+                }
                 boolean saveEnd = endDateControlsVisible(freqSelected[0]) && !openEnded.isChecked();
                 if (saveFromForm(existing, name, amount, pay[0], freqSelected[0], startFields,
                         saveEnd ? endFields : null, cal, remindBox.isChecked(),
@@ -981,16 +977,19 @@ public final class CommitmentsActivity extends Activity {
     }
 
     private static final long[] UNIT_MS = {60_000L, 3600_000L, 86400_000L, 604800_000L};
+    private static final int RAW_LEAD_UNIT = UNIT_MS.length;
     private static final int REQUEST_NOTIFY = 41;
 
-    /** Splits a lead time into the largest whole unit that divides it (weeks down to minutes),
-     *  defaulting a fresh editor to one day. Returns {number, unitIndex}. */
+    /** Splits a lead time into the largest whole unit that divides it (weeks down to minutes).
+     *  A raw-millisecond unit is used for values that cannot be represented by whole minutes, so
+     *  reopening and saving an imported value never truncates it. Returns {number, unitIndex}. */
     private static long[] decomposeLead(long ms) {
-        if (ms <= 0) return new long[]{1, 2};
+        if (ms < 0) return new long[]{0, RAW_LEAD_UNIT};
+        if (ms == 0) return new long[]{0, 2};
         if (ms % UNIT_MS[3] == 0) return new long[]{ms / UNIT_MS[3], 3};
         if (ms % UNIT_MS[2] == 0) return new long[]{ms / UNIT_MS[2], 2};
         if (ms % UNIT_MS[1] == 0) return new long[]{ms / UNIT_MS[1], 1};
-        return new long[]{Math.max(1, ms / UNIT_MS[0]), 0};
+        return new long[]{ms, RAW_LEAD_UNIT};
     }
 
     private boolean needsNotificationPermission() {
@@ -1017,56 +1016,60 @@ public final class CommitmentsActivity extends Activity {
         }
     }
 
-    private Commitment lookupCommitment(String commitmentId) {
-        if (commitmentId == null) return null;
-        for (Commitment c : BalanceData.readCommitments(this)) {
-            if (c.id.equals(commitmentId)) return c;
-        }
-        return null;
-    }
-
-    private boolean canSave(EditText name, EditText amount) {
+    private boolean canSave(EditText name, EditText amount, boolean pay) {
         return !name.getText().toString().trim().isEmpty()
-            && parseAmount(amount.getText().toString()) != 0;
+            && parseAmount(amount.getText().toString(), pay) != null;
     }
 
     private boolean isToman() {
         return CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(this));
     }
 
-    /** A stored rial magnitude written in the display currency, the way every amount on screen
-     *  reads (toman drops the trailing zero the same way the dashboard does). */
+    /** A stored rial magnitude written in the display currency. Toman keeps one decimal place
+     *  when needed, so opening and saving an amount cannot lose its trailing rial. */
     private String formatMagnitude(long rialAbs) {
-        return String.valueOf(isToman() ? rialAbs / 10 : rialAbs);
+        BigInteger magnitude = BigInteger.valueOf(rialAbs).abs();
+        BigDecimal display = new BigDecimal(magnitude);
+        if (isToman()) display = display.movePointLeft(1);
+        return display.stripTrailingZeros().toPlainString();
     }
 
-    /** The editor figure back in stored rials. Toman input regains its trailing zero; a figure
-     *  that would overflow the stored bound reads as empty and keeps Save disabled. */
-    private long parseAmount(String raw) {
+    /** Parses a positive display magnitude into the exact signed stored long. The negative long
+     *  range has one extra magnitude, so a payment can represent Long.MIN_VALUE exactly. */
+    private Long parseAmount(String raw, boolean pay) {
         try {
-            String digits = BalanceData.digits(raw.replace(",", "").trim());
-            if (digits.isEmpty()) return 0;
-            long value = Long.parseLong(digits);
-            if (value <= 0) return 0;
-            if (isToman()) {
-                if (value > Commitment.MAX_AMOUNT / 10) return 0;
-                return value * 10;
-            }
-            return value > Commitment.MAX_AMOUNT ? 0 : value;
+            String number = BalanceData.digits(raw.replace(",", "")
+                .replace("\u066C", "").replace("\u066B", ".").trim());
+            if (!number.matches("[0-9]+(?:\\.[0-9]+)?")) return null;
+            BigDecimal display = new BigDecimal(number);
+            if (display.signum() <= 0) return null;
+            BigInteger magnitude = (isToman()
+                ? display.movePointRight(1) : display).toBigIntegerExact();
+            BigInteger max = pay ? BigInteger.ONE.shiftLeft(63)
+                : BigInteger.ONE.shiftLeft(63).subtract(BigInteger.ONE);
+            if (magnitude.signum() <= 0 || magnitude.compareTo(max) > 0) return null;
+            if (pay && magnitude.equals(BigInteger.ONE.shiftLeft(63))) return Long.MIN_VALUE;
+            long value = magnitude.longValueExact();
+            return pay ? -value : value;
         } catch (Exception e) {
-            return 0;
+            return null;
         }
     }
 
     private long parseLead(String raw, int unit) {
         try {
-            long n = Long.parseLong(BalanceData.digits(raw.trim()));
-            if (n < 0) n = 0;
-            long step = UNIT_MS[Math.max(0, Math.min(unit, UNIT_MS.length - 1))];
-            if (n > Commitment.MAX_REMIND_BEFORE_MS / step) return Commitment.MAX_REMIND_BEFORE_MS;
-            return n * step;
+            String digits = BalanceData.digits(raw.replace(",", "")
+                .replace("\u066C", "").trim());
+            if (!digits.matches("[0-9]+")) return -1;
+            BigInteger n = new BigInteger(digits);
+            if (unit == RAW_LEAD_UNIT) {
+                return n.compareTo(BigInteger.valueOf(Long.MAX_VALUE)) > 0 ? -1 : n.longValue();
+            }
+            if (unit < 0 || unit >= UNIT_MS.length) return -1;
+            BigInteger value = n.multiply(BigInteger.valueOf(UNIT_MS[unit]));
+            return value.compareTo(BigInteger.valueOf(Long.MAX_VALUE)) > 0 ? -1 : value.longValue();
         } catch (Exception e) {
-            return 0;
+            return -1;
         }
     }
 
@@ -1074,8 +1077,8 @@ public final class CommitmentsActivity extends Activity {
             int frequency, EditText[] startFields, EditText[] endFields, CalendarSystem cal,
             boolean remind, long remindBeforeMs) {
         String title = name.getText().toString().trim();
-        long magnitude = parseAmount(amount.getText().toString());
-        if (title.isEmpty() || magnitude == 0) return false;
+        Long signedAmount = parseAmount(amount.getText().toString(), pay);
+        if (title.isEmpty() || signedAmount == null || remindBeforeMs < 0) return false;
         Long start = parseDate(startFields, cal);
         if (start == null) {
             Toast.makeText(this, getString(R.string.commitments_bad_date),
@@ -1096,24 +1099,29 @@ public final class CommitmentsActivity extends Activity {
                 return false;
             }
         }
-        long signed = pay ? -magnitude : magnitude;
-        List<Commitment> commitments = BalanceData.readCommitments(this);
-        List<Commitment> kept = new ArrayList<>();
-        if (existing == null) {
-            kept.addAll(commitments);
-            kept.add(new Commitment(java.util.UUID.randomUUID().toString(), title, signed,
-                frequency, start, end, false, null, remind, remindBeforeMs));
-        } else {
-            for (Commitment c : commitments) {
-                if (!c.id.equals(existing.id)) {
-                    kept.add(c);
-                    continue;
+        try {
+            Commitment updated;
+            if (existing == null) {
+                updated = Commitment.create(title, signedAmount, frequency, start, end,
+                    remind, remindBeforeMs);
+            } else {
+                // The editor may have been open while another screen changed this definition.
+                // Fetch again so the upsert reuses the current lazy settlement lists rather than
+                // attempting to write an invalidated snapshot or dropping a newer mark.
+                Commitment current = CommitmentStore.get(this, existing.id);
+                if (current == null) {
+                    showCommitmentError(null);
+                    return false;
                 }
-                kept.add(new Commitment(c.id, title, signed, frequency, start, end, c.done,
-                    c.paid, c.legacyPaidThrough, remind, remindBeforeMs));
+                updated = new Commitment(current.id, title, signedAmount, frequency, start, end,
+                    current.done, current.paid, current.legacyPaidThrough, current.unpaid,
+                    remind, remindBeforeMs);
             }
+            CommitmentStore.upsert(this, updated);
+        } catch (Exception error) {
+            showCommitmentError(error);
+            return false;
         }
-        BalanceData.writeCommitments(this, kept);
         CommitmentReminders.scheduleAll(this);
         render();
         return true;
@@ -1124,16 +1132,29 @@ public final class CommitmentsActivity extends Activity {
             .setTitle(getString(R.string.commitments_delete_title))
             .setMessage(getString(R.string.commitments_delete_message))
             .setPositiveButton(getString(R.string.commitments_delete), (d, w) -> {
-                List<Commitment> kept = new ArrayList<>();
-                for (Commitment c : BalanceData.readCommitments(this))
-                    if (!c.id.equals(commitmentId)) kept.add(c);
-                BalanceData.writeCommitments(this, kept);
-                CommitmentReminders.scheduleAll(this);
-                render();
+                try {
+                    if (!CommitmentStore.delete(this, commitmentId)) {
+                        showCommitmentError(null);
+                        return;
+                    }
+                    CommitmentReminders.scheduleAll(this);
+                    render();
+                } catch (Exception error) {
+                    showCommitmentError(error);
+                }
             })
             .setNegativeButton(getString(R.string.lock_cancel), null)
             .show();
         activeDialog.setOnDismissListener(d -> activeDialog = null);
+    }
+
+    /** Store failures used to disappear behind the old compatibility façade. Keep them visible to
+     *  the user when a single-record operation cannot be completed. */
+    private void showCommitmentError(Exception error) {
+        String message = error == null ? null : error.getMessage();
+        if (message == null || message.trim().isEmpty())
+            message = "Could not save commitment. Please try again.";
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
 
     /** A series in one line for the editor: how many of its dues around now are still
@@ -1145,7 +1166,7 @@ public final class CommitmentsActivity extends Activity {
         int remaining = 0;
         for (long at : dues) if (!c.isSettled(at)) remaining++;
         return getString(R.string.commitments_series, remaining, dues.size(),
-            signedAmount(remaining * c.amount));
+            signedAmount(BigInteger.valueOf(c.amount).multiply(BigInteger.valueOf(remaining))));
     }
 
     // ====================================================================
@@ -1223,11 +1244,31 @@ public final class CommitmentsActivity extends Activity {
     }
 
     private String signedAmount(long n) {
-        String mag = CurrencyHelper.amount(this, Math.abs(n));
-        if (n == 0) return mag;
-        String sign = n < 0 ? "−" : "+";
+        return signedAmount(BigInteger.valueOf(n));
+    }
+
+    private String signedAmount(BigInteger n) {
+        String mag = displayMagnitude(n.abs());
+        if (n.signum() == 0) return mag;
+        String sign = n.signum() < 0 ? "−" : "+";
         if (!persian) return sign + mag;
         return "⁦" + sign + mag + "⁩";
+    }
+
+    /** Formats a signed-long magnitude without Math.abs overflow or toman truncation. */
+    private String displayMagnitude(long n) {
+        return displayMagnitude(BigInteger.valueOf(n).abs());
+    }
+
+    private String displayMagnitude(BigInteger magnitude) {
+        BigDecimal display = new BigDecimal(magnitude);
+        boolean toman = isToman();
+        if (toman) display = display.movePointLeft(1);
+        NumberFormat numbers = NumberFormat.getNumberInstance(
+            persian ? new Locale("fa") : Locale.US);
+        numbers.setGroupingUsed(true);
+        numbers.setMaximumFractionDigits(toman ? 1 : 0);
+        return numbers.format(display);
     }
 
     private int valueColor(long value) {

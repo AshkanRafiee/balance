@@ -52,8 +52,9 @@ public class CommitmentsInteractionTest {
     private ActivityScenario<CommitmentsActivity> commitmentsScenario;
     private ActivityScenario<MainActivity> mainScenario;
 
-    @Before public void setUp() {
+    @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        CommitmentStore.clear(ctx);
         originalLanguage = LocaleHelper.currentTag(ctx);
         originalCurrency = CurrencyHelper.currency(ctx);
         originalRegion = RegionHelper.region(ctx);
@@ -72,7 +73,7 @@ public class CommitmentsInteractionTest {
         BalanceData.writeCommitments(ctx, new ArrayList<Commitment>());
     }
 
-    @After public void tearDown() {
+    @After public void tearDown() throws Exception {
         if (commitmentsScenario != null) commitmentsScenario.close();
         if (mainScenario != null) mainScenario.close();
 

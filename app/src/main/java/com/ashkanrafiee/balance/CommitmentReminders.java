@@ -11,6 +11,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
+import android.util.Log;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -34,6 +35,7 @@ import java.util.Set;
 final class CommitmentReminders {
     private CommitmentReminders() {}
 
+    private static final String TAG = "CommitmentReminders";
     static final String CHANNEL_ID = "commitment_reminders";
     private static final String PREFS = "commitment_reminders";
     private static final String KEY_SCHEDULED = "scheduled_ids";
@@ -70,43 +72,42 @@ final class CommitmentReminders {
         Set<String> wanted = new HashSet<>();
         SharedPreferences prefs =
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        if (Build.VERSION.SDK_INT >= 33
-                && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
-                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            for (String id : prefs.getStringSet(KEY_SCHEDULED, new HashSet<String>()))
-                cancelScheduled(context, alarms, id);
-            prefs.edit().putStringSet(KEY_SCHEDULED, new HashSet<String>()).apply();
-            return;
-        }
-        for (Commitment c : BalanceData.readCommitments(context)) {
-            if (!c.remind) {
-                clearOverdueFired(context, c.id);
-                continue;
-            }
-            Long due = reminderDue(context, c, cal, now);
-            if (due == null) clearOverdueFired(context, c.id);
-            Long at = due == null ? null : due - Math.max(0, c.remindBeforeMs);
-            if (at == null && c.remind && hasDueBeyondWindow(c, cal, now))
-                at = now + 365L * 86400000L;
-            if (at == null) continue;
-            wanted.add(c.id);
-            // A due already inside its lead window reports now: nudge it a minute out so the
-            // alarm still fires instead of being set in the past. Exact where the system
-            // allows it, so a due-day reminder cannot slide; inexact otherwise, which still
-            // fires the same day for these day-scale lead times.
-            long trigger = at <= now ? now + 60_000L : at;
-            try {
-                if (canScheduleExact(context)) {
-                    alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger,
-                        alarm(context, c.id));
-                } else {
+        try {
+            CommitmentStore.forEachDefinition(context, c -> {
+                if (!c.remind) {
+                    clearOverdueFired(context, c.id);
+                    return;
+                }
+                Long due = reminderDue(context, c, cal, now);
+                if (due == null) clearOverdueFired(context, c.id);
+                Long at = due == null ? null : due - Math.max(0, c.remindBeforeMs);
+                if (at == null && c.remind && hasDueBeyondWindow(c, cal, now))
+                    at = now + 365L * 86400000L;
+                if (at == null) return;
+                wanted.add(c.id);
+                // A due already inside its lead window reports now: nudge it a minute out so the
+                // alarm still fires instead of being set in the past. Exact where the system
+                // allows it, so a due-day reminder cannot slide; inexact otherwise, which still
+                // fires the same day for these day-scale lead times.
+                long trigger = at <= now ? now + 60_000L : at;
+                try {
+                    if (canScheduleExact(context)) {
+                        alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger,
+                            alarm(context, c.id));
+                    } else {
+                        alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger,
+                            alarm(context, c.id));
+                    }
+                } catch (SecurityException exactPermissionChanged) {
                     alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger,
                         alarm(context, c.id));
                 }
-            } catch (SecurityException exactPermissionChanged) {
-                alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger,
-                    alarm(context, c.id));
-            }
+            });
+        } catch (Exception error) {
+            // Do not cancel the existing alarm set when a paged read fails halfway through. The
+            // next app open/boot will retry against the authoritative store.
+            Log.w(TAG, "commitment reminder read failed", error);
+            return;
         }
         Set<String> previous = prefs.getStringSet(KEY_SCHEDULED, new HashSet<String>());
         for (String id : previous) {
@@ -126,9 +127,12 @@ final class CommitmentReminders {
 
     /** Fires one due reminder: notifies unless the commitment is gone or settled, then re-arms. */
     static void fire(Context context, String id) {
-        Commitment found = null;
-        for (Commitment c : BalanceData.readCommitments(context)) {
-            if (c.id.equals(id)) found = c;
+        Commitment found;
+        try {
+            found = CommitmentStore.get(context, id);
+        } catch (Exception error) {
+            Log.w(TAG, "commitment reminder lookup failed", error);
+            return;
         }
         if (found != null && found.remind) {
             boolean iran = RegionHelper.isIran(context);
