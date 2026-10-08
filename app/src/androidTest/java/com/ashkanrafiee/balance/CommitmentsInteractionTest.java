@@ -194,7 +194,13 @@ public class CommitmentsInteractionTest {
             AlertDialog manageDialog = dialogField(activity, "manageDialogWindow");
             TextView definition = findText(manageDialog.getWindow().getDecorView(), source.name);
             assertNotNull("the reminder definition must be listed", definition);
-            assertTrue(definition.performClick());
+            View clickable = definition;
+            while (clickable != null && !clickable.isClickable()) {
+                android.view.ViewParent parent = clickable.getParent();
+                clickable = parent instanceof View ? (View) parent : null;
+            }
+            assertNotNull("the reminder row must be clickable", clickable);
+            assertTrue(clickable.performClick());
         });
 
         commitmentsScenario.onActivity(activity -> {
