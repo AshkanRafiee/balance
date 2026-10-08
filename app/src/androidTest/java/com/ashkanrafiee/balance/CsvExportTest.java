@@ -1,6 +1,7 @@
 package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
@@ -13,6 +14,8 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.io.ByteArrayOutputStream;
+import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -471,5 +474,86 @@ public class CsvExportTest {
             sum += Long.parseLong(parse(line(csv, i)).get(5));
         }
         assertEquals(-750_000L, sum);
+    }
+
+    @Test public void write_largeStore_emitsEveryRowThroughBoundedPages() throws Exception {
+        BalanceData.reset(ctx, true);
+        try {
+            List<Transaction> input = new ArrayList<>();
+            for (int i = 0; i < 2_050; i++) {
+                input.add(new Transaction("Synthetic", "account-" + i, 10_000L + i, i,
+                    "signature-" + i));
+            }
+            assertTrue(TransactionStore.replace(ctx, input));
+
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            CsvExport.write(ctx, 37, output, noText());
+            byte[] bytes = output.toByteArray();
+            assertEquals((byte) 0xEF, bytes[0]);
+            assertEquals((byte) 0xBB, bytes[1]);
+            assertEquals((byte) 0xBF, bytes[2]);
+
+            String csv = new String(bytes, StandardCharsets.UTF_8);
+            String[] rows = csv.split("\n", -1);
+            assertEquals(2_051, rows.length);
+            assertEquals("0", parse(rows[1]).get(5));
+            assertEquals("2049", parse(rows[2_050]).get(5));
+        } finally {
+            BalanceData.reset(ctx, true);
+        }
+    }
+
+    @Test public void write_outputStream_keepsPersianTextAndUtf8Bom() throws Exception {
+        BalanceData.reset(ctx, true);
+        try {
+            Transaction t = new Transaction("bank_melli", null, DATE_2026, 1_250_000L,
+                "signature-fa", "content-fa");
+            assertTrue(TransactionStore.replace(ctx, java.util.Collections.singletonList(t)));
+            java.util.Map<String, String> notes = new java.util.HashMap<>();
+            notes.put(BalanceData.noteKey(t), "مبلغ را نگه داشتم برای روز مبادا");
+
+            LocaleHelper.setLanguage(ctx, "fa");
+            Context fa = LocaleHelper.wrap(ctx);
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            CsvExport.write(fa, output, new CsvExport.Text(notes, null, null));
+
+            byte[] bytes = output.toByteArray();
+            assertEquals((byte) 0xEF, bytes[0]);
+            assertEquals((byte) 0xBB, bytes[1]);
+            assertEquals((byte) 0xBF, bytes[2]);
+            String decoded = new String(bytes, StandardCharsets.UTF_8);
+            assertTrue(decoded.contains("مبلغ را نگه داشتم برای روز مبادا"));
+            assertTrue(decoded.contains("۱۲۵٬۰۰۰"));
+            assertTrue(decoded.contains(",تومان,"));
+        } finally {
+            BalanceData.reset(ctx, true);
+        }
+    }
+
+    @Test public void write_storeFailure_propagatesWithoutCompletionFlush() throws Exception {
+        BalanceData.reset(ctx, true);
+        try {
+            assertTrue(TransactionStore.replace(ctx,
+                java.util.Collections.singletonList(new Transaction("Synthetic", 1L, 2L))));
+            assertTrue(ctx.deleteDatabase(TransactionStore.DB_NAME));
+
+            final boolean[] flushed = {false};
+            StringWriter output = new StringWriter() {
+                @Override public void flush() {
+                    flushed[0] = true;
+                    super.flush();
+                }
+            };
+            boolean failed = false;
+            try {
+                CsvExport.write(ctx, 1, output, noText());
+            } catch (Exception expected) {
+                failed = true;
+            }
+            assertTrue("a store failure must reach the caller", failed);
+            assertFalse("a failed store traversal must not flush a completed export", flushed[0]);
+        } finally {
+            BalanceData.reset(ctx, true);
+        }
     }
 }

@@ -2,10 +2,14 @@ package com.ashkanrafiee.balance;
 
 import android.content.Context;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -39,6 +43,9 @@ import org.json.JSONArray;
  * BOM makes every UTF-8-aware consumer read the file correctly.
  */
 final class CsvExport {
+    /** The number of decrypted rows the store may retain while a streaming export is running. */
+    static final int STREAM_PAGE_SIZE = 256;
+
     /** The fixed, unlocalized column set: spreadsheet tools and scripts must agree on the shape of
      *  the file regardless of the app's language. */
     static final String[] HEADER = {
@@ -121,6 +128,73 @@ final class CsvExport {
                 : cells(context, l.tx, text, iran, calendar, time, iso));
         }
         return out.toString();
+    }
+
+    /**
+     * Writes the complete transaction store to a UTF-8 CSV destination without building a history-
+     * sized list or a history-sized output string. Rows are emitted in the store cursor's order.
+     * Returning normally means the writer was flushed after the last row; store and writer failures
+     * are propagated to the caller, so a partial destination is never reported as a completed export.
+     * The writer remains owned by the caller and is not closed.
+     */
+    static void write(Context context, Writer writer, Text text) throws Exception {
+        write(context, STREAM_PAGE_SIZE, writer, text);
+    }
+
+    /** Same as {@link #write(Context, Writer, Text)}, with an explicit bounded store page size. */
+    static void write(Context context, int pageSize, Writer writer, Text text) throws Exception {
+        if (writer == null) throw new NullPointerException("writer");
+            write(context, visitor -> TransactionStore.forEach(context, pageSize, visitor),
+            writer, text);
+    }
+
+    /**
+     * Writes transactions supplied by a synchronous visitor source. This overload lets a caller
+     * apply a streaming scope before handing rows to the CSV writer; the source's order is retained.
+     * A source backed by {@link TransactionStore#forEach} keeps the same bounded-memory and failure
+     * behavior as the store overload. The writer remains owned by the caller and is not closed.
+     */
+    static void write(Context context, TransactionStore.StreamSource source, Writer writer,
+            Text text) throws Exception {
+        if (source == null) throw new NullPointerException("source");
+        if (writer == null) throw new NullPointerException("writer");
+
+        boolean iran = RegionHelper.isIran(context);
+        Calendar calendar = Calendar.getInstance(Locale.getDefault());
+        SimpleDateFormat time = new SimpleDateFormat("HH:mm", Locale.US);
+        SimpleDateFormat iso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
+        iso.setTimeZone(TimeZone.getTimeZone("UTC"));
+
+        writer.write('\uFEFF');
+        appendRow(writer, HEADER);
+        source.forEach(transaction -> {
+            writer.write('\n');
+            appendRow(writer, cells(context, transaction, text, iran, calendar, time, iso));
+        });
+        // A successful flush is the completion point. In particular, do not flush from a catch or
+        // finally block after a store failure has interrupted the source.
+        writer.flush();
+    }
+
+    /** Same source-driven export as the writer overload, encoded as UTF-8 and left open. */
+    static void write(Context context, TransactionStore.StreamSource source, OutputStream output,
+            Text text) throws Exception {
+        if (output == null) throw new NullPointerException("output");
+        Writer writer = new OutputStreamWriter(output, StandardCharsets.UTF_8);
+        write(context, source, writer, text);
+    }
+
+    /** Writes the complete transaction store as UTF-8 and leaves the supplied stream open. */
+    static void write(Context context, OutputStream output, Text text) throws Exception {
+        write(context, STREAM_PAGE_SIZE, output, text);
+    }
+
+    /** Same as {@link #write(Context, OutputStream, Text)}, with an explicit bounded page size. */
+    static void write(Context context, int pageSize, OutputStream output, Text text)
+            throws Exception {
+        if (output == null) throw new NullPointerException("output");
+        Writer writer = new OutputStreamWriter(output, StandardCharsets.UTF_8);
+        write(context, pageSize, writer, text);
     }
 
     /** One exported line: a parsed movement, or unaccounted money. */
@@ -210,6 +284,13 @@ final class CsvExport {
         for (int i = 0; i < cells.length; i++) {
             if (i > 0) out.append(',');
             out.append(escape(cells[i]));
+        }
+    }
+
+    private static void appendRow(Writer out, String... cells) throws IOException {
+        for (int i = 0; i < cells.length; i++) {
+            if (i > 0) out.write(',');
+            out.write(escape(cells[i]));
         }
     }
 }
