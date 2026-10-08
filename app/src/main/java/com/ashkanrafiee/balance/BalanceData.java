@@ -781,8 +781,7 @@ final class BalanceData {
     }
 
     /** Saves (or with a blank input, clears) the note for a transaction. The text is trimmed and
-     *  capped at {@link #MAX_NOTE_LENGTH}, so hostile or accidental multi-megabyte pastes are cut
-     *  down to a bounded size before they are written encrypted. */
+     *  retained in the encrypted metadata store without a lifetime entry-count cap. */
     static void setNote(Context context, Transaction t, String text) {
         try { MetadataStore.setNote(context, t, text); }
         catch (Exception e) { throw new IllegalStateException("metadata note write failed", e); }

@@ -91,6 +91,21 @@ final class DataGeneration {
         }
     }
 
+    /** Test isolation seam; production resets intentionally keep the published generation. */
+    static void clearForTests(Context input) {
+        synchronized (BalanceData.class) {
+            Context root = rootContext(input);
+            Manifest manifest = null;
+            try { manifest = readManifest(root); } catch (Exception ignored) { }
+            if (manifest != null) root.deleteSharedPreferences(prefsName(manifest.generation));
+            deleteRecursively(generationsDirectory(root));
+            File manifestFile = manifestFile(root);
+            if (manifestFile.exists()) manifestFile.delete();
+            File backup = new File(manifestFile.getPath() + ".bak");
+            if (backup.exists()) backup.delete();
+        }
+    }
+
     /** Refreshes the fail-closed database inventory after an explicit store reset. */
     static void refreshMarker(Context input) throws Exception {
         if (!(input instanceof GenerationContext)) return;

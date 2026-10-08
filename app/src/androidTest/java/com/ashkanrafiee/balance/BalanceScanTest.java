@@ -49,6 +49,7 @@ public class BalanceScanTest {
 
     @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        BalanceData.reset(ctx, true);
         InstrumentationRegistry.getInstrumentation().getUiAutomation()
                 .adoptShellPermissionIdentity(android.Manifest.permission.READ_SMS);
         exec("pm grant " + ctx.getPackageName() + " android.permission.READ_SMS");
