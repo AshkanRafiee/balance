@@ -2,6 +2,7 @@ package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -61,12 +62,14 @@ public class BackupFramesTest {
     }
 
     @Test public void truncatedFooter_isRejected() throws Exception {
-        byte[] backup = encode(new ByteArrayInputStream("payload".getBytes(StandardCharsets.UTF_8)),
-                PASSWORD);
+        byte[] payload = "payload".getBytes(StandardCharsets.UTF_8);
+        byte[] backup = encode(new ByteArrayInputStream(payload), PASSWORD);
         byte[] truncated = Arrays.copyOf(backup, backup.length - 1);
+        ByteArrayOutputStream restored = new ByteArrayOutputStream();
 
         expectInvalid(() -> BackupFrames.read(
-                new ByteArrayInputStream(truncated), new ByteArrayOutputStream(), PASSWORD));
+                new ByteArrayInputStream(truncated), restored, PASSWORD));
+        assertArrayEquals(payload, restored.toByteArray());
     }
 
     @Test public void bitFlipInCiphertext_isRejected() throws Exception {
@@ -120,6 +123,117 @@ public class BackupFramesTest {
         assertEquals(0, restored.size());
         assertEquals(BackupFrames.HEADER_BYTES + BackupFrames.FRAME_HEADER_BYTES
                 + "COMPLETE".length() + 16, backup.length);
+    }
+
+    @Test public void producerException_doesNotCreateASuccessfulFooter() throws Exception {
+        ByteArrayOutputStream backup = new ByteArrayOutputStream();
+        try {
+            BackupFrames.write((BackupFrames.PlaintextProducer) plaintext -> {
+                plaintext.write("partial JSON".getBytes(StandardCharsets.UTF_8));
+                throw new IOException("producer failed");
+            }, backup, PASSWORD);
+            fail("producer failure must be propagated");
+        } catch (IOException expected) {
+            assertEquals("producer failed", expected.getMessage());
+        }
+
+        expectInvalid(() -> BackupFrames.read(
+                new ByteArrayInputStream(backup.toByteArray()), new ByteArrayOutputStream(), PASSWORD));
+    }
+
+    @Test public void unfinishedOutput_closeDoesNotInventACompletionFooter() throws Exception {
+        ByteArrayOutputStream backup = new ByteArrayOutputStream();
+        BackupFrames.BackupOutputStream plaintext = BackupFrames.openOutputStream(backup, PASSWORD);
+        plaintext.write("unfinished JSON".getBytes(StandardCharsets.UTF_8));
+        plaintext.close();
+
+        expectInvalid(() -> BackupFrames.read(
+                new ByteArrayInputStream(backup.toByteArray()), new ByteArrayOutputStream(), PASSWORD));
+    }
+
+    @Test public void inputStreamEOF_isAuthenticatedAndRequiresPhysicalEOF() throws Exception {
+        byte[] original = "streamed JSON payload".getBytes(StandardCharsets.UTF_8);
+        byte[] backup = encode(new ByteArrayInputStream(original), PASSWORD);
+        BackupFrames.AuthenticatedInputStream plaintext = BackupFrames.openInputStream(
+                new ByteArrayInputStream(backup), PASSWORD);
+        ByteArrayOutputStream restored = new ByteArrayOutputStream();
+        byte[] buffer = new byte[original.length];
+        assertEquals(original.length, plaintext.read(buffer, 0, buffer.length));
+        restored.write(buffer);
+        assertEquals(-1, plaintext.read());
+        plaintext.finish();
+        plaintext.close();
+
+        assertArrayEquals(original, restored.toByteArray());
+    }
+
+    @Test public void inputStream_closeDrainsUnreadPlaintext() throws Exception {
+        byte[] backup = encode(new ByteArrayInputStream("unread tail".getBytes(StandardCharsets.UTF_8)),
+                PASSWORD);
+        BackupFrames.AuthenticatedInputStream plaintext = BackupFrames.openInputStream(
+                new ByteArrayInputStream(backup), PASSWORD);
+        assertEquals('u', plaintext.read());
+        plaintext.close();
+    }
+
+    @Test public void inputStream_truncatedFooterIsRejectedByFinish() throws Exception {
+        byte[] backup = encode(new ByteArrayInputStream("payload".getBytes(StandardCharsets.UTF_8)),
+                PASSWORD);
+        byte[] truncated = Arrays.copyOf(backup, backup.length - 1);
+        BackupFrames.AuthenticatedInputStream plaintext = BackupFrames.openInputStream(
+                new ByteArrayInputStream(truncated), PASSWORD);
+        byte[] payload = new byte["payload".length()];
+        assertEquals(payload.length, plaintext.read(payload, 0, payload.length));
+        expectInvalid(plaintext::finish);
+        plaintext.close();
+    }
+
+    @Test public void inputStream_trailingBytesAreRejectedByFinish() throws Exception {
+        byte[] backup = encode(new ByteArrayInputStream("payload".getBytes(StandardCharsets.UTF_8)),
+                PASSWORD);
+        byte[] trailing = Arrays.copyOf(backup, backup.length + 1);
+        trailing[trailing.length - 1] = 0x55;
+        BackupFrames.AuthenticatedInputStream plaintext = BackupFrames.openInputStream(
+                new ByteArrayInputStream(trailing), PASSWORD);
+        byte[] payload = new byte["payload".length()];
+        assertEquals(payload.length, plaintext.read(payload, 0, payload.length));
+        expectInvalid(plaintext::finish);
+        plaintext.close();
+    }
+
+    @Test public void inputStream_footerTamperIsRejectedByFinish() throws Exception {
+        byte[] backup = encode(new ByteArrayInputStream("payload".getBytes(StandardCharsets.UTF_8)),
+                PASSWORD);
+        backup[backup.length - 1] ^= 0x20;
+        BackupFrames.AuthenticatedInputStream plaintext = BackupFrames.openInputStream(
+                new ByteArrayInputStream(backup), PASSWORD);
+        byte[] payload = new byte["payload".length()];
+        assertEquals(payload.length, plaintext.read(payload, 0, payload.length));
+        expectInvalid(plaintext::finish);
+        plaintext.close();
+    }
+
+    @Test public void producerFramesRemainBoundedWhileTotalStreamHasNoCap() throws Exception {
+        final int size = BackupFrames.MAX_PLAINTEXT_BYTES * 4 + 19;
+        BoundedBackupOutputStream backup = new BoundedBackupOutputStream();
+        BackupFrames.write((BackupFrames.PlaintextProducer) plaintext -> {
+            byte[] chunk = new byte[8192];
+            int position = 0;
+            while (position < size) {
+                int count = Math.min(chunk.length, size - position);
+                for (int i = 0; i < count; i++) {
+                    chunk[i] = (byte) (position * 31 + ((position + i) >>> 8));
+                }
+                plaintext.write(chunk, 0, count);
+                position += count;
+            }
+            Arrays.fill(chunk, (byte) 0);
+        }, backup, PASSWORD);
+
+        assertTrue(backup.largestWrite <= BackupFrames.MAX_PLAINTEXT_BYTES + 32);
+        ByteArrayOutputStream restored = new ByteArrayOutputStream();
+        BackupFrames.read(new ByteArrayInputStream(backup.toByteArray()), restored, PASSWORD);
+        assertEquals(size, restored.size());
     }
 
     private static byte[] encode(InputStream source, char[] password) throws IOException {
@@ -198,6 +312,25 @@ public class BackupFramesTest {
         @Override public void write(byte[] bytes, int offset, int length) {
             digest.update(bytes, offset, length);
             count += length;
+        }
+    }
+
+    private static final class BoundedBackupOutputStream extends OutputStream {
+        private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        int largestWrite;
+
+        @Override public void write(int value) {
+            bytes.write(value);
+            largestWrite = Math.max(largestWrite, 1);
+        }
+
+        @Override public void write(byte[] source, int offset, int length) {
+            largestWrite = Math.max(largestWrite, length);
+            bytes.write(source, offset, length);
+        }
+
+        byte[] toByteArray() {
+            return bytes.toByteArray();
         }
     }
 }

@@ -62,6 +62,70 @@ public final class BackupFrames {
     private BackupFrames() {}
 
     /**
+     * Synchronously produces plaintext into a backup. Returning normally is required for the
+     * completion footer to be written.
+     */
+    @FunctionalInterface
+    public interface PlaintextProducer {
+        void produce(OutputStream plaintext) throws IOException;
+    }
+
+    /**
+     * Opens a bounded-memory plaintext writer. The returned stream writes encrypted frames as it
+     * is written to; it never starts a thread or creates an intermediate pipe.
+     *
+     * <p>{@link BackupOutputStream#finish()} is the commit operation. Closing an unfinished
+     * stream aborts it and deliberately does not write a completion footer. This makes a producer
+     * exception unable to turn a partial JSON document into a restorable backup.
+     */
+    public static BackupOutputStream openOutputStream(OutputStream backup, char[] password)
+            throws IOException {
+        if (backup == null) throw new IllegalArgumentException("output stream is null");
+        if (password == null) throw new IllegalArgumentException("password is null");
+        return new BackupOutputStream(backup, password);
+    }
+
+    /**
+     * Opens an authenticated plaintext stream. A read returning {@code -1} means the completion
+     * footer has been authenticated and the physical backup has been checked for trailing bytes.
+     * Call {@link AuthenticatedInputStream#finish()} (or close the stream) when the JSON consumer
+     * stops before reading plaintext EOF.
+     */
+    public static AuthenticatedInputStream openInputStream(InputStream backup, char[] password)
+            throws IOException {
+        if (backup == null) throw new IllegalArgumentException("input stream is null");
+        if (password == null) throw new IllegalArgumentException("password is null");
+        return new AuthenticatedInputStream(backup, password);
+    }
+
+    /**
+     * Runs a synchronous producer and commits the backup only when it returns normally.
+     * Neither the producer's stream nor {@code backup} is closed.
+     */
+    public static void write(PlaintextProducer producer, OutputStream backup, char[] password)
+            throws IOException {
+        if (producer == null) throw new IllegalArgumentException("producer is null");
+        BackupOutputStream out = openOutputStream(backup, password);
+        try {
+            // Keep close ownership with this method. JSON writers commonly close the stream they
+            // wrap, and that must not commit or abort before the producer has returned.
+            producer.produce(out.producerStream());
+            out.finish();
+        } catch (IOException | RuntimeException | Error e) {
+            out.abort();
+            throw e;
+        } finally {
+            out.close();
+        }
+    }
+
+    /** Same producer API with the destination first, for call sites that build the destination first. */
+    public static void write(OutputStream backup, char[] password, PlaintextProducer producer)
+            throws IOException {
+        write(producer, backup, password);
+    }
+
+    /**
      * Encrypts all bytes from {@code plaintext} into {@code backup}.
      *
      * <p>Neither stream is closed. The destination is flushed only after the authenticated footer
@@ -76,43 +140,22 @@ public final class BackupFrames {
             throws IOException {
         requireArguments(plaintext, backup, password);
 
-        byte[] salt = new byte[SALT_BYTES];
-        RANDOM.nextBytes(salt);
-        byte[] header = buildHeader(salt);
-        SecretKey key;
+        BackupOutputStream out = openOutputStream(backup, password);
+        byte[] buffer = new byte[MAX_PLAINTEXT_BYTES];
         try {
-            key = deriveKey(password, salt);
-        } catch (GeneralSecurityException e) {
-            Arrays.fill(header, (byte) 0);
-            throw new IOException("Unable to initialize backup encryption", e);
-        } finally {
-            Arrays.fill(salt, (byte) 0);
-        }
-
-        DataOutputStream out = new DataOutputStream(backup);
-        byte[] plaintextFrame = new byte[MAX_PLAINTEXT_BYTES];
-        long sequence = 0;
-        try {
-            out.write(header);
-            Cipher cipher = cipher();
-
             for (;;) {
-                int count = readChunk(plaintext, plaintextFrame);
+                int count = readChunk(plaintext, buffer);
                 if (count < 0) break;
                 if (count == 0) continue;
-                writeFrame(out, cipher, key, header, DATA_FRAME, sequence++, plaintextFrame, count);
+                out.write(buffer, 0, count);
             }
-
-            // The footer is a frame rather than an unencrypted marker, so it authenticates both
-            // the complete stream and the header even when the stream contains no data frames.
-            writeFrame(out, cipher, key, header, FOOTER_FRAME, sequence++, COMPLETION,
-                    COMPLETION.length);
-            out.flush();
-        } catch (GeneralSecurityException e) {
-            throw new IOException("Unable to encrypt backup", e);
+            out.finish();
+        } catch (IOException | RuntimeException | Error e) {
+            out.abort();
+            throw e;
         } finally {
-            Arrays.fill(plaintextFrame, (byte) 0);
-            Arrays.fill(header, (byte) 0);
+            Arrays.fill(buffer, (byte) 0);
+            out.close();
         }
     }
 
@@ -130,26 +173,354 @@ public final class BackupFrames {
             throws IOException {
         requireArguments(backup, plaintext, password);
 
-        DataInputStream in = new DataInputStream(backup);
-        byte[] header = readHeader(in);
-        byte[] salt = parseAndCopySalt(header);
-        SecretKey key;
+        AuthenticatedInputStream in = openInputStream(backup, password);
+        byte[] buffer = new byte[MAX_PLAINTEXT_BYTES];
+        Throwable failure = null;
         try {
-            key = deriveKey(password, salt);
-        } catch (GeneralSecurityException e) {
-            Arrays.fill(salt, (byte) 0);
-            Arrays.fill(header, (byte) 0);
-            throw new InvalidBackupException("Unable to initialize backup encryption", e);
+            int count;
+            while ((count = in.read(buffer, 0, buffer.length)) != -1) {
+                plaintext.write(buffer, 0, count);
+            }
+            // read() returning EOF already performs this check; keep finish explicit so this
+            // method remains correct if the stream implementation changes its read granularity.
+            in.finish();
+            plaintext.flush();
+        } catch (IOException | RuntimeException | Error e) {
+            failure = e;
+            throw e;
         } finally {
-            Arrays.fill(salt, (byte) 0);
+            Arrays.fill(buffer, (byte) 0);
+            try {
+                in.close();
+            } catch (IOException closeFailure) {
+                if (failure != null) {
+                    failure.addSuppressed(closeFailure);
+                } else {
+                    throw closeFailure;
+                }
+            }
+        }
+    }
+
+    /**
+     * Plaintext output stream for a backup under construction.
+     *
+     * <p>Data is retained only until one frame is full (at most 64 KiB), then encrypted and sent
+     * to the destination. {@link #finish()} is intentionally separate from {@link #close()}:
+     * close aborts an unfinished document, while finish authenticates completion and flushes the
+     * destination. The destination stream is never closed.
+     */
+    public static final class BackupOutputStream extends OutputStream {
+        private final OutputStream backup;
+        private byte[] header;
+        private SecretKey key;
+        private Cipher cipher;
+        private final byte[] plaintextFrame = new byte[MAX_PLAINTEXT_BYTES];
+        private final byte[] singleByte = new byte[1];
+        private int buffered;
+        private long sequence;
+        private boolean finished;
+        private boolean closed;
+        private IOException failure;
+
+        private BackupOutputStream(OutputStream backup, char[] password) throws IOException {
+            this.backup = backup;
+
+            byte[] salt = new byte[SALT_BYTES];
+            byte[] madeHeader = null;
+            SecretKey madeKey = null;
+            Cipher madeCipher = null;
+            boolean adopted = false;
+            try {
+                RANDOM.nextBytes(salt);
+                madeHeader = buildHeader(salt);
+                madeKey = deriveKey(password, salt);
+                madeCipher = cipher();
+                backup.write(madeHeader);
+                this.header = madeHeader;
+                this.key = madeKey;
+                this.cipher = madeCipher;
+                adopted = true;
+            } catch (GeneralSecurityException e) {
+                throw new IOException("Unable to initialize backup encryption", e);
+            } finally {
+                Arrays.fill(salt, (byte) 0);
+                if (!adopted && madeHeader != null) {
+                    Arrays.fill(madeHeader, (byte) 0);
+                }
+            }
         }
 
-        long expectedSequence = 0;
-        boolean footerSeen = false;
-        try {
-            Cipher cipher = cipher();
+        /**
+         * Completes the backup. This method is idempotent after a successful completion.
+         */
+        public void finish() throws IOException {
+            ensureOpen();
+            if (finished) return;
+            try {
+                flushFrame();
+                // The footer is an encrypted frame, not an unauthenticated marker. It binds the
+                // complete sequence and header even when no data was written.
+                writeFrame(backup, cipher, key, header, FOOTER_FRAME, sequence++, COMPLETION,
+                        COMPLETION.length);
+                backup.flush();
+                finished = true;
+                wipeCryptoState();
+            } catch (GeneralSecurityException e) {
+                fail(new IOException("Unable to encrypt backup", e));
+                throw failure;
+            } catch (IOException e) {
+                fail(e);
+                throw e;
+            }
+        }
+
+        /**
+         * Aborts this writer without writing a completion footer. It is safe to call repeatedly.
+         */
+        public void abort() {
+            cleanup();
+        }
+
+        @Override public void write(int value) throws IOException {
+            singleByte[0] = (byte) value;
+            write(singleByte, 0, 1);
+        }
+
+        @Override public void write(byte[] bytes, int offset, int length) throws IOException {
+            ensureWritable();
+            if (bytes == null) throw new NullPointerException("bytes");
+            if (offset < 0 || length < 0 || offset > bytes.length - length) {
+                throw new IndexOutOfBoundsException();
+            }
+
+            int position = offset;
+            int remaining = length;
+            while (remaining > 0) {
+                int count = Math.min(remaining, MAX_PLAINTEXT_BYTES - buffered);
+                System.arraycopy(bytes, position, plaintextFrame, buffered, count);
+                buffered += count;
+                position += count;
+                remaining -= count;
+                if (buffered == MAX_PLAINTEXT_BYTES) flushFrame();
+            }
+        }
+
+        @Override public void flush() throws IOException {
+            ensureOpen();
+            try {
+                flushFrame();
+                backup.flush();
+            } catch (IOException e) {
+                fail(e);
+                throw e;
+            }
+        }
+
+        /**
+         * Aborts an unfinished writer. It never closes the destination and never invents a footer
+         * after a producer has failed.
+         */
+        @Override public void close() {
+            if (closed) return;
+            cleanup();
+        }
+
+        private void flushFrame() throws IOException {
+            if (buffered == 0) return;
+            try {
+                writeFrame(backup, cipher, key, header, DATA_FRAME, sequence++, plaintextFrame,
+                        buffered);
+            } catch (GeneralSecurityException e) {
+                fail(new IOException("Unable to encrypt backup", e));
+                throw failure;
+            } catch (IOException e) {
+                fail(e);
+                throw e;
+            } finally {
+                Arrays.fill(plaintextFrame, (byte) 0);
+                buffered = 0;
+            }
+        }
+
+        private void ensureOpen() throws IOException {
+            if (closed) throw new IOException("Backup output stream is closed");
+            if (failure != null) throw failure;
+        }
+
+        private void ensureWritable() throws IOException {
+            ensureOpen();
+            if (finished) throw new IOException("Backup output stream is finished");
+        }
+
+        private void fail(IOException exception) {
+            failure = exception;
+            cleanup();
+        }
+
+        private void cleanup() {
+            Arrays.fill(plaintextFrame, (byte) 0);
+            Arrays.fill(singleByte, (byte) 0);
+            buffered = 0;
+            wipeCryptoState();
+            closed = true;
+        }
+
+        private void wipeCryptoState() {
+            if (header != null) Arrays.fill(header, (byte) 0);
+            header = null;
+            key = null;
+            cipher = null;
+        }
+
+        private OutputStream producerStream() {
+            return new OutputStream() {
+                @Override public void write(int value) throws IOException {
+                    BackupOutputStream.this.write(value);
+                }
+
+                @Override public void write(byte[] bytes, int offset, int length)
+                        throws IOException {
+                    BackupOutputStream.this.write(bytes, offset, length);
+                }
+
+                @Override public void flush() throws IOException {
+                    BackupOutputStream.this.flush();
+                }
+
+                @Override public void close() {
+                    // The enclosing producer method decides whether to commit or abort.
+                }
+            };
+        }
+    }
+
+    /**
+     * Authenticated plaintext input stream for staged restore.
+     *
+     * <p>Plaintext is intentionally released before the later footer is checked. The caller must
+     * therefore write it to disposable staging storage and publish that storage only after
+     * {@link #finish()} or an EOF return from {@link #read(byte[], int, int)}. Calling close on a
+     * partially consumed stream drains and validates it; a validation failure is reported by
+     * close. The encrypted source is never closed.
+     */
+    public static final class AuthenticatedInputStream extends InputStream {
+        private final DataInputStream in;
+        private byte[] header;
+        private SecretKey key;
+        private Cipher cipher;
+        private final byte[] singleByte = new byte[1];
+        private byte[] framePlaintext;
+        private int framePosition;
+        private int frameLength;
+        private long expectedSequence;
+        private boolean finished;
+        private boolean closed;
+        private IOException failure;
+
+        private AuthenticatedInputStream(InputStream backup, char[] password) throws IOException {
+            DataInputStream madeIn = new DataInputStream(backup);
+            byte[] madeHeader = readHeader(madeIn);
+            try {
+                byte[] salt = parseAndCopySalt(madeHeader);
+                SecretKey madeKey;
+                Cipher madeCipher;
+                try {
+                    madeKey = deriveKey(password, salt);
+                    madeCipher = cipher();
+                } catch (GeneralSecurityException e) {
+                    throw new InvalidBackupException("Unable to initialize backup encryption", e);
+                } finally {
+                    Arrays.fill(salt, (byte) 0);
+                }
+                this.in = madeIn;
+                this.header = madeHeader;
+                this.key = madeKey;
+                this.cipher = madeCipher;
+            } catch (IOException e) {
+                Arrays.fill(madeHeader, (byte) 0);
+                throw e;
+            }
+        }
+
+        /**
+         * Reads and discards any remaining plaintext, then requires authenticated footer and
+         * physical EOF. It uses a fixed-size discard buffer and is safe to call repeatedly after
+         * successful completion.
+         */
+        public void finish() throws IOException {
+            ensureOpen();
+            if (finished) return;
+
+            byte[] discard = new byte[8 * 1024];
+            try {
+                while (read(discard, 0, discard.length) != -1) {
+                    // Deliberately discard staged plaintext that the JSON reader did not consume.
+                }
+            } finally {
+                Arrays.fill(discard, (byte) 0);
+            }
+        }
+
+        /** Alias for finish, useful at restore call sites that describe this operation as draining. */
+        public void drain() throws IOException {
+            finish();
+        }
+
+        @Override public int read() throws IOException {
+            int count = read(singleByte, 0, 1);
+            return count < 0 ? -1 : singleByte[0] & 0xff;
+        }
+
+        @Override public int read(byte[] bytes, int offset, int length) throws IOException {
+            ensureOpen();
+            if (bytes == null) throw new NullPointerException("bytes");
+            if (offset < 0 || length < 0 || offset > bytes.length - length) {
+                throw new IndexOutOfBoundsException();
+            }
+            if (length == 0) return 0;
+            if (finished) return -1;
+
+            try {
+                if (framePosition == frameLength) {
+                    clearFrame();
+                    if (!readNextFrame()) return -1;
+                }
+                int count = Math.min(length, frameLength - framePosition);
+                System.arraycopy(framePlaintext, framePosition, bytes, offset, count);
+                framePosition += count;
+                return count;
+            } catch (IOException e) {
+                failure = e;
+                throw e;
+            }
+        }
+
+        /**
+         * Drains and validates an unfinished source. The source supplied to this class is not
+         * closed, because ownership remains with the caller.
+         */
+        @Override public void close() throws IOException {
+            if (closed) return;
+            IOException validationFailure = null;
+            try {
+                if (failure == null && !finished) finish();
+            } catch (IOException e) {
+                validationFailure = e;
+            } finally {
+                Arrays.fill(singleByte, (byte) 0);
+                clearFrame();
+                wipeCryptoState();
+                closed = true;
+            }
+            if (validationFailure != null) throw validationFailure;
+        }
+
+        private boolean readNextFrame() throws IOException {
             byte[] frameHeader = new byte[FRAME_HEADER_BYTES];
-            for (;;) {
+            byte[] ciphertext = null;
+            byte[] cleartext = null;
+            try {
                 int first = in.read();
                 if (first < 0) {
                     throw new InvalidBackupException("Backup is missing its completion footer");
@@ -175,42 +546,65 @@ public final class BackupFrames {
                     throw new InvalidBackupException("Invalid backup completion footer");
                 }
 
-                byte[] ciphertext = new byte[length + TAG_BYTES];
+                ciphertext = new byte[length + TAG_BYTES];
                 readFully(in, ciphertext, 0, ciphertext.length, "Truncated backup frame");
-                byte[] cleartext = decryptFrame(cipher, key, header, frameHeader, ciphertext);
+                try {
+                    cleartext = decryptFrame(cipher, key, header, frameHeader, ciphertext);
+                } catch (GeneralSecurityException e) {
+                    throw new InvalidBackupException("Backup authentication failed", e);
+                }
 
                 if (type == DATA_FRAME) {
-                    plaintext.write(cleartext);
-                } else {
-                    if (!MessageDigest.isEqual(cleartext, COMPLETION)) {
-                        throw new InvalidBackupException("Invalid backup completion footer");
-                    }
-                    footerSeen = true;
-                    Arrays.fill(cleartext, (byte) 0);
-                    Arrays.fill(ciphertext, (byte) 0);
-                    break;
+                    framePlaintext = cleartext;
+                    cleartext = null;
+                    framePosition = 0;
+                    frameLength = framePlaintext.length;
+                    expectedSequence++;
+                    return true;
                 }
-                Arrays.fill(cleartext, (byte) 0);
-                Arrays.fill(ciphertext, (byte) 0);
-                expectedSequence++;
-            }
 
-            if (!footerSeen) {
-                throw new InvalidBackupException("Backup is missing its completion footer");
+                if (!MessageDigest.isEqual(cleartext, COMPLETION)) {
+                    throw new InvalidBackupException("Invalid backup completion footer");
+                }
+                // A successful plaintext EOF is stronger than seeing a footer: no bytes may follow
+                // it, even if those bytes would otherwise be ignored by a JSON consumer.
+                if (in.read() != -1) {
+                    throw new InvalidBackupException("Backup has trailing bytes");
+                }
+                finished = true;
+                wipeCryptoState();
+                return false;
+            } finally {
+                Arrays.fill(frameHeader, (byte) 0);
+                if (ciphertext != null) Arrays.fill(ciphertext, (byte) 0);
+                if (cleartext != null) Arrays.fill(cleartext, (byte) 0);
             }
-            if (in.read() != -1) {
-                throw new InvalidBackupException("Backup has trailing bytes");
-            }
-            plaintext.flush();
-        } catch (GeneralSecurityException e) {
-            throw new InvalidBackupException("Backup authentication failed", e);
-        } finally {
-            Arrays.fill(header, (byte) 0);
+        }
+
+        private void clearFrame() {
+            if (framePlaintext != null) Arrays.fill(framePlaintext, (byte) 0);
+            framePlaintext = null;
+            framePosition = 0;
+            frameLength = 0;
+        }
+
+        private void ensureOpen() throws IOException {
+            if (closed) throw new IOException("Backup input stream is closed");
+            if (failure != null) throw failure;
+        }
+
+        private void wipeCryptoState() {
+            if (header != null) Arrays.fill(header, (byte) 0);
+            header = null;
+            key = null;
+            cipher = null;
         }
     }
 
     /** A format/authentication failure that must prevent a staged restore from being published. */
     public static final class InvalidBackupException extends IOException {
+        private static final long serialVersionUID = 1L;
+
         InvalidBackupException(String message) {
             super(message);
         }
@@ -255,14 +649,19 @@ public final class BackupFrames {
 
     private static byte[] readHeader(DataInputStream in) throws IOException {
         byte[] header = new byte[HEADER_BYTES];
-        readFully(in, header, 0, header.length, "Truncated backup header");
-        return header;
+        try {
+            readFully(in, header, 0, header.length, "Truncated backup header");
+            return header;
+        } catch (IOException e) {
+            Arrays.fill(header, (byte) 0);
+            throw e;
+        }
     }
 
     private static byte[] parseAndCopySalt(byte[] header) throws IOException {
+        byte[] magic = new byte[MAGIC.length];
         try {
             DataInputStream in = new DataInputStream(new ByteArrayInputStream(header));
-            byte[] magic = new byte[MAGIC.length];
             in.readFully(magic);
             if (!Arrays.equals(magic, MAGIC)
                     || in.readUnsignedByte() != FORMAT_VERSION
@@ -281,6 +680,8 @@ public final class BackupFrames {
             return salt;
         } catch (EOFException e) {
             throw new InvalidBackupException("Truncated backup header", e);
+        } finally {
+            Arrays.fill(magic, (byte) 0);
         }
     }
 
@@ -304,7 +705,7 @@ public final class BackupFrames {
         return Cipher.getInstance("AES/GCM/NoPadding");
     }
 
-    private static void writeFrame(DataOutputStream out, Cipher cipher, SecretKey key,
+    private static void writeFrame(OutputStream out, Cipher cipher, SecretKey key,
             byte[] header, int type, long sequence, byte[] cleartext, int length)
             throws IOException, GeneralSecurityException {
         byte[] frameHeader = new byte[FRAME_HEADER_BYTES];
@@ -320,20 +721,20 @@ public final class BackupFrames {
         byte[] madeHeader = frameBytes.toByteArray();
         System.arraycopy(madeHeader, 0, frameHeader, 0, FRAME_HEADER_BYTES);
 
-        byte[] ciphertext;
+        byte[] ciphertext = null;
         try {
             cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(TAG_BITS, iv));
             cipher.updateAAD(header);
             cipher.updateAAD(frameHeader);
             ciphertext = cipher.doFinal(cleartext, 0, length);
+            out.write(frameHeader);
+            out.write(ciphertext);
         } finally {
             Arrays.fill(iv, (byte) 0);
             Arrays.fill(madeHeader, (byte) 0);
+            Arrays.fill(frameHeader, (byte) 0);
+            if (ciphertext != null) Arrays.fill(ciphertext, (byte) 0);
         }
-        out.write(frameHeader);
-        out.write(ciphertext);
-        Arrays.fill(frameHeader, (byte) 0);
-        Arrays.fill(ciphertext, (byte) 0);
     }
 
     private static byte[] decryptFrame(Cipher cipher, SecretKey key, byte[] header,
