@@ -46,12 +46,12 @@ public class BackupRestoreTest {
 
     @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
     }
 
     @After public void tearDown() throws Exception {
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
     }
 
     private File file(String name) {
@@ -100,7 +100,7 @@ public class BackupRestoreTest {
         Uri u = uri("roundtrip.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
 
         BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
         assertEquals(3, res.added);
@@ -240,7 +240,7 @@ public class BackupRestoreTest {
         Uri u = uri("withbalance.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
         assertTrue(BalanceData.readTransactions(ctx).isEmpty());
 
         BackupManager.restore(ctx, u, PASSWORD);
@@ -495,7 +495,7 @@ public class BackupRestoreTest {
             Uri u = uri("merge1.balance");
             BackupManager.create(ctx, u, PASSWORD);
 
-            ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+            BalanceData.reset(ctx, true);
             // Current holds: an older Tejarat (backup is newer) and a bank missing from the backup.
             BalanceData.write(ctx, map(
                 bank("Tejarat", 1_000_000L, T + 1000),
@@ -520,7 +520,7 @@ public class BackupRestoreTest {
         Uri u = uri("merge2.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
         BalanceData.write(ctx, map(bank("Tejarat", 500_000L, T + 500)));
 
         BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
@@ -534,7 +534,7 @@ public class BackupRestoreTest {
         Uri u = uri("merge3.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
         BalanceData.write(ctx, map(bank("Tejarat", 7_000_000L, T + 9999)));
 
         BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
@@ -549,7 +549,7 @@ public class BackupRestoreTest {
         Uri u = uri("merge4.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
         BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
 
         BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
@@ -569,7 +569,7 @@ public class BackupRestoreTest {
         Uri u = uri("composite.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
         LinkedHashMap<String, Bank> current = new LinkedHashMap<>();
         current.put("Mellat|1110000222", new Bank("Mellat", 1_000_000L, T + 1000, "x", "1110000222"));
         current.put("Mellat", new Bank("Mellat", 4_000_000L, T + 2000, "x"));
@@ -669,7 +669,7 @@ public class BackupRestoreTest {
         Uri u = uri("txn1.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
 
         BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
         List<Transaction> out = BalanceData.readTransactions(ctx);
@@ -687,7 +687,7 @@ public class BackupRestoreTest {
         Uri u = uri("txn2.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
         // Current device history: the same Tejarat deposit (same fingerprint) and a local-only Melat
         // withdrawal. Restore must not duplicate Tejarat and must keep Melat.
         BalanceData.writeTransactions(ctx, Arrays.asList(
@@ -721,7 +721,7 @@ public class BackupRestoreTest {
         Uri u = uri("content-dedup.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
         Transaction localTx = new Transaction("Refah", null, T + 100,
             -200_000L, "old-signature", "same-sms-content");
         BalanceData.writeTransactions(ctx, Arrays.asList(localTx));
@@ -743,7 +743,7 @@ public class BackupRestoreTest {
             full.add(Commitment.create("local-" + i, -100, Commitment.ONCE,
                 T + 1000 + i, null, false, 0));
         }
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
         BalanceData.writeCommitments(ctx, full);
 
         BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
@@ -761,7 +761,7 @@ public class BackupRestoreTest {
         Uri u = uri("txn3.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
 
         BackupManager.restore(ctx, u, PASSWORD);
         List<Transaction> out = BalanceData.readTransactions(ctx);
@@ -785,7 +785,7 @@ public class BackupRestoreTest {
         Uri u = uri("notes-roundtrip.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
 
         BackupManager.restore(ctx, u, PASSWORD);
         List<Transaction> out = BalanceData.readTransactions(ctx);
@@ -823,7 +823,7 @@ public class BackupRestoreTest {
         Uri u = uri("notes-merge.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
         Transaction localA = new Transaction("Tejarat", null, T + 100, 200_000L, "sig-A", "content-A");
         Transaction localB = new Transaction("Melat", null, T + 200, -50_000L, "sig-B", "content-B");
         BalanceData.writeTransactions(ctx, Arrays.asList(localA, localB));
@@ -857,7 +857,7 @@ public class BackupRestoreTest {
         Uri u = uri("reasons-roundtrip.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
 
         BackupManager.restore(ctx, u, PASSWORD);
         List<Transaction> out = BalanceData.readTransactions(ctx);
@@ -898,7 +898,7 @@ public class BackupRestoreTest {
         Uri u = uri("reasons-merge.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
         Transaction localA = new Transaction("Blu", null, T + 100, -220_000L, "sig-A", "content-A");
         Transaction localB = new Transaction("Blu", null, T + 200, 50_000L, "sig-B", "content-B");
         BalanceData.writeTransactions(ctx, Arrays.asList(localA, localB));
@@ -958,7 +958,7 @@ public class BackupRestoreTest {
         Uri u = uri("channels-roundtrip.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
 
         BackupManager.restore(ctx, u, PASSWORD);
         List<Transaction> out = BalanceData.readTransactions(ctx);
@@ -1003,7 +1003,7 @@ public class BackupRestoreTest {
         Uri u = uri("channels-merge.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
         Transaction localA = new Transaction("Tejarat", "01350000000", T + 100, -220_000L, "sig-A", "content-A");
         Transaction localB = new Transaction("Tejarat", "01350000000", T + 200, 50_000L, "sig-B", "content-B");
         BalanceData.writeTransactions(ctx, Arrays.asList(localA, localB));
@@ -1051,7 +1051,7 @@ public class BackupRestoreTest {
         Uri u = uri("tags-roundtrip.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
 
         BackupManager.restore(ctx, u, PASSWORD);
         Transaction out = txByContent(BalanceData.readTransactions(ctx), "content-A");
@@ -1083,7 +1083,7 @@ public class BackupRestoreTest {
         Uri u = uri("tags-merge.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
         Transaction localA = new Transaction("Tejarat", null, T + 100, 200_000L, "sig-A", "content-A");
         Transaction localB = new Transaction("Melat", null, T + 200, -50_000L, "sig-B", "content-B");
         BalanceData.writeTransactions(ctx, Arrays.asList(localA, localB));
@@ -1138,7 +1138,7 @@ public class BackupRestoreTest {
         Uri u = uri("commitments-roundtrip.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
 
         BackupManager.restore(ctx, u, PASSWORD);
         List<Commitment> out = BalanceData.readCommitments(ctx);
@@ -1173,7 +1173,7 @@ public class BackupRestoreTest {
         Uri u = uri("commitments-merge.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.reset(ctx, true);
         List<Commitment> local = new ArrayList<>();
         local.add(commitment("id-shared", "local-name"));
         BalanceData.writeCommitments(ctx, local);
