@@ -160,6 +160,25 @@ public class HistoryReaderTest {
         }
     }
 
+    @Test public void summaryWithResiduals_streamsDateOrderedResidualsIntoTotals() throws Exception {
+        long first = epoch(2026, 9, 10);
+        List<Transaction> stored = Arrays.asList(
+            new Transaction(BANK, ACCOUNT, first + 2 * DAY, -5L, 283L, "later", null),
+            new Transaction(BANK, ACCOUNT, first, -30L, 290L, "first", null));
+        assertTrue(BalanceData.writeTransactions(context, stored));
+        HistoryActivity.Filter filter = new HistoryActivity.Filter(
+            HistoryActivity.DIR_WITHDRAWAL, HistoryActivity.RANGE_ALL, null, null);
+        HistoryReader.Request request = new HistoryReader.Request(false, 1, BANK, ACCOUNT,
+            filter, "", null, null, 0, 0);
+
+        HistoryReader.Result result = HistoryReader.summaryWithResiduals(context, request);
+        HistoryReader.Result reference = HistoryReader.reference(context, request);
+        assertTrue(result.residualsComplete);
+        assertEquals(reference.total, result.total);
+        assertEquals(reference.movementCount, result.movementCount);
+        assertEquals(-37L, result.total);
+    }
+
     @Test public void requestedDayRows_failInsteadOfSilentlyTruncating() throws Exception {
         long date = epoch(2026, 9, 15);
         assertTrue(BalanceData.writeTransactions(context, Arrays.asList(

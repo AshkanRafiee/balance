@@ -42,7 +42,7 @@ final class HistoryReader {
 
     private HistoryReader() {}
 
-    enum Mode { SUMMARY, REFERENCE }
+    enum Mode { SUMMARY, RESIDUAL_SUMMARY, REFERENCE }
 
     /** The immutable scope and bounded row-retention policy for one read. */
     static final class Request {
@@ -142,13 +142,14 @@ final class HistoryReader {
         final List<Transaction> visibleTransactions;
         final List<Residual> visibleResiduals;
 
-        private Result(boolean reference, Stats allTime, Stats today, Stats month, Stats year,
+        private Result(boolean reference, boolean residualsComplete, Stats allTime, Stats today,
+                Stats month, Stats year,
                 List<YearSummary> years, Map<String, DaySummary> daySummaries,
                 Map<String, DayRows> requestedDayRows, List<Transaction> visibleTransactions,
                 List<Residual> visibleResiduals) {
             this.reference = reference;
-            this.residualsComplete = reference;
-            this.limitation = reference ? null : SUMMARY_RESIDUAL_LIMITATION;
+            this.residualsComplete = residualsComplete;
+            this.limitation = residualsComplete ? null : SUMMARY_RESIDUAL_LIMITATION;
             this.allTime = allTime;
             this.today = today;
             this.month = month;
@@ -280,7 +281,9 @@ final class HistoryReader {
         if (context == null) throw new NullPointerException("context");
         if (request == null) throw new NullPointerException("request");
         if (mode == null) throw new NullPointerException("mode");
-        return mode == Mode.SUMMARY ? summary(context, request) : reference(context, request);
+        if (mode == Mode.SUMMARY) return summary(context, request);
+        if (mode == Mode.RESIDUAL_SUMMARY) return summaryWithResiduals(context, request);
+        return reference(context, request);
     }
 
     /** One stable, bounded-memory pass over the transaction store. */
@@ -296,7 +299,33 @@ final class HistoryReader {
             if (!matcher.matchesTransaction(transaction)) return;
             accumulator.addTransaction(transaction);
         });
-        return accumulator.result(false, null, null);
+        return accumulator.result(false, false, null, null);
+    }
+
+    /** Bounded summary plus date-ordered residuals emitted from encrypted disk staging. */
+    static Result summaryWithResiduals(Context context, Request request) throws Exception {
+        final Accumulator accumulator = new Accumulator(request);
+        final Matcher matcher = new Matcher(context, request);
+        TransactionStore.forEach(context, request.pageSize, transaction -> {
+            if (!inScope(transaction, request)) return;
+            if (!matchesMovementFilter(transaction, request)) return;
+            if (!matchesTags(context, transaction, request.selectedTags)) return;
+            if (!matcher.matchesTransaction(transaction)) return;
+            accumulator.addTransaction(transaction);
+        });
+        if (request.selectedTags.isEmpty()) {
+            HistoryResidualReader.forEach(context, request.bank, request.account,
+                request.pageSize, residual -> {
+                    if (!matchesResidualFilter(residual, request)) return;
+                    if (!matcher.matchesResidual(residual)) return;
+                    accumulator.addResidual(residual);
+                });
+        }
+        return accumulator.result(false, true, null, null);
+    }
+
+    static Result readSummaryWithResiduals(Context context, Request request) throws Exception {
+        return summaryWithResiduals(context, request);
     }
 
     /** Explicit alias for callers that want to name the selected mode in the call site. */
@@ -346,7 +375,7 @@ final class HistoryReader {
         Accumulator accumulator = new Accumulator(request);
         for (Transaction transaction : visibleTransactions) accumulator.addTransaction(transaction);
         for (Residual residual : visibleResiduals) accumulator.addResidual(residual);
-        return accumulator.result(true, visibleTransactions, visibleResiduals);
+        return accumulator.result(true, true, visibleTransactions, visibleResiduals);
     }
 
     /** Explicitly named compatibility entry point; it is intentionally not the bounded path. */
@@ -366,6 +395,17 @@ final class HistoryReader {
         if (filter.direction == HistoryActivity.DIR_WITHDRAWAL && transaction.amount >= 0) return false;
         if (filter.from == null && filter.to == null) return true;
         CalDate date = calendarDate(transaction.date, request.iran, Calendar.getInstance(Locale.getDefault()));
+        if (filter.from != null && date.compare(filter.from) < 0) return false;
+        return filter.to == null || date.compare(filter.to) <= 0;
+    }
+
+    private static boolean matchesResidualFilter(Residual residual, Request request) {
+        HistoryActivity.Filter filter = request.filter;
+        if (filter.direction == HistoryActivity.DIR_DEPOSIT && residual.amount <= 0) return false;
+        if (filter.direction == HistoryActivity.DIR_WITHDRAWAL && residual.amount >= 0) return false;
+        if (filter.from == null && filter.to == null) return true;
+        CalDate date = calendarDate(residual.toDate, request.iran,
+            Calendar.getInstance(Locale.getDefault()));
         if (filter.from != null && date.compare(filter.from) < 0) return false;
         return filter.to == null || date.compare(filter.to) <= 0;
     }
@@ -601,7 +641,7 @@ final class HistoryReader {
                 Calendar.getInstance(Locale.getDefault())).key();
         }
 
-        Result result(boolean reference, List<Transaction> transactions,
+        Result result(boolean reference, boolean residualsComplete, List<Transaction> transactions,
                 List<Residual> residuals) {
             List<YearSummary> yearResults = new ArrayList<>();
             LinkedHashMap<String, DaySummary> dayResults = new LinkedHashMap<>();
@@ -649,7 +689,7 @@ final class HistoryReader {
                 : Collections.unmodifiableList(new ArrayList<>(transactions));
             List<Residual> visibleResidual = residuals == null ? null
                 : Collections.unmodifiableList(new ArrayList<>(residuals));
-            return new Result(reference, allTime.freeze(), today.freeze(), month.freeze(),
+            return new Result(reference, residualsComplete, allTime.freeze(), today.freeze(), month.freeze(),
                 year.freeze(), yearResults, dayResults, rowResults, visibleTx, visibleResidual);
         }
     }
