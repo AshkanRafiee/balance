@@ -1462,6 +1462,10 @@ public final class HistoryActivity extends Activity {
      *  affordance next to the breakdown heading; empty whenever the history fully adds up. */
     private List<Residual> allResiduals = new ArrayList<>();
 
+    /** Day rows retained by the current bounded history result. A day outside this set must be
+     *  re-read before it can be opened, rather than appearing open with silently missing rows. */
+    private Set<String> loadedDayKeys = Collections.emptySet();
+
     /** Scroll container, kept so the list position survives rotation. */
     private PullRefreshScrollView scrollView;
 
@@ -1485,7 +1489,9 @@ public final class HistoryActivity extends Activity {
                 expandedYears.add(y.key());
                 for (MonthGroup m : y.months) {
                     expandedMonths.add(m.key());
-                    for (DayGroup d : m.days) expandedDays.add(d.key());
+                    for (DayGroup d : m.days) {
+                        if (loadedDayKeys.contains(d.key())) expandedDays.add(d.key());
+                    }
                 }
             }
             return;
@@ -1497,7 +1503,9 @@ public final class HistoryActivity extends Activity {
             if (y.year != now.year) continue;
             for (MonthGroup m : y.months) {
                 if (m.month != now.month) continue;
-                for (DayGroup d : m.days) expandedDays.add(d.key());
+                for (DayGroup d : m.days) {
+                    if (loadedDayKeys.contains(d.key())) expandedDays.add(d.key());
+                }
             }
         }
     }
@@ -1547,7 +1555,9 @@ public final class HistoryActivity extends Activity {
             expandedYears.add(y.key());
             for (MonthGroup m : y.months) {
                 expandedMonths.add(m.key());
-                for (DayGroup d : m.days) expandedDays.add(d.key());
+                for (DayGroup d : m.days) {
+                    if (loadedDayKeys.contains(d.key())) expandedDays.add(d.key());
+                }
             }
         }
     }
@@ -1794,12 +1804,11 @@ public final class HistoryActivity extends Activity {
     // Screen rendering
     // ====================================================================
 
-    /** Re-reads the saved history, applies the current filters and the search query, and rebuilds
-     *  the whole screen from it: the filter bar first (so its chips mirror the active filter),
-     *  then the hero and the breakdown computed over the narrowed list, so every figure on screen
-     *  reflects exactly what is shown. The decrypt-and-parse plus the per-movement calendar math
-     *  run on a worker thread so a large story never stalls the UI; only the finished groups are
-     *  drawn here. */
+    /** Reads a bounded history summary and rebuilds the screen from it. The first pass discovers
+     *  the visible day keys needed by fresh, expand-all, or new-search expansion; the second pass
+     *  retains rows only for the days this render will actually open. The decrypt-and-parse plus
+     *  the per-movement calendar math run on a worker thread so a large story never stalls the UI;
+     *  only the finished groups are drawn here. */
     private void render() {
         final int gen = ++renderGen;
         final Filter f = filter;
@@ -1808,6 +1817,15 @@ public final class HistoryActivity extends Activity {
         final boolean iran = iranCalendar;
         final String query = searchQuery == null ? "" : searchQuery.trim();
         final List<String> tagSelection = new ArrayList<>(selectedTags);
+        final Set<String> expandedSnapshot = new java.util.LinkedHashSet<>(expandedDays);
+        final boolean seededSnapshot = expandedSeeded;
+        final String expansionKey = expansionQuery(query);
+        final String previousExpansionKey = searchExpandedFor;
+        final Set<String> savedPreSearchDays = preSearchDays == null ? null
+            : new java.util.LinkedHashSet<>(preSearchDays);
+        final boolean expandAll = BalanceData.getExpandAllHistory(this);
+        final boolean discoverExpansion = (!expansionKey.isEmpty()
+            && !expansionKey.equals(previousExpansionKey)) || (!seededSnapshot && expandAll);
         new Thread(() -> {
             try {
                 CountDownLatch started = renderGateStarted;
@@ -1816,14 +1834,55 @@ public final class HistoryActivity extends Activity {
                     started.countDown();
                     release.await();
                 }
-                List<Transaction> txs = BalanceData.readTransactions(getApplicationContext());
-                if (bank != null) txs = filterByBank(txs, bank);
-                if (acct != null) txs = filterByAccount(txs, acct);
-                // Detected across the whole account before any narrowing, since a residual is only
-                // provable between two balance statements a filter may hide, and then narrowed by the
-                // same rules so what is on screen and what the totals say always agree.
-                List<Residual> residuals = applyResidualFilters(Residual.between(txs), f, iran);
-                List<Transaction> filtered = applyFilters(txs, f, iran);
+
+                if (expandedSnapshot.size() > HistoryReader.DEFAULT_MAX_REQUESTED_DAYS) {
+                    throw new UnsupportedOperationException(
+                        "expanded history exceeds the bounded day batch");
+                }
+
+                Set<String> requestedDays;
+                if (discoverExpansion) {
+                    // This pass retains no rows. It is needed only because the screen's existing
+                    // expand-all/search rules discover some expanded days from the grouped result.
+                    HistoryReader.Request discoveryRequest = new HistoryReader.Request(
+                        iran, HistoryReader.DEFAULT_PAGE_SIZE, bank, acct, f, query, tagSelection,
+                        Collections.emptySet(), HistoryReader.DEFAULT_MAX_REQUESTED_DAYS,
+                        HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
+                    HistoryReader.Result discovery = HistoryReader.summaryWithResiduals(
+                        getApplicationContext(), discoveryRequest);
+                    requestedDays = plannedExpandedDays(discovery, expandedSnapshot,
+                        seededSnapshot, expandAll, expansionKey, previousExpansionKey,
+                        savedPreSearchDays, iran);
+                } else {
+                    requestedDays = new java.util.LinkedHashSet<>(expandedSnapshot);
+                    if (expansionKey.isEmpty() && previousExpansionKey != null
+                            && savedPreSearchDays != null) {
+                        // Clearing a search restores the exact pre-search day expansion after the
+                        // result is installed, so the transient search expansion is not requested.
+                        requestedDays.clear();
+                        requestedDays.addAll(savedPreSearchDays);
+                    } else if (!seededSnapshot && !expandAll) {
+                        // The normal first-load seed opens every visible day in the current month.
+                        // Request the calendar's complete month; nonexistent days simply produce
+                        // empty DayRows and never affect the summary.
+                        CalDate current = CalDate.today(iran);
+                        for (int day = 1; day <= CalDate.daysInMonth(current.year,
+                                current.month, iran); day++) {
+                            requestedDays.add(CalDate.of(current.year, current.month, day).key());
+                        }
+                    }
+                }
+                if (requestedDays.size() > HistoryReader.DEFAULT_MAX_REQUESTED_DAYS) {
+                    throw new UnsupportedOperationException(
+                        "expanded history does not fit the bounded day batch");
+                }
+
+                HistoryReader.Request request = new HistoryReader.Request(
+                    iran, HistoryReader.DEFAULT_PAGE_SIZE, bank, acct, f, query, tagSelection,
+                    requestedDays, HistoryReader.DEFAULT_MAX_REQUESTED_DAYS,
+                    HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
+                HistoryReader.Result result = HistoryReader.summaryWithResiduals(
+                    getApplicationContext(), request);
                 final Map<String, String> notesNow =
                     BalanceData.readNotes(getApplicationContext());
                 final Map<String, String> reasonsNow =
@@ -1832,20 +1891,13 @@ public final class HistoryActivity extends Activity {
                     BalanceData.readChannels(getApplicationContext());
                 final Map<String, List<String>> tagsNow =
                     BalanceData.readTags(getApplicationContext());
-                filtered = applyTagFilter(filtered, tagsNow, tagSelection);
-                if (!tagSelection.isEmpty()) residuals = new ArrayList<>();
-                if (!query.isEmpty()) {
-                    final SearchPass pass =
-                        new SearchPass(this, iran, notesNow, reasonsNow, channelsNow, tagsNow);
-                    filtered = filterBySearch(filtered, query, t -> txHaystack(pass, t));
-                    residuals = filterBySearch(residuals, query, r -> residualHaystack(pass, r));
-                }
-                final List<Transaction> shown = filtered;
-                final List<Residual> shownResiduals = residuals;
-                final Lists lists = buildLists(shown, shownResiduals, iran);
+                final Lists lists = listsFromSummary(result);
+                final List<Residual> requestedResiduals = residualsFromSummary(result);
                 runOnUiThread(() -> {
                     if (gen != renderGen || isDestroyed() || isFinishing()) return;
-                    allResiduals = shownResiduals;
+                    allResiduals = requestedResiduals;
+                    loadedDayKeys = Collections.unmodifiableSet(
+                        new java.util.LinkedHashSet<>(result.requestedDayRows.keySet()));
                     notes = notesNow;
                     reasons = reasonsNow;
                     channels = channelsNow;
@@ -1866,7 +1918,8 @@ public final class HistoryActivity extends Activity {
                         emptyState();
                     } else {
                         body.addView(heroCard(lists), margin(0, 0, 0, 6));
-                        body.addView(breakdownHeading(shown.size()), margin(0, 16, 0, 12));
+                        body.addView(breakdownHeading(result.movementCount),
+                            margin(0, 16, 0, 12));
                         allYears = lists.years;
                         seedExpanded();
                         expandForSearch(expansionQuery(query), lists.years);
@@ -1901,6 +1954,46 @@ public final class HistoryActivity extends Activity {
                 });
             }
         }).start();
+    }
+
+    /** Determines which visible days the existing seed/search rules will open after this result is
+     *  installed. Collapsed days remain summary-only; stale expansion keys for filtered-out days do
+     *  not consume the bounded row batch. */
+    private static Set<String> plannedExpandedDays(HistoryReader.Result result,
+            Set<String> expandedSnapshot, boolean seeded, boolean expandAll, String expansionKey,
+            String previousExpansionKey, Set<String> savedPreSearchDays, boolean iran) {
+        Set<String> visible = new java.util.LinkedHashSet<>(result.daySummaries.keySet());
+        Set<String> requested = new java.util.LinkedHashSet<>();
+        for (String key : expandedSnapshot) {
+            if (visible.contains(key)) requested.add(key);
+        }
+
+        if (!seeded) {
+            if (expandAll) {
+                requested.addAll(visible);
+            } else {
+                CalDate current = CalDate.today(iran);
+                for (HistoryReader.DaySummary day : result.daySummaries.values()) {
+                    if (day.date.year == current.year && day.date.month == current.month) {
+                        requested.add(day.date.key());
+                    }
+                }
+            }
+        }
+
+        if (expansionKey.isEmpty()) {
+            if (previousExpansionKey != null && savedPreSearchDays != null) {
+                requested.clear();
+                for (String key : savedPreSearchDays) {
+                    if (visible.contains(key)) requested.add(key);
+                }
+            }
+        } else if (!expansionKey.equals(previousExpansionKey)) {
+            // expandForSearch opens every group in a fresh search/tag expansion so no match is
+            // hidden inside a collapsed day.
+            requested.addAll(visible);
+        }
+        return requested;
     }
 
     /** Returns only the transactions whose bank equals {@code bank}, preserving input order.
@@ -2058,7 +2151,7 @@ public final class HistoryActivity extends Activity {
      * screen. The button is how the amber rows explain themselves without every row having to spell
      * it out, and its absence when the history adds up is itself the reassurance.
      */
-    private LinearLayout breakdownHeading(int shown) {
+    private LinearLayout breakdownHeading(long shown) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -2070,7 +2163,7 @@ public final class HistoryActivity extends Activity {
         // How much history is on screen. Without it the size of an account is a guess, and the cost
         // of the breakdown below grows with it.
         row.addView(text(getResources().getQuantityString(
-            R.plurals.history_n_tx, shown, shown), 12, muted, medium()));
+            R.plurals.history_n_tx, quantity(shown), shown), 12, muted, medium()));
 
         if (allResiduals.isEmpty()) return row;
 
@@ -2377,7 +2470,8 @@ public final class HistoryActivity extends Activity {
 
         LinearLayout.LayoutParams spacer = new LinearLayout.LayoutParams(0, 0, 1);
         head.addView(new View(this), spacer);
-        TextView count = text(getResources().getQuantityString(R.plurals.history_n_tx, m.n, m.n), 11, muted);
+        TextView count = text(getResources().getQuantityString(
+            R.plurals.history_n_tx, quantity(m.n), m.n), 11, muted);
         head.addView(count);
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
@@ -2437,7 +2531,7 @@ public final class HistoryActivity extends Activity {
     /** A collapsible day row: caret, a Today/Yesterday tag over the date, transaction count and
      *  the day's net; expanding it lists that day's transactions newest first. */
     private LinearLayout dayCard(DayGroup g, LinearLayout daysHost, List<DayGroup> days) {
-        boolean open = expandedDays.contains(g.key());
+        boolean open = expandedDays.contains(g.key()) && loadedDayKeys.contains(g.key());
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPaddingRelative(dp(2), dp(2), dp(2), dp(2));
@@ -2449,8 +2543,14 @@ public final class HistoryActivity extends Activity {
         head.setBackground(ripple(rounded(openBg, 10)));
         head.setPaddingRelative(dp(4), dp(6), dp(4), dp(6));
         head.setOnClickListener(v -> {
-            if (open) expandedDays.remove(g.key()); else expandedDays.add(g.key());
-            renderDays(daysHost, days);
+            if (open) {
+                expandedDays.remove(g.key());
+                renderDays(daysHost, days);
+            } else {
+                expandedDays.add(g.key());
+                if (loadedDayKeys.contains(g.key())) renderDays(daysHost, days);
+                else render();
+            }
         });
         head.addView(caret(open, 13), new LinearLayout.LayoutParams(dp(22), -2));
 
@@ -2478,7 +2578,7 @@ public final class HistoryActivity extends Activity {
 
         LinearLayout.LayoutParams spacer = new LinearLayout.LayoutParams(0, 0, 1);
         head.addView(new View(this), spacer);
-        if (g.txs.size() > 1) head.addView(countChip(g.txs.size()));
+        if (g.n > 1) head.addView(countChip(g.n));
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
         TextView sum = bold(signedAmount(g.sum), 13, valueColor(g.sum));
@@ -3032,13 +3132,19 @@ public final class HistoryActivity extends Activity {
         }
     }
 
+    /** Keeps plural selection valid while preserving the full long count in the displayed text. */
+    private static int quantity(long count) {
+        return count > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) count;
+    }
+
     /** A small neutral chip with a count, for transaction-count density. */
-    private TextView countChip(int n) {
+    private TextView countChip(long n) {
         TextView t = text(String.valueOf(n), 11, muted);
         t.setTypeface(Fonts.text(this), Typeface.BOLD);
         t.setBackground(rounded(chipBg, 8));
         t.setPadding(dp(7), dp(3), dp(7), dp(3));
-        t.setContentDescription(getResources().getQuantityString(R.plurals.history_n_tx, n, n));
+        t.setContentDescription(getResources().getQuantityString(
+            R.plurals.history_n_tx, quantity(n), n));
         return t;
     }
 
@@ -3150,6 +3256,7 @@ public final class HistoryActivity extends Activity {
     static final class DayGroup {
         final CalDate date;
         long sum;
+        long n;
         final List<Transaction> txs = new ArrayList<>();
         /** Unaccounted money detected on this day, shown beside the movements rather than among
          *  them: it is proven by the day's own balance statements, not read off a message. */
@@ -3171,7 +3278,7 @@ public final class HistoryActivity extends Activity {
     static final class MonthGroup {
         final int year, month;
         long sum, dep, wit;
-        int n;
+        long n;
         final List<DayGroup> days = new ArrayList<>();
         MonthGroup(int year, int month) {
             this.year = year;
@@ -3187,7 +3294,7 @@ public final class HistoryActivity extends Activity {
     static final class YearGroup {
         final int year;
         long sum, dep, wit;
-        int n;
+        long n;
         final List<MonthGroup> months = new ArrayList<>();
         YearGroup(int year) {
             this.year = year;
@@ -3480,6 +3587,68 @@ public final class HistoryActivity extends Activity {
         }
     }
 
+    /** Adapts the bounded reader's aggregates and requested rows to the established screen model.
+     *  Every group is retained for headers, while row lists are filled only when the reader was
+     *  explicitly asked for that day's rows. */
+    static Lists listsFromSummary(HistoryReader.Result result) {
+        if (result == null) throw new NullPointerException("result");
+        Lists lists = new Lists();
+        lists.today = result.todayTotal;
+        lists.month = result.monthTotal;
+        lists.year = result.yearTotal;
+        lists.total = result.total;
+        lists.todayDep = result.todayDeposits;
+        lists.monthDep = result.monthDeposits;
+        lists.yearDep = result.yearDeposits;
+        lists.todayWit = result.todayWithdrawals;
+        lists.monthWit = result.monthWithdrawals;
+        lists.yearWit = result.yearWithdrawals;
+
+        for (HistoryReader.YearSummary summaryYear : result.years) {
+            YearGroup year = new YearGroup(summaryYear.year);
+            year.sum = summaryYear.stats.sum;
+            year.dep = summaryYear.stats.deposits;
+            year.wit = summaryYear.stats.withdrawals;
+            year.n = summaryYear.stats.movementCount;
+            for (HistoryReader.MonthSummary summaryMonth : summaryYear.months) {
+                MonthGroup month = new MonthGroup(summaryMonth.year, summaryMonth.month);
+                month.sum = summaryMonth.stats.sum;
+                month.dep = summaryMonth.stats.deposits;
+                month.wit = summaryMonth.stats.withdrawals;
+                month.n = summaryMonth.stats.movementCount;
+                for (HistoryReader.DaySummary summaryDay : summaryMonth.days) {
+                    DayGroup day = new DayGroup(summaryDay.date);
+                    day.sum = summaryDay.stats.sum;
+                    day.n = summaryDay.stats.movementCount;
+                    HistoryReader.DayRows rows = result.requestedDayRows.get(day.key());
+                    if (rows != null) {
+                        day.txs.addAll(rows.transactions);
+                        day.residuals.addAll(rows.residuals);
+                        for (HistoryReader.Row row : rows.rows) {
+                            day.lines.add(new Line(row.date, row.transaction, row.residual));
+                        }
+                    }
+                    month.days.add(day);
+                }
+                year.months.add(month);
+            }
+            lists.years.add(year);
+        }
+        return lists;
+    }
+
+    /** Returns the residual objects retained for requested day rows, which is the bounded subset
+     *  available to the existing row detail and explainer affordances. */
+    static List<Residual> residualsFromSummary(HistoryReader.Result result) {
+        if (result == null) throw new NullPointerException("result");
+        List<Residual> out = new ArrayList<>();
+        for (HistoryReader.DayRows rows : result.requestedDayRows.values()) {
+            out.addAll(rows.residuals);
+        }
+        out.sort((a, b) -> Long.compare(b.toDate, a.toDate));
+        return out;
+    }
+
     /** Splits the raw transactions into the summary sums and the year-by-year (month-by-month,
      *  day-by-day) groups of the given calendar system. Never mutates the caller's list. */
     static Lists buildLists(List<Transaction> txs) {
@@ -3596,6 +3765,7 @@ public final class HistoryActivity extends Activity {
             month.days.add(day);
         }
         day.sum += amount;
+        if (count) day.n++;
         return day;
     }
 

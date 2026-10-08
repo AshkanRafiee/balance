@@ -179,6 +179,29 @@ public class HistoryReaderTest {
         assertEquals(-37L, result.total);
     }
 
+    @Test public void summaryConversionKeepsAggregatesAndOnlyRequestedDayRows() throws Exception {
+        long newer = epoch(2026, 9, 15);
+        List<Transaction> stored = Arrays.asList(
+            new Transaction(BANK, ACCOUNT, newer - DAY, 30L, null, "older", null),
+            new Transaction(BANK, ACCOUNT, newer, -10L, null, "newer", null));
+        assertTrue(BalanceData.writeTransactions(context, stored));
+        String requestedDay = CalDate.fromGregorian(2026, 9, 15, false).key();
+        HistoryReader.Request request = new HistoryReader.Request(false, 1, BANK, ACCOUNT,
+            HistoryActivity.Filter.ALL, "", null, Collections.singleton(requestedDay), 64, 128);
+
+        HistoryReader.Result result = HistoryReader.summaryWithResiduals(context, request);
+        HistoryActivity.Lists lists = HistoryActivity.listsFromSummary(result);
+
+        assertEquals(result.total, lists.total);
+        assertEquals(result.movementCount, lists.years.get(0).n);
+        HistoryActivity.DayGroup selected = lists.years.get(0).months.get(0).days.get(0);
+        HistoryActivity.DayGroup collapsed = lists.years.get(0).months.get(0).days.get(1);
+        assertEquals(1, selected.txs.size());
+        assertEquals(1, selected.lines.size());
+        assertTrue(collapsed.txs.isEmpty());
+        assertTrue(collapsed.lines.isEmpty());
+    }
+
     @Test public void requestedDayRows_failInsteadOfSilentlyTruncating() throws Exception {
         long date = epoch(2026, 9, 15);
         assertTrue(BalanceData.writeTransactions(context, Arrays.asList(
