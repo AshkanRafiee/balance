@@ -13,12 +13,10 @@ import android.util.Log;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.MessageDigest;
-import java.util.UUID;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -45,6 +43,7 @@ final class BalanceData {
     private static final String KEY_TRANSACTIONS_MANIFEST = "transactions_manifest_v2";
     private static final String TRANSACTION_PAGE_PREFIX = "transactions_page_v2_";
     private static final int TRANSACTION_PAGE_SIZE = 1000;
+    static final String KEY_TRANSACTION_STORE_TOKEN = "transaction_store_token";
     static final String KEY_TX_NOTES = "transaction_notes";
     /** The reasons the bank itself stated, keyed exactly like the notes. Kept in a store of its own so
      *  a detected reason can never overwrite what the user wrote — and never touches it at all. */
@@ -226,6 +225,10 @@ final class BalanceData {
         return new String(cipher.doFinal(in, 12, in.length - 12), StandardCharsets.UTF_8);
     }
 
+    /** Package-private bridge for the row store; payloads remain protected by the same Keystore key. */
+    static String encryptStorePayload(String plain) throws Exception { return encrypt(plain); }
+    static String decryptStorePayload(String blob) throws Exception { return decrypt(blob); }
+
     static LinkedHashMap<String, Bank> read(Context context) {
         LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
         try {
@@ -307,6 +310,12 @@ final class BalanceData {
     static List<Transaction> readTransactions(Context context) {
         List<Transaction> paged = null;
         try {
+            List<Transaction> database = TransactionStore.read(context);
+            if (database != null) {
+                String legacy = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
+                    .getString(KEY_TRANSACTIONS, null);
+                if (!database.isEmpty() || legacy == null) return database;
+            }
             paged = readPagedTransactions(context);
         } catch (Exception e) {
             Log.w(TAG, "paged transaction store unreadable; trying legacy store", e);
@@ -335,32 +344,8 @@ final class BalanceData {
     static boolean writeTransactions(Context context, List<Transaction> txs) {
         try {
             if (txs == null) return false;
-            if (txs.isEmpty()) {
-                clearPagedTransactions(context);
-                return context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-                    .remove(KEY_TRANSACTIONS).commit();
-            }
-
-            String generation = UUID.randomUUID().toString();
-            int pageCount = (txs.size() + TRANSACTION_PAGE_SIZE - 1) / TRANSACTION_PAGE_SIZE;
-            for (int page = 0; page < pageCount; page++) {
-                int from = page * TRANSACTION_PAGE_SIZE;
-                int to = Math.min(txs.size(), from + TRANSACTION_PAGE_SIZE);
-                writeTransactionPage(context, generation, page, txs.subList(from, to));
-            }
-
-            JSONObject manifest = new JSONObject()
-                .put("version", 1)
-                .put("generation", generation)
-                .put("pages", pageCount)
-                .put("count", txs.size());
-            String encoded = encrypt(manifest.toString());
-            boolean published = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
-                .edit().putString(KEY_TRANSACTIONS_MANIFEST, encoded).commit();
-            if (!published) throw new Exception("transaction manifest was not committed");
-            context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-                .remove(KEY_TRANSACTIONS).commit();
-            removeOldTransactionPages(context, generation);
+            if (!TransactionStore.replace(context, txs)) return false;
+            clearPagedTransactions(context);
             return true;
         } catch (Exception e) {
             Log.w(TAG, "writeTransactions failed", e);
@@ -388,21 +373,6 @@ final class BalanceData {
         }
         if (out.size() != count) throw new Exception("incomplete transaction generation");
         return out;
-    }
-
-    private static void writeTransactionPage(Context context, String generation, int page,
-            List<Transaction> txs) throws Exception {
-        File target = transactionPage(context, generation, page);
-        File temp = new File(target.getPath() + ".tmp");
-        byte[] bytes = encrypt(serializeTransactions(txs)).getBytes(StandardCharsets.UTF_8);
-        try (FileOutputStream out = new FileOutputStream(temp)) {
-            out.write(bytes);
-            out.getFD().sync();
-        }
-        if (!temp.renameTo(target)) {
-            temp.delete();
-            throw new Exception("transaction page was not committed");
-        }
     }
 
     private static String readTransactionPage(Context context, String generation, int page)
@@ -1016,6 +986,7 @@ final class BalanceData {
                 .remove(KEY_RECENT_MOVEMENTS).remove(KEY_TX_REASONS).remove(KEY_TX_CHANNELS);
         if (alsoNotes) data.remove(KEY_TX_NOTES).remove(KEY_TX_TAGS);
         data.commit();
+        TransactionStore.clear(context);
         removeOldTransactionPages(context, null);
         context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
             .remove(KEY_SCANNED_THROUGH)
