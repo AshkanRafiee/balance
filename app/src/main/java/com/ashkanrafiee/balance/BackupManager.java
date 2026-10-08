@@ -3,6 +3,7 @@ package com.ashkanrafiee.balance;
 import android.content.Context;
 import android.net.Uri;
 import android.util.Base64;
+import android.util.JsonWriter;
 import android.util.Log;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -155,6 +156,102 @@ final class BackupManager {
         } finally {
             temp.delete();
         }
+    }
+
+    /**
+     * Creates the framed v2 backup. The legacy {@link #create} writer remains available while the
+     * v2 restore path is staged and verified; new callers should use this method once restore is
+     * enabled. Rows are written directly from bounded cursors and the framed footer is committed
+     * only after the JSON producer completes.
+     */
+    static void createFramed(Context context, Uri uri, String password) throws Exception {
+        if (password == null) throw new IllegalArgumentException("password");
+        File temp = File.createTempFile("balance-backup-v2-", ".tmp", context.getCacheDir());
+        char[] chars = password.toCharArray();
+        try {
+            synchronized (BalanceData.class) {
+                try (FileOutputStream raw = new FileOutputStream(temp)) {
+                    BackupFrames.BackupOutputStream encrypted =
+                        BackupFrames.openOutputStream(raw, chars);
+                    try {
+                        JsonWriter json = new JsonWriter(new OutputStreamWriter(encrypted,
+                            StandardCharsets.UTF_8));
+                        writeFramedPayload(context, json);
+                        json.flush();
+                        encrypted.finish();
+                    } finally {
+                        encrypted.close();
+                    }
+                }
+            }
+            copyFileToUri(context, temp, uri);
+        } finally {
+            java.util.Arrays.fill(chars, '\0');
+            temp.delete();
+        }
+    }
+
+    private static void writeFramedPayload(Context context, JsonWriter json) throws Exception {
+        json.beginObject();
+        json.name("schema").value(2);
+
+        json.name("balances").beginArray();
+        for (Map.Entry<String, Bank> entry : BalanceData.read(context).entrySet()) {
+            Bank bank = entry.getValue();
+            json.beginObject().name("key").value(entry.getKey()).name("name").value(bank.name)
+                .name("amount").value(bank.amount).name("date").value(bank.date)
+                .name("sender").value(bank.sender);
+            if (bank.account != null) json.name("account").value(bank.account);
+            json.endObject();
+        }
+        json.endArray();
+
+        json.name("transactions").beginArray();
+        TransactionStore.forEach(context, 256, transaction -> writeTransaction(json, transaction));
+        json.endArray();
+
+        json.name("metadata").beginObject();
+        writeMetadata(context, json, MetadataStore.NOTES, false);
+        writeMetadata(context, json, MetadataStore.REASONS, false);
+        writeMetadata(context, json, MetadataStore.CHANNELS, false);
+        writeMetadata(context, json, MetadataStore.TAGS, true);
+        json.endObject();
+
+        json.name("commitments");
+        CommitmentStore.writeJsonRecords(context, json);
+        json.endObject();
+    }
+
+    private static void writeTransaction(JsonWriter json, Transaction t) throws java.io.IOException {
+        json.beginObject().name("bank").value(t.bank).name("date").value(t.date)
+            .name("amount").value(t.amount);
+        if (t.account != null) json.name("account").value(t.account);
+        if (t.balance != null) json.name("balance").value(t.balance);
+        if (t.sig != null) json.name("sig").value(t.sig);
+        if (t.content != null) json.name("content").value(t.content);
+        json.endObject();
+    }
+
+    private static void writeMetadata(Context context, JsonWriter json, int kind, boolean tags)
+            throws Exception {
+        String name;
+        if (kind == MetadataStore.NOTES) name = "notes";
+        else if (kind == MetadataStore.REASONS) name = "reasons";
+        else if (kind == MetadataStore.CHANNELS) name = "channels";
+        else name = "tags";
+        json.name(name).beginArray();
+        MetadataStore.forEach(context, kind, 256, row -> {
+            json.beginObject().name("key").value(row.key);
+            if (tags) {
+                json.name("tags").beginArray();
+                for (String tag : row.tags) json.value(tag);
+                json.endArray();
+            } else {
+                json.name("text").value(row.text);
+            }
+            json.endObject();
+        });
+        json.endArray();
     }
 
     private static void writeStreamingPayload(Context context, Writer writer) throws Exception {

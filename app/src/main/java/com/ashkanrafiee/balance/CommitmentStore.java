@@ -7,8 +7,10 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.util.Base64;
+import android.util.JsonWriter;
 
 import java.io.Writer;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -410,6 +412,35 @@ final class CommitmentStore {
             writer.write("]}");
             return null;
         });
+    }
+
+    /** Streams definitions and every explicit settlement mark without building one large JSON row. */
+    static void writeJsonRecords(Context context, JsonWriter writer) throws Exception {
+        if (writer == null) throw new NullPointerException("writer");
+        writer.beginArray();
+        forEachDefinition(context, PAGE_SIZE, definition -> writeJsonRecord(writer, definition));
+        writer.endArray();
+    }
+
+    private static void writeJsonRecord(JsonWriter writer, Commitment c) throws IOException {
+        writer.beginObject();
+        writer.name("id").value(c.id);
+        writer.name("name").value(c.name);
+        writer.name("amount").value(c.amount);
+        writer.name("freq").value(c.frequency);
+        writer.name("start").value(c.start);
+        if (c.end != null) writer.name("end").value(c.end);
+        if (c.done) writer.name("done").value(true);
+        if (c.legacyPaidThrough > 0) writer.name("paidThrough").value(c.legacyPaidThrough);
+        if (c.remind) writer.name("remind").value(true);
+        if (c.remindBeforeMs > 0) writer.name("remindBefore").value(c.remindBeforeMs);
+        writer.name("paid").beginArray();
+        for (Long date : c.paid) writer.value(date);
+        writer.endArray();
+        writer.name("unpaid").beginArray();
+        for (Long date : c.unpaid) writer.value(date);
+        writer.endArray();
+        writer.endObject();
     }
 
     /** Streams the explicit paid/unpaid arrays plus paidThrough, without expanding that watermark. */

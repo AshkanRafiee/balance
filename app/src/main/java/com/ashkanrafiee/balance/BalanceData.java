@@ -57,13 +57,12 @@ final class BalanceData {
     /** User-created commitments (loans, debts, subscriptions and the like), stored as one JSON
      *  array under this key. */
     static final String KEY_COMMITMENTS = "commitments";
-    /** Upper bound on one transaction note, so a huge paste cannot bloat the encrypted store. */
-    static final int MAX_NOTE_LENGTH = 500;
-    /** Bounds on user-created tag data, applied both at the UI boundary and while reading backups. */
-    static final int MAX_TAG_LENGTH = 64;
-    static final int MAX_TAGS_PER_TRANSACTION = 32;
-    static final int MAX_TAG_ENTRIES = 100_000;
-    static final int MAX_BALANCE_ENTRIES = 10_000;
+    /** Historical metadata limits retained for source compatibility; they are not storage caps. */
+    @Deprecated static final int MAX_NOTE_LENGTH = 500;
+    @Deprecated static final int MAX_TAG_LENGTH = 64;
+    @Deprecated static final int MAX_TAGS_PER_TRANSACTION = 32;
+    @Deprecated static final int MAX_TAG_ENTRIES = 100_000;
+    @Deprecated static final int MAX_BALANCE_ENTRIES = 10_000;
     static final String PREFS_PREF = "balance_preferences";
     static final String KEY_HIDDEN = "balances_hidden";
     static final String KEY_WIDGET_HIDDEN = "widget_balances_hidden";
@@ -249,7 +248,7 @@ final class BalanceData {
         try {
             JSONObject obj = new JSONObject(json);
             Iterator<String> keys = obj.keys();
-            while (keys.hasNext() && map.size() < MAX_BALANCE_ENTRIES) {
+            while (keys.hasNext()) {
                 String key = keys.next();
                 JSONObject entry = obj.getJSONObject(key);
                 String account = entry.has("account") && !entry.isNull("account")
@@ -867,12 +866,7 @@ final class BalanceData {
                 Log.w(TAG, "refusing to persist empty balances over existing data");
                 return;
             }
-            LinkedHashMap<String, Bank> bounded = new LinkedHashMap<>();
-            for (Map.Entry<String, Bank> entry : map.entrySet()) {
-                if (bounded.size() >= MAX_BALANCE_ENTRIES) break;
-                bounded.put(entry.getKey(), entry.getValue());
-            }
-            String json = serialize(bounded);
+            String json = serialize(map);
             context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
                 .putString(KEY_BALANCES, encrypt(json)).apply();
         } catch (Exception e) {
