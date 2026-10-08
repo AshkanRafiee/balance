@@ -103,6 +103,9 @@ public class RefahBankTest {
         InstrumentationRegistry.getInstrumentation().getUiAutomation()
             .adoptShellPermissionIdentity(android.Manifest.permission.READ_SMS);
         exec("pm grant " + context.getPackageName() + " android.permission.READ_SMS");
+        exec("cmd appops set " + context.getPackageName()
+            + " android:read_restricted_messages allow");
+        exec("cmd appops set com.ashkanrafiee.smsinject WRITE_SMS allow");
         context.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
         context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
         clearInbox();

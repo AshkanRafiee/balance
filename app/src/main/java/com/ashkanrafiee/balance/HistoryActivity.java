@@ -55,6 +55,7 @@ import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * Shows the transaction history parsed from supported bank SMS: the net sum of transactions for
@@ -172,6 +173,14 @@ public final class HistoryActivity extends Activity {
     /** Bumped on every render request; the finished render applies its result only if it is still
      *  the newest, so a quick filter change never gets overwritten by a stale slower build. */
     private int renderGen;
+    private static volatile CountDownLatch renderGateStarted;
+    private static volatile CountDownLatch renderGateRelease;
+
+    /** Test-only gate for making the loading state deterministic without a large history fixture. */
+    static void setRenderGateForTest(CountDownLatch started, CountDownLatch release) {
+        renderGateStarted = started;
+        renderGateRelease = release;
+    }
 
     /** The placeholder blocks on screen while the history is being read, and the one animator that
      *  sweeps a highlight across all of them. */
@@ -1801,6 +1810,12 @@ public final class HistoryActivity extends Activity {
         final List<String> tagSelection = new ArrayList<>(selectedTags);
         new Thread(() -> {
             try {
+                CountDownLatch started = renderGateStarted;
+                CountDownLatch release = renderGateRelease;
+                if (started != null && release != null) {
+                    started.countDown();
+                    release.await();
+                }
                 List<Transaction> txs = BalanceData.readTransactions(getApplicationContext());
                 if (bank != null) txs = filterByBank(txs, bank);
                 if (acct != null) txs = filterByAccount(txs, acct);
@@ -1828,9 +1843,9 @@ public final class HistoryActivity extends Activity {
                 final List<Transaction> shown = filtered;
                 final List<Residual> shownResiduals = residuals;
                 final Lists lists = buildLists(shown, shownResiduals, iran);
-                allResiduals = shownResiduals;
                 runOnUiThread(() -> {
                     if (gen != renderGen || isDestroyed() || isFinishing()) return;
+                    allResiduals = shownResiduals;
                     notes = notesNow;
                     reasons = reasonsNow;
                     channels = channelsNow;
@@ -3215,8 +3230,9 @@ public final class HistoryActivity extends Activity {
         }
     }
 
-    /** Exact tag membership: a selected tag never matches a different tag merely because its name is
-     *  a substring. Comparison is case-insensitive because tag names are user-entered labels. */
+    /** Exact tag membership: every selected tag must be present, and a selected tag never matches a
+     *  different tag merely because its name is a substring. Comparison is case-insensitive because
+     *  tag names are user-entered labels. */
     static boolean matchesTags(Transaction t, Map<String, List<String>> tags,
             Collection<String> selected) {
         if (selected == null || selected.isEmpty()) return true;

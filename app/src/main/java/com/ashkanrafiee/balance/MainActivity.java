@@ -1166,9 +1166,13 @@ public class MainActivity extends Activity {
                     }
                 } else {
                     view.loadSaved();
+                    boolean countsChanged = res.added > 0 || res.updated > 0
+                        || res.transactionsAdded > 0 || res.commitmentsAdded > 0;
                     String summary = res.changed()
-                        ? getString(R.string.backup_restore_summary, res.added, res.updated,
-                            res.commitmentsAdded)
+                        ? countsChanged
+                            ? getString(R.string.backup_restore_summary, res.added, res.updated,
+                                res.commitmentsAdded, res.transactionsAdded)
+                            : getString(R.string.backup_restore_summary_metadata)
                         : getString(R.string.backup_restore_summary_none);
                     Toast.makeText(MainActivity.this,
                         getString(R.string.backup_restored) + "\n" + summary,

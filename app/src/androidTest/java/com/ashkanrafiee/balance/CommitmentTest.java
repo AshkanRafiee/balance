@@ -245,6 +245,13 @@ public class CommitmentTest {
         assertNull(Commitment.totalAmount(c, CalendarSystem.GREGORIAN));
     }
 
+    @Test public void totalAmount_rejectsAnUnboundedFiniteExpansion() {
+        long start = Commitment.millisOf(2026, 10, 7, CalendarSystem.GREGORIAN);
+        Commitment c = Commitment.create("hostile", -20, Commitment.DAILY, start,
+            Long.MAX_VALUE, false, 0);
+        assertNull(Commitment.totalAmount(c, CalendarSystem.GREGORIAN));
+    }
+
     // ---- settlement -----------------------------------------------------------------
 
     @Test public void nextDue_advancesPastMarkedDays() {

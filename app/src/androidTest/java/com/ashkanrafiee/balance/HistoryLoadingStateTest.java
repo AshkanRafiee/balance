@@ -24,6 +24,8 @@ import org.junit.runner.RunWith;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * What the history screen shows while it is still reading its history.
@@ -38,6 +40,7 @@ public class HistoryLoadingStateTest {
     private Context ctx;
     private String originalTag;
     private String originalCurrency;
+    private androidx.test.core.app.ActivityScenario<HistoryActivity> scenario;
 
     private static final String MELLAT = "Mellat";
     private static final String ACCOUNT = "111";
@@ -53,46 +56,44 @@ public class HistoryLoadingStateTest {
     }
 
     @After public void tearDown() {
+        HistoryActivity.setRenderGateForTest(null, null);
+        if (scenario != null) scenario.close();
         LocaleHelper.setLanguage(ctx, originalTag);
         CurrencyHelper.setCurrency(ctx, originalCurrency);
         BalanceData.reset(ctx, true);
     }
 
-    /**
-     * Enough movements that reading and grouping them takes far longer than the screen takes to
-     * open.
-     *
-     * <p>The placeholders go up during the screen's own setup and come down with the render that
-     * follows, and launching waits for the screen to settle, so this is a race by nature: a store
-     * that reads quickly is simply never caught mid-load. It is sized with a wide margin so the race
-     * is not close — a few thousand movements are finished before the launch returns.
-     */
+    /** A small history is enough because the render gate makes the loading state deterministic. */
     private void storeEnoughToBeSlowToRead() {
         long now = System.currentTimeMillis();
         List<Transaction> txs = new ArrayList<>();
-        for (int i = 0; i < 20000; i++) {
+        for (int i = 0; i < 4; i++) {
             txs.add(new Transaction(MELLAT, ACCOUNT, now - i * HOUR,
                 (i % 3 == 0 ? 1 : -1) * (100_000L + i), "sig" + i, null));
         }
         BalanceData.writeTransactions(ctx, txs);
     }
 
-    @Test public void whileItIsStillReading_theScreenShowsPlaceholdersRatherThanBlank() {
+    @Test public void whileItIsStillReading_theScreenShowsPlaceholdersRatherThanBlank()
+            throws Exception {
         storeEnoughToBeSlowToRead();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        HistoryActivity.setRenderGateForTest(started, release);
         openHistory();
+        try {
+            assertTrue("the history render should reach the gate",
+                started.await(10, TimeUnit.SECONDS));
+            assertNotNull("a blank white page is not a loading state",
+                findByDescription(ctx.getString(R.string.history_loading)));
 
-        assertNotNull("a blank white page is not a loading state",
-            findByDescription(ctx.getString(R.string.history_loading)));
-
-        // Collect the placeholders while they are still the content. They are the only thing wearing
-        // a shimmer, so this cannot be satisfied later by the real history taking their place.
-        final List<View> bars = shimmerBars();
-        assertTrue("the placeholders must have something to show", !bars.isEmpty());
-        // Children alone prove nothing: a bare View carrying only a background has no intrinsic size,
-        // so a placeholder left to wrap its content lays out at zero and the skeleton is a set of
-        // empty cards. The screen has not been measured when the activity starts, so let it have the
-        // frames it needs; bars that can never lay out never satisfy this.
-        await(() -> allLaidOut(bars), 15_000, "the placeholders to be laid out");
+            final List<View> bars = shimmerBars();
+            assertTrue("the placeholders must have something to show", !bars.isEmpty());
+            await(() -> allLaidOut(bars), 15_000, "the placeholders to be laid out");
+        } finally {
+            HistoryActivity.setRenderGateForTest(null, null);
+            release.countDown();
+        }
     }
 
     @Test public void onceLoaded_thePlaceholdersAreGone() {
@@ -114,7 +115,7 @@ public class HistoryLoadingStateTest {
             .putExtra(HistoryActivity.EXTRA_BANK, MELLAT)
             .putExtra(HistoryActivity.EXTRA_ACCOUNT, ACCOUNT)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        InstrumentationRegistry.getInstrumentation().startActivitySync(i);
+        scenario = androidx.test.core.app.ActivityScenario.launch(i);
     }
 
     private static boolean allLaidOut(List<View> bars) {

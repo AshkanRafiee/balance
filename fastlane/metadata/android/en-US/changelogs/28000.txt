@@ -1,0 +1,4 @@
+• Added recurring commitments with monthly planning, remaining payable and receivable totals, settlement tracking and optional reminders.
+• Added private transaction tags and notes, reusable history filters, CSV export and richer encrypted backups.
+• Added support for more Iranian bank SMS formats, including Middle East, Sepah and Refah account and transaction messages.
+• Improved Persian typography, privacy controls and history handling, including clearer unaccounted-money explanations.

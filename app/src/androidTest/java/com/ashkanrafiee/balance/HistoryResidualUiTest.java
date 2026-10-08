@@ -85,7 +85,7 @@ public class HistoryResidualUiTest {
             .putExtra(HistoryActivity.EXTRA_BANK, MELLAT)
             .putExtra(HistoryActivity.EXTRA_ACCOUNT, ACCOUNT)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        InstrumentationRegistry.getInstrumentation().startActivitySync(i);
+        scenario = androidx.test.core.app.ActivityScenario.launch(i);
         // The screen builds itself off the main thread, so wait for the export action, which only
         // exists once the history header is in place.
         await(() -> findByDescription(ctx.getString(R.string.history_export)) != null, 20_000);

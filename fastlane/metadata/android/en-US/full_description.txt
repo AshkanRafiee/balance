@@ -1,4 +1,4 @@
-Balance reads your bank's balance SMS on the phone and shows the latest balance for every supported bank — split per account number when the bank states one — plus the combined total. No account, no cloud, no analytics and no internet permission: the parsing happens on your device, and your financial data stays there, encrypted.
+Balance reads bank SMS on your phone and shows the latest balance for supported banks — split per account when stated — plus the combined total. No account, cloud, analytics or internet permission: parsing is on-device and stored data is encrypted. Balance does not upload or send it; Report, sharing, CSV export and backup only hand selected data to the app or location you choose.
 
 Currently built for users in Iran, with Iranian banks and their Persian message formats.
 
@@ -15,7 +15,7 @@ Features:
 - Home-screen widget with the same bank order, totals and masking
 - Transaction history by day, month and year, showing out-of-order messages (a transfer and its fee) in their true order
 - Unaccounted money: when a balance statement changed by more than the messages explain, the difference appears as an amber "Unaccounted" row on the later statement's date and is counted in every total. It is proven by two statements your bank sent
-- Filter the history by deposits or withdrawals, by date, and by exact reusable tags — today, this month, this year, or a custom range in the Persian or Gregorian calendar. Match all or any selected tags, or search across the transaction details and tags
+- Filter the history by deposits or withdrawals, by date, and by exact reusable tags — today, this month, this year, or a custom range in the Persian or Gregorian calendar. Search across the transaction details and tags
 - Movement reasons read from the bank: when a message names the event behind a movement — a phone top-up, a bill payment, a refund, an instant transfer — the row says so in your own language, and so does the channel it went through when the bank states that. Otherwise nothing is added, and neither ever mixes into your note
 - Private notes and multiple tags: tap any row to write your own words and labels about that movement; they follow it through every filter, into CSV exports and into encrypted backups
 - Optional commitments card: name your loans, debts, subscriptions and anything paid or received — once or recurring (daily to yearly), open-ended or with an end date — with separate remaining payable/receivable totals, monthly grouping, older paid dues and reminders. Edit through Manage

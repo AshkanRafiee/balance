@@ -711,6 +711,46 @@ public class BackupRestoreTest {
         assertEquals(1, melat);     // current history never dropped
     }
 
+    @Test public void merge_transactions_sameContentWithNewAccountDoesNotDuplicate() throws Exception {
+        // A parser update can add an account to a transaction that an older build stored without
+        // one. The content digest identifies the same physical SMS even though its parsed signature
+        // and account-aware identity changed.
+        Transaction backupTx = new Transaction("Refah", "123456789", T + 100,
+            -200_000L, "new-signature", "same-sms-content");
+        BalanceData.writeTransactions(ctx, Arrays.asList(backupTx));
+        Uri u = uri("content-dedup.balance");
+        BackupManager.create(ctx, u, PASSWORD);
+
+        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        Transaction localTx = new Transaction("Refah", null, T + 100,
+            -200_000L, "old-signature", "same-sms-content");
+        BalanceData.writeTransactions(ctx, Arrays.asList(localTx));
+
+        BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
+        assertEquals(0, res.transactionsAdded);
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
+    }
+
+    @Test public void restore_commitmentsPreservesTheLocalCapacityCap() throws Exception {
+        List<Commitment> one = new ArrayList<>();
+        one.add(Commitment.create("backup", -100, Commitment.ONCE, T + 100, null, false, 0));
+        BalanceData.writeCommitments(ctx, one);
+        Uri u = uri("commitment-cap.balance");
+        BackupManager.create(ctx, u, PASSWORD);
+
+        List<Commitment> full = new ArrayList<>();
+        for (int i = 0; i < Commitment.MAX_COMMITMENTS; i++) {
+            full.add(Commitment.create("local-" + i, -100, Commitment.ONCE,
+                T + 1000 + i, null, false, 0));
+        }
+        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        BalanceData.writeCommitments(ctx, full);
+
+        BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
+        assertEquals(0, res.commitmentsAdded);
+        assertEquals(Commitment.MAX_COMMITMENTS, BalanceData.readCommitments(ctx).size());
+    }
+
     @Test public void merge_transactions_sameAmountSameTimeDifferentAccounts_staySeparate() throws Exception {
         // Two accounts of one bank moved the same amount at the same moment; without an account-aware
         // identity the restore merge would collapse them into a single history row.

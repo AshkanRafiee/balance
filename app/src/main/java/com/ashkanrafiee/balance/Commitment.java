@@ -40,6 +40,11 @@ final class Commitment {
     static final long MAX_REMIND_BEFORE_MS = 365L * 86400000L;
     static final int MAX_COMMITMENTS = 500;
     static final int MAX_SETTLED_DAYS = 2000;
+    /** A finite total larger than this cannot be useful as one displayed amount, and counting it
+     *  must not make a crafted backup expand millions of recurrence rows on the UI thread. */
+    static final long MAX_TOTAL_OCCURRENCES = 100_000L;
+
+    interface OccurrenceVisitor { void visit(long at); }
 
     final String id;
     final String name;
@@ -142,12 +147,34 @@ final class Commitment {
     static Long totalAmount(Commitment c, CalendarSystem cal) {
         if (c == null || cal == null || c.end == null && c.frequency != ONCE) return null;
         long end = c.end == null ? c.start : c.end;
-        long count = occurrences(c, cal, c.start, end).size();
+        long count = countOccurrences(c, cal, c.start, end, MAX_TOTAL_OCCURRENCES);
+        if (count > MAX_TOTAL_OCCURRENCES) return null;
         try {
             return Math.multiplyExact(count, c.amount);
         } catch (ArithmeticException overflow) {
             return null;
         }
+    }
+
+    /** Counts without materializing the occurrence list. A limit keeps a hostile finite end date
+     *  from turning a management-screen total into an unbounded allocation or loop. */
+    private static long countOccurrences(Commitment c, CalendarSystem cal, long fromMs,
+            long toMs, long limit) {
+        if (toMs < fromMs) return 0;
+        long maxSpan = limit * 366L * 86400000L;
+        if (toMs - fromMs > maxSpan) return limit + 1;
+        if (c.frequency == ONCE) return 1;
+        int[] anchor = civilDay(c.start, cal);
+        int[] cursor = firstCursor(c, cal, anchor, startOfDay(fromMs));
+        int[] last = civilDay(startOfDay(toMs), cal);
+        int[] endCivil = c.end == null || c.end > toMs ? null : civilDay(c.end, cal);
+        long count = 0;
+        while (compare(cursor, last) <= 0) {
+            if (endCivil != null && compare(cursor, endCivil) > 0) break;
+            if (++count > limit) return count;
+            step(cursor, c.frequency, cal, anchor[2]);
+        }
+        return count;
     }
 
     JSONObject toJson() {
@@ -212,25 +239,41 @@ final class Commitment {
      *  a decade-wide window costs nothing. */
     static List<Long> occurrences(Commitment c, CalendarSystem cal, long fromMs, long toMs) {
         List<Long> out = new ArrayList<>();
-        if (c == null || cal == null || toMs < fromMs) return out;
+        visitOccurrences(c, cal, fromMs, toMs, out::add);
+        return out;
+    }
+
+    /** Visits due days without allocating a list, for screens that only need aggregates or a small
+     *  visible window. */
+    static void visitOccurrences(Commitment c, CalendarSystem cal, long fromMs, long toMs,
+            OccurrenceVisitor visitor) {
+        visitOccurrences(c, cal, fromMs, toMs, visitor, -1);
+    }
+
+    static void visitOccurrences(Commitment c, CalendarSystem cal, long fromMs, long toMs,
+            OccurrenceVisitor visitor, int maxVisits) {
+        if (c == null || cal == null || visitor == null || toMs < fromMs) return;
         int[] anchor = civilDay(c.start, cal);
-        int[] end = c.end == null ? null : civilDay(c.end, cal);
+        int[] end = c.end == null || c.end > toMs ? null : civilDay(c.end, cal);
         long fromDay = startOfDay(fromMs);
         long toDay = startOfDay(toMs);
         if (c.frequency == ONCE) {
             long at = millisOf(anchor[0], anchor[1], anchor[2], cal);
-            if (at >= fromDay && at <= toDay) out.add(at);
-            return out;
+            if (at >= fromDay && at <= toDay) visitor.visit(at);
+            return;
         }
         int[] cursor = firstCursor(c, cal, anchor, fromDay);
         int[] last = civilDay(toDay, cal);
+        int visited = 0;
         while (compare(cursor, last) <= 0) {
             if (end != null && compare(cursor, end) > 0) break;
             long at = millisOf(cursor[0], cursor[1], cursor[2], cal);
-            if (at >= fromDay && at <= toDay) out.add(at);
+            if (at >= fromDay && at <= toDay) {
+                visitor.visit(at);
+                if (maxVisits > 0 && ++visited >= maxVisits) return;
+            }
             step(cursor, c.frequency, cal, anchor[2]);
         }
-        return out;
     }
 
     /** Positions the recurrence cursor at the first possible due day in the requested window. */

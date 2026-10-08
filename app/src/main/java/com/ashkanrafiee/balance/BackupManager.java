@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.spec.KeySpec;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -93,8 +94,13 @@ final class BackupManager {
     static final class RestoreResult {
         int added;
         int updated;
+        int transactionsAdded;
         int commitmentsAdded;
-        boolean changed() { return added > 0 || updated > 0 || commitmentsAdded > 0; }
+        boolean metadataChanged;
+        boolean changed() {
+            return added > 0 || updated > 0 || transactionsAdded > 0
+                || commitmentsAdded > 0 || metadataChanged;
+        }
     }
 
     private BackupManager() {}
@@ -152,7 +158,9 @@ final class BackupManager {
         out.write(toIntBytes(headerBytes.length));
         out.write(headerBytes);
         out.write(ct);
-        writeUri(context, uri, out.toByteArray());
+        byte[] backup = out.toByteArray();
+        if (backup.length > MAX_BACKUP_BYTES) throw new Exception("backup too large");
+        writeUri(context, uri, backup);
     }
 
     /** Reads an encrypted backup, merges it with the current balances (newest wins per bank) and
@@ -174,12 +182,14 @@ final class BackupManager {
         int version = file[MAGIC.length] & 0xFF;
         if (version < 1 || version > FORMAT_VERSION) throw new BackupException(R.string.backup_error_unsupported);
         int headerLen = fromIntBytes(file, MAGIC.length + 1);
-        if (headerLen <= 0 || MAGIC.length + 1 + 4 + headerLen > file.length)
+        long payloadStart = (long) MAGIC.length + 1 + 4 + headerLen;
+        if (headerLen <= 0 || headerLen > MAX_BACKUP_BYTES || payloadStart > file.length)
             throw new BackupException(R.string.backup_error_not_backup);
         byte[] headerBytes = new byte[headerLen];
-        System.arraycopy(file, MAGIC.length + 1 + 4, headerBytes, 0, headerLen);
-        byte[] ct = new byte[file.length - (MAGIC.length + 1 + 4 + headerLen)];
-        System.arraycopy(file, MAGIC.length + 1 + 4 + headerLen, ct, 0, ct.length);
+        int headerStart = MAGIC.length + 1 + 4;
+        System.arraycopy(file, headerStart, headerBytes, 0, headerLen);
+        byte[] ct = new byte[(int) (file.length - payloadStart)];
+        System.arraycopy(file, (int) payloadStart, ct, 0, ct.length);
 
         JSONObject header;
         try {
@@ -257,7 +267,7 @@ final class BackupManager {
                 backup = new LinkedHashMap<>();
             if (payload.has("transactions"))
                 backupTxs = BalanceData.deserializeTransactions(
-                    payload.getJSONObject("transactions").toString());
+                    payload.getJSONObject("transactions").toString(), MAX_TRANSACTIONS);
             if (payload.has("txNotes"))
                 backupNotes = BalanceData.deserializeTextMap(payload.getJSONObject("txNotes").toString());
             if (payload.has("txReasons"))
@@ -304,15 +314,23 @@ final class BackupManager {
         if (backupTxs.size() > MAX_TRANSACTIONS)
             backupTxs = backupTxs.subList(0, MAX_TRANSACTIONS);
         Set<String> seen = new HashSet<>();
-        for (Transaction t : currentTxs) seen.add(BalanceData.txIdentityKey(t));
+        Set<String> seenContent = new HashSet<>();
+        for (Transaction t : currentTxs) {
+            seen.add(BalanceData.txIdentityKey(t));
+            if (t.content != null) seenContent.add(t.content);
+        }
         for (Transaction t : backupTxs) {
+            if (currentTxs.size() >= MAX_TRANSACTIONS) break;
+            if (t.content != null && seenContent.contains(t.content)) continue;
             String sigKey = t.sig != null ? "s:" + t.sig : null;
             String key = BalanceData.txIdentityKey(t);
             if (sigKey != null && seen.contains(sigKey)) continue;
             if (seen.contains(key)) continue;
             if (sigKey != null) seen.add(sigKey);
             seen.add(key);
+            if (t.content != null) seenContent.add(t.content);
             currentTxs.add(t);
+            result.transactionsAdded++;
         }
         BalanceData.writeTransactions(context, currentTxs);
 
@@ -322,7 +340,10 @@ final class BackupManager {
         // older backup without a notes section leaves the current notes completely untouched.
         if (!backupNotes.isEmpty()) {
             Map<String, String> currentNotes = BalanceData.readNotes(context);
-            if (unionLocalFirst(currentNotes, backupNotes)) BalanceData.writeNotes(context, currentNotes);
+            if (unionLocalFirst(currentNotes, backupNotes)) {
+                BalanceData.writeNotes(context, currentNotes);
+                result.metadataChanged = true;
+            }
         }
 
         // The reasons the banks stated travel with the movements they describe, merged exactly like the
@@ -331,16 +352,20 @@ final class BackupManager {
         // without a reasons section leaves the current reasons completely untouched.
         if (!backupReasons.isEmpty()) {
             Map<String, String> currentReasons = BalanceData.readReasons(context);
-            if (unionLocalFirst(currentReasons, backupReasons))
+            if (unionLocalFirst(currentReasons, backupReasons)) {
                 BalanceData.writeReasons(context, currentReasons);
+                result.metadataChanged = true;
+            }
         }
 
         // The channels the banks stated travel the same way, so a movement whose SMS was deleted
         // before the backup still shows how the money moved.
         if (!backupChannels.isEmpty()) {
             Map<String, String> currentChannels = BalanceData.readChannels(context);
-            if (unionLocalFirst(currentChannels, backupChannels))
+            if (unionLocalFirst(currentChannels, backupChannels)) {
                 BalanceData.writeChannels(context, currentChannels);
+                result.metadataChanged = true;
+            }
         }
 
         // Tags are user-owned and can be multiple per movement. Restore unions both sides so a tag
@@ -349,8 +374,10 @@ final class BackupManager {
             Map<String, List<String>> currentTags = BalanceData.readTags(context);
             boolean tagsChanged = remapTagKeys(backupTags, tagKeyAliases(currentTxs, backupTxs));
             tagsChanged |= BalanceData.unionTags(currentTags, backupTags);
-            if (tagsChanged)
+            if (tagsChanged) {
                 BalanceData.writeTags(context, currentTags);
+                result.metadataChanged = true;
+            }
         }
         // Commitments are user-owned like tags: a restore unions both sides by id, so a series
         // created on either device survives, and an older backup without the section leaves local
@@ -362,6 +389,7 @@ final class BackupManager {
             boolean commitmentsChanged = false;
             for (Commitment c : backupCommitments) {
                 if (ids.contains(c.id)) continue;
+                if (currentCommitments.size() >= Commitment.MAX_COMMITMENTS) break;
                 ids.add(c.id);
                 currentCommitments.add(c);
                 commitmentsChanged = true;
@@ -392,19 +420,27 @@ final class BackupManager {
      *  signature during restore: its tags must follow the surviving row rather than stay orphaned. */
     private static Map<String, String> tagKeyAliases(List<Transaction> current, List<Transaction> backup) {
         Map<String, String> aliases = new LinkedHashMap<>();
+        Map<String, Transaction> byContent = new HashMap<>();
+        Map<String, Transaction> byIdentity = new HashMap<>();
+        for (Transaction existing : current) {
+            if (existing.content != null) byContent.put(existing.content, existing);
+            byIdentity.put(BalanceData.txIdentityKey(existing), existing);
+            if (existing.sig != null) byIdentity.put("s:" + existing.sig, existing);
+        }
         for (Transaction incoming : backup) {
-            for (Transaction existing : current) {
-                if (!sameMovement(incoming, existing)) continue;
-                String from = BalanceData.noteKey(incoming);
-                String to = BalanceData.noteKey(existing);
-                if (!from.equals(to)) aliases.put(from, to);
-                break;
-            }
+            Transaction existing = incoming.content == null ? null : byContent.get(incoming.content);
+            if (existing == null) existing = byIdentity.get(BalanceData.txIdentityKey(incoming));
+            if (existing == null && incoming.sig != null) existing = byIdentity.get("s:" + incoming.sig);
+            if (existing == null || !sameMovement(incoming, existing)) continue;
+            String from = BalanceData.noteKey(incoming);
+            String to = BalanceData.noteKey(existing);
+            if (!from.equals(to)) aliases.put(from, to);
         }
         return aliases;
     }
 
     private static boolean sameMovement(Transaction a, Transaction b) {
+        if (a.content != null && b.content != null && a.content.equals(b.content)) return true;
         if (a.sig != null && b.sig != null && a.sig.equals(b.sig)) return true;
         return BalanceData.txIdentityKey(a).equals(BalanceData.txIdentityKey(b));
     }

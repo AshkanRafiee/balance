@@ -40,6 +40,8 @@ public final class CommitmentsActivity extends Activity {
     static final int WINDOW_MONTHS = 12;
     /** How many overdue rows render before the rest collapse into a "+N older" line. */
     static final int MAX_OVERDUE_ROWS = 50;
+    /** Maximum overdue occurrences inspected per commitment, keeping very old schedules bounded. */
+    static final int MAX_OVERDUE_OCCURRENCES = 2048;
 
     /** One due day of one commitment on screen. */
     static final class Row {
@@ -75,6 +77,7 @@ public final class CommitmentsActivity extends Activity {
         final List<MonthGroup> months = new ArrayList<>();
         long overduePay;
         long overdueReceive;
+        long overdueCount;
         long payTotal;
         long receiveTotal;
         long thisMonthPay;
@@ -91,20 +94,10 @@ public final class CommitmentsActivity extends Activity {
         long today = Commitment.startOfDay(nowMs);
         int[] currentCivil = Commitment.civilDay(today, cal);
         long currentMonthStart = Commitment.millisOf(currentCivil[0], currentCivil[1], 1, cal);
-        long historyStart = today - 366L * 86400000L;
         for (Commitment c : commitments) {
             if (c == null) continue;
-            if (c.frequency == Commitment.ONCE && c.done && c.start < historyStart
-                    && c.start < currentMonthStart) {
-                addSettledMonth(summary, c, Commitment.startOfDay(c.start), cal);
-            } else if (c.frequency != Commitment.ONCE) {
-                for (Long paidDay : c.paid) {
-                    if (paidDay != null && paidDay < historyStart && paidDay < currentMonthStart)
-                        addSettledMonth(summary, c, paidDay, cal);
-                }
-            }
             long overdueEnd = currentMonthStart - 1;
-            for (long at : Commitment.occurrences(c, cal, historyStart, overdueEnd)) {
+            Commitment.visitOccurrences(c, cal, overdueWindowStart(c, overdueEnd), overdueEnd, at -> {
                 if (c.isSettled(at)) {
                     // The current month already owns its settled rows. Keep older paid rows in
                     // their original month so they never appear in the overdue section.
@@ -122,14 +115,22 @@ public final class CommitmentsActivity extends Activity {
                             settledMonth = new MonthGroup(settledCivil[0], settledCivil[1]);
                             summary.settledMonths.add(settledMonth);
                         }
-                        settledMonth.rows.add(new Row(c, at, true));
+                        boolean present = false;
+                        for (Row existing : settledMonth.rows) {
+                            if (existing.date == at && existing.commitment.id.equals(c.id)) {
+                                present = true;
+                                break;
+                            }
+                        }
+                        if (!present) settledMonth.rows.add(new Row(c, at, true));
                     }
                 } else {
-                    summary.overdue.add(new Row(c, at, false));
+                    summary.overdueCount++;
+                    addOverdueRow(summary, new Row(c, at, false));
                     if (c.isPayment()) summary.overduePay += c.amount;
                     else summary.overdueReceive += c.amount;
                 }
-            }
+            }, MAX_OVERDUE_OCCURRENCES);
         }
         summary.overdue.sort((x, y) -> {
             int byDate = Long.compare(y.date, x.date);
@@ -206,22 +207,28 @@ public final class CommitmentsActivity extends Activity {
         return summary;
     }
 
-    private static void addSettledMonth(Summary summary, Commitment c, long at, CalendarSystem cal) {
-        int[] civil = Commitment.civilDay(at, cal);
-        MonthGroup month = null;
-        for (MonthGroup candidate : summary.settledMonths) {
-            if (candidate.year == civil[0] && candidate.month == civil[1]) {
-                month = candidate;
-                break;
-            }
+    private static void addOverdueRow(Summary summary, Row row) {
+        if (summary.overdue.size() < MAX_OVERDUE_ROWS) {
+            summary.overdue.add(row);
+            return;
         }
-        if (month == null) {
-            month = new MonthGroup(civil[0], civil[1]);
-            summary.settledMonths.add(month);
+        int oldest = 0;
+        for (int i = 1; i < summary.overdue.size(); i++)
+            if (summary.overdue.get(i).date < summary.overdue.get(oldest).date) oldest = i;
+        if (row.date > summary.overdue.get(oldest).date) summary.overdue.set(oldest, row);
+    }
+
+    private static long overdueWindowStart(Commitment c, long overdueEnd) {
+        long spanDays;
+        switch (c.frequency) {
+            case Commitment.WEEKLY: spanDays = MAX_OVERDUE_OCCURRENCES * 7L; break;
+            case Commitment.MONTHLY: spanDays = MAX_OVERDUE_OCCURRENCES * 31L; break;
+            case Commitment.YEARLY: spanDays = MAX_OVERDUE_OCCURRENCES * 366L; break;
+            default: spanDays = MAX_OVERDUE_OCCURRENCES;
         }
-        for (Row existing : month.rows)
-            if (existing.date == at && existing.commitment.id.equals(c.id)) return;
-        month.rows.add(new Row(c, at, true));
+        long span = spanDays * 86400000L;
+        long from = overdueEnd > span ? overdueEnd - span : 0;
+        return Math.max(Commitment.startOfDay(c.start), Commitment.startOfDay(from));
     }
 
     private int fg, muted, accent, card, chipBg, depBg, warnBg, warnFg, negativeColor,
@@ -573,8 +580,9 @@ public final class CommitmentsActivity extends Activity {
         }
         int shown = Math.min(summary.overdue.size(), MAX_OVERDUE_ROWS);
         for (int i = 0; i < shown; i++) box.addView(occurrenceRow(summary.overdue.get(i)));
-        if (summary.overdue.size() > shown) {
-            box.addView(text(getString(R.string.commitments_older, summary.overdue.size() - shown),
+        long older = summary.overdueCount - shown;
+        if (older > 0) {
+            box.addView(text(getString(R.string.commitments_older, older),
                 12, warnFg), new LinearLayout.LayoutParams(-2, -2));
         }
         root.addView(box, margin(0, 0, 0, 12));
@@ -715,6 +723,7 @@ public final class CommitmentsActivity extends Activity {
                 continue;
             }
             reschedule |= c.remind;
+            CommitmentReminders.resetFired(this, c.id);
             if (c.frequency == Commitment.ONCE) {
                 kept.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
                     true, c.paid, c.legacyPaidThrough, c.remind, c.remindBeforeMs));
@@ -723,10 +732,9 @@ public final class CommitmentsActivity extends Activity {
                 if (!paid.contains(row.date)) paid.add(row.date);
                 if (c.legacyPaidThrough > 0) {
                     CalendarSystem legacyCal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
-                    for (long at : Commitment.occurrences(c, legacyCal, c.start, c.legacyPaidThrough)) {
+                    Commitment.visitOccurrences(c, legacyCal, c.start, c.legacyPaidThrough, at -> {
                         if (at != row.date && !paid.contains(at)) paid.add(at);
-                    }
-                    paid.remove(Long.valueOf(row.date));
+                    }, Commitment.MAX_SETTLED_DAYS);
                 }
                 kept.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
                     c.done, paid, 0, c.remind, c.remindBeforeMs));
@@ -749,14 +757,21 @@ public final class CommitmentsActivity extends Activity {
                 continue;
             }
             reschedule |= c.remind;
+            CommitmentReminders.resetFired(this, c.id);
             if (c.frequency == Commitment.ONCE) {
                 kept.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
                     false, c.paid, c.remind, c.remindBeforeMs));
             } else {
                 List<Long> paid = new ArrayList<>(c.paid);
                 paid.remove(Long.valueOf(row.date));
+                if (c.legacyPaidThrough > 0) {
+                    CalendarSystem legacyCal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
+                    Commitment.visitOccurrences(c, legacyCal, c.start, c.legacyPaidThrough, at -> {
+                        if (at != row.date && !paid.contains(at)) paid.add(at);
+                    }, Commitment.MAX_SETTLED_DAYS);
+                }
                 kept.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
-                    c.done, paid, c.remind, c.remindBeforeMs));
+                    c.done, paid, 0, c.remind, c.remindBeforeMs));
             }
         }
         BalanceData.writeCommitments(this, kept);

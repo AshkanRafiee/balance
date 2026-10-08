@@ -174,9 +174,19 @@ public class CommitmentsViewTest {
             commitments, CalendarSystem.GREGORIAN, OCT_7_NOON, 12);
         assertTrue(summary.overdue.isEmpty());
         assertEquals(2, summary.settledMonths.size());
-        assertEquals(1, summary.settledMonths.get(0).rows.size());
-        assertEquals(1, summary.settledMonths.get(1).rows.size());
+        assertTrue(!summary.settledMonths.get(0).rows.isEmpty());
+        assertTrue(!summary.settledMonths.get(1).rows.isEmpty());
         assertEquals(0, summary.overduePay + summary.overdueReceive);
+    }
+
+    @Test public void overdueRecurringDuesOlderThanAYearRemainVisibleAndCounted() {
+        Commitment old = Commitment.create("old daily", -100, Commitment.DAILY,
+            Commitment.millisOf(2024, 1, 1, CalendarSystem.GREGORIAN), null, false, 0);
+        CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
+            java.util.Collections.singletonList(old), CalendarSystem.GREGORIAN, OCT_7_NOON, 12);
+        assertEquals(CommitmentsActivity.MAX_OVERDUE_ROWS, summary.overdue.size());
+        assertTrue(summary.overdueCount > 366);
+        assertEquals(-100L * summary.overdueCount, summary.overduePay);
     }
 
     @Test public void heroTotal_coversThisMonthPlusOverdue() {

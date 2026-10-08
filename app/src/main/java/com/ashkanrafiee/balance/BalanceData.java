@@ -55,6 +55,8 @@ final class BalanceData {
     static final int MAX_TAG_LENGTH = 64;
     static final int MAX_TAGS_PER_TRANSACTION = 32;
     static final int MAX_TAG_ENTRIES = 100_000;
+    static final int MAX_STORED_TRANSACTIONS = 200_000;
+    static final int MAX_BALANCE_ENTRIES = 10_000;
     static final String PREFS_PREF = "balance_preferences";
     static final String KEY_HIDDEN = "balances_hidden";
     static final String KEY_WIDGET_HIDDEN = "widget_balances_hidden";
@@ -237,7 +239,7 @@ final class BalanceData {
         try {
             JSONObject obj = new JSONObject(json);
             Iterator<String> keys = obj.keys();
-            while (keys.hasNext()) {
+            while (keys.hasNext() && map.size() < MAX_BALANCE_ENTRIES) {
                 String key = keys.next();
                 JSONObject entry = obj.getJSONObject(key);
                 String account = entry.has("account") && !entry.isNull("account")
@@ -300,7 +302,7 @@ final class BalanceData {
                 .getString(KEY_TRANSACTIONS, null);
             if (stored == null) return new ArrayList<>();
             String json = stored.indexOf('{') == 0 ? stored : decrypt(stored);
-            List<Transaction> list = parseTransactions(json);
+            List<Transaction> list = parseTransactions(json, MAX_STORED_TRANSACTIONS);
             if (stored.indexOf('{') == 0 && !list.isEmpty()) writeTransactions(context, list);
             return list;
         } catch (Exception e) {
@@ -329,7 +331,9 @@ final class BalanceData {
      *  skipped when absent, so backups stay readable both ways. */
     static String serializeTransactions(List<Transaction> txs) throws Exception {
         JSONArray arr = new JSONArray();
+        int count = 0;
         for (Transaction t : txs) {
+            if (count++ >= MAX_STORED_TRANSACTIONS) break;
             JSONObject e = new JSONObject()
                 .put("bank", t.bank)
                 .put("date", t.date)
@@ -345,14 +349,28 @@ final class BalanceData {
 
     /** Parses a transaction JSON (as produced by {@link #serializeTransactions}) into a fresh list. */
     static List<Transaction> deserializeTransactions(String json) {
-        return parseTransactions(json);
+        return parseTransactions(json, MAX_STORED_TRANSACTIONS);
     }
 
-    private static List<Transaction> parseTransactions(String json) {
+    static List<Transaction> deserializeTransactions(String json, int maxEntries) {
+        try {
+            JSONArray arr = new JSONObject(json).optJSONArray(KEY_TRANSACTIONS);
+            if (arr != null && arr.length() > maxEntries)
+                throw new IllegalArgumentException("transaction limit exceeded");
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
+        return parseTransactions(json, maxEntries);
+    }
+
+    private static List<Transaction> parseTransactions(String json, int maxEntries) {
         List<Transaction> list = new ArrayList<>();
         try {
             JSONArray arr = new JSONObject(json).optJSONArray(KEY_TRANSACTIONS);
             if (arr == null) return list;
+            if (arr.length() > maxEntries) return list;
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject e = arr.getJSONObject(i);
                 String sig = e.has("sig") && !e.isNull("sig") ? e.getString("sig") : null;
@@ -420,8 +438,10 @@ final class BalanceData {
             String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
                 .getString(KEY_TX_TAGS, null);
             if (stored == null) return new LinkedHashMap<>();
-            String json = stored.indexOf('{') == 0 ? stored : decrypt(stored);
-            return deserializeTagsMap(json);
+            boolean legacy = stored.indexOf('{') == 0;
+            Map<String, List<String>> out = deserializeTagsMap(legacy ? stored : decrypt(stored));
+            if (legacy) writeTags(context, out);
+            return out;
         } catch (Exception e) {
             Log.w(TAG, "tag store read failed", e);
             return new LinkedHashMap<>();
@@ -584,8 +604,10 @@ final class BalanceData {
             String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
                 .getString(KEY_COMMITMENTS, null);
             if (stored == null) return new ArrayList<>();
-            String json = stored.indexOf('{') == 0 ? stored : decrypt(stored);
-            return deserializeCommitments(json);
+            boolean legacy = stored.indexOf('{') == 0;
+            List<Commitment> out = deserializeCommitments(legacy ? stored : decrypt(stored));
+            if (legacy) writeCommitments(context, out);
+            return out;
         } catch (Exception e) {
             Log.w(TAG, "commitment store read failed", e);
             return new ArrayList<>();
@@ -660,8 +682,11 @@ final class BalanceData {
             String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
                 .getString(key, null);
             if (stored == null) return new LinkedHashMap<>();
-            String json = stored.indexOf('{') == 0 ? stored : decrypt(stored);
-            return new LinkedHashMap<>(deserializeTextMap(json));
+            boolean legacy = stored.indexOf('{') == 0;
+            Map<String, String> out = new LinkedHashMap<>(
+                deserializeTextMap(legacy ? stored : decrypt(stored)));
+            if (legacy) writeTextStore(context, key, out);
+            return out;
         } catch (Exception e) {
             Log.w(TAG, "text store read failed", e);
             return new LinkedHashMap<>();
@@ -723,8 +748,9 @@ final class BalanceData {
         JSONObject o = new JSONObject();
         if (text != null) {
             for (Map.Entry<String, String> e : text.entrySet()) {
+                if (o.length() >= MAX_TAG_ENTRIES) break;
                 String v = e.getValue();
-                if (v != null && !v.isEmpty()) o.put(e.getKey(), v);
+                if (v != null && !v.isEmpty()) o.put(e.getKey(), capNoteLength(v));
             }
         }
         return o.toString();
@@ -736,10 +762,10 @@ final class BalanceData {
         try {
             JSONObject o = new JSONObject(json);
             java.util.Iterator<String> it = o.keys();
-            while (it.hasNext()) {
+            while (it.hasNext() && out.size() < MAX_TAG_ENTRIES) {
                 String key = it.next();
                 String v = o.optString(key, null);
-                if (v != null && !v.isEmpty()) out.put(key, v);
+                if (v != null && !v.isEmpty()) out.put(key, capNoteLength(v));
             }
         } catch (Exception ex) {
             Log.w(TAG, "deserializeTextMap failed");
@@ -850,7 +876,12 @@ final class BalanceData {
                 Log.w(TAG, "refusing to persist empty balances over existing data");
                 return;
             }
-            String json = serialize(map);
+            LinkedHashMap<String, Bank> bounded = new LinkedHashMap<>();
+            for (Map.Entry<String, Bank> entry : map.entrySet()) {
+                if (bounded.size() >= MAX_BALANCE_ENTRIES) break;
+                bounded.put(entry.getKey(), entry.getValue());
+            }
+            String json = serialize(bounded);
             context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
                 .putString(KEY_BALANCES, encrypt(json)).apply();
         } catch (Exception e) {
@@ -923,8 +954,10 @@ final class BalanceData {
             String raw = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
                 .getString(KEY_EXCLUDED, null);
             if (raw == null) return set;
-            JSONArray arr = new JSONArray(raw);
+            boolean legacy = raw.indexOf('[') == 0;
+            JSONArray arr = new JSONArray(legacy ? raw : decrypt(raw));
             for (int i = 0; i < arr.length(); i++) set.add(arr.getString(i));
+            if (legacy) setExcluded(context, set);
         } catch (Exception e) {
             Log.w(TAG, "excluded entries unreadable; treating as none", e);
         }
@@ -932,10 +965,14 @@ final class BalanceData {
     }
 
     static void setExcluded(Context context, Set<String> excluded) {
-        JSONArray arr = new JSONArray();
-        for (String key : excluded) arr.put(key);
-        context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
-            .putString(KEY_EXCLUDED, arr.toString()).apply();
+        try {
+            JSONArray arr = new JSONArray();
+            for (String key : excluded) arr.put(key);
+            context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
+                .putString(KEY_EXCLUDED, encrypt(arr.toString())).apply();
+        } catch (Exception e) {
+            Log.w(TAG, "excluded entries write failed", e);
+        }
     }
 
     static boolean isExcluded(Context context, String key) {
@@ -2208,7 +2245,8 @@ final class BalanceData {
             String raw = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
                 .getString(KEY_RECENT_MOVEMENTS, null);
             if (raw == null) return map;
-            String json = raw.indexOf('{') == 0 ? raw : decrypt(raw);
+            boolean legacy = raw.indexOf('{') == 0;
+            String json = legacy ? raw : decrypt(raw);
             JSONObject obj = new JSONObject(json);
             Iterator<String> it = obj.keys();
             while (it.hasNext()) {
@@ -2224,6 +2262,7 @@ final class BalanceData {
                 }
                 map.put(bank, list);
             }
+            if (legacy) saveRecentMovements(context, map);
         } catch (Exception e) {
             Log.w(TAG, "loadRecentMovements failed", e);
         }
@@ -2263,13 +2302,15 @@ final class BalanceData {
             String raw = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
                 .getString(KEY_HISTORY_LAST_BALANCE, null);
             if (raw == null) return map;
-            String json = raw.indexOf('{') == 0 ? raw : decrypt(raw);
+            boolean legacy = raw.indexOf('{') == 0;
+            String json = legacy ? raw : decrypt(raw);
             JSONObject obj = new JSONObject(json);
             Iterator<String> it = obj.keys();
             while (it.hasNext()) {
                 String b = it.next();
                 map.put(b, obj.getLong(b));
             }
+            if (legacy) saveLastBalances(context, map);
         } catch (Exception e) {
             Log.w(TAG, "loadLastBalances failed", e);
         }

@@ -38,6 +38,7 @@ final class CommitmentReminders {
     private static final String PREFS = "commitment_reminders";
     private static final String KEY_SCHEDULED = "scheduled_ids";
     private static final String KEY_FIRED = "fired_due";
+    private static final String KEY_OVERDUE_FIRED = "overdue_fired";
     static final String ACTION_REMIND = "com.ashkanrafiee.balance.COMMITMENT_REMIND";
     static final String EXTRA_ID = "commitment_id";
 
@@ -73,12 +74,17 @@ final class CommitmentReminders {
                 && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
                     != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             for (String id : prefs.getStringSet(KEY_SCHEDULED, new HashSet<String>()))
-                alarms.cancel(alarm(context, id));
+                cancelScheduled(context, alarms, id);
             prefs.edit().putStringSet(KEY_SCHEDULED, new HashSet<String>()).apply();
             return;
         }
         for (Commitment c : BalanceData.readCommitments(context)) {
+            if (!c.remind) {
+                clearOverdueFired(context, c.id);
+                continue;
+            }
             Long due = reminderDue(context, c, cal, now);
+            if (due == null) clearOverdueFired(context, c.id);
             Long at = due == null ? null : due - Math.max(0, c.remindBeforeMs);
             if (at == null && c.remind && hasDueBeyondWindow(c, cal, now))
                 at = now + 365L * 86400000L;
@@ -104,7 +110,7 @@ final class CommitmentReminders {
         }
         Set<String> previous = prefs.getStringSet(KEY_SCHEDULED, new HashSet<String>());
         for (String id : previous) {
-            if (!wanted.contains(id)) alarms.cancel(alarm(context, id));
+            if (!wanted.contains(id)) cancelScheduled(context, alarms, id);
         }
         prefs.edit().putStringSet(KEY_SCHEDULED, wanted).apply();
     }
@@ -131,7 +137,12 @@ final class CommitmentReminders {
             if (due != null && !found.isSettled(due)
                     && notifyDue(context, found, due, iran)) {
                 rememberFired(context, found.id, due);
+                if (due < Commitment.startOfDay(System.currentTimeMillis()))
+                    rememberOverdueFired(context, found.id);
+                else clearOverdueFired(context, found.id);
             }
+        } else {
+            cancelNotification(context, id);
         }
         scheduleAll(context);
     }
@@ -142,10 +153,23 @@ final class CommitmentReminders {
     private static Long reminderDue(Context context, Commitment c, CalendarSystem cal, long now) {
         if (c == null || !c.remind) return null;
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        for (long at : Commitment.occurrences(c, cal,
-                Math.min(c.start, Commitment.startOfDay(now) - 366L * 86400000L),
-                Commitment.startOfDay(now) - 1)) {
-            if (!c.isSettled(at) && !wasFired(prefs, c.id, at)) return at;
+        if (!overdueWasFired(prefs, c.id)) {
+            final Long[] latest = {null};
+            long overdueEnd = Commitment.startOfDay(now) - 1;
+            long spanDays = c.frequency == Commitment.WEEKLY
+                ? CommitmentsActivity.MAX_OVERDUE_OCCURRENCES * 7L
+                : c.frequency == Commitment.MONTHLY
+                    ? CommitmentsActivity.MAX_OVERDUE_OCCURRENCES * 31L
+                    : c.frequency == Commitment.YEARLY
+                        ? CommitmentsActivity.MAX_OVERDUE_OCCURRENCES * 366L
+                        : CommitmentsActivity.MAX_OVERDUE_OCCURRENCES;
+            long span = spanDays * 86400000L;
+            long from = Math.max(Commitment.startOfDay(c.start),
+                Commitment.startOfDay(overdueEnd > span ? overdueEnd - span : 0));
+            Commitment.visitOccurrences(c, cal, from, overdueEnd, at -> {
+                    if (!c.isSettled(at) && !wasFired(prefs, c.id, at)) latest[0] = at;
+                }, CommitmentsActivity.MAX_OVERDUE_OCCURRENCES);
+            if (latest[0] != null) return latest[0];
         }
         for (long at : Commitment.occurrences(c, cal, Commitment.startOfDay(now),
                 Commitment.startOfDay(now) + 730L * 86400000L)) {
@@ -169,6 +193,45 @@ final class CommitmentReminders {
 
     private static boolean wasFired(SharedPreferences prefs, String id, long due) {
         return prefs.getStringSet(KEY_FIRED, new HashSet<String>()).contains(firedKey(id, due));
+    }
+
+    private static boolean overdueWasFired(SharedPreferences prefs, String id) {
+        return prefs.getStringSet(KEY_OVERDUE_FIRED, new HashSet<String>()).contains(id);
+    }
+
+    private static void rememberOverdueFired(Context context, String id) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        Set<String> fired = new HashSet<>(prefs.getStringSet(KEY_OVERDUE_FIRED,
+            new HashSet<String>()));
+        fired.add(id);
+        prefs.edit().putStringSet(KEY_OVERDUE_FIRED, fired).apply();
+    }
+
+    private static void clearOverdueFired(Context context, String id) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        Set<String> fired = new HashSet<>(prefs.getStringSet(KEY_OVERDUE_FIRED,
+            new HashSet<String>()));
+        if (fired.remove(id)) prefs.edit().putStringSet(KEY_OVERDUE_FIRED, fired).apply();
+    }
+
+    /** Clears reminder suppression when a commitment's settlement state changes. */
+    static void resetFired(Context context, String id) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        Set<String> fired = new HashSet<>(prefs.getStringSet(KEY_FIRED, new HashSet<String>()));
+        fired.removeIf(value -> value.startsWith(id + "|"));
+        prefs.edit().putStringSet(KEY_FIRED, fired).apply();
+        clearOverdueFired(context, id);
+    }
+
+    private static void cancelScheduled(Context context, AlarmManager alarms, String id) {
+        alarms.cancel(alarm(context, id));
+        cancelNotification(context, id);
+    }
+
+    private static void cancelNotification(Context context, String id) {
+        NotificationManager manager =
+            (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager != null) manager.cancel("commitment:" + id, 1);
     }
 
     private static void rememberFired(Context context, String id, long due) {
