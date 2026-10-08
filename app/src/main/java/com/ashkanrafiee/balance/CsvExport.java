@@ -87,6 +87,76 @@ final class CsvExport {
         }
     }
 
+    /** Point lookups for the movement text columns. Implementations may read one metadata row at a
+     * time, so a history export does not need to materialize all notes, reasons, channels or tags. */
+    interface TextLookup {
+        String note(String key) throws Exception;
+        String reason(String key) throws Exception;
+        String channel(String key) throws Exception;
+        List<String> tags(String key) throws Exception;
+    }
+
+    /** Adapts the compatibility map-shaped text input to the bounded point-lookup seam. */
+    static TextLookup lookup(Text text) {
+        if (text == null) text = Text.none();
+        final Text supplied = text;
+        return new TextLookup() {
+            @Override public String note(String key) {
+                return supplied.notes == null ? null : supplied.notes.get(key);
+            }
+
+            @Override public String reason(String key) {
+                return supplied.reasons == null ? null : supplied.reasons.get(key);
+            }
+
+            @Override public String channel(String key) {
+                return supplied.channels == null ? null : supplied.channels.get(key);
+            }
+
+            @Override public List<String> tags(String key) {
+                return supplied.tags == null ? null : supplied.tags.get(key);
+            }
+        };
+    }
+
+    /** Reusable cell writer for disk-backed exports. It owns only date-formatting state and emits
+     * one row at a time; the destination writer remains owned by the caller. */
+    static final class CellWriter {
+        private final Context context;
+        private final boolean iran;
+        private final Calendar calendar;
+        private final SimpleDateFormat time;
+        private final SimpleDateFormat iso;
+
+        CellWriter(Context context) {
+            if (context == null) throw new NullPointerException("context");
+            this.context = context;
+            iran = RegionHelper.isIran(context);
+            calendar = Calendar.getInstance(Locale.getDefault());
+            time = new SimpleDateFormat("HH:mm", Locale.US);
+            iso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
+            iso.setTimeZone(TimeZone.getTimeZone("UTC"));
+        }
+
+        void header(Writer writer) throws IOException {
+            writer.write('\uFEFF');
+            appendRow(writer, HEADER);
+        }
+
+        void movement(Writer writer, Transaction transaction, TextLookup text) throws Exception {
+            if (writer == null) throw new NullPointerException("writer");
+            if (transaction == null) throw new NullPointerException("transaction");
+            if (text == null) text = lookup(null);
+            appendRow(writer, cellsWithLookup(context, transaction, text, iran, calendar, time, iso));
+        }
+
+        void residual(Writer writer, Residual residual) throws IOException {
+            if (writer == null) throw new NullPointerException("writer");
+            if (residual == null) throw new NullPointerException("residual");
+            appendRow(writer, residualCells(context, residual, iran, calendar, time, iso));
+        }
+    }
+
     private CsvExport() {}
 
     /** The CSV text: a UTF-8 BOM, the header row, then one row per transaction in chronological
@@ -255,6 +325,39 @@ final class CsvExport {
             List<String> values = text.tags.get(key);
             if (values != null && !values.isEmpty()) tagJson = new JSONArray(values).toString();
         }
+        return new String[]{
+            BankRules.displayName(context, t.bank),
+            t.account == null ? "" : t.account,
+            iso.format(new Date(t.date)),
+            local.year + "/" + local.month + "/" + local.day,
+            time.format(new Date(t.date)),
+            String.valueOf(t.amount),
+            CurrencyHelper.amount(context, t.amount),
+            CurrencyHelper.label(context),
+            note == null ? "" : note,
+            reason == null ? "" : reason,
+            channel == null ? "" : channel,
+            KIND_MOVEMENT,
+            tagJson
+        };
+    }
+
+    /** Same movement layout as {@link #cells(Context, Transaction, Text, boolean, Calendar,
+     * SimpleDateFormat, SimpleDateFormat)}, resolved through one metadata lookup at a time. */
+    private static String[] cellsWithLookup(Context context, Transaction t, TextLookup text,
+            boolean iran, Calendar calendar, SimpleDateFormat time, SimpleDateFormat iso)
+            throws Exception {
+        calendar.setTimeInMillis(t.date);
+        CalDate local = CalDate.fromGregorian(
+            calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH) + 1,
+            calendar.get(Calendar.DAY_OF_MONTH), iran);
+        String key = BalanceData.noteKey(t);
+        String note = text.note(key);
+        String reason = BankRules.reasonCaption(context, text.reason(key));
+        String channel = BankRules.channelCaption(context, text.channel(key));
+        String tagJson = "";
+        List<String> values = text.tags(key);
+        if (values != null && !values.isEmpty()) tagJson = new JSONArray(values).toString();
         return new String[]{
             BankRules.displayName(context, t.bank),
             t.account == null ? "" : t.account,

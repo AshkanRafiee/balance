@@ -43,6 +43,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -777,51 +778,48 @@ public final class HistoryActivity extends Activity {
     private void writeExport(Uri uri) {
         final String query = searchQuery == null ? "" : searchQuery.trim();
         final List<String> tagSelection = new ArrayList<>(selectedTags);
+        final Filter activeFilter = filter;
+        final String bank = bankFilter;
+        final String account = accountFilter;
+        final boolean iran = iranCalendar;
         new Thread(() -> {
             final int[] error = {0};
             try {
-                final List<Transaction> txs;
-                final java.util.Map<String, String> notes;
-                final java.util.Map<String, String> reasons;
-                final java.util.Map<String, String> channels;
-                final java.util.Map<String, List<String>> tagsNow;
-                final List<Residual> residuals;
-                synchronized (BalanceData.class) {
-                    txs = BalanceData.readTransactions(getApplicationContext());
-                    notes = BalanceData.readNotes(getApplicationContext());
-                    reasons = BalanceData.readReasons(getApplicationContext());
-                    channels = BalanceData.readChannels(getApplicationContext());
-                    tagsNow = BalanceData.readTags(getApplicationContext());
-                    // Detected before narrowing, exactly as on screen, so the file reconciles with
-                    // the totals the user just looked at.
-                    residuals = Residual.between(txs);
-                }
-                List<Transaction> scope = txs;
-                List<Residual> residualScope = residuals;
-                if (bankFilter != null) {
-                    scope = filterByBank(txs, bankFilter);
-                    residualScope = filterResidualsByBank(residualScope, bankFilter);
-                }
-                if (accountFilter != null) {
-                    scope = filterByAccount(scope, accountFilter);
-                    residualScope = filterResidualsByAccount(residualScope, accountFilter);
-                }
-                List<Residual> residualOut = applyResidualFilters(residualScope, filter, iranCalendar);
-                scope = applyFilters(scope, filter, iranCalendar);
-                scope = applyTagFilter(scope, tagsNow, tagSelection);
-                if (!tagSelection.isEmpty()) residualOut = new ArrayList<>();
-                if (!query.isEmpty()) {
-                    final SearchPass pass =
-                        new SearchPass(this, iranCalendar, notes, reasons, channels, tagsNow);
-                    scope = filterBySearch(scope, query, t -> txHaystack(pass, t));
-                    residualOut = filterBySearch(residualOut, query, r -> residualHaystack(pass, r));
-                }
-                String csv = CsvExport.csv(getApplicationContext(), scope, residualOut,
-                    new CsvExport.Text(notes, reasons, channels, tagsNow));
+                final Context app = getApplicationContext();
+                final List<String> tokens = searchTokens(query);
+                final CsvExport.TextLookup lookup = new CsvExport.TextLookup() {
+                    @Override public String note(String key) throws Exception {
+                        return MetadataStore.getText(app, MetadataStore.NOTES, key);
+                    }
+                    @Override public String reason(String key) throws Exception {
+                        return MetadataStore.getText(app, MetadataStore.REASONS, key);
+                    }
+                    @Override public String channel(String key) throws Exception {
+                        return MetadataStore.getText(app, MetadataStore.CHANNELS, key);
+                    }
+                    @Override public List<String> tags(String key) throws Exception {
+                        return MetadataStore.getTags(app, key);
+                    }
+                };
+                TransactionStore.StreamSource movements = visitor ->
+                    TransactionStore.forEach(app, CsvExport.STREAM_PAGE_SIZE, transaction -> {
+                        if (!exportMovementMatches(app, transaction, bank, account, activeFilter,
+                                iran, tagSelection, tokens, lookup)) return;
+                        visitor.accept(transaction);
+                    });
+                HistoryCsvExport.ResidualSource residuals = visitor ->
+                    HistoryResidualReader.forEach(app, bank, account,
+                        CsvExport.STREAM_PAGE_SIZE, residual -> {
+                            if (!tagSelection.isEmpty() || !exportResidualMatches(app, residual,
+                                    activeFilter, iran, tokens)) return;
+                            visitor.accept(residual);
+                        });
                 OutputStream out = getContentResolver().openOutputStream(uri, "w");
                 if (out == null) throw new IOException("no output stream");
                 try {
-                    out.write(csv.getBytes(StandardCharsets.UTF_8));
+                    OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
+                    HistoryCsvExport.writeLookup(app, CsvExport.STREAM_PAGE_SIZE, movements,
+                        residuals, writer, lookup);
                 } finally {
                     out.close();
                 }
@@ -834,6 +832,60 @@ public final class HistoryActivity extends Activity {
                     ? R.string.history_export_saved : R.string.history_export_failed),
                 Toast.LENGTH_SHORT).show());
         }).start();
+    }
+
+    private boolean exportMovementMatches(Context context, Transaction transaction, String bank,
+            String account, Filter activeFilter, boolean iran, List<String> selected,
+            List<String> tokens, CsvExport.TextLookup lookup) throws Exception {
+        if (bank != null && !bank.equals(transaction.bank)) return false;
+        if (account != null && !account.equals(transaction.account)) return false;
+        if (activeFilter.direction == DIR_DEPOSIT && transaction.amount <= 0) return false;
+        if (activeFilter.direction == DIR_WITHDRAWAL && transaction.amount >= 0) return false;
+        CalDate date = calOf(transaction.date, iran);
+        if (activeFilter.from != null && date.compare(activeFilter.from) < 0) return false;
+        if (activeFilter.to != null && date.compare(activeFilter.to) > 0) return false;
+        String key = BalanceData.noteKey(transaction);
+        List<String> tags = lookup.tags(key);
+        for (String wanted : selected) {
+            boolean found = false;
+            for (String actual : tags) {
+                if (BalanceData.sameTag(actual, wanted)) { found = true; break; }
+            }
+            if (!found) return false;
+        }
+        if (tokens.isEmpty()) return true;
+        boolean fa = LocaleHelper.isPersian(context);
+        boolean toman = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(context));
+        String reason = lookup.reason(key);
+        String channel = lookup.channel(key);
+        String haystack = transactionSearchText(transaction,
+            BankRules.displayName(context, transaction.bank), lookup.note(key), reason,
+            BankRules.reasonCaption(context, reason), channel,
+            BankRules.channelCaption(context, channel), CurrencyHelper.amount(toman, fa,
+                transaction.amount), transaction.amount > 0 ? context.getString(R.string.history_deposit)
+                : transaction.amount < 0 ? context.getString(R.string.history_withdrawal) : null,
+            dateText(date, fa), timeText(transaction.date, fa),
+            CalDate.monthName(date.month, iran, fa), compactDate(date, fa), tags);
+        return matchesTokens(haystack, tokens);
+    }
+
+    private boolean exportResidualMatches(Context context, Residual residual, Filter activeFilter,
+            boolean iran, List<String> tokens) {
+        if (activeFilter.direction == DIR_DEPOSIT && residual.amount <= 0) return false;
+        if (activeFilter.direction == DIR_WITHDRAWAL && residual.amount >= 0) return false;
+        CalDate date = calOf(residual.toDate, iran);
+        if (activeFilter.from != null && date.compare(activeFilter.from) < 0) return false;
+        if (activeFilter.to != null && date.compare(activeFilter.to) > 0) return false;
+        if (tokens.isEmpty()) return true;
+        boolean fa = LocaleHelper.isPersian(context);
+        boolean toman = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(context));
+        String haystack = residualSearchText(residual,
+            BankRules.displayName(context, residual.bank), CurrencyHelper.amount(toman, fa,
+                residual.amount), residual.amount > 0 ? context.getString(R.string.history_deposit)
+                : context.getString(R.string.history_withdrawal), context.getString(R.string.residual_label),
+            dateText(date, fa), timeText(residual.toDate, fa),
+            CalDate.monthName(date.month, iran, fa), compactDate(date, fa));
+        return matchesTokens(haystack, tokens);
     }
 
     // ====================================================================
