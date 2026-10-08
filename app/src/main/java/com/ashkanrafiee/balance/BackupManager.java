@@ -332,7 +332,8 @@ final class BackupManager {
             currentTxs.add(t);
             result.transactionsAdded++;
         }
-        BalanceData.writeTransactions(context, currentTxs);
+        if (!BalanceData.writeTransactions(context, currentTxs))
+            throw new Exception("transaction restore could not be persisted");
 
         // Notes are merged as a union with the local text winning, mirroring the transaction union:
         // a restore must never clobber the note the user typed since the backup was made, and notes

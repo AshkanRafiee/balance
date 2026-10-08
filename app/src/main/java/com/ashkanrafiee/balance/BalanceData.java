@@ -1743,13 +1743,17 @@ final class BalanceData {
                         stored.add(fresh.get(i));
                     }
                 }
-                saveLastBalances(context, lastBalance);
                 completed = true;
             } catch (Exception e) {
                 failed = true;
                 Log.w(TAG, "history scan failed", e);
             }
-            writeTransactions(context, stored);
+            if (!writeTransactions(context, stored)) {
+                failed = true;
+                completed = false;
+                return added;
+            }
+            saveLastBalances(context, lastBalance);
             // The reasons and channels land after the transactions they belong to, so the stores never
             // hold one for a movement that was not written.
             boolean reasonsChanged = mergeReasons(context, detectedReasons);
