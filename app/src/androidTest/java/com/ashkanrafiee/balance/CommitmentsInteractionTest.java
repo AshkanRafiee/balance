@@ -6,12 +6,14 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import android.Manifest;
+import android.app.AlertDialog;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.EditText;
 import android.widget.TextView;
 
 import androidx.test.core.app.ActivityScenario;
@@ -175,6 +177,39 @@ public class CommitmentsInteractionTest {
         assertRemainingZeroes(futureOnly);
     }
 
+    @Test public void editor_preservesNonMinuteReminderWithoutAnInvalidChipSelection() {
+        long rawLeadMs = 30L * 60_000L + 1L;
+        long due = Commitment.startOfDay(System.currentTimeMillis());
+        Commitment source = Commitment.create("raw reminder", -100_000L, Commitment.MONTHLY,
+            due, null, true, rawLeadMs);
+        BalanceData.writeCommitments(ctx, singleton(source));
+
+        commitmentsScenario = ActivityScenario.launch(CommitmentsActivity.class);
+        commitmentsScenario.onActivity(activity -> {
+            String manageLabel = LocaleHelper.wrap(ctx).getString(R.string.commitments_manage);
+            TextView manage = findText(activity.getWindow().getDecorView(), manageLabel);
+            assertNotNull("the commitments screen must show Manage", manage);
+            assertTrue(manage.performClick());
+
+            AlertDialog manageDialog = dialogField(activity, "manageDialogWindow");
+            TextView definition = findText(manageDialog.getWindow().getDecorView(), source.name);
+            assertNotNull("the reminder definition must be listed", definition);
+            assertTrue(definition.performClick());
+        });
+
+        commitmentsScenario.onActivity(activity -> {
+            AlertDialog editor = dialogField(activity, "activeDialog");
+            EditText lead = findEditText(editor.getWindow().getDecorView(), String.valueOf(rawLeadMs));
+            assertNotNull("a raw reminder must reopen with its exact milliseconds", lead);
+            assertEquals(String.valueOf(rawLeadMs), lead.getText().toString());
+            editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+        });
+
+        List<Commitment> saved = BalanceData.readCommitments(ctx);
+        assertEquals(1, saved.size());
+        assertEquals(rawLeadMs, saved.get(0).remindBeforeMs);
+    }
+
     private void assertRemainingZeroes(List<String> drawn) {
         assertTrue("a non-empty definition list must retain the payable label",
             drawn.contains(REMAINING_PAYABLE));
@@ -272,6 +307,31 @@ public class CommitmentsInteractionTest {
             }
         }
         return null;
+    }
+
+    private static EditText findEditText(View root, String wanted) {
+        if (root instanceof EditText) {
+            EditText edit = (EditText) root;
+            if (wanted.contentEquals(edit.getText())) return edit;
+        }
+        if (root instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) root;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                EditText found = findEditText(group.getChildAt(i), wanted);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private static AlertDialog dialogField(CommitmentsActivity activity, String name) {
+        try {
+            Field field = CommitmentsActivity.class.getDeclaredField(name);
+            field.setAccessible(true);
+            return (AlertDialog) field.get(activity);
+        } catch (Exception e) {
+            throw new AssertionError("could not inspect the commitments dialog", e);
+        }
     }
 
     private static final class TextCanvas extends Canvas {

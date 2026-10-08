@@ -890,7 +890,9 @@ public final class CommitmentsActivity extends Activity {
                 refreshChips(unitChips, index);
             };
         }
-        LinearLayout unitRow = chipRow(unitChips, unitSelected[0], unitActions);
+        // A non-minute lead time is kept as raw milliseconds. It has no visible unit chip, but
+        // remains the selected value for saving so reopening and saving cannot truncate it.
+        LinearLayout unitRow = chipRow(unitChips, leadChipSelection(unitSelected[0]), unitActions);
         LinearLayout.LayoutParams unitLp = new LinearLayout.LayoutParams(0, -2, 3);
         unitLp.setMarginStart(dp(8));
         leadRow.addView(unitRow, unitLp);
@@ -977,19 +979,25 @@ public final class CommitmentsActivity extends Activity {
     }
 
     private static final long[] UNIT_MS = {60_000L, 3600_000L, 86400_000L, 604800_000L};
-    private static final int RAW_LEAD_UNIT = UNIT_MS.length;
+    static final int RAW_LEAD_UNIT = UNIT_MS.length;
     private static final int REQUEST_NOTIFY = 41;
 
     /** Splits a lead time into the largest whole unit that divides it (weeks down to minutes).
      *  A raw-millisecond unit is used for values that cannot be represented by whole minutes, so
      *  reopening and saving an imported value never truncates it. Returns {number, unitIndex}. */
-    private static long[] decomposeLead(long ms) {
+    static long[] decomposeLead(long ms) {
         if (ms < 0) return new long[]{0, RAW_LEAD_UNIT};
         if (ms == 0) return new long[]{0, 2};
         if (ms % UNIT_MS[3] == 0) return new long[]{ms / UNIT_MS[3], 3};
         if (ms % UNIT_MS[2] == 0) return new long[]{ms / UNIT_MS[2], 2};
         if (ms % UNIT_MS[1] == 0) return new long[]{ms / UNIT_MS[1], 1};
+        if (ms % UNIT_MS[0] == 0) return new long[]{ms / UNIT_MS[0], 0};
         return new long[]{ms, RAW_LEAD_UNIT};
+    }
+
+    /** Maps the lead-time model unit to a visible chip, or no chip for raw milliseconds. */
+    static int leadChipSelection(int unit) {
+        return unit >= 0 && unit < UNIT_MS.length ? unit : -1;
     }
 
     private boolean needsNotificationPermission() {
@@ -1148,12 +1156,11 @@ public final class CommitmentsActivity extends Activity {
         activeDialog.setOnDismissListener(d -> activeDialog = null);
     }
 
-    /** Store failures used to disappear behind the old compatibility façade. Keep them visible to
-     *  the user when a single-record operation cannot be completed. */
+    /** Shows a store failure when it has a user-readable message; null failures stay quiet until
+     *  a localized fallback is available. */
     private void showCommitmentError(Exception error) {
         String message = error == null ? null : error.getMessage();
-        if (message == null || message.trim().isEmpty())
-            message = "Could not save commitment. Please try again.";
+        if (message == null || message.trim().isEmpty()) return;
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
 

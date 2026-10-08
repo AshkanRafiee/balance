@@ -204,4 +204,17 @@ public class CommitmentsViewTest {
         assertTrue(CommitmentsActivity.endDateControlsVisible(Commitment.MONTHLY));
     }
 
+    @Test public void leadDecomposition_usesMinutesAndKeepsRawMillisecondsOutOfChips() {
+        long thirtyMinutes = 30L * 60_000L;
+        long[] minuteParts = CommitmentsActivity.decomposeLead(thirtyMinutes);
+        assertEquals(30L, minuteParts[0]);
+        assertEquals(0L, minuteParts[1]);
+
+        long[] rawParts = CommitmentsActivity.decomposeLead(thirtyMinutes + 1L);
+        assertEquals(thirtyMinutes + 1L, rawParts[0]);
+        assertEquals(CommitmentsActivity.RAW_LEAD_UNIT, rawParts[1]);
+        assertEquals(-1, CommitmentsActivity.leadChipSelection((int) rawParts[1]));
+        assertEquals(3, CommitmentsActivity.leadChipSelection(3));
+    }
+
 }
