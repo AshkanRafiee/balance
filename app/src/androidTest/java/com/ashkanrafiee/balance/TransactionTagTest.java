@@ -26,13 +26,15 @@ public class TransactionTagTest {
     private static final long T = 1_000_000_000L;
     private Context ctx;
 
-    @Before public void setUp() {
+    @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        MetadataStore.reset(ctx, true);
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
     }
 
-    @After public void tearDown() {
+    @After public void tearDown() throws Exception {
+        MetadataStore.reset(ctx, true);
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
     }
 
@@ -48,7 +50,7 @@ public class TransactionTagTest {
         assertEquals(Arrays.asList("groceries", "Bills"), BalanceData.readTagNames(ctx));
     }
 
-    @Test public void tags_areBoundedAndBlankInputRemovesAssignment() {
+    @Test public void tags_areUncappedAndBlankInputRemovesAssignment() {
         Transaction t = tx("content-A");
         StringBuilder longTag = new StringBuilder();
         for (int i = 0; i < BalanceData.MAX_TAG_LENGTH + 20; i++) longTag.append('x');
@@ -58,8 +60,8 @@ public class TransactionTagTest {
 
         BalanceData.setTags(ctx, t, many);
         List<String> saved = BalanceData.getTags(ctx, t);
-        assertEquals(BalanceData.MAX_TAGS_PER_TRANSACTION, saved.size());
-        assertTrue(saved.get(0).length() <= BalanceData.MAX_TAG_LENGTH);
+        assertEquals(many.size(), saved.size());
+        assertEquals(longTag.length(), saved.get(0).length());
 
         BalanceData.setTags(ctx, t, Arrays.asList(" "));
         assertTrue(BalanceData.getTags(ctx, t).isEmpty());

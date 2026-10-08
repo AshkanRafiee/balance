@@ -1,9 +1,13 @@
 package com.ashkanrafiee.balance;
 
+import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.List;
+import java.util.TreeSet;
 import java.util.UUID;
+import java.time.LocalDate;
 import org.json.JSONObject;
 
 /** A user-defined commitment: money the user will pay or receive, once or on a schedule.
@@ -29,20 +33,14 @@ final class Commitment {
     static final int MONTHLY = 3;
     static final int YEARLY = 4;
 
-    /** Bounds applied at the write boundary (mirroring the tag store): names trim and cap, the
-     *  amount must be non-zero and bounded, the end must not precede the start, the settled-day
-     *  list caps so a hostile backup cannot bloat it, and the store itself caps how many
-     *  commitments one device keeps, so one runaway import cannot bloat the encrypted store or
-     *  the alarm table. */
-    static final int MAX_NAME_LENGTH = 64;
-    static final int MAX_ID_LENGTH = 128;
-    static final long MAX_AMOUNT = 999_999_999_999L;
-    static final long MAX_REMIND_BEFORE_MS = 365L * 86400000L;
-    static final int MAX_COMMITMENTS = 500;
-    static final int MAX_SETTLED_DAYS = 2000;
-    /** A finite total larger than this cannot be useful as one displayed amount, and counting it
-     *  must not make a crafted backup expand millions of recurrence rows on the UI thread. */
-    static final long MAX_TOTAL_OCCURRENCES = 100_000L;
+    /** Historical limits, retained for source compatibility only. Not retention limits. */
+    @Deprecated static final int MAX_NAME_LENGTH = 64;
+    @Deprecated static final int MAX_ID_LENGTH = 128;
+    @Deprecated static final long MAX_AMOUNT = 999_999_999_999L;
+    @Deprecated static final long MAX_REMIND_BEFORE_MS = 365L * 86400000L;
+    @Deprecated static final int MAX_COMMITMENTS = 500;
+    @Deprecated static final int MAX_SETTLED_DAYS = 2000;
+    @Deprecated static final long MAX_TOTAL_OCCURRENCES = 100_000L;
 
     interface OccurrenceVisitor { void visit(long at); }
 
@@ -58,6 +56,8 @@ final class Commitment {
     final boolean done;
     /** Recurring due days the user marked settled, as start-of-day millis. */
     final List<Long> paid;
+    /** Exact dates reopened under the legacy watermark. Overrides both kinds of paid marks. */
+    final List<Long> unpaid;
     /** Compatibility with the first commitment build, which stored one recurring watermark.
      *  New marks always use {@link #paid}; this is retained only so an existing user's old
      *  settled history does not suddenly reappear as unpaid after upgrading. */
@@ -67,6 +67,15 @@ final class Commitment {
     /** How far before the due moment the reminder fires. */
     final long remindBeforeMs;
 
+    /** An immutable store-backed list. contains() must perform an individual-date lookup. */
+    abstract static class SettlementList extends AbstractList<Long> {}
+
+    private static List<Long> freeze(List<Long> dates) {
+        if (dates == null) return Collections.emptyList();
+        if (dates instanceof SettlementList) return dates;
+        return Collections.unmodifiableList(new ArrayList<>(dates));
+    }
+
     Commitment(String id, String name, long amount, int frequency, long start, Long end,
             boolean done, List<Long> paid, boolean remind, long remindBeforeMs) {
         this(id, name, amount, frequency, start, end, done, paid, 0, remind, remindBeforeMs);
@@ -75,6 +84,13 @@ final class Commitment {
     Commitment(String id, String name, long amount, int frequency, long start, Long end,
             boolean done, List<Long> paid, long legacyPaidThrough, boolean remind,
             long remindBeforeMs) {
+        this(id, name, amount, frequency, start, end, done, paid, legacyPaidThrough,
+            null, remind, remindBeforeMs);
+    }
+
+    Commitment(String id, String name, long amount, int frequency, long start, Long end,
+            boolean done, List<Long> paid, long legacyPaidThrough, List<Long> unpaid,
+            boolean remind, long remindBeforeMs) {
         this.id = id;
         this.name = name;
         this.amount = amount;
@@ -82,10 +98,9 @@ final class Commitment {
         this.start = start;
         this.end = end;
         this.done = done;
-        this.paid = paid == null
-            ? java.util.Collections.<Long>emptyList()
-            : java.util.Collections.unmodifiableList(new ArrayList<>(paid));
-        this.legacyPaidThrough = Math.max(0, legacyPaidThrough);
+        this.paid = freeze(paid);
+        this.unpaid = freeze(unpaid);
+        this.legacyPaidThrough = legacyPaidThrough;
         this.remind = remind;
         this.remindBeforeMs = remindBeforeMs;
     }
@@ -97,39 +112,44 @@ final class Commitment {
             start, end, false, null, remind, remindBeforeMs));
     }
 
-    /** The write-boundary form: trims and caps the name, clamps the amount, lead time and
-     *  frequency into range, drops an end that precedes the start, and keeps the settled-day
-     *  list to positive days within its cap. Returns null when there is nothing worth keeping
-     *  (a blank name or a zero amount), so the store never holds one. */
+    /** Valid nonzero signed long amounts, names, ids, positive dates and nonnegative lead times
+     *  have no retention limits. Reject invalid definitions rather than truncating their data. */
     static Commitment normalized(Commitment c) {
-        if (c == null || c.id == null || c.id.isEmpty() || c.id.length() > MAX_ID_LENGTH) return null;
-        String name = c.name == null ? "" : c.name.trim();
-        if (name.length() > MAX_NAME_LENGTH) name = name.substring(0, MAX_NAME_LENGTH).trim();
-        if (name.isEmpty()) return null;
-        if (c.amount == 0 || c.amount < -MAX_AMOUNT || c.amount > MAX_AMOUNT) return null;
-        int frequency = c.frequency < ONCE || c.frequency > YEARLY ? ONCE : c.frequency;
+        if (c == null || c.id == null || c.id.isEmpty()) return null;
+        String name = c.name;
+        if (name == null || name.trim().isEmpty()) return null;
+        if (c.amount == 0 || c.frequency < ONCE || c.frequency > YEARLY) return null;
+        int frequency = c.frequency;
         if (c.start <= 0) return null;
         Long end = c.end;
         if (end != null && end < startOfDay(c.start)) return null;
-        List<Long> paid = new ArrayList<>();
-        if (c.paid != null) {
-            for (Long day : c.paid) {
-                if (day == null || day <= 0 || paid.contains(day)) continue;
-                paid.add(day);
-            }
-            paid.sort(null);
-            // The recent marks are the live ones (undo, reminders); the oldest fall off first.
-            while (paid.size() > MAX_SETTLED_DAYS) paid.remove(0);
-        }
-        long remindBefore = Math.max(0, Math.min(c.remindBeforeMs, MAX_REMIND_BEFORE_MS));
+        if (c.legacyPaidThrough < 0 || c.remindBeforeMs < 0) return null;
+        List<Long> paid = normalizeDates(c.paid);
+        List<Long> unpaid = normalizeDates(c.unpaid);
+        if (paid == null || unpaid == null) return null;
+        if (!(paid instanceof SettlementList) && !(unpaid instanceof SettlementList)
+                && !Collections.disjoint(paid, unpaid)) return null;
         return new Commitment(c.id, name, c.amount, frequency, c.start, end,
-            frequency == ONCE && c.done, paid, c.legacyPaidThrough, c.remind, remindBefore);
+            c.done, paid, c.legacyPaidThrough, unpaid, c.remind, c.remindBeforeMs);
+    }
+
+    private static List<Long> normalizeDates(List<Long> dates) {
+        if (dates instanceof SettlementList) return dates;
+        TreeSet<Long> sorted = new TreeSet<>();
+        if (dates != null) {
+            for (Long date : dates) {
+                if (date == null || date <= 0) return null;
+                sorted.add(date);
+            }
+        }
+        return new ArrayList<>(sorted);
     }
 
     /** Whether the occurrence due at {@code dateMs} (an occurrence this class expanded) is
      *  settled: a finished one-time commitment, or a recurring due the user marked. */
     boolean isSettled(long dateMs) {
         if (frequency == ONCE) return done;
+        if (unpaid.contains(dateMs)) return false;
         return paid.contains(dateMs) || (legacyPaidThrough > 0 && dateMs <= legacyPaidThrough);
     }
 
@@ -146,38 +166,53 @@ final class Commitment {
      */
     static Long totalAmount(Commitment c, CalendarSystem cal) {
         if (c == null || cal == null || c.end == null && c.frequency != ONCE) return null;
-        long end = c.end == null ? c.start : c.end;
-        long count = countOccurrences(c, cal, c.start, end, MAX_TOTAL_OCCURRENCES);
-        if (count > MAX_TOTAL_OCCURRENCES) return null;
         try {
-            return Math.multiplyExact(count, c.amount);
+            long occurrences = countOccurrences(c, cal);
+            if (occurrences <= 0) return null;
+            return Math.multiplyExact(occurrences, c.amount);
         } catch (ArithmeticException overflow) {
             return null;
         }
     }
 
-    /** Counts without materializing the occurrence list. A limit keeps a hostile finite end date
-     *  from turning a management-screen total into an unbounded allocation or loop. */
-    private static long countOccurrences(Commitment c, CalendarSystem cal, long fromMs,
-            long toMs, long limit) {
-        if (toMs < fromMs) return 0;
-        long maxSpan = limit * 366L * 86400000L;
-        if (toMs - fromMs > maxSpan) return limit + 1;
+    /** Constant-space, constant-time count, including very long finite schedules. */
+    private static long countOccurrences(Commitment c, CalendarSystem cal) {
         if (c.frequency == ONCE) return 1;
         int[] anchor = civilDay(c.start, cal);
-        int[] cursor = firstCursor(c, cal, anchor, startOfDay(fromMs));
-        int[] last = civilDay(startOfDay(toMs), cal);
-        int[] endCivil = c.end == null || c.end > toMs ? null : civilDay(c.end, cal);
-        long count = 0;
-        while (compare(cursor, last) <= 0) {
-            if (endCivil != null && compare(cursor, endCivil) > 0) break;
-            if (++count > limit) return count;
-            step(cursor, c.frequency, cal, anchor[2]);
+        int[] last = civilDay(c.end, cal);
+        if (compare(anchor, last) > 0) return 0;
+        if (c.frequency == DAILY || c.frequency == WEEKLY) {
+            long days = gregorianDay(c.end).toEpochDay() - gregorianDay(c.start).toEpochDay();
+            return days / (c.frequency == WEEKLY ? 7 : 1) + 1;
         }
-        return count;
+        long steps;
+        int[] cursor;
+        if (c.frequency == MONTHLY) {
+            steps = (last[0] - (long) anchor[0]) * 12 + last[1] - anchor[1];
+            cursor = monthCursor(anchor, steps, cal);
+        } else {
+            steps = last[0] - (long) anchor[0];
+            cursor = new int[]{last[0], anchor[1],
+                Math.min(anchor[2], cal.daysInMonth(last[0], anchor[1]))};
+        }
+        return steps + (compare(cursor, last) <= 0 ? 1 : 0);
+    }
+
+    private static LocalDate gregorianDay(long millis) {
+        int[] civil = civilDay(millis, CalendarSystem.GREGORIAN);
+        return LocalDate.of(civil[0], civil[1], civil[2]);
     }
 
     JSONObject toJson() {
+        return json(true);
+    }
+
+    /** Definition-only payload for SQLite; settlement arrays live in separate encrypted rows. */
+    JSONObject definitionJson() {
+        return json(false);
+    }
+
+    private JSONObject json(boolean includeSettlements) {
         JSONObject e = new JSONObject();
         try {
             e.put("id", id);
@@ -187,45 +222,72 @@ final class Commitment {
             e.put("start", start);
             if (end != null) e.put("end", end.longValue());
             if (done) e.put("done", true);
-            if (paid != null && !paid.isEmpty()) {
+            if (includeSettlements && !paid.isEmpty()) {
                 org.json.JSONArray settled = new org.json.JSONArray();
                 for (Long day : paid) settled.put(day.longValue());
                 e.put("paid", settled);
+            }
+            if (includeSettlements && !unpaid.isEmpty()) {
+                org.json.JSONArray reopened = new org.json.JSONArray();
+                for (Long day : unpaid) reopened.put(day.longValue());
+                e.put("unpaid", reopened);
             }
             if (legacyPaidThrough > 0) e.put("paidThrough", legacyPaidThrough);
             if (remind) e.put("remind", true);
             if (remindBeforeMs > 0) e.put("remindBefore", remindBeforeMs);
         } catch (Exception ex) {
-            return new JSONObject();
+            throw new IllegalStateException("commitment serialization failed", ex);
         }
         return e;
     }
 
     static Commitment fromJson(JSONObject e) {
         try {
-            String id = e.optString("id", null);
-            String name = e.optString("name", null);
-            if (id == null || id.isEmpty() || name == null) return null;
-            long amount = e.getLong("amount");
-            int frequency = e.optInt("freq", ONCE);
-            long start = e.getLong("start");
-            Long end = e.has("end") && !e.isNull("end") ? e.getLong("end") : null;
-            List<Long> paid = new ArrayList<>();
-            org.json.JSONArray settled = e.optJSONArray("paid");
-            if (settled != null) {
-                int first = Math.max(0, settled.length() - MAX_SETTLED_DAYS);
-                for (int i = first; i < settled.length(); i++) {
-                    long day = settled.optLong(i, 0);
-                    if (day > 0) paid.add(day);
-                }
-            }
-            long legacyPaidThrough = e.optLong("paidThrough", 0);
-            return normalized(new Commitment(id, name, amount, frequency, start, end,
-                e.optBoolean("done", false), paid, legacyPaidThrough,
-                e.optBoolean("remind", false), e.optLong("remindBefore", 0)));
+            Object id = e.get("id"), name = e.get("name");
+            if (!(id instanceof String) || !(name instanceof String)) return null;
+            long amount = exactLong(e.get("amount"));
+            long freq = e.has("freq") ? exactLong(e.get("freq")) : ONCE;
+            if (freq < ONCE || freq > YEARLY) return null;
+            long start = exactLong(e.get("start"));
+            Long end = e.has("end") && !e.isNull("end") ? exactLong(e.get("end")) : null;
+            List<Long> paid = datesFromJson(e, "paid");
+            List<Long> unpaid = datesFromJson(e, "unpaid");
+            long legacyPaidThrough = e.has("paidThrough") ? exactLong(e.get("paidThrough")) : 0;
+            long lead = e.has("remindBefore") ? exactLong(e.get("remindBefore")) : 0;
+            if (legacyPaidThrough < 0 || lead < 0) return null;
+            return normalized(new Commitment((String) id, (String) name, amount, (int) freq,
+                start, end, booleanFromJson(e, "done"), paid, legacyPaidThrough, unpaid,
+                booleanFromJson(e, "remind"), lead));
         } catch (Exception ex) {
             return null;
         }
+    }
+
+    /** JSONObject.getLong coerces overflowing/fractional doubles; never use it for money/dates. */
+    static long exactLong(Object value) {
+        if (value instanceof Long || value instanceof Integer || value instanceof Short
+                || value instanceof Byte) return ((Number) value).longValue();
+        if (value instanceof String) return Long.parseLong((String) value);
+        throw new IllegalArgumentException("expected exact long");
+    }
+
+    private static boolean booleanFromJson(JSONObject e, String key) throws Exception {
+        if (!e.has(key)) return false;
+        Object value = e.get(key);
+        if (!(value instanceof Boolean)) throw new IllegalArgumentException("expected boolean");
+        return (Boolean) value;
+    }
+
+    private static List<Long> datesFromJson(JSONObject e, String key) throws Exception {
+        List<Long> dates = new ArrayList<>();
+        if (!e.has(key)) return dates;
+        org.json.JSONArray array = e.getJSONArray(key);
+        for (int i = 0; i < array.length(); i++) {
+            long date = exactLong(array.get(i));
+            if (date <= 0) throw new IllegalArgumentException("invalid settlement date");
+            dates.add(date);
+        }
+        return dates;
     }
 
     // ====================================================================
@@ -285,20 +347,12 @@ final class Commitment {
         int[] target = civilDay(fromDay, cal);
         if (c.frequency == DAILY || c.frequency == WEEKLY) {
             int stepDays = c.frequency == WEEKLY ? 7 : 1;
-            long distance = Math.max(0, (fromDay - anchorAt) / 86400000L);
-            long high = Math.max(1, distance / stepDays + 2);
-            while (high < Integer.MAX_VALUE / (long) stepDays
-                    && dailyStepAt(anchor, cal, high, stepDays) < fromDay) high *= 2;
-            long low = 0;
-            while (low < high) {
-                long middle = (low + high) >>> 1;
-                if (dailyStepAt(anchor, cal, middle, stepDays) < fromDay) low = middle + 1;
-                else high = middle;
-            }
-            return civilDay(dailyStepAt(anchor, cal, low, stepDays), cal);
+            long distance = gregorianDay(fromDay).toEpochDay() - gregorianDay(anchorAt).toEpochDay();
+            long steps = (distance + stepDays - 1) / stepDays;
+            return civilDay(dailyStepAt(anchor, cal, steps, stepDays), cal);
         }
         if (c.frequency == MONTHLY) {
-            long months = (target[0] - anchor[0]) * 12L + target[1] - anchor[1];
+            long months = (target[0] - (long) anchor[0]) * 12 + target[1] - anchor[1];
             if (months > 0) cursor = monthCursor(anchor, months, cal);
         } else if (c.frequency == YEARLY && target[0] > anchor[0]) {
             cursor[0] = target[0];
@@ -310,10 +364,9 @@ final class Commitment {
     }
 
     private static long dailyStepAt(int[] anchor, CalendarSystem cal, long steps, int stepDays) {
-        Calendar g = Calendar.getInstance();
-        g.setTimeInMillis(millisOf(anchor[0], anchor[1], anchor[2], cal));
-        g.add(Calendar.DAY_OF_MONTH, (int) (steps * stepDays));
-        return startOfDay(g.getTimeInMillis());
+        LocalDate day = gregorianDay(millisOf(anchor[0], anchor[1], anchor[2], cal))
+            .plusDays(Math.multiplyExact(steps, stepDays));
+        return millisOf(day.getYear(), day.getMonthValue(), day.getDayOfMonth(), CalendarSystem.GREGORIAN);
     }
 
     private static int[] monthCursor(int[] anchor, long months, CalendarSystem cal) {

@@ -26,13 +26,13 @@ public class CommitmentTest {
 
     private Context ctx;
 
-    @Before public void setUp() {
+    @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        CommitmentStore.clear(ctx);
     }
 
-    @After public void tearDown() {
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+    @After public void tearDown() throws Exception {
+        CommitmentStore.clear(ctx);
     }
 
     private static Commitment commitment(String name, long amount, int frequency, long start) {
@@ -55,15 +55,15 @@ public class CommitmentTest {
         assertNull(Commitment.create("rent", -5000, Commitment.MONTHLY, 0, null, false, 0));
     }
 
-    @Test public void normalized_capsNameAndAmount() {
+    @Test public void normalized_preservesValidNameAndAmount() {
         long start = Commitment.millisOf(2026, 10, 7, CalendarSystem.GREGORIAN);
         StringBuilder name = new StringBuilder();
         for (int i = 0; i < 100; i++) name.append('x');
         Commitment c = Commitment.create(name.toString(), -5000, Commitment.MONTHLY,
             start, null, false, 0);
         assertNotNull(c);
-        assertEquals(Commitment.MAX_NAME_LENGTH, c.name.length());
-        assertNull(Commitment.create("rent", Commitment.MAX_AMOUNT + 1, Commitment.MONTHLY,
+        assertEquals(100, c.name.length());
+        assertNotNull(Commitment.create("rent", Commitment.MAX_AMOUNT + 1, Commitment.MONTHLY,
             start, null, false, 0));
     }
 
@@ -72,8 +72,29 @@ public class CommitmentTest {
         Commitment c = Commitment.create("rent", -5000, 99, start,
             Commitment.millisOf(2026, 10, 1, CalendarSystem.GREGORIAN), false, -5);
         assertNull(c);
-        assertNull(Commitment.create("invalid", Long.MIN_VALUE, Commitment.MONTHLY,
+        assertNotNull(Commitment.create("valid", Long.MIN_VALUE, Commitment.MONTHLY,
             start, null, false, 0));
+    }
+
+    @Test public void normalized_rejectsMalformedSettlementAndReminderState() {
+        long start = Commitment.millisOf(2026, 10, 7, CalendarSystem.GREGORIAN);
+        List<Long> invalidDate = new ArrayList<>();
+        invalidDate.add(0L);
+        Commitment malformedDate = new Commitment("bad-date", "bad", 1, Commitment.DAILY,
+            start, null, false, invalidDate, false, 0);
+        assertNull(Commitment.normalized(malformedDate));
+
+        Commitment malformedLead = new Commitment("bad-lead", "bad", 1, Commitment.DAILY,
+            start, null, false, null, false, -1);
+        assertNull(Commitment.normalized(malformedLead));
+
+        List<Long> paid = new ArrayList<>();
+        paid.add(start);
+        List<Long> unpaid = new ArrayList<>();
+        unpaid.add(start);
+        Commitment conflicting = new Commitment("conflict", "conflict", 1, Commitment.DAILY,
+            start, null, false, paid, 0, unpaid, false, 0);
+        assertNull(Commitment.normalized(conflicting));
     }
 
     // ---- JSON ---------------------------------------------------------------------
@@ -107,13 +128,17 @@ public class CommitmentTest {
         Commitment c = commitment("daily", -100, Commitment.DAILY, start);
         List<Long> paid = new ArrayList<>();
         paid.add(start);
+        List<Long> unpaid = new ArrayList<>();
+        unpaid.add(Commitment.millisOf(2026, 10, 8, CalendarSystem.GREGORIAN));
         Commitment marked = new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
-            false, paid, false, 0);
+            false, paid, 0, unpaid, false, 0);
         List<Commitment> back =
             BalanceData.deserializeCommitments(BalanceData.serializeCommitments(list(marked)));
         assertEquals(1, back.size());
         assertEquals(paid, back.get(0).paid);
+        assertEquals(unpaid, back.get(0).unpaid);
         assertTrue(back.get(0).isSettled(start));
+        assertFalse(back.get(0).isSettled(unpaid.get(0)));
     }
 
     private static List<Commitment> list(Commitment c) {
@@ -245,11 +270,25 @@ public class CommitmentTest {
         assertNull(Commitment.totalAmount(c, CalendarSystem.GREGORIAN));
     }
 
-    @Test public void totalAmount_rejectsAnUnboundedFiniteExpansion() {
+    @Test public void totalAmount_countsLongFiniteScheduleWithoutUiCap() {
         long start = Commitment.millisOf(2026, 10, 7, CalendarSystem.GREGORIAN);
-        Commitment c = Commitment.create("hostile", -20, Commitment.DAILY, start,
+        Commitment c = Commitment.create("long", 1, Commitment.DAILY, start,
             Long.MAX_VALUE, false, 0);
-        assertNull(Commitment.totalAmount(c, CalendarSystem.GREGORIAN));
+        Long total = Commitment.totalAmount(c, CalendarSystem.GREGORIAN);
+        assertNotNull(total);
+        assertTrue(total.longValue() > Commitment.MAX_TOTAL_OCCURRENCES);
+    }
+
+    @Test public void totalAmount_returnsNullOnlyWhenMultiplicationOverflows() {
+        long start = Commitment.millisOf(2026, 10, 7, CalendarSystem.GREGORIAN);
+        Commitment minOnce = Commitment.create("min", Long.MIN_VALUE, Commitment.ONCE, start,
+            null, false, 0);
+        assertEquals(Long.valueOf(Long.MIN_VALUE),
+            Commitment.totalAmount(minOnce, CalendarSystem.GREGORIAN));
+
+        Commitment overflow = Commitment.create("overflow", Long.MAX_VALUE, Commitment.DAILY,
+            start, day(start, 1), false, 0);
+        assertNull(Commitment.totalAmount(overflow, CalendarSystem.GREGORIAN));
     }
 
     // ---- settlement -----------------------------------------------------------------

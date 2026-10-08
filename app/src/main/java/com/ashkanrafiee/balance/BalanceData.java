@@ -240,8 +240,7 @@ final class BalanceData {
             parse(map, json);
             if (legacy && !map.isEmpty()) write(context, map);
         } catch (Exception e) {
-            Log.w(TAG, "read failed", e);
-            return map;
+            throw new IllegalStateException("balance store read failed", e);
         }
         return map;
     }
@@ -308,33 +307,11 @@ final class BalanceData {
 
     /** Reads all saved transactions, newest first, the order in which they were appended. */
     static List<Transaction> readTransactions(Context context) {
-        List<Transaction> paged = null;
         try {
             List<Transaction> database = TransactionStore.read(context);
-            if (database != null) {
-                String legacy = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
-                    .getString(KEY_TRANSACTIONS, null);
-                if (!database.isEmpty() || legacy == null) return database;
-            }
-            paged = readPagedTransactions(context);
+            return database == null ? new ArrayList<>() : database;
         } catch (Exception e) {
-            Log.w(TAG, "paged transaction store unreadable; trying legacy store", e);
-        }
-        if (paged != null) return paged;
-        try {
-            String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
-                .getString(KEY_TRANSACTIONS, null);
-            if (stored == null) return new ArrayList<>();
-            String json = stored.indexOf('{') == 0 ? stored : decrypt(stored);
-            List<Transaction> list = parseTransactions(json, Integer.MAX_VALUE);
-            if (writeTransactions(context, list)) {
-                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
-                    .remove(KEY_TRANSACTIONS).commit();
-            }
-            return list;
-        } catch (Exception e) {
-            Log.w(TAG, "readTransactions failed", e);
-            return new ArrayList<>();
+            throw new IllegalStateException("transaction store read failed", e);
         }
     }
 
@@ -484,66 +461,53 @@ final class BalanceData {
     /** Reads every saved note ({@code noteKey → text}), newest-first irrelevant since it is a plain
      *  lookup map. A missing or corrupt store reads as empty, never null. */
     static Map<String, String> readNotes(Context context) {
-        return readTextStore(context, KEY_TX_NOTES);
+        try { return MetadataStore.readNotes(context); }
+        catch (Exception e) { throw new IllegalStateException("metadata notes read failed", e); }
     }
 
     /** Persists the supplied notes encrypted under {@link #KEY_TX_NOTES}. An empty map removes the
      *  key so a notes-free device stores nothing at all. */
     static void writeNotes(Context context, Map<String, String> notes) {
-        writeTextStore(context, KEY_TX_NOTES, notes);
+        try { MetadataStore.writeNotes(context, notes); }
+        catch (Exception e) { throw new IllegalStateException("metadata notes write failed", e); }
     }
 
     /** Every reason the bank stated ({@code noteKey → title}), the same plain lookup map the notes are
      *  read as. Never null, and entirely separate from them. */
     static Map<String, String> readReasons(Context context) {
-        return readTextStore(context, KEY_TX_REASONS);
+        try { return MetadataStore.readReasons(context); }
+        catch (Exception e) { throw new IllegalStateException("metadata reasons read failed", e); }
     }
 
     /** Persists the supplied reasons encrypted under {@link #KEY_TX_REASONS}. */
     static void writeReasons(Context context, Map<String, String> reasons) {
-        writeTextStore(context, KEY_TX_REASONS, reasons);
+        try { MetadataStore.writeReasons(context, reasons); }
+        catch (Exception e) { throw new IllegalStateException("metadata reasons write failed", e); }
     }
 
     /** Every channel a bank stated ({@code noteKey → channel}), the same plain lookup map the notes are
      *  read as. Never null, and entirely separate from them. */
     static Map<String, String> readChannels(Context context) {
-        return readTextStore(context, KEY_TX_CHANNELS);
+        try { return MetadataStore.readChannels(context); }
+        catch (Exception e) { throw new IllegalStateException("metadata channels read failed", e); }
     }
 
     /** Persists the supplied channels encrypted under {@link #KEY_TX_CHANNELS}. */
     static void writeChannels(Context context, Map<String, String> channels) {
-        writeTextStore(context, KEY_TX_CHANNELS, channels);
+        try { MetadataStore.writeChannels(context, channels); }
+        catch (Exception e) { throw new IllegalStateException("metadata channels write failed", e); }
     }
 
     /** Reads every saved tag assignment ({@code noteKey → ordered tag names}). */
     static Map<String, List<String>> readTags(Context context) {
-        try {
-            String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
-                .getString(KEY_TX_TAGS, null);
-            if (stored == null) return new LinkedHashMap<>();
-            boolean legacy = stored.indexOf('{') == 0;
-            Map<String, List<String>> out = deserializeTagsMap(legacy ? stored : decrypt(stored));
-            if (legacy) writeTags(context, out);
-            return out;
-        } catch (Exception e) {
-            Log.w(TAG, "tag store read failed", e);
-            return new LinkedHashMap<>();
-        }
+        try { return MetadataStore.readTags(context); }
+        catch (Exception e) { throw new IllegalStateException("metadata tags read failed", e); }
     }
 
     /** Persists tag assignments encrypted under {@link #KEY_TX_TAGS}. */
     static void writeTags(Context context, Map<String, List<String>> tags) {
-        try {
-            android.content.SharedPreferences.Editor e =
-                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit();
-            if (tags == null || tags.isEmpty()) {
-                e.remove(KEY_TX_TAGS).apply();
-                return;
-            }
-            e.putString(KEY_TX_TAGS, encrypt(serializeTagsMap(tags))).apply();
-        } catch (Exception ex) {
-            Log.w(TAG, "tag store write failed", ex);
-        }
+        try { MetadataStore.writeTags(context, tags); }
+        catch (Exception e) { throw new IllegalStateException("metadata tags write failed", e); }
     }
 
     /** Returns all distinct tag names in first-seen order for a picker or filter. */
@@ -560,18 +524,14 @@ final class BalanceData {
 
     /** Tags assigned to one transaction, never null and safe for callers to modify. */
     static List<String> getTags(Context context, Transaction t) {
-        List<String> tags = readTags(context).get(noteKey(t));
-        return tags == null ? new ArrayList<>() : new ArrayList<>(tags);
+        try { return MetadataStore.getTags(context, t); }
+        catch (Exception e) { throw new IllegalStateException("metadata tags read failed", e); }
     }
 
-    /** Saves a bounded, trimmed, duplicate-free tag list for one transaction. */
+    /** Saves a trimmed, duplicate-free tag list for one transaction. */
     static void setTags(Context context, Transaction t, Collection<String> input) {
-        Map<String, List<String>> tags = readTags(context);
-        List<String> normalized = normalizeTags(input);
-        String key = noteKey(t);
-        if (normalized.isEmpty()) tags.remove(key);
-        else tags.put(key, normalized);
-        writeTags(context, tags);
+        try { MetadataStore.setTags(context, t, input); }
+        catch (Exception e) { throw new IllegalStateException("metadata tags write failed", e); }
     }
 
     /** Returns true when two tag names represent the same user tag. */
@@ -583,9 +543,7 @@ final class BalanceData {
     static String serializeTagsMap(Map<String, List<String>> tags) throws Exception {
         JSONObject out = new JSONObject();
         if (tags != null) {
-            int entries = 0;
             for (Map.Entry<String, List<String>> e : tags.entrySet()) {
-                if (entries++ >= MAX_TAG_ENTRIES) break;
                 List<String> normalized = normalizeTags(e.getValue());
                 if (e.getKey() != null && !e.getKey().isEmpty() && !normalized.isEmpty()) {
                     JSONArray values = new JSONArray();
@@ -603,13 +561,12 @@ final class BalanceData {
         try {
             JSONObject obj = new JSONObject(json);
             Iterator<String> it = obj.keys();
-            int entries = 0;
-            while (it.hasNext() && entries++ < MAX_TAG_ENTRIES) {
+            while (it.hasNext()) {
                 String key = it.next();
                 JSONArray values = obj.optJSONArray(key);
                 if (values == null) continue;
                 List<String> tags = new ArrayList<>();
-                for (int i = 0; i < values.length() && tags.size() < MAX_TAGS_PER_TRANSACTION; i++) {
+                for (int i = 0; i < values.length(); i++) {
                     if (!values.isNull(i)) tags.add(values.optString(i, null));
                 }
                 tags = normalizeTags(tags);
@@ -639,7 +596,7 @@ final class BalanceData {
             for (String tag : normalizeTags(e.getValue())) {
                 boolean present = false;
                 for (String old : merged) if (sameTag(old, tag)) { present = true; break; }
-                if (!present && merged.size() < MAX_TAGS_PER_TRANSACTION) {
+                if (!present) {
                     merged.add(tag);
                     changed = true;
                 }
@@ -656,23 +613,13 @@ final class BalanceData {
             if (raw == null) continue;
             String tag = raw.trim();
             if (tag.isEmpty()) continue;
-            tag = capTagLength(tag);
-            if (tag.isEmpty()) continue;
             boolean duplicate = false;
             for (String old : out) if (sameTag(old, tag)) { duplicate = true; break; }
             if (!duplicate) {
                 out.add(tag);
-                if (out.size() >= MAX_TAGS_PER_TRANSACTION) break;
             }
         }
         return out;
-    }
-
-    private static String capTagLength(String s) {
-        if (s.length() <= MAX_TAG_LENGTH) return s;
-        int end = MAX_TAG_LENGTH;
-        while (end > 0 && Character.isLowSurrogate(s.charAt(end))) end--;
-        return s.substring(0, end).trim();
     }
 
     // ====================================================================
@@ -684,45 +631,19 @@ final class BalanceData {
      *  row can never poison the list. */
     static List<Commitment> readCommitments(Context context) {
         try {
-            String stored = context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE)
-                .getString(KEY_COMMITMENTS, null);
-            if (stored == null) return new ArrayList<>();
-            boolean legacy = stored.indexOf('{') == 0;
-            List<Commitment> out = deserializeCommitments(legacy ? stored : decrypt(stored));
-            if (legacy) writeCommitments(context, out);
-            return out;
+            return CommitmentStore.readCommitments(context);
         } catch (Exception e) {
-            Log.w(TAG, "commitment store read failed", e);
-            return new ArrayList<>();
+            throw new IllegalStateException("commitment store read failed", e);
         }
     }
 
-    /** Persists the supplied commitments encrypted under {@link #KEY_COMMITMENTS}. Entries are
-     *  normalized at the boundary and the list caps at {@link Commitment#MAX_COMMITMENTS}, so a
-     *  runaway import cannot bloat the store; an empty list removes the key, so a device with
-     *  no commitments stores nothing at all. */
+    /** Persists the supplied commitments in the encrypted, uncapped commitment store. */
     static void writeCommitments(Context context, List<Commitment> commitments) {
         try {
-            android.content.SharedPreferences.Editor e =
-                context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit();
-            List<Commitment> kept = new ArrayList<>();
-            if (commitments != null) {
-                for (Commitment c : commitments) {
-                    Commitment n = Commitment.normalized(c);
-                    if (n == null) continue;
-                    boolean duplicate = false;
-                    for (Commitment k : kept) if (k.id.equals(n.id)) { duplicate = true; break; }
-                    if (!duplicate) kept.add(n);
-                    if (kept.size() >= Commitment.MAX_COMMITMENTS) break;
-                }
-            }
-            if (kept.isEmpty()) {
-                e.remove(KEY_COMMITMENTS).apply();
-                return;
-            }
-            e.putString(KEY_COMMITMENTS, encrypt(serializeCommitments(kept))).apply();
-        } catch (Exception ex) {
-            Log.w(TAG, "commitment store write failed", ex);
+            CommitmentStore.writeCommitments(context, commitments == null
+                ? java.util.Collections.emptyList() : commitments);
+        } catch (Exception e) {
+            throw new IllegalStateException("commitment store write failed", e);
         }
     }
 
@@ -745,7 +666,7 @@ final class BalanceData {
             JSONArray arr = new JSONObject(json).optJSONArray(KEY_COMMITMENTS);
             if (arr == null) return out;
             java.util.Set<String> ids = new HashSet<>();
-            for (int i = 0; i < arr.length() && out.size() < Commitment.MAX_COMMITMENTS; i++) {
+            for (int i = 0; i < arr.length(); i++) {
                 JSONObject e = arr.optJSONObject(i);
                 if (e == null) continue;
                 Commitment c = Commitment.fromJson(e);
@@ -799,7 +720,8 @@ final class BalanceData {
      *  every detected reason was already stored, so an unchanged inbox costs no write. Returns whether
      *  the store gained anything, so a scan can tell a visible change from a no-op. */
     static boolean mergeReasons(Context context, Map<String, String> detected) {
-        return mergeDetectedTextStore(context, KEY_TX_REASONS, detected);
+        try { return MetadataStore.mergeReasons(context, detected); }
+        catch (Exception e) { throw new IllegalStateException("metadata reasons merge failed", e); }
     }
 
     /** Folds the channels one scan detected into the stored ones, on exactly the terms the reasons are
@@ -807,7 +729,8 @@ final class BalanceData {
      *  user's note is theirs, and neither store can clobber the other. Returns whether the store
      *  gained anything, like {@link #mergeReasons}. */
     static boolean mergeChannels(Context context, Map<String, String> detected) {
-        return mergeDetectedTextStore(context, KEY_TX_CHANNELS, detected);
+        try { return MetadataStore.mergeChannels(context, detected); }
+        catch (Exception e) { throw new IllegalStateException("metadata channels merge failed", e); }
     }
 
     private static boolean mergeDetectedTextStore(Context context, String key,
@@ -831,9 +754,8 @@ final class BalanceData {
         JSONObject o = new JSONObject();
         if (text != null) {
             for (Map.Entry<String, String> e : text.entrySet()) {
-                if (o.length() >= MAX_TAG_ENTRIES) break;
                 String v = e.getValue();
-                if (v != null && !v.isEmpty()) o.put(e.getKey(), capNoteLength(v));
+                if (v != null && !v.isEmpty()) o.put(e.getKey(), v);
             }
         }
         return o.toString();
@@ -845,10 +767,10 @@ final class BalanceData {
         try {
             JSONObject o = new JSONObject(json);
             java.util.Iterator<String> it = o.keys();
-            while (it.hasNext() && out.size() < MAX_TAG_ENTRIES) {
+            while (it.hasNext()) {
                 String key = it.next();
                 String v = o.optString(key, null);
-                if (v != null && !v.isEmpty()) out.put(key, capNoteLength(v));
+                if (v != null && !v.isEmpty()) out.put(key, v);
             }
         } catch (Exception ex) {
             Log.w(TAG, "deserializeTextMap failed");
@@ -858,36 +780,16 @@ final class BalanceData {
 
     /** The transaction's note, or null when none is saved. */
     static String getNote(Context context, Transaction t) {
-        return readNotes(context).get(noteKey(t));
+        try { return MetadataStore.getNote(context, t); }
+        catch (Exception e) { throw new IllegalStateException("metadata note read failed", e); }
     }
 
     /** Saves (or with a blank input, clears) the note for a transaction. The text is trimmed and
      *  capped at {@link #MAX_NOTE_LENGTH}, so hostile or accidental multi-megabyte pastes are cut
      *  down to a bounded size before they are written encrypted. */
     static void setNote(Context context, Transaction t, String text) {
-        Map<String, String> notes = readNotes(context);
-        String key = noteKey(t);
-        if (text == null) {
-            notes.remove(key);
-            writeNotes(context, notes);
-            return;
-        }
-        String trimmed = text.trim();
-        if (trimmed.isEmpty()) {
-            notes.remove(key);
-            writeNotes(context, notes);
-            return;
-        }
-        notes.put(key, capNoteLength(trimmed));
-        writeNotes(context, notes);
-    }
-
-    /** Trims a text to {@link #MAX_NOTE_LENGTH} characters without splitting a surrogate pair. */
-    private static String capNoteLength(String s) {
-        if (s.length() <= MAX_NOTE_LENGTH) return s;
-        int end = MAX_NOTE_LENGTH;
-        while (end > 0 && Character.isLowSurrogate(s.charAt(end))) end--;
-        return s.substring(0, end);
+        try { MetadataStore.setNote(context, t, text); }
+        catch (Exception e) { throw new IllegalStateException("metadata note write failed", e); }
     }
 
     /** Moves the text attached to a movement that a full-history rebuild would orphan: when a stored
@@ -899,6 +801,12 @@ final class BalanceData {
      *  already carries text, the destination's text is kept and the text of the row the rebuild drops is
      *  dropped with it, since that key can no longer be read. */
     static void migrateTransactionText(Context context, Map<Transaction, Transaction> replaced) {
+        try {
+            MetadataStore.migrateTransactionText(context, replaced);
+            return;
+        } catch (Exception e) {
+            Log.w(TAG, "metadata transaction migration failed", e);
+        }
         Map<String, String> notes = readNotes(context);
         if (migrateTextKeys(notes, replaced)) writeNotes(context, notes);
         Map<String, String> reasons = readReasons(context);
@@ -982,6 +890,11 @@ final class BalanceData {
      *  the messages the rebuild below reprocesses, and the transactions they describe are deleted here
      *  with everything else — keeping them would only leave entries nothing points at. */
     static void reset(Context context, boolean alsoNotes) {
+        try { CommitmentStore.clear(context); }
+        catch (Exception e) { throw new IllegalStateException("commitment reset failed", e); }
+        TransactionStore.clear(context);
+        try { MetadataStore.reset(context, alsoNotes); }
+        catch (Exception e) { throw new IllegalStateException("metadata reset failed", e); }
         android.content.SharedPreferences.Editor data =
             context.getSharedPreferences(PREFS_DATA, Context.MODE_PRIVATE).edit()
                 .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS)
@@ -990,7 +903,6 @@ final class BalanceData {
                 .remove(KEY_RECENT_MOVEMENTS).remove(KEY_TX_REASONS).remove(KEY_TX_CHANNELS);
         if (alsoNotes) data.remove(KEY_TX_NOTES).remove(KEY_TX_TAGS);
         data.commit();
-        TransactionStore.clear(context);
         removeOldTransactionPages(context, null);
         context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
             .remove(KEY_SCANNED_THROUGH)

@@ -31,13 +31,15 @@ public class TransactionNoteTest {
 
     private Context ctx;
 
-    @Before public void setUp() {
+    @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        MetadataStore.reset(ctx, true);
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
     }
 
-    @After public void tearDown() {
+    @After public void tearDown() throws Exception {
+        MetadataStore.reset(ctx, true);
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
     }
 
@@ -144,13 +146,13 @@ public class TransactionNoteTest {
         assertTrue(BalanceData.readNotes(ctx).isEmpty());
     }
 
-    @Test public void note_overlong_isCapped() {
+    @Test public void note_overlong_isRetained() {
         Transaction t = tx("Tejarat", null, "sig-A", "content-A");
         StringBuilder buf = new StringBuilder();
         for (int i = 0; i < 600; i++) buf.append('a');
         BalanceData.setNote(ctx, t, buf.toString());
         String stored = BalanceData.getNote(ctx, t);
-        assertTrue(stored.length() <= BalanceData.MAX_NOTE_LENGTH);
+        assertEquals(600, stored.length());
     }
 
     @Test public void note_persistsInTheEncryptedStore() {
