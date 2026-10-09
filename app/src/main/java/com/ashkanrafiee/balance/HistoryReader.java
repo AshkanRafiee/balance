@@ -353,14 +353,14 @@ final class HistoryReader {
         synchronized (BalanceData.class) {
             HistoryTimeline.Builder timeline = HistoryTimeline.open(context);
             Accumulator accumulator = new Accumulator(context, request, timeline);
-            try {
-                Matcher matcher = new Matcher(context, request);
+            try (MetadataStore.LookupSession metadata = MetadataStore.LookupSession.open(context)) {
+                Matcher matcher = new Matcher(context, request, metadata);
                 TransactionStore.forEach(context, request.pageSize, transaction -> {
-                    // Scope narrowing precedes all other filters. Residual detection in the
-                    // reference path uses exactly this bank/account scope before later predicates.
+                    // Scope narrowing precedes all other filters. Residual detection in the reference path
+                    // uses exactly this bank/account scope before any of these later predicates run.
                     if (!inScope(transaction, request)) return;
                     if (!matchesMovementFilter(transaction, request)) return;
-                    if (!matchesTags(context, transaction, request.selectedTags)) return;
+                    if (!matchesTags(metadata, transaction, request.selectedTags)) return;
                     if (!matcher.matchesTransaction(transaction)) return;
                     accumulator.addTransaction(transaction);
                 });
@@ -404,27 +404,32 @@ final class HistoryReader {
         // This is the only production-code call site kept for residual parity. Residual detection
         // happens before direction/date/tag/search narrowing, just as HistoryActivity currently does.
         List<Residual> residuals = Residual.between(scope);
-        List<Residual> visibleResiduals = HistoryActivity.applyResidualFilters(
+        List<Residual> filteredResiduals = HistoryActivity.applyResidualFilters(
             residuals, request.filter, request.iran);
-        List<Transaction> visibleTransactions = HistoryActivity.applyFilters(
+        List<Transaction> filteredTransactions = HistoryActivity.applyFilters(
             scope, request.filter, request.iran);
 
-        visibleTransactions = filterTags(context, visibleTransactions, request.selectedTags);
-        if (!request.selectedTags.isEmpty()) visibleResiduals = new ArrayList<>();
+        List<Transaction> visibleTransactions;
+        List<Residual> visibleResiduals;
+        try (MetadataStore.LookupSession metadata = MetadataStore.LookupSession.open(context)) {
+            visibleTransactions = filterTags(metadata, filteredTransactions, request.selectedTags);
+            visibleResiduals = new ArrayList<>(filteredResiduals);
+            if (!request.selectedTags.isEmpty()) visibleResiduals = new ArrayList<>();
 
-        Matcher matcher = new Matcher(context, request);
-        if (!matcher.empty()) {
-            List<Transaction> searchedTransactions = new ArrayList<>();
-            for (Transaction transaction : visibleTransactions) {
-                if (matcher.matchesTransaction(transaction)) searchedTransactions.add(transaction);
-            }
-            visibleTransactions = searchedTransactions;
+            Matcher matcher = new Matcher(context, request, metadata);
+            if (!matcher.empty()) {
+                List<Transaction> searchedTransactions = new ArrayList<>();
+                for (Transaction transaction : visibleTransactions) {
+                    if (matcher.matchesTransaction(transaction)) searchedTransactions.add(transaction);
+                }
+                visibleTransactions = searchedTransactions;
 
-            List<Residual> searchedResiduals = new ArrayList<>();
-            for (Residual residual : visibleResiduals) {
-                if (matcher.matchesResidual(residual)) searchedResiduals.add(residual);
+                List<Residual> searchedResiduals = new ArrayList<>();
+                for (Residual residual : visibleResiduals) {
+                    if (matcher.matchesResidual(residual)) searchedResiduals.add(residual);
+                }
+                visibleResiduals = searchedResiduals;
             }
-            visibleResiduals = searchedResiduals;
         }
 
         Accumulator accumulator = new Accumulator(context, request);
@@ -465,21 +470,21 @@ final class HistoryReader {
         return filter.to == null || date.compare(filter.to) <= 0;
     }
 
-    private static List<Transaction> filterTags(Context context, List<Transaction> input,
-            Collection<String> selected) throws Exception {
+    private static List<Transaction> filterTags(MetadataStore.LookupSession metadata,
+            List<Transaction> input, Collection<String> selected) throws Exception {
         if (selected == null || selected.isEmpty()) return new ArrayList<>(input);
         List<Transaction> out = new ArrayList<>();
         for (Transaction transaction : input) {
-            if (matchesTags(context, transaction, selected)) out.add(transaction);
+            if (matchesTags(metadata, transaction, selected)) out.add(transaction);
         }
         return out;
     }
 
-    /** Point lookups keep this prototype from materializing notes, reasons, channels, or tags. */
-    private static boolean matchesTags(Context context, Transaction transaction,
+    /** Session point lookups keep this prototype from materializing notes, reasons, channels, or tags. */
+    private static boolean matchesTags(MetadataStore.LookupSession metadata, Transaction transaction,
             Collection<String> selected) throws Exception {
         if (selected == null || selected.isEmpty()) return true;
-        List<String> actual = MetadataStore.getTags(context, BalanceData.noteKey(transaction));
+        List<String> actual = metadata.tags(BalanceData.noteKey(transaction));
         for (String wanted : selected) {
             boolean found = false;
             for (String tag : actual) {
@@ -495,6 +500,7 @@ final class HistoryReader {
 
     private static final class Matcher {
         private final Context context;
+        private final MetadataStore.LookupSession metadata;
         private final Request request;
         private final List<String> tokens;
         private final boolean persian;
@@ -504,9 +510,10 @@ final class HistoryReader {
         private final String residualLabel;
         private final SimpleDateFormat clock = new SimpleDateFormat("HH:mm", Locale.US);
 
-        Matcher(Context context, Request request) {
+        Matcher(Context context, Request request, MetadataStore.LookupSession metadata) {
             this.context = context;
             this.request = request;
+            this.metadata = metadata;
             this.tokens = HistoryActivity.searchTokens(request.searchQuery);
             this.persian = LocaleHelper.isPersian(context);
             this.toman = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(context));
@@ -520,10 +527,10 @@ final class HistoryReader {
         boolean matchesTransaction(Transaction transaction) throws Exception {
             if (tokens.isEmpty()) return true;
             String key = BalanceData.noteKey(transaction);
-            String note = MetadataStore.getText(context, MetadataStore.NOTES, key);
-            String reason = MetadataStore.getText(context, MetadataStore.REASONS, key);
-            String channel = MetadataStore.getText(context, MetadataStore.CHANNELS, key);
-            List<String> tags = MetadataStore.getTags(context, key);
+            String note = metadata.text(MetadataStore.NOTES, key);
+            String reason = metadata.text(MetadataStore.REASONS, key);
+            String channel = metadata.text(MetadataStore.CHANNELS, key);
+            List<String> tags = metadata.tags(key);
             CalDate date = calendarDate(transaction.date, request.iran,
                 Calendar.getInstance(Locale.getDefault()));
             String haystack = HistoryActivity.transactionSearchText(transaction,
@@ -722,10 +729,13 @@ final class HistoryReader {
             }
 
             LinkedHashMap<String, DayRows> rowResults = new LinkedHashMap<>();
-            for (String key : request.requestedDayKeys) {
-                if (snapshot != null) {
-                    rowResults.put(key, fromPage(context, snapshot,
-                        snapshot.firstPage(key, request.maxRowsPerDay), request.iran));
+            if (snapshot != null && !request.requestedDayKeys.isEmpty()) {
+                try (MetadataStore.LookupSession metadata =
+                        MetadataStore.LookupSession.open(context)) {
+                    for (String key : request.requestedDayKeys) {
+                        rowResults.put(key, fromPage(metadata, snapshot,
+                            snapshot.firstPage(key, request.maxRowsPerDay), request.iran));
+                    }
                 }
             }
             List<Transaction> visibleTx = transactions == null ? null
@@ -762,16 +772,18 @@ final class HistoryReader {
             } else {
                 page = snapshot.nextPage(dayKey, cursor, pageSize);
             }
-            return fromPage(context, snapshot, page, result.iranCalendar);
+            try (MetadataStore.LookupSession metadata = MetadataStore.LookupSession.open(context)) {
+                return fromPage(metadata, snapshot, page, result.iranCalendar);
+            }
         }
     }
 
-    private static DayRows fromPage(Context context, HistoryTimeline snapshot,
+    private static DayRows fromPage(MetadataStore.LookupSession metadata, HistoryTimeline snapshot,
             HistoryTimeline.Page page, boolean iran) throws Exception {
         List<Row> rows = new ArrayList<>(page.entries.size());
         List<Transaction> transactions = new ArrayList<>();
         List<Residual> residuals = new ArrayList<>();
-        Map<String, Metadata> metadata = new LinkedHashMap<>();
+        Map<String, Metadata> pageMetadata = new LinkedHashMap<>();
         CalDate date = null;
         for (HistoryTimeline.Entry entry : page.entries) {
             if (date == null) date = calendarDate(entry.date, iran,
@@ -781,20 +793,21 @@ final class HistoryReader {
             if (entry.transaction != null) {
                 transactions.add(entry.transaction);
                 String key = BalanceData.noteKey(entry.transaction);
-                metadata.put(key, pointMetadata(context, key));
+                pageMetadata.put(key, pointMetadata(metadata, key));
             } else {
                 residuals.add(entry.residual);
             }
         }
-        return new DayRows(page.dayKey, date, rows, transactions, residuals, metadata,
+        return new DayRows(page.dayKey, date, rows, transactions, residuals, pageMetadata,
             page.hasPrevious, page.hasMore, page.first, page.last);
     }
 
-    private static Metadata pointMetadata(Context context, String key) throws Exception {
-        return new Metadata(MetadataStore.getText(context, MetadataStore.NOTES, key),
-            MetadataStore.getText(context, MetadataStore.REASONS, key),
-            MetadataStore.getText(context, MetadataStore.CHANNELS, key),
-            MetadataStore.getTags(context, key));
+    private static Metadata pointMetadata(MetadataStore.LookupSession metadata, String key)
+            throws Exception {
+        return new Metadata(metadata.text(MetadataStore.NOTES, key),
+            metadata.text(MetadataStore.REASONS, key),
+            metadata.text(MetadataStore.CHANNELS, key),
+            metadata.tags(key));
     }
 
     private static CalDate calendarDate(long millis, boolean iran, Calendar calendar) {

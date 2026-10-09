@@ -113,6 +113,88 @@ final class MetadataStore {
     interface Visitor { void accept(Row row) throws Exception; }
     private interface Work<T> { T run(Session session) throws Exception; }
 
+    /** One pinned read connection serving many point lookups. Opening the store (database open
+     *  plus key unwraps) happens once instead of once per row, which is what makes history search
+     *  and page metadata affordable. Not thread-safe: use from a single worker thread and close it
+     *  when the pass ends. Reads see committed state; like the point lookup helpers it replaces,
+     *  it does not pin a store revision. */
+    static final class LookupSession implements AutoCloseable {
+        private final Helper helper;
+        private final Session session;
+        private boolean closed;
+
+        private LookupSession(Helper helper, Session session) {
+            this.helper = helper;
+            this.session = session;
+        }
+
+        /** Opens the session, running any pending legacy migration first. */
+        static LookupSession open(Context context) throws Exception {
+            if (context == null) throw new NullPointerException("context");
+            synchronized (BalanceData.class) {
+                // Migrate through the normal path first so this session only ever reads the
+                // current row format; afterwards it owns one connection for every lookup.
+                access(context, ALL, false, true, s -> null);
+                Context resolved = DataGeneration.context(context);
+                SharedPreferences prefs = resolved.getSharedPreferences(
+                    BalanceData.PREFS_DATA, Context.MODE_PRIVATE);
+                Helper helper = new Helper(resolved);
+                SQLiteDatabase db = null;
+                boolean ok = false;
+                try {
+                    db = helper.getReadableDatabase();
+                    String owner = meta(db, OWNER);
+                    String token = prefs.getString(KEY_METADATA_STORE_TOKEN, null);
+                    if (owner != null && token != null && !owner.equals(token))
+                        throw new IllegalStateException("metadata store ownership unavailable");
+                    Session session = new Session(db, owner);
+                    LookupSession out = new LookupSession(helper, session);
+                    helper = null;
+                    ok = true;
+                    return out;
+                } finally {
+                    if (!ok) {
+                        if (db != null && db.isOpen()) {
+                            try { db.close(); } catch (Exception ignored) { }
+                        }
+                        if (helper != null) helper.close();
+                    }
+                }
+            }
+        }
+
+        /** The stored text for one key, or null when absent. */
+        String text(int kind, String key) throws Exception {
+            requireTextKind(kind);
+            requireKey(key);
+            checkOpen();
+            Row row = session.find(kind, key);
+            return row == null ? null : row.text;
+        }
+
+        /** A mutable copy of the tags for one key, empty when absent. */
+        List<String> tags(String key) throws Exception {
+            requireKey(key);
+            checkOpen();
+            Row row = session.find(TAGS, key);
+            return row == null ? new ArrayList<>() : new ArrayList<>(row.tags);
+        }
+
+        private void checkOpen() {
+            if (closed) throw new IllegalStateException("metadata lookup session is closed");
+        }
+
+        @Override public void close() {
+            if (closed) return;
+            closed = true;
+            try {
+                session.close();
+            } finally {
+                helper.close();
+            }
+        }
+    }
+
     static Map<String, String> readNotes(Context context) throws Exception {
         return readText(context, NOTES);
     }

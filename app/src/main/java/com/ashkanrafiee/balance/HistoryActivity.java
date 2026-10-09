@@ -776,18 +776,19 @@ public final class HistoryActivity extends Activity {
             try {
                 final Context app = getApplicationContext();
                 final List<String> tokens = searchTokens(query);
+                final MetadataStore.LookupSession metadata = MetadataStore.LookupSession.open(app);
                 final CsvExport.TextLookup lookup = new CsvExport.TextLookup() {
                     @Override public String note(String key) throws Exception {
-                        return MetadataStore.getText(app, MetadataStore.NOTES, key);
+                        return metadata.text(MetadataStore.NOTES, key);
                     }
                     @Override public String reason(String key) throws Exception {
-                        return MetadataStore.getText(app, MetadataStore.REASONS, key);
+                        return metadata.text(MetadataStore.REASONS, key);
                     }
                     @Override public String channel(String key) throws Exception {
-                        return MetadataStore.getText(app, MetadataStore.CHANNELS, key);
+                        return metadata.text(MetadataStore.CHANNELS, key);
                     }
                     @Override public List<String> tags(String key) throws Exception {
-                        return MetadataStore.getTags(app, key);
+                        return metadata.tags(key);
                     }
                 };
                 TransactionStore.StreamSource movements = visitor ->
@@ -806,9 +807,13 @@ public final class HistoryActivity extends Activity {
                 OutputStream out = getContentResolver().openOutputStream(uri, "w");
                 if (out == null) throw new IOException("no output stream");
                 try {
-                    OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
-                    HistoryCsvExport.writeLookup(app, CsvExport.STREAM_PAGE_SIZE, movements,
-                        residuals, writer, lookup);
+                    try {
+                        OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
+                        HistoryCsvExport.writeLookup(app, CsvExport.STREAM_PAGE_SIZE, movements,
+                            residuals, writer, lookup);
+                    } finally {
+                        metadata.close();
+                    }
                 } finally {
                     out.close();
                 }
