@@ -63,6 +63,8 @@ final class CommitmentStore {
     private static final String ROW_KEY = "row_key";
     private static final String REVISION = "revision";
     private static final String MIGRATED = "legacy_digest";
+    /** Prefix for per-deletion META tombstones; the value keeps the deleted definition id. */
+    private static final String DELETED_PREFIX = "deleted:";
     private static final String ROW_DOMAIN = "commitments";
     static final String TABLE = DEFINITIONS;
     static final String SETTLEMENT_TABLE = SETTLEMENTS;
@@ -285,6 +287,12 @@ final class CommitmentStore {
             return session().mergeDefinition(definition);
         }
         boolean delete(String id) throws Exception { requireId(id); return session().delete(id); }
+        boolean noteDeletion(String id) throws Exception {
+            requireId(id); return session().noteDeletion(id);
+        }
+        boolean isDeleted(String id) throws Exception {
+            requireId(id); return session().isDeleted(id);
+        }
         boolean settle(String id, long date) throws Exception {
             requireId(id); requireDate(date); return session().settle(id, date, true);
         }
@@ -451,6 +459,20 @@ final class CommitmentStore {
         writer.beginArray();
         forEachDefinition(context, PAGE_SIZE, definition -> writeJsonRecord(writer, definition));
         writer.endArray();
+    }
+
+    /** Streams the ids of explicitly deleted definitions, oldest tombstone first. */
+    static void writeJsonDeletions(Context context, JsonWriter writer) throws Exception {
+        if (writer == null) throw new NullPointerException("writer");
+        access(context, true, s -> {
+            writer.beginArray();
+            try (Cursor cursor = s.db.query(META, new String[]{"value"},
+                    "key LIKE ?", new String[]{DELETED_PREFIX + "%"}, null, null, "key ASC")) {
+                while (cursor.moveToNext()) writer.value(cursor.getString(0));
+            }
+            writer.endArray();
+            return null;
+        });
     }
 
     private static void writeJsonRecord(JsonWriter writer, Commitment c) throws IOException {
@@ -786,6 +808,7 @@ final class CommitmentStore {
 
         boolean mergeDefinition(Commitment incoming) throws Exception {
             Definition existing = find(incoming.id, true);
+            if (existing == null && isDeleted(incoming.id)) return false;
             boolean changed = false;
             if (existing == null) {
                 upsert(incoming);
@@ -883,6 +906,10 @@ final class CommitmentStore {
                 values.put("lookup", definitionLookup(c.id));
                 values.put("payload", definitionPayload(c));
                 db.insertOrThrow("incoming_definitions", null, values);
+                // An id in the authoritative new set is by definition not deleted: drop its
+                // tombstone so backups taken afterwards stay self-consistent. Ids absent from
+                // the set keep their tombstones.
+                db.delete(META, "key=?", new String[]{DELETED_PREFIX + definitionLookup(c.id)});
                 for (Long date : c.paid) putIncomingMark("replacement_marks", rowId, date, true);
                 for (Long date : c.unpaid) putIncomingMark("replacement_marks", rowId, date, false);
                 rowId = Math.incrementExact(rowId);
@@ -902,8 +929,28 @@ final class CommitmentStore {
 
         boolean delete(String id) {
             int count = db.delete(DEFINITIONS, "lookup=?", new String[]{definitionLookup(id)});
-            if (count != 0) touch();
-            return count != 0;
+            if (count == 0) return false;
+            noteDeletion(id);
+            touch();
+            return true;
+        }
+
+        /**
+         * Records an explicit deletion so restoring an older backup cannot resurrect the
+         * definition. Ids are random per creation, so a tombstone can never match a future
+         * definition. Tombstones live in META: no schema change, and reset wipes them with
+         * everything else.
+         */
+        boolean noteDeletion(String id) {
+            String key = DELETED_PREFIX + definitionLookup(id);
+            if (meta(db, key) != null) return false;
+            putMeta(db, key, id);
+            touch();
+            return true;
+        }
+
+        boolean isDeleted(String id) {
+            return meta(db, DELETED_PREFIX + definitionLookup(id)) != null;
         }
 
         DefinitionPage definitionPage(long afterId, int limit) throws Exception {

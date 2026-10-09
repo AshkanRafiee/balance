@@ -257,6 +257,9 @@ final class BackupManager {
         json.name("commitments");
         CommitmentStore.writeJsonRecords(context, json);
 
+        json.name("commitmentDeletions");
+        CommitmentStore.writeJsonDeletions(context, json);
+
         json.name("sources").beginArray();
         java.util.List<SourceStore.Source> sources = new java.util.ArrayList<>();
         SourceStore.forEachSource(context, 256, source -> { sources.add(source); });

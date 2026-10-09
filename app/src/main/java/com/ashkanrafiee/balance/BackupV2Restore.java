@@ -64,6 +64,9 @@ final class BackupV2Restore {
     private static final int SECTION_METADATA = 1 << 3;
     private static final int SECTION_COMMITMENTS = 1 << 4;
     private static final int SECTION_SOURCES = 1 << 5;
+    /** Tombstones of explicitly deleted commitments. Optional like sources: backups written
+     *  before deletions were recorded carry no such section. */
+    private static final int SECTION_COMMITMENT_DELETIONS = 1 << 6;
     private static final int ALL_SECTIONS = SECTION_SCHEMA | SECTION_BALANCES
         | SECTION_TRANSACTIONS | SECTION_METADATA | SECTION_COMMITMENTS;
 
@@ -644,13 +647,19 @@ final class BackupV2Restore {
                     seen |= bit;
                     parseSources(json, stage);
                     break;
+                case "commitmentDeletions":
+                    bit = SECTION_COMMITMENT_DELETIONS;
+                    if ((seen & bit) != 0) throw invalid("duplicate commitment deletions");
+                    seen |= bit;
+                    parseCommitmentDeletions(json, stage);
+                    break;
                 default:
                     throw invalid("unknown backup section");
             }
         }
         json.endObject();
         if ((seen & ALL_SECTIONS) != ALL_SECTIONS
-                || (seen & ~ (ALL_SECTIONS | SECTION_SOURCES)) != 0)
+                || (seen & ~ (ALL_SECTIONS | SECTION_SOURCES | SECTION_COMMITMENT_DELETIONS)) != 0)
             throw invalid("incomplete backup sections");
     }
 
@@ -844,6 +853,17 @@ final class BackupV2Restore {
     private static void parseCommitments(JsonReader json, InputStage stage) throws Exception {
         json.beginArray();
         while (json.hasNext()) parseCommitment(json, stage);
+        json.endArray();
+    }
+
+    /** Reads explicitly deleted commitment ids into encrypted staging. */
+    private static void parseCommitmentDeletions(JsonReader json, InputStage stage) throws Exception {
+        json.beginArray();
+        while (json.hasNext()) {
+            String id = requiredString(json);
+            if (id.isEmpty()) throw invalid("invalid commitment deletion");
+            stage.addCommitmentDeletion(id);
+        }
         json.endArray();
     }
 
@@ -1080,8 +1100,10 @@ final class BackupV2Restore {
         if (selection.contains(BackupManager.Section.TAGS))
             mergeMetadata(context, stage, TAGS, MetadataStore.TAGS, true, result);
 
-        if (selection.contains(BackupManager.Section.COMMITMENTS))
+        if (selection.contains(BackupManager.Section.COMMITMENTS)) {
             mergeCommitments(context, stage, result);
+            mergeCommitmentDeletions(context, stage, result);
+        }
         return result;
     }
 
@@ -1201,6 +1223,9 @@ final class BackupV2Restore {
             stage.forEachCommitment((ordinal, definition) -> {
                 final boolean[] changed = {false};
                 Commitment local = editor.get(definition.id);
+                // An explicitly deleted definition stays deleted: delete wins over any older
+                // backup, and tombstones travel forward in every newer backup.
+                if (local == null && editor.isDeleted(definition.id)) return;
                 boolean newDefinition = local == null;
                 if (local == null) {
                     editor.upsert(definition);
@@ -1233,6 +1258,25 @@ final class BackupV2Restore {
                     Math.incrementExact(result.commitmentsAdded);
                 if (changed[0]) result.metadataChanged = true;
             });
+            return null;
+        });
+    }
+
+    /**
+     * Unions the backup's deletion tombstones into the local store after definitions merge,
+     * removing any local definition the tombstone covers. Delete wins: a definition the user
+     * erased is never resurrected by an older backup, and the tombstone is kept so still-older
+     * backups cannot resurrect it either.
+     */
+    private static void mergeCommitmentDeletions(Context context, InputStage stage,
+            BackupManager.RestoreResult result) throws Exception {
+        CommitmentStore.runInTransaction(context, editor -> {
+            final boolean[] changed = {false};
+            stage.forEachCommitmentDeletion(id -> {
+                if (editor.delete(id)) changed[0] = true;
+                if (editor.noteDeletion(id)) changed[0] = true;
+            });
+            if (changed[0]) result.metadataChanged = true;
             return null;
         });
     }
@@ -1335,6 +1379,7 @@ final class BackupV2Restore {
     private interface EventVisitor {
         void accept(long date, boolean settled) throws Exception;
     }
+    private interface DeletionVisitor { void accept(String id) throws Exception; }
 
     /** Disposable encrypted input rows. Its only plaintext lifetime is one parser row. */
     private static final class InputStage implements AutoCloseable {
@@ -1468,6 +1513,18 @@ final class BackupV2Restore {
             db.insertOrThrow("commitment_events", null, values);
         }
 
+        void addCommitmentDeletion(String id) throws Exception {
+            ContentValues values = new ContentValues();
+            String idDigest = digest("commitment_deletion\n" + id);
+            values.put("id_digest", idDigest);
+            values.put("payload", codec.encrypt(id, deletionIdentity(idDigest)));
+            try {
+                db.insertOrThrow("commitment_deletions", null, values);
+            } catch (SQLiteConstraintException e) {
+                throw invalid("duplicate commitment deletion");
+            }
+        }
+
         void addAlias(String from, String to) throws Exception {
             if (from == null || to == null || from.isEmpty() || to.isEmpty())
                 throw invalid("invalid transaction alias");
@@ -1562,6 +1619,21 @@ final class BackupV2Restore {
             }
         }
 
+        void forEachCommitmentDeletion(DeletionVisitor visitor) throws Exception {
+            try (Cursor cursor = db.query("commitment_deletions",
+                    new String[]{"id_digest", "payload"}, null, null, null, null,
+                    "rowid ASC")) {
+                while (cursor.moveToNext()) {
+                    String idDigest = cursor.getString(0);
+                    String id = codec.decrypt(cursor.getString(1), deletionIdentity(idDigest));
+                    if (id == null || id.isEmpty()
+                            || !idDigest.equals(digest("commitment_deletion\n" + id)))
+                        throw invalid("invalid staged commitment deletion");
+                    visitor.accept(id);
+                }
+            }
+        }
+
         void forEachCommitmentEvent(long commitmentOrdinal, EventVisitor visitor) throws Exception {
             try (Cursor cursor = db.query("commitment_events",
                     new String[]{"event_digest", "payload"},
@@ -1623,6 +1695,10 @@ final class BackupV2Restore {
         return "event\n" + ordinal + "\n" + digest;
     }
 
+    private static String deletionIdentity(String digest) {
+        return "commitment_deletion\n" + digest;
+    }
+
     private static String aliasIdentity(String digest) {
         return "alias\n" + digest;
     }
@@ -1641,6 +1717,8 @@ final class BackupV2Restore {
             db.execSQL("CREATE TABLE commitment_events (commitment_ordinal INTEGER NOT NULL,"
                 + " ordinal INTEGER NOT NULL, event_digest TEXT NOT NULL UNIQUE,"
                 + " payload TEXT NOT NULL, PRIMARY KEY(commitment_ordinal, ordinal))");
+            db.execSQL("CREATE TABLE commitment_deletions (id_digest TEXT PRIMARY KEY,"
+                + " payload TEXT NOT NULL)");
             db.execSQL("CREATE INDEX commitment_events_owner ON commitment_events(commitment_ordinal, ordinal)");
             db.execSQL("CREATE TABLE aliases (source_digest TEXT PRIMARY KEY, payload TEXT NOT NULL)");
         }

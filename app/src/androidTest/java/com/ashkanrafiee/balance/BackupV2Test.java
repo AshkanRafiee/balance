@@ -282,6 +282,50 @@ public class BackupV2Test {
         assertEquals(1, BalanceData.readCommitments(context).size());
     }
 
+    @Test public void restore_skipsDefinitionsDeletedAfterTheBackup() throws Exception {
+        Commitment commitment = Commitment.create("Doomed", -100L, Commitment.ONCE,
+            Commitment.startOfDay(T), null, false, 0);
+        BalanceData.writeCommitments(context, Collections.singletonList(commitment));
+        File backup = file("v2-deletion-skip.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+
+        assertTrue(CommitmentStore.delete(context, commitment.id));
+        assertTrue(BalanceData.readCommitments(context).isEmpty());
+
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD);
+        assertTrue("an older backup must not resurrect an explicit delete",
+            BalanceData.readCommitments(context).isEmpty());
+    }
+
+    @Test public void deletions_travelWithBackupsUntilReset() throws Exception {
+        Commitment commitment = Commitment.create("Gone", -50L, Commitment.ONCE,
+            Commitment.startOfDay(T), null, false, 0);
+        BalanceData.writeCommitments(context, Collections.singletonList(commitment));
+        assertTrue(CommitmentStore.delete(context, commitment.id));
+
+        File backup = file("v2-deletions.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+        BalanceData.reset(context, true);
+
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD);
+        assertTrue(BalanceData.readCommitments(context).isEmpty());
+
+        // The tombstone travelled with the backup, so an even older backup — one that
+        // still carries the definition — cannot resurrect it either.
+        File older = file("v2-deletions-older.bin");
+        BalanceData.writeCommitments(context, Collections.singletonList(commitment));
+        BackupManager.createFramed(context, Uri.fromFile(older), PASSWORD);
+        assertTrue(CommitmentStore.delete(context, commitment.id));
+        BackupManager.restore(context, Uri.fromFile(older), PASSWORD);
+        assertTrue(BalanceData.readCommitments(context).isEmpty());
+
+        // Reset is the explicit full erase: afterwards the same old backup restores again.
+        BalanceData.reset(context, true);
+        BackupManager.restore(context, Uri.fromFile(older), PASSWORD);
+        assertEquals(1, BalanceData.readCommitments(context).size());
+        assertEquals("Gone", BalanceData.readCommitments(context).get(0).name);
+    }
+
     @Test public void wrongPasswordLateFrameTrailingAndMalformedInputLeaveLiveDataUnchanged()
             throws Exception {
         LinkedHashMap<String, Bank> live = new LinkedHashMap<>();
