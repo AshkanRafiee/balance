@@ -1886,9 +1886,27 @@ public final class HistoryActivity extends Activity {
                     release.await();
                 }
 
+                // A dashboard warm-up may already hold exactly this view read from unchanged
+                // stores; taking it skips both the discovery and the fresh pass below. The warm
+                // result only carries the default month's pages, so an expansion reaching beyond
+                // it falls through to the fresh pass instead of showing an open empty day.
+                result = HistoryWarmup.take(bank, acct, f, query, tagSelection, iran,
+                    getApplicationContext());
+                if (result != null
+                        && !result.requestedDayRows.keySet().containsAll(expandedSnapshot)) {
+                    try {
+                        result.close();
+                    } catch (Exception e) {
+                        android.util.Log.w("BalanceHistory", "warmup cleanup failed", e);
+                    }
+                    result = null;
+                }
                 Set<String> requestedDays;
                 HistoryReader.Result discovery = null;
                 try {
+                    if (result != null) {
+                        requestedDays = new java.util.LinkedHashSet<>(result.requestedDayRows.keySet());
+                    } else {
                     if (discoverExpansion) {
                         // This pass retains no rows. It is needed only because the screen's
                         // existing expand-all/search rules discover expanded days from the grouped
@@ -1919,6 +1937,7 @@ public final class HistoryActivity extends Activity {
                             }
                         }
                     }
+                    }
                 } finally {
                     if (discovery != null) {
                         try { discovery.close(); } catch (Exception e) {
@@ -1927,12 +1946,14 @@ public final class HistoryActivity extends Activity {
                     }
                 }
 
-                HistoryReader.Request request = new HistoryReader.Request(
-                    iran, HistoryReader.DEFAULT_PAGE_SIZE, bank, acct, f, query, tagSelection,
-                    requestedDays, 0,
-                    HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
-                result = HistoryReader.summaryWithResiduals(
-                    getApplicationContext(), request);
+                if (result == null) {
+                    HistoryReader.Request request = new HistoryReader.Request(
+                        iran, HistoryReader.DEFAULT_PAGE_SIZE, bank, acct, f, query, tagSelection,
+                        requestedDays, 0,
+                        HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
+                    result = HistoryReader.summaryWithResiduals(
+                        getApplicationContext(), request);
+                }
                 final Lists lists = listsFromSummary(result);
                 final List<Residual> requestedResiduals = residualsFromSummary(result);
                 final HistoryReader.Result completed = result;

@@ -236,6 +236,22 @@ final class TransactionStore {
         return mergeResult(context, source, null);
     }
 
+    /** Current store revision for cache validation; null when absent or unreadable. Read-only:
+     *  it never creates the database, so a missing store stays missing. */
+    static String revision(Context context) {
+        try {
+            Context resolved = DataGeneration.context(context);
+            File file = resolved.getDatabasePath(DB_NAME);
+            if (file == null || !file.isFile()) return null;
+            try (SQLiteDatabase db = SQLiteDatabase.openDatabase(file.getPath(), null,
+                    SQLiteDatabase.OPEN_READONLY)) {
+                return meta(db, REVISION);
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     /** Migrates legacy input only when no committed store exists; never replaces existing rows. */
     static boolean migrateLegacy(Context context) throws Exception {
         return access(context, false, true, false, s -> s != null && s.migrated);

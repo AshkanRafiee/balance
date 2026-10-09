@@ -193,6 +193,9 @@ public class MainActivity extends Activity {
         // Re-arm commitment reminders from the stored series: edits, a restored backup or a
         // newly granted notification permission all land here before the next due.
         CommitmentReminders.scheduleAll(this);
+        // Precompute the default history view off the UI thread so opening history later usually
+        // finds a ready result. Single-flight and skipped once cached; never touches the UI.
+        HistoryWarmup.warm(this);
         if (view != null) {
             view.enforceAutoHide();
             view.invalidateCommitmentSummary();

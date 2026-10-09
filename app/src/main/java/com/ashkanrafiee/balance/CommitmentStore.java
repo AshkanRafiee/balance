@@ -300,6 +300,22 @@ final class CommitmentStore {
         }
     }
 
+    /** Current store revision for cache validation; null when absent or unreadable. Read-only:
+     *  it never creates the database, so a missing store stays missing. */
+    static String revision(Context context) {
+        try {
+            Context resolved = DataGeneration.context(context);
+            java.io.File file = resolved.getDatabasePath(DB_NAME);
+            if (file == null || !file.isFile()) return null;
+            try (SQLiteDatabase db = SQLiteDatabase.openDatabase(file.getPath(), null,
+                    SQLiteDatabase.OPEN_READONLY)) {
+                return meta(db, REVISION);
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     static DefinitionPage pageDefinitions(Context context, long afterId, int limit) throws Exception {
         requirePageSize(limit);
         return access(context, true, s -> s.definitionPage(afterId, limit));
