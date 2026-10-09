@@ -1930,9 +1930,7 @@ public final class HistoryActivity extends Activity {
         final String previousExpansionKey = searchExpandedFor;
         final Set<String> savedPreSearchDays = preSearchDays == null ? null
             : new java.util.LinkedHashSet<>(preSearchDays);
-        final boolean expandAll = BalanceData.getExpandAllHistory(this);
-        final boolean discoverExpansion = (!expansionKey.isEmpty()
-            && !expansionKey.equals(previousExpansionKey)) || (!seededSnapshot && expandAll);
+                final boolean expandAll = BalanceData.getExpandAllHistory(this);
         final WorkProgress renderProgress = new WorkProgress() {
             @Override public void stage(int stageResId) {
                 setLoadingStage(gen, stageResId);
@@ -1970,61 +1968,39 @@ public final class HistoryActivity extends Activity {
                     }
                     result = null;
                 }
-                Set<String> requestedDays;
-                HistoryReader.Result discovery = null;
-                try {
-                    if (result != null) {
-                        requestedDays = new java.util.LinkedHashSet<>(result.requestedDayRows.keySet());
-                    } else {
-                    if (discoverExpansion) {
-                        // This pass retains no rows. It is needed only because the screen's
-                        // existing expand-all/search rules discover expanded days from the grouped
-                        // result.
-                        HistoryReader.Request discoveryRequest = new HistoryReader.Request(
-                            iran, HistoryReader.DEFAULT_PAGE_SIZE, bank, acct, f, query,
-                            tagSelection, Collections.emptySet(), 0,
-                            HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
-                        discovery = HistoryReader.summaryWithResiduals(
-                            getApplicationContext(), discoveryRequest, renderProgress);
-                        requestedDays = plannedExpandedDays(discovery, expandedSnapshot,
-                            seededSnapshot, expandAll, expansionKey, previousExpansionKey,
-                            savedPreSearchDays, iran);
-                    } else {
-                        requestedDays = new java.util.LinkedHashSet<>(expandedSnapshot);
-                        if (expansionKey.isEmpty() && previousExpansionKey != null
-                                && savedPreSearchDays != null) {
-                            // Clearing a search restores the exact pre-search day expansion.
-                            requestedDays.clear();
-                            requestedDays.addAll(savedPreSearchDays);
-                        } else if (!seededSnapshot && !expandAll) {
-                            // The normal first-load seed opens every visible day in the current
-                            // month. Nonexistent days simply produce empty pages.
-                            CalDate current = CalDate.today(iran);
-                            for (int day = 1; day <= CalDate.daysInMonth(current.year,
-                                    current.month, iran); day++) {
-                                requestedDays.add(CalDate.of(current.year, current.month, day).key());
-                            }
-                        }
-                    }
-                    }
-                } finally {
-                    if (discovery != null) {
-                        try { discovery.close(); } catch (Exception e) {
-                            android.util.Log.w("BalanceHistory", "discovery cleanup failed", e);
-                        }
-                    }
-                }
-
-                if (result == null) {
-                    HistoryReader.Request request = new HistoryReader.Request(
-                        iran, HistoryReader.DEFAULT_PAGE_SIZE, bank, acct, f, query, tagSelection,
-                        requestedDays, 0,
+                java.util.Map<String, HistoryReader.DayRows> initialPages;
+                if (result != null) {
+                    initialPages = result.requestedDayRows;
+                } else {
+                    // One full pass with no day rows. The groups below decide which days need
+                    // pages, and those pages are read back from the same pass's timeline
+                    // snapshot. This used to run a throwaway discovery pass and then repeat the
+                    // entire decrypt for the requested days, so every search paid double.
+                    HistoryReader.Request planRequest = new HistoryReader.Request(
+                        iran, HistoryReader.DEFAULT_PAGE_SIZE, bank, acct, f, query,
+                        tagSelection, Collections.emptySet(), 0,
                         HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
                     result = HistoryReader.summaryWithResiduals(
-                        getApplicationContext(), request, renderProgress);
+                        getApplicationContext(), planRequest, renderProgress);
+                    Set<String> requestedDays = plannedExpandedDays(result, expandedSnapshot,
+                        seededSnapshot, expandAll, expansionKey, previousExpansionKey,
+                        savedPreSearchDays, iran);
+                    java.util.LinkedHashMap<String, HistoryReader.DayRows> pages =
+                        new java.util.LinkedHashMap<>();
+                    // One shared metadata session for the whole seed set: opening one per day
+                    // would multiply store opens by the day count.
+                    try (MetadataStore.LookupSession metadata =
+                            MetadataStore.LookupSession.open(getApplicationContext())) {
+                        for (String dayKey : requestedDays) {
+                            // Nonexistent days simply produce empty pages, as before.
+                            pages.put(dayKey, HistoryReader.readPage(metadata, result, dayKey,
+                                HistoryReader.DEFAULT_MAX_ROWS_PER_DAY));
+                        }
+                    }
+                    initialPages = pages;
                 }
-                final Lists lists = listsFromSummary(result);
-                final List<Residual> requestedResiduals = residualsFromSummary(result);
+                final Lists lists = listsFromSummary(result, initialPages);
+                final List<Residual> requestedResiduals = residualsFromPages(initialPages);
                 final HistoryReader.Result completed = result;
                 runOnUiThread(() -> {
                     if (gen != renderGen || isDestroyed() || isFinishing()) {
@@ -2041,7 +2017,7 @@ public final class HistoryActivity extends Activity {
                         }
                     }
                     loadedDayPages.clear();
-                    loadedDayPages.putAll(completed.requestedDayRows);
+                    loadedDayPages.putAll(initialPages);
                     pageMetadata = collectPageMetadata(loadedDayPages);
                     allResiduals = requestedResiduals;
                     residualCount = completed.residualCount;
@@ -2120,11 +2096,13 @@ public final class HistoryActivity extends Activity {
             if (expandAll) {
                 requested.addAll(visible);
             } else {
+                // The normal first-load seed opens every day of the current month, including
+                // days with no movements: their empty pages pre-fill the day cache, so opening
+                // another day later evicts an empty skeleton instead of collapsing a built day.
                 CalDate current = CalDate.today(iran);
-                for (HistoryReader.DaySummary day : result.daySummaries.values()) {
-                    if (day.date.year == current.year && day.date.month == current.month) {
-                        requested.add(day.date.key());
-                    }
+                for (int day = 1;
+                        day <= CalDate.daysInMonth(current.year, current.month, iran); day++) {
+                    requested.add(CalDate.of(current.year, current.month, day).key());
                 }
             }
         }

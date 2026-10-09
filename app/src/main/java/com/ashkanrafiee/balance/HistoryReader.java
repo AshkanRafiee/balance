@@ -775,6 +775,21 @@ final class HistoryReader {
     }
 
     /** Loads one timeline page and the metadata needed to render only that page. */
+    /**
+     * Reads one day's first page reusing the caller's metadata session. Paging a whole seed set
+     * through one session matches the old in-result paging cost; opening a session per day
+     * multiplies store opens by the day count.
+     */
+    static DayRows readPage(MetadataStore.LookupSession metadata, Result result, String dayKey,
+            int pageSize) throws Exception {
+        if (metadata == null) throw new NullPointerException("metadata");
+        if (result == null) throw new NullPointerException("result");
+        HistoryTimeline snapshot = result.timeline;
+        if (snapshot == null) throw new IllegalStateException("history result is closed");
+        return fromPage(metadata, snapshot, snapshot.firstPage(dayKey, pageSize),
+            result.iranCalendar);
+    }
+
     static DayRows readPage(Context context, Result result, String dayKey,
             HistoryTimeline.CursorKey cursor, boolean previous, int pageSize) throws Exception {
         if (context == null) throw new NullPointerException("context");
