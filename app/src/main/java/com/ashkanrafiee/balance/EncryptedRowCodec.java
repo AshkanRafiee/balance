@@ -15,9 +15,8 @@ import javax.crypto.spec.SecretKeySpec;
  *
  * <p>The data key is software-held only for the lifetime of a store session. Its serialized form
  * is still protected by the application's Keystore bridge, while row payloads use the software
- * key so large stores do not invoke Keystore once per row. The codec is deliberately thread
- * confined: store sessions are synchronized by their callers and a codec cannot be used after it
- * has been closed.
+ * key so large stores do not invoke Keystore once per row. Each call uses a fresh cipher with a
+ * random nonce, so concurrent calls are safe; a codec cannot be used after it has been closed.
  */
 final class EncryptedRowCodec implements AutoCloseable {
     static final String PREFIX = "ER1:";
@@ -28,14 +27,12 @@ final class EncryptedRowCodec implements AutoCloseable {
 
     private final byte[] key;
     private final String domain;
-    private final long ownerThread;
     private final SecureRandom random = new SecureRandom();
     private boolean closed;
 
     private EncryptedRowCodec(byte[] key, String domain) {
         this.key = key;
         this.domain = domain;
-        ownerThread = Thread.currentThread().getId();
     }
 
     /** Creates and Keystore-wraps a fresh independent AES-256 row key. */
@@ -148,9 +145,7 @@ final class EncryptedRowCodec implements AutoCloseable {
         }
     }
 
-    @Override public void close() {
-        if (Thread.currentThread().getId() != ownerThread)
-            throw new IllegalStateException("row codec used from another thread");
+    @Override public synchronized void close() {
         if (!closed) {
             Arrays.fill(key, (byte) 0);
             closed = true;
@@ -166,9 +161,7 @@ final class EncryptedRowCodec implements AutoCloseable {
         return (AAD_PREFIX + domain + "\n" + identity).getBytes(StandardCharsets.UTF_8);
     }
 
-    private void checkThread() {
-        if (Thread.currentThread().getId() != ownerThread)
-            throw new IllegalStateException("row codec used from another thread");
+    private synchronized void checkThread() {
         if (closed) throw new IllegalStateException("row codec is closed");
     }
 }
