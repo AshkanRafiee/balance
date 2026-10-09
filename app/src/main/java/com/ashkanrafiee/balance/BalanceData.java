@@ -87,6 +87,9 @@ final class BalanceData {
      *  by default so the empty state can introduce the feature without forcing the full screen
      *  on users who never add a commitment. */
     static final String KEY_SHOW_COMMITMENTS = "show_commitments";
+    /** Unlock flag for the hidden debug menu (seven taps on the About version). Unlock-only:
+     *  once visible it stays visible, so diagnostics are reachable when they are needed. */
+    static final String KEY_DEBUG_MENU_UNLOCKED = "debug_menu_unlocked";
     static final int DEFAULT_STALE_DAYS = 14;
     static final String KEY_ONBOARDING_SEEN = "onboarding_seen";
 
@@ -198,16 +201,42 @@ final class BalanceData {
         return kg.generateKey();
     }
 
+    /** Process-lifetime cache of the data key. Every store session open unwraps its index and
+     *  row keys through {@link #decryptStorePayload}, so reaching the Keystore daemon on each
+     *  call multiplies history/dashboard latency (one IPC per unwrap, far slower on hardware
+     *  keystores than on the emulator). Caching the reference is security-neutral: the key is
+     *  authentication-free and usable by this process at all times, and the app lock gates the
+     *  UI through independent keys. A use failure (e.g. a wiped keystore) drops the cache and
+     *  retries once with a fresh load. */
+    private static volatile SecretKey cachedKey;
+
     private static SecretKey getOrCreateKey() throws Exception {
-        KeyStore ks = KeyStore.getInstance(KEYSTORE);
-        ks.load(null);
-        if (ks.containsAlias(KEY_ALIAS)) return (SecretKey) ks.getKey(KEY_ALIAS, null);
-        return createKey();
+        SecretKey key = cachedKey;
+        if (key != null) return key;
+        synchronized (BalanceData.class) {
+            key = cachedKey;
+            if (key != null) return key;
+            KeyStore ks = KeyStore.getInstance(KEYSTORE);
+            ks.load(null);
+            key = ks.containsAlias(KEY_ALIAS)
+                ? (SecretKey) ks.getKey(KEY_ALIAS, null) : createKey();
+            cachedKey = key;
+            return key;
+        }
+    }
+
+    private static void dropCachedKey() {
+        synchronized (BalanceData.class) { cachedKey = null; }
     }
 
     private static String encrypt(String plain) throws Exception {
         Cipher cipher = Cipher.getInstance(TRANSFORM);
-        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey());
+        try {
+            cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey());
+        } catch (Exception e) {
+            dropCachedKey();
+            cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey());
+        }
         byte[] iv = cipher.getIV();
         byte[] ct = cipher.doFinal(plain.getBytes(StandardCharsets.UTF_8));
         byte[] out = new byte[iv.length + ct.length];
@@ -220,7 +249,12 @@ final class BalanceData {
         byte[] in = Base64.decode(blob, Base64.NO_WRAP);
         Cipher cipher = Cipher.getInstance(TRANSFORM);
         GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_BITS, in, 0, 12);
-        cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), spec);
+        try {
+            cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), spec);
+        } catch (Exception e) {
+            dropCachedKey();
+            cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), spec);
+        }
         return new String(cipher.doFinal(in, 12, in.length - 12), StandardCharsets.UTF_8);
     }
 
@@ -1058,14 +1092,25 @@ final class BalanceData {
     }
 
     /** Whether the history breakdown opens every year, month and day by default instead of only the
-     *  current year, month and its days. A display choice, picked in the Display menu.
+     *  current year, month and its days. A debug-only choice: expanding everything is slow and
+     *  meant for diagnostics, so it lives in the hidden debug menu rather than Display.
      *
-     *  <p>Off unless the user turns it on, so a first open shows the freshest history rather than
+     *  <p>Off unless turned on there, so a first open shows the freshest history rather than
      *  the whole account. Each level still opens on its own, so this is the only thing that can ask
      *  for everything, and it is a deliberate choice rather than a default. */
     static boolean getExpandAllHistory(Context context) {
         return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
             .getBoolean(KEY_EXPAND_ALL_HISTORY, false);
+    }
+
+    static boolean isDebugMenuUnlocked(Context context) {
+        return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+            .getBoolean(KEY_DEBUG_MENU_UNLOCKED, false);
+    }
+
+    static void setDebugMenuUnlocked(Context context) {
+        context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_DEBUG_MENU_UNLOCKED, true).apply();
     }
 
     static void setExpandAllHistory(Context context, boolean on) {
