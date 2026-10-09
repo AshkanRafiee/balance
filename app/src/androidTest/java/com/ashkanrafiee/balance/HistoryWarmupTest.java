@@ -74,6 +74,27 @@ public class HistoryWarmupTest {
         HistoryWarmup.invalidate();
     }
 
+    @Test public void take_withRewarm_refillsTheCacheInTheBackground() throws Exception {
+        seed();
+        HistoryWarmup.warmNow(context);
+        HistoryReader.Result first = HistoryWarmup.take(null, null, HistoryActivity.Filter.ALL,
+            "", Collections.emptyList(), RegionHelper.isIran(context), context, true);
+        assertNotNull(first);
+        try {
+            HistoryReader.Result refilled = null;
+            long deadline = System.currentTimeMillis() + 15_000;
+            while (refilled == null && System.currentTimeMillis() < deadline) {
+                Thread.sleep(200);
+                refilled = takeDefault();
+            }
+            assertNotNull("a taken warm-up must re-warm itself in the background", refilled);
+            refilled.close();
+        } finally {
+            first.close();
+        }
+        HistoryWarmup.invalidate();
+    }
+
     private void seed() {
         List<Transaction> stored = new ArrayList<>();
         stored.add(tx(1L));

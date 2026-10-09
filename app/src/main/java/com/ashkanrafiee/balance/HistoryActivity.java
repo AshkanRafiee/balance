@@ -1957,8 +1957,10 @@ public final class HistoryActivity extends Activity {
                 // stores; taking it skips both the discovery and the fresh pass below. The warm
                 // result only carries the default month's pages, so an expansion reaching beyond
                 // it falls through to the fresh pass instead of showing an open empty day.
+                // Re-warm on a hit so a second open right behind this one usually finds
+                // a ready result too instead of waiting for the next dashboard resume.
                 result = HistoryWarmup.take(bank, acct, f, query, tagSelection, iran,
-                    getApplicationContext());
+                    getApplicationContext(), true);
                 if (result != null
                         && !result.requestedDayRows.keySet().containsAll(expandedSnapshot)) {
                     try {

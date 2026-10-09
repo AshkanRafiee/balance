@@ -43,6 +43,10 @@ final class HistoryWarmup {
         if (app == null) app = context;
         final Context application = app;
         new Thread(() -> {
+            // Speculative work while the user is still on the dashboard: stay out of the
+            // way of anything they actually asked for.
+            android.os.Process.setThreadPriority(
+                android.os.Process.THREAD_PRIORITY_BACKGROUND);
             try {
                 warmNow(application);
             } catch (Exception e) {
@@ -65,6 +69,17 @@ final class HistoryWarmup {
      */
     static HistoryReader.Result take(String bank, String account, HistoryActivity.Filter filter,
             String query, List<String> tags, boolean iran, Context context) {
+        return take(bank, account, filter, query, tags, iran, context, false);
+    }
+
+    /**
+     * Same, optionally re-warming in the background once the cached result is taken. History
+     * uses this so a second open right behind the first usually finds a ready result too,
+     * instead of waiting for the next dashboard resume to re-warm. Tests keep the default to
+     * stay deterministic.
+     */
+    static HistoryReader.Result take(String bank, String account, HistoryActivity.Filter filter,
+            String query, List<String> tags, boolean iran, Context context, boolean rewarm) {
         Fingerprint wanted = new Fingerprint(bank, account, filter, query, tags, iran,
             revisions(context), CalDate.today(iran).key());
         synchronized (LOCK) {
@@ -73,6 +88,7 @@ final class HistoryWarmup {
             cached = null;
             cachedKey = null;
             needsWarm = true;
+            if (rewarm) warm(context);
             return out;
         }
     }
