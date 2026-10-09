@@ -100,6 +100,7 @@ public class RefahBankTest {
 
     private void prepareProvider() throws Exception {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        BalanceData.reset(context, true);
         InstrumentationRegistry.getInstrumentation().getUiAutomation()
             .adoptShellPermissionIdentity(android.Manifest.permission.READ_SMS);
         exec("pm grant " + context.getPackageName() + " android.permission.READ_SMS");

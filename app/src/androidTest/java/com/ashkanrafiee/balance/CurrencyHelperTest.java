@@ -19,10 +19,14 @@ import org.junit.runner.RunWith;
 public class CurrencyHelperTest {
 
     private Context ctx;
+    private String originalLanguage;
 
     @Before public void setUp() {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        originalLanguage = LocaleHelper.currentTag(ctx);
+        LocaleHelper.setLanguage(ctx, "en");
         ctx.getSharedPreferences("balance_currency", Context.MODE_PRIVATE).edit().clear().commit();
+        LocaleHelper.setLanguage(ctx, originalLanguage);
     }
 
     @After public void tearDown() {
