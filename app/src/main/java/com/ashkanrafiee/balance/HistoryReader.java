@@ -802,7 +802,7 @@ final class HistoryReader {
         List<Row> rows = new ArrayList<>(page.entries.size());
         List<Transaction> transactions = new ArrayList<>();
         List<Residual> residuals = new ArrayList<>();
-        Map<String, Metadata> pageMetadata = new LinkedHashMap<>();
+        List<String> keys = new ArrayList<>();
         CalDate date = null;
         for (HistoryTimeline.Entry entry : page.entries) {
             if (date == null) date = calendarDate(entry.date, iran,
@@ -811,22 +811,26 @@ final class HistoryReader {
             rows.add(row);
             if (entry.transaction != null) {
                 transactions.add(entry.transaction);
-                String key = BalanceData.noteKey(entry.transaction);
-                pageMetadata.put(key, pointMetadata(metadata, key));
+                keys.add(BalanceData.noteKey(entry.transaction));
             } else {
                 residuals.add(entry.residual);
             }
         }
+        // One indexed query per kind for the whole page instead of four store accesses per row.
+        Map<String, String> notes = metadata.texts(MetadataStore.NOTES, keys);
+        Map<String, String> reasons = metadata.texts(MetadataStore.REASONS, keys);
+        Map<String, String> channels = metadata.texts(MetadataStore.CHANNELS, keys);
+        Map<String, List<String>> tags = metadata.tagsFor(keys);
+        Map<String, Metadata> pageMetadata = new LinkedHashMap<>();
+        for (String key : keys) {
+            if (!pageMetadata.containsKey(key)) {
+                pageMetadata.put(key, new Metadata(notes.get(key), reasons.get(key),
+                    channels.get(key),
+                    tags.containsKey(key) ? tags.get(key) : Collections.emptyList()));
+            }
+        }
         return new DayRows(page.dayKey, date, rows, transactions, residuals, pageMetadata,
             page.hasPrevious, page.hasMore, page.first, page.last);
-    }
-
-    private static Metadata pointMetadata(MetadataStore.LookupSession metadata, String key)
-            throws Exception {
-        return new Metadata(metadata.text(MetadataStore.NOTES, key),
-            metadata.text(MetadataStore.REASONS, key),
-            metadata.text(MetadataStore.CHANNELS, key),
-            metadata.tags(key));
     }
 
     private static CalDate calendarDate(long millis, boolean iran, Calendar calendar) {

@@ -69,6 +69,26 @@ public class MetadataStoreTest {
         }
     }
 
+    @Test public void lookupSession_matchesPointLookupsInBatches() throws Exception {
+        assertTrue(MetadataStore.setNote(context, "note-key", "private note"));
+        assertTrue(MetadataStore.setTags(context, "tag-key", Arrays.asList("food", "Bills")));
+        List<String> keys = Arrays.asList("note-key", "tag-key", "absent-key", "note-key");
+        try (MetadataStore.LookupSession session = MetadataStore.LookupSession.open(context)) {
+            Map<String, String> notes = session.texts(MetadataStore.NOTES, keys);
+            assertEquals("private note", notes.get("note-key"));
+            assertEquals(1, notes.size());
+            assertEquals("private note",
+                session.text(MetadataStore.NOTES, "note-key"));
+            assertNull(session.text(MetadataStore.NOTES, "absent-key"));
+
+            Map<String, List<String>> tags = session.tagsFor(keys);
+            assertEquals(Arrays.asList("food", "Bills"), tags.get("tag-key"));
+            assertEquals(1, tags.size());
+            assertEquals(Arrays.asList("food", "Bills"), session.tags("tag-key"));
+            assertTrue(session.tags("absent-key").isEmpty());
+        }
+    }
+
     @Test public void replacementHasNoLegacyEntryCountCap() throws Exception {
         Map<String, String> notes = new LinkedHashMap<>();
         int count = BalanceData.MAX_TAG_ENTRIES + 1;

@@ -121,11 +121,13 @@ final class MetadataStore {
     static final class LookupSession implements AutoCloseable {
         private final Helper helper;
         private final Session session;
+        private final boolean owned;
         private boolean closed;
 
-        private LookupSession(Helper helper, Session session) {
+        private LookupSession(Helper helper, Session session, boolean owned) {
             this.helper = helper;
             this.session = session;
+            this.owned = owned;
         }
 
         /** Opens the session, running any pending legacy migration first. */
@@ -148,7 +150,7 @@ final class MetadataStore {
                     if (owner != null && token != null && !owner.equals(token))
                         throw new IllegalStateException("metadata store ownership unavailable");
                     Session session = new Session(db, owner);
-                    LookupSession out = new LookupSession(helper, session);
+                    LookupSession out = new LookupSession(helper, session, owner != null);
                     helper = null;
                     ok = true;
                     return out;
@@ -168,6 +170,7 @@ final class MetadataStore {
             requireTextKind(kind);
             requireKey(key);
             checkOpen();
+            if (!owned) return null;
             Row row = session.find(kind, key);
             return row == null ? null : row.text;
         }
@@ -176,8 +179,84 @@ final class MetadataStore {
         List<String> tags(String key) throws Exception {
             requireKey(key);
             checkOpen();
+            if (!owned) return new ArrayList<>();
             Row row = session.find(TAGS, key);
             return row == null ? new ArrayList<>() : new ArrayList<>(row.tags);
+        }
+
+        /** One indexed query per 256 keys instead of one store access per row. Absent keys are
+         *  simply missing from the map. */
+        Map<String, String> texts(int kind, Collection<String> keys) throws Exception {
+            requireTextKind(kind);
+            checkOpen();
+            Map<String, String> out = new LinkedHashMap<>();
+            if (!owned) return out;
+            for (List<String> chunk : chunks(keys)) {
+                String[] args = new String[chunk.size() + 1];
+                args[0] = Integer.toString(kind);
+                StringBuilder placeholders = new StringBuilder();
+                for (int i = 0; i < chunk.size(); i++) {
+                    requireKey(chunk.get(i));
+                    args[i + 1] = session.lookup(kind, chunk.get(i));
+                    if (i > 0) placeholders.append(',');
+                    placeholders.append('?');
+                }
+                checkOpen();
+                try (Cursor cursor = session.db.query(TABLE,
+                        new String[]{"id", "kind", "lookup", "payload"},
+                        "kind=? AND lookup IN (" + placeholders + ")", args,
+                        null, null, null)) {
+                    while (cursor.moveToNext()) {
+                        Row row = session.decode(cursor);
+                        if (row.text != null) out.put(row.key, row.text);
+                    }
+                }
+            }
+            return out;
+        }
+
+        /** One indexed query per 256 keys; transactions without saved tags stay absent. */
+        Map<String, List<String>> tagsFor(Collection<String> keys) throws Exception {
+            checkOpen();
+            Map<String, List<String>> out = new LinkedHashMap<>();
+            if (!owned) return out;
+            for (List<String> chunk : chunks(keys)) {
+                String[] args = new String[chunk.size() + 1];
+                args[0] = Integer.toString(TAGS);
+                StringBuilder placeholders = new StringBuilder();
+                for (int i = 0; i < chunk.size(); i++) {
+                    requireKey(chunk.get(i));
+                    args[i + 1] = session.lookup(TAGS, chunk.get(i));
+                    if (i > 0) placeholders.append(',');
+                    placeholders.append('?');
+                }
+                checkOpen();
+                try (Cursor cursor = session.db.query(TABLE,
+                        new String[]{"id", "kind", "lookup", "payload"},
+                        "kind=? AND lookup IN (" + placeholders + ")", args,
+                        null, null, null)) {
+                    while (cursor.moveToNext()) {
+                        Row row = session.decode(cursor);
+                        out.put(row.key, new ArrayList<>(row.tags));
+                    }
+                }
+            }
+            return out;
+        }
+
+        private static List<List<String>> chunks(Collection<String> keys) {
+            List<String> distinct = new ArrayList<>();
+            if (keys != null) {
+                java.util.Set<String> seen = new java.util.HashSet<>();
+                for (String key : keys) {
+                    if (key != null && seen.add(key)) distinct.add(key);
+                }
+            }
+            List<List<String>> out = new ArrayList<>();
+            for (int i = 0; i < distinct.size(); i += 256) {
+                out.add(distinct.subList(i, Math.min(distinct.size(), i + 256)));
+            }
+            return out;
         }
 
         private void checkOpen() {
