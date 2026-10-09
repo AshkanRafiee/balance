@@ -76,6 +76,7 @@ public class MainActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        BalanceData.migrateExpandAllToDebugMenu(this);
         if (android.os.Build.VERSION.SDK_INT >= 30)
             getWindow().setDecorFitsSystemWindows(false);
         getWindow().setStatusBarColor(resColor(R.color.status_bar));

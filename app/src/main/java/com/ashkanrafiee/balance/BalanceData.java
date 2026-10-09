@@ -1118,6 +1118,20 @@ final class BalanceData {
             .edit().putBoolean(KEY_EXPAND_ALL_HISTORY, on).apply();
     }
 
+    /** One-time move of expand-all out of the Display menu. Anyone who had it on gets the fast
+     *  default back: the switch no longer exists where they left it, and a hidden slow mode
+     *  must not survive the upgrade. Debug users can turn it back on in the debug menu.
+     *  Idempotent; safe to call on every start. */
+    static final String KEY_EXPAND_ALL_DEBUG_MIGRATED = "expand_all_debug_migrated";
+
+    static void migrateExpandAllToDebugMenu(Context context) {
+        SharedPreferences prefs =
+            context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
+        if (prefs.getBoolean(KEY_EXPAND_ALL_DEBUG_MIGRATED, false)) return;
+        prefs.edit().putBoolean(KEY_EXPAND_ALL_HISTORY, false)
+            .putBoolean(KEY_EXPAND_ALL_DEBUG_MIGRATED, true).apply();
+    }
+
     static boolean getShowCommitments(Context context) {
         return context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
             .getBoolean(KEY_SHOW_COMMITMENTS, true);

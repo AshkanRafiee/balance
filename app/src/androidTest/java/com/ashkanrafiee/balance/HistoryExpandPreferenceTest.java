@@ -13,8 +13,9 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-/** The Display-menu "expand all history" preference: an off-by-default boolean that opens every
- *  year, month and day of the history breakdown instead of only the current year, month and its days. */
+/** The "expand all history" preference: an off-by-default boolean that opens every
+ *  year, month and day of the history breakdown instead of only the current year, month and its days.
+ *  It used to live in the Display menu and now lives in the hidden debug menu. */
 @RunWith(AndroidJUnit4.class)
 public class HistoryExpandPreferenceTest {
 
@@ -38,5 +39,16 @@ public class HistoryExpandPreferenceTest {
         assertTrue(BalanceData.getExpandAllHistory(ctx));
         BalanceData.setExpandAllHistory(ctx, false);
         assertFalse(BalanceData.getExpandAllHistory(ctx));
+    }
+
+    @Test public void migrateExpandAllToDebugMenu_turnsOffALefoverOptInOnce() {
+        // A user who had expand-all on before it moved to the debug menu gets the fast
+        // default back; re-enabling afterwards (via the debug menu) is respected.
+        BalanceData.setExpandAllHistory(ctx, true);
+        BalanceData.migrateExpandAllToDebugMenu(ctx);
+        assertFalse(BalanceData.getExpandAllHistory(ctx));
+        BalanceData.setExpandAllHistory(ctx, true);
+        BalanceData.migrateExpandAllToDebugMenu(ctx);
+        assertTrue(BalanceData.getExpandAllHistory(ctx));
     }
 }

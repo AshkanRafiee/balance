@@ -433,6 +433,8 @@ public final class HistoryActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        // The task may have been restored straight into history without the dashboard running.
+        BalanceData.migrateExpandAllToDebugMenu(this);
         if (state != null) {
             java.util.ArrayList<String> y = state.getStringArrayList(KEY_EXPANDED_YEARS);
             java.util.ArrayList<String> m = state.getStringArrayList(KEY_EXPANDED_MONTHS);
