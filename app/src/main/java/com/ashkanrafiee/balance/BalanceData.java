@@ -1130,8 +1130,15 @@ final class BalanceData {
      *  sender has matched once. Senders are resolved before parsing, skipping the regex pass for the
      *  non-bank tail. */
     static synchronized int scanSms(Context context, LinkedHashMap<String, Bank> saved) {
+        return scanSms(context, saved, null);
+    }
+
+    /** Same as {@link #scanSms(Context, LinkedHashMap)} with advisory progress. */
+    static synchronized int scanSms(Context context, LinkedHashMap<String, Bank> saved,
+            WorkProgress progress) {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
             return 0;
+        if (progress != null) progress.stage(R.string.scan_stage_reading);
         LinkedHashMap<String, Bank> current = read(context);
         SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
         long watermark = prefs.getLong(KEY_SCANNED_THROUGH, 0);
@@ -1239,6 +1246,7 @@ final class BalanceData {
             }
             windows.put(key, pruneWindow(merged));
         }
+        if (progress != null) progress.stage(R.string.scan_stage_saving);
         saveRecentMovements(context, windows);
 
         write(context, current);
@@ -1275,9 +1283,15 @@ final class BalanceData {
      *  every stored entry whose message was deleted. If that scan fails part-way, neither the rules
      *  version nor the watermark is advanced, so the rebuild runs again on the next scan. */
     static synchronized int scanHistory(Context context) {
+        return scanHistory(context, null);
+    }
+
+    /** Same as {@link #scanHistory(Context)} with advisory progress. */
+    static synchronized int scanHistory(Context context, WorkProgress progress) {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
             return 0;
         if (HISTORY_SCANNING) return 0;
+        if (progress != null) progress.stage(R.string.scan_stage_reading);
         HISTORY_SCANNING = true;
         boolean completed = false;
         // Whether anything the history screen shows may have changed. A scan that finds nothing new
@@ -1631,6 +1645,7 @@ final class BalanceData {
                 failed = true;
                 Log.w(TAG, "history scan failed", e);
             }
+            if (progress != null) progress.stage(R.string.scan_stage_saving);
             if (!writeTransactions(context, stored)) {
                 failed = true;
                 completed = false;

@@ -117,6 +117,12 @@ final class BackupV2Restore {
 
     static BackupManager.RestoreResult restore(Context context, Uri uri, String password)
             throws Exception {
+        return restore(context, uri, password, null);
+    }
+
+    /** Same as {@link #restore(Context, Uri, String)} with advisory progress. */
+    static BackupManager.RestoreResult restore(Context context, Uri uri, String password,
+            WorkProgress progress) throws Exception {
         if (password == null) throw new IllegalArgumentException("password");
 
         Context application = context.getApplicationContext();
@@ -124,6 +130,7 @@ final class BackupV2Restore {
         char[] chars = password.toCharArray();
         InputStage input = null;
         try {
+            if (progress != null) progress.stage(R.string.backup_progress_restoring);
             input = new InputStage(application);
             readAuthenticated(application, uri, chars, input);
             input.commitInput();
@@ -135,6 +142,7 @@ final class BackupV2Restore {
                 // context. Stage.publish() is the only operation that makes the merge visible.
                 try (DataGeneration.Stage generation = DataGeneration.beginStage(application)) {
                     generation.setPublishHookForTests(publishHookForTests);
+                    if (progress != null) progress.stage(R.string.backup_stage_merging);
                     result = apply(generation.context(), input);
                     generation.publish();
                 }
@@ -161,6 +169,12 @@ final class BackupV2Restore {
      */
     static BackupManager.RestoreResult restoreLegacy(Context context, Uri uri, String password)
             throws Exception {
+        return restoreLegacy(context, uri, password, null);
+    }
+
+    /** Same as {@link #restoreLegacy(Context, Uri, String)} with advisory progress. */
+    static BackupManager.RestoreResult restoreLegacy(Context context, Uri uri, String password,
+            WorkProgress progress) throws Exception {
         if (password == null) throw new IllegalArgumentException("password");
         Context application = context.getApplicationContext();
         if (application == null) application = context;
@@ -170,6 +184,7 @@ final class BackupV2Restore {
         File plaintext = File.createTempFile("balance-legacy-", ".stage", application.getCacheDir());
         InputStage input = null;
         try {
+            if (progress != null) progress.stage(R.string.backup_progress_restoring);
             decryptLegacy(application, uri, chars, plaintext, stageKey, stageIv);
             input = new InputStage(application);
             try (InputStream staged = openPlaintextStage(plaintext, stageKey, stageIv);
@@ -189,6 +204,7 @@ final class BackupV2Restore {
             synchronized (BalanceData.class) {
                 try (DataGeneration.Stage generation = DataGeneration.beginStage(application)) {
                     generation.setPublishHookForTests(publishHookForTests);
+                    if (progress != null) progress.stage(R.string.backup_stage_merging);
                     result = apply(generation.context(), input);
                     generation.publish();
                 }

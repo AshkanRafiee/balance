@@ -1116,10 +1116,11 @@ public class MainActivity extends Activity {
 
     private void createBackup(Uri uri, String password) {
         showProgress(getString(R.string.backup_progress_creating));
+        final WorkProgress progress = dialogProgress();
         new Thread(() -> {
             final int[] error = {0};
             try {
-                BackupManager.createFramed(getApplicationContext(), uri, password);
+                BackupManager.createFramed(getApplicationContext(), uri, password, progress);
             } catch (BackupManager.BackupException e) {
                 error[0] = e.resId;
             } catch (Exception e) {
@@ -1142,11 +1143,12 @@ public class MainActivity extends Activity {
 
     private void restoreBackup(Uri uri, String password) {
         showProgress(getString(R.string.backup_progress_restoring));
+        final WorkProgress progress = dialogProgress();
         new Thread(() -> {
             final int[] error = {0};
             final BackupManager.RestoreResult[] result = {null};
             try {
-                result[0] = BackupManager.restore(getApplicationContext(), uri, password);
+                result[0] = BackupManager.restore(getApplicationContext(), uri, password, progress);
             } catch (BackupManager.BackupException e) {
                 error[0] = e.resId;
             } catch (Exception e) {
@@ -1186,6 +1188,19 @@ public class MainActivity extends Activity {
     }
 
     private android.app.AlertDialog progressDialog;
+    private TextView progressMessage;
+
+    /** Progress callbacks for the backup/restore worker: stage labels replace the dialog text. */
+    private WorkProgress dialogProgress() {
+        return new WorkProgress() {
+            @Override public void stage(final int stageResId) {
+                runOnUiThread(() -> updateProgressText(getString(stageResId)));
+            }
+
+            @Override public void progress(long done, long total) {
+            }
+        };
+    }
 
     private void showProgress(String message) {
         LinearLayout wrap = new LinearLayout(this);
@@ -1195,6 +1210,7 @@ public class MainActivity extends Activity {
         wrap.setPadding(margin, dp(18), margin, dp(14));
         TextView tv = new TextView(this);
         tv.setText(message);
+        progressMessage = tv;
         tv.setTextSize(15);
         tv.setTextColor(resColor(R.color.fg));
         wrap.addView(tv);
@@ -1242,6 +1258,12 @@ public class MainActivity extends Activity {
             progressDialog.dismiss();
             progressDialog = null;
         }
+        progressMessage = null;
+    }
+
+    /** Replaces the progress dialog text, e.g. when a restore moves from decrypting to merging. */
+    private void updateProgressText(String message) {
+        if (progressDialog != null && progressMessage != null) progressMessage.setText(message);
     }
 
     private int resColor(int res) {
@@ -1649,6 +1671,7 @@ public class MainActivity extends Activity {
                 // dashboard, and let the strip say the numbers are as of their last scan. Read off
                 // the main thread like every other load: it decrypts and parses the whole store.
                 refreshing = true;
+                if (hard) showProgress(getString(R.string.reset_progress));
                 new Thread(() -> {
                     final Context app = MainActivity.this.getApplicationContext();
                     try {
@@ -1658,6 +1681,7 @@ public class MainActivity extends Activity {
                         // half-rebuilt silently. Keep the previous screen and say so.
                         android.util.Log.w("Balance", "reset failed", e);
                         post(() -> {
+                            dismissProgress();
                             toast(R.string.toast_reset_failed);
                             refreshing = false;
                             invalidate();
@@ -1669,15 +1693,21 @@ public class MainActivity extends Activity {
                         saved = BalanceData.read(app);
                     } catch (Exception e) {
                         android.util.Log.w("Balance", "saved balances unreadable", e);
-                        post(() -> applySaved(new LinkedHashMap<>(), app,
-                            getString(R.string.status_sms_unreadable)));
+                        post(() -> {
+                            dismissProgress();
+                            applySaved(new LinkedHashMap<>(), app,
+                                getString(R.string.status_sms_unreadable));
+                        });
                         return;
                     }
                     // Nothing stored yet (a fresh install, or a reset): the empty card wants the
                     // plain "permission is needed" wording, and there is no strip to explain it.
-                    post(() -> applySaved(saved, app, saved.isEmpty()
-                        ? getString(R.string.status_permission_needed)
-                        : getString(R.string.status_stale_no_permission)));
+                    post(() -> {
+                        dismissProgress();
+                        applySaved(saved, app, saved.isEmpty()
+                            ? getString(R.string.status_permission_needed)
+                            : getString(R.string.status_stale_no_permission));
+                    });
                 }).start();
                 return;
             }
@@ -1689,27 +1719,41 @@ public class MainActivity extends Activity {
             String statusNoSms = getString(R.string.status_no_sms_found);
             String updatedNow = getString(R.string.status_updated_now);
             String statusLoaded = getString(R.string.status_loaded_from_saved);
+            final WorkProgress refreshProgress = hard ? dialogProgress() : null;
+            if (hard) showProgress(getString(R.string.reset_progress));
             new Thread(() -> {
                 final Context app = MainActivity.this.getApplicationContext();
                 try {
-                    if (hard) BalanceData.reset(app, alsoNotes);
+                    if (hard) {
+                        if (refreshProgress != null)
+                            refreshProgress.stage(R.string.reset_progress);
+                        BalanceData.reset(app, alsoNotes);
+                    }
                     LinkedHashMap<String, Bank> saved = BalanceData.read(app);
-                    int count = BalanceData.scanSms(app, saved);
+                    int count = BalanceData.scanSms(app, saved, refreshProgress);
                     post(() -> {
+                        dismissProgress();
                         applySaved(saved, app, buildStatus(count, saved.isEmpty(), statusNoSms, updatedNow));
                         if (hard) toast(R.string.toast_reset_done);
                         if (refreshAgain) { refreshAgain = false; refresh(pendingHard, pendingNotes, silent); }
                     });
                 } catch (Exception e) {
+                    android.util.Log.w("Balance", "refresh failed", e);
                     post(() -> {
-                        LinkedHashMap<String, Bank> saved2 = BalanceData.read(app);
+                        dismissProgress();
+                        LinkedHashMap<String, Bank> saved2 = new LinkedHashMap<>();
+                        try {
+                            saved2 = BalanceData.read(app);
+                        } catch (Exception unreadable) {
+                            android.util.Log.w("Balance", "saved balances unreadable", unreadable);
+                        }
                         applySaved(saved2, app,
                             saved2.isEmpty() ? getString(R.string.status_sms_unreadable) : statusLoaded);
                         if (hard) toast(R.string.toast_reset_failed);
                         if (refreshAgain) { refreshAgain = false; refresh(pendingHard, pendingNotes, silent); }
                     });
                 }
-                BalanceData.scanHistory(app);
+                BalanceData.scanHistory(app, refreshProgress);
             }).start();
         }
 

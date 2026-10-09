@@ -177,10 +177,17 @@ final class BackupManager {
      * only after the JSON producer completes.
      */
     static void createFramed(Context context, Uri uri, String password) throws Exception {
+        createFramed(context, uri, password, null);
+    }
+
+    /** Same as {@link #createFramed(Context, Uri, String)} with advisory progress. */
+    static void createFramed(Context context, Uri uri, String password, WorkProgress progress)
+            throws Exception {
         if (password == null) throw new IllegalArgumentException("password");
         File temp = File.createTempFile("balance-backup-v2-", ".tmp", context.getCacheDir());
         char[] chars = password.toCharArray();
         try {
+            if (progress != null) progress.stage(R.string.backup_stage_reading);
             synchronized (BalanceData.class) {
                 try (FileOutputStream raw = new FileOutputStream(temp)) {
                     BackupFrames.BackupOutputStream encrypted =
@@ -311,8 +318,14 @@ final class BackupManager {
      *  interleaving would let one of them persist a stale snapshot and silently drop the other's
      *  freshly scanned transactions. */
     static RestoreResult restore(Context context, Uri uri, String password) throws Exception {
-        if (isFramed(context, uri)) return BackupV2Restore.restore(context, uri, password);
-        return BackupV2Restore.restoreLegacy(context, uri, password);
+        return restore(context, uri, password, null);
+    }
+
+    /** Same as {@link #restore(Context, Uri, String)} with advisory progress. */
+    static RestoreResult restore(Context context, Uri uri, String password, WorkProgress progress)
+            throws Exception {
+        if (isFramed(context, uri)) return BackupV2Restore.restore(context, uri, password, progress);
+        return BackupV2Restore.restoreLegacy(context, uri, password, progress);
     }
 
     private static boolean isFramed(Context context, Uri uri) throws Exception {
