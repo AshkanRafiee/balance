@@ -351,10 +351,21 @@ final class BackupManager {
     /** Restores only the selected sections; unselected local data is left untouched. */
     static RestoreResult restore(Context context, Uri uri, String password, WorkProgress progress,
             java.util.Set<Section> selection) throws Exception {
+        return restore(context, uri, password, progress, selection, false);
+    }
+
+    /**
+     * Same with a deletion policy. When {@code includeDeleted} is false (the default),
+     * commitments the user deleted stay deleted; when true, the restore brings them back.
+     */
+    static RestoreResult restore(Context context, Uri uri, String password, WorkProgress progress,
+            java.util.Set<Section> selection, boolean includeDeleted) throws Exception {
         if (selection == null) selection = allSections();
         if (isFramed(context, uri))
-            return BackupV2Restore.restore(context, uri, password, progress, selection);
-        return BackupV2Restore.restoreLegacy(context, uri, password, progress, selection);
+            return BackupV2Restore.restore(context, uri, password, progress, selection,
+                includeDeleted);
+        return BackupV2Restore.restoreLegacy(context, uri, password, progress, selection,
+            includeDeleted);
     }
 
     private static boolean isFramed(Context context, Uri uri) throws Exception {

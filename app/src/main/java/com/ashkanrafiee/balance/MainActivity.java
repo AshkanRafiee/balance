@@ -1154,9 +1154,12 @@ public class MainActivity extends Activity {
             getString(R.string.restore_section_channels),
             getString(R.string.restore_section_tags),
             getString(R.string.restore_section_commitments),
-            getString(R.string.restore_section_sources)};
-        final boolean[] checked = new boolean[sections.length];
+            getString(R.string.restore_section_sources),
+            getString(R.string.restore_include_deleted)};
+        final boolean[] checked = new boolean[sections.length + 1];
         java.util.Arrays.fill(checked, true);
+        // Bringing back deleted commitments is opt-in: it starts unchecked.
+        checked[sections.length] = false;
         new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.restore_sections_title))
             .setMultiChoiceItems(labels, checked, (d, which, isChecked) -> checked[which] = isChecked)
@@ -1167,12 +1170,13 @@ public class MainActivity extends Activity {
                 for (int i = 0; i < sections.length; i++) {
                     if (checked[i]) selection.add(sections[i]);
                 }
-                restoreBackup(uri, password, selection);
+                restoreBackup(uri, password, selection, checked[sections.length]);
             })
             .show();
     }
 
-    private void restoreBackup(Uri uri, String password, Set<BackupManager.Section> selection) {
+    private void restoreBackup(Uri uri, String password, Set<BackupManager.Section> selection,
+            boolean includeDeleted) {
         showProgress(getString(R.string.backup_progress_restoring));
         final WorkProgress progress = dialogProgress();
         new Thread(() -> {
@@ -1180,7 +1184,7 @@ public class MainActivity extends Activity {
             final BackupManager.RestoreResult[] result = {null};
             try {
                 result[0] = BackupManager.restore(getApplicationContext(), uri, password,
-                    progress, selection);
+                    progress, selection, includeDeleted);
             } catch (BackupManager.BackupException e) {
                 error[0] = e.resId;
             } catch (Exception e) {

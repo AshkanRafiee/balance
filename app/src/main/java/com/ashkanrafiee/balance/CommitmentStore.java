@@ -293,6 +293,9 @@ final class CommitmentStore {
         boolean isDeleted(String id) throws Exception {
             requireId(id); return session().isDeleted(id);
         }
+        boolean clearDeletion(String id) throws Exception {
+            requireId(id); return session().clearDeletion(id);
+        }
         boolean settle(String id, long date) throws Exception {
             requireId(id); requireDate(date); return session().settle(id, date, true);
         }
@@ -951,6 +954,15 @@ final class CommitmentStore {
 
         boolean isDeleted(String id) {
             return meta(db, DELETED_PREFIX + definitionLookup(id)) != null;
+        }
+
+        /** Forgets a deletion tombstone, used when a restore explicitly brings back deleted items. */
+        boolean clearDeletion(String id) {
+            int count = db.delete(META, "key=?",
+                new String[]{DELETED_PREFIX + definitionLookup(id)});
+            if (count == 0) return false;
+            touch();
+            return true;
         }
 
         DefinitionPage definitionPage(long afterId, int limit) throws Exception {

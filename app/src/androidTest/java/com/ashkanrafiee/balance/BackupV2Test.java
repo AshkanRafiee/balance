@@ -326,6 +326,31 @@ public class BackupV2Test {
         assertEquals("Gone", BalanceData.readCommitments(context).get(0).name);
     }
 
+    @Test public void restore_includeDeleted_bringsBackDeletedAndForgetsTombstone()
+            throws Exception {
+        Commitment commitment = Commitment.create("Back", -75L, Commitment.ONCE,
+            Commitment.startOfDay(T), null, false, 0);
+        BalanceData.writeCommitments(context, Collections.singletonList(commitment));
+        File backup = file("v2-include-deleted.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+        assertTrue(CommitmentStore.delete(context, commitment.id));
+        assertTrue(BalanceData.readCommitments(context).isEmpty());
+
+        // Default restores keep the deletion.
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD);
+        assertTrue(BalanceData.readCommitments(context).isEmpty());
+
+        // Opting in brings the definition back and forgets the tombstone, so a later
+        // default restore of the same backup keeps it instead of deleting it again.
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD, null,
+            BackupManager.allSections(), true);
+        assertEquals(1, BalanceData.readCommitments(context).size());
+        assertEquals("Back", BalanceData.readCommitments(context).get(0).name);
+
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD);
+        assertEquals(1, BalanceData.readCommitments(context).size());
+    }
+
     @Test public void wrongPasswordLateFrameTrailingAndMalformedInputLeaveLiveDataUnchanged()
             throws Exception {
         LinkedHashMap<String, Bank> live = new LinkedHashMap<>();

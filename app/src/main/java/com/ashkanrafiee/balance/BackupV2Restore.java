@@ -133,6 +133,17 @@ final class BackupV2Restore {
     static BackupManager.RestoreResult restore(Context context, Uri uri, String password,
             WorkProgress progress, java.util.Set<BackupManager.Section> selection)
             throws Exception {
+        return restore(context, uri, password, progress, selection, false);
+    }
+
+    /**
+     * Same with a deletion policy. When {@code includeDeleted} is false (the default),
+     * explicitly deleted commitments stay deleted; when true, the restore brings them back
+     * and forgets their tombstones.
+     */
+    static BackupManager.RestoreResult restore(Context context, Uri uri, String password,
+            WorkProgress progress, java.util.Set<BackupManager.Section> selection,
+            boolean includeDeleted) throws Exception {
         if (password == null) throw new IllegalArgumentException("password");
 
         Context application = context.getApplicationContext();
@@ -153,7 +164,7 @@ final class BackupV2Restore {
                 try (DataGeneration.Stage generation = DataGeneration.beginStage(application)) {
                     generation.setPublishHookForTests(publishHookForTests);
                     if (progress != null) progress.stage(R.string.backup_stage_merging);
-                    result = apply(generation.context(), input, selection);
+                    result = apply(generation.context(), input, selection, includeDeleted);
                     generation.publish();
                 }
             }
@@ -192,6 +203,13 @@ final class BackupV2Restore {
     static BackupManager.RestoreResult restoreLegacy(Context context, Uri uri, String password,
             WorkProgress progress, java.util.Set<BackupManager.Section> selection)
             throws Exception {
+        return restoreLegacy(context, uri, password, progress, selection, false);
+    }
+
+    /** Same with a deletion policy; see {@link #restore} for {@code includeDeleted}. */
+    static BackupManager.RestoreResult restoreLegacy(Context context, Uri uri, String password,
+            WorkProgress progress, java.util.Set<BackupManager.Section> selection,
+            boolean includeDeleted) throws Exception {
         if (password == null) throw new IllegalArgumentException("password");
         Context application = context.getApplicationContext();
         if (application == null) application = context;
@@ -222,7 +240,7 @@ final class BackupV2Restore {
                 try (DataGeneration.Stage generation = DataGeneration.beginStage(application)) {
                     generation.setPublishHookForTests(publishHookForTests);
                     if (progress != null) progress.stage(R.string.backup_stage_merging);
-                    result = apply(generation.context(), input, selection);
+                    result = apply(generation.context(), input, selection, includeDeleted);
                     generation.publish();
                 }
             }
@@ -1076,7 +1094,8 @@ final class BackupV2Restore {
     }
 
     private static BackupManager.RestoreResult apply(Context context, InputStage stage,
-            java.util.Set<BackupManager.Section> selection) throws Exception {
+            java.util.Set<BackupManager.Section> selection, boolean includeDeleted)
+            throws Exception {
         if (selection == null) selection = BackupManager.allSections();
         BackupManager.RestoreResult result = new BackupManager.RestoreResult();
         if (selection.contains(BackupManager.Section.SOURCES)) mergeSources(context, stage, result);
@@ -1101,8 +1120,8 @@ final class BackupV2Restore {
             mergeMetadata(context, stage, TAGS, MetadataStore.TAGS, true, result);
 
         if (selection.contains(BackupManager.Section.COMMITMENTS)) {
-            mergeCommitments(context, stage, result);
-            mergeCommitmentDeletions(context, stage, result);
+            mergeCommitments(context, stage, result, includeDeleted);
+            mergeCommitmentDeletions(context, stage, result, includeDeleted);
         }
         return result;
     }
@@ -1218,14 +1237,16 @@ final class BackupV2Restore {
      * watermark is not expanded into history.
      */
     private static void mergeCommitments(Context context, InputStage stage,
-            BackupManager.RestoreResult result) throws Exception {
+            BackupManager.RestoreResult result, boolean includeDeleted) throws Exception {
         CommitmentStore.runInTransaction(context, editor -> {
             stage.forEachCommitment((ordinal, definition) -> {
                 final boolean[] changed = {false};
                 Commitment local = editor.get(definition.id);
                 // An explicitly deleted definition stays deleted: delete wins over any older
-                // backup, and tombstones travel forward in every newer backup.
-                if (local == null && editor.isDeleted(definition.id)) return;
+                // backup, and tombstones travel forward in every newer backup — unless the
+                // restore was asked to bring deleted items back.
+                if (local == null && editor.isDeleted(definition.id) && !includeDeleted) return;
+                if (includeDeleted && editor.clearDeletion(definition.id)) changed[0] = true;
                 boolean newDefinition = local == null;
                 if (local == null) {
                     editor.upsert(definition);
@@ -1269,7 +1290,10 @@ final class BackupV2Restore {
      * backups cannot resurrect it either.
      */
     private static void mergeCommitmentDeletions(Context context, InputStage stage,
-            BackupManager.RestoreResult result) throws Exception {
+            BackupManager.RestoreResult result, boolean includeDeleted) throws Exception {
+        // Bringing deleted items back means their tombstones are forgotten too: neither the
+        // backup's deletions nor its tombstone union apply.
+        if (includeDeleted) return;
         CommitmentStore.runInTransaction(context, editor -> {
             final boolean[] changed = {false};
             stage.forEachCommitmentDeletion(id -> {
