@@ -228,8 +228,6 @@
     <string name="commitments_bad_date">تاریخ معتبر وارد کنید</string>
     <string name="commitments_end_before_start">تاریخ پایان قبل از شروع است</string>
     <string name="commitments_channel">یادآور تعهدات</string>
-    <string name="commitments_notification_title">یادآوری تعهد</string>
-    <string name="commitments_notification_text">یک تعهد سررسید شده است. برای جزئیات Balance را باز کنید.</string>
     <string name="commitments_remind">یادآور</string>
     <string name="commitments_remind_me">یادآوری کن</string>
     <string name="commitments_unit_minutes">دقیقه</string>

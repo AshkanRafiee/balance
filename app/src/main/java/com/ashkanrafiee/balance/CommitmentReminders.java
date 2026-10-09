@@ -263,21 +263,47 @@ final class CommitmentReminders {
         open.setData(Uri.parse("balance://commitment/" + Uri.encode(c.id)));
         PendingIntent tap = PendingIntent.getActivity(context, c.id.hashCode(), open,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        // Name every reminder: same-time dues used to post identical lines, distinguishable
+        // only by tapping through. The detail line carries data only (no words), so it needs
+        // no translation and reads correctly in both languages.
+        String detail = notificationDetail(context, c, due);
         Notification notification = new Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_balance_monochrome)
-            .setContentTitle(context.getString(R.string.commitments_notification_title))
-            .setContentText(context.getString(R.string.commitments_notification_text))
+            .setContentTitle(notificationTitle(c))
+            .setContentText(detail)
             .setContentIntent(tap)
             .setVisibility(Notification.VISIBILITY_PRIVATE)
             .setPublicVersion(new Notification.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_balance_monochrome)
-                .setContentTitle(context.getString(R.string.commitments_notification_title))
-                .setContentText(context.getString(R.string.commitments_notification_text))
+                .setContentTitle(context.getString(R.string.app_name))
                 .build())
             .setAutoCancel(true)
             .build();
         manager.notify("commitment:" + c.id, 1, notification);
         return true;
+    }
+
+    /** The notification title names the commitment, so same-time dues stay distinguishable. */
+    static String notificationTitle(Commitment c) {
+        if (c == null) throw new NullPointerException("commitment");
+        return c.name;
+    }
+
+    /** Amount and due day as data only: localizable without a translatable sentence. */
+    static String notificationDetail(Context context, Commitment c, long due) {
+        if (c == null) throw new NullPointerException("commitment");
+        return CurrencyHelper.display(context, c.amount) + " · " + dueText(context, due);
+    }
+
+    /** The due day written the way the commitments screen writes dates, in either calendar. */
+    private static String dueText(Context context, long due) {
+        boolean iran = RegionHelper.isIran(context);
+        boolean persian = LocaleHelper.isPersian(context);
+        CalendarSystem cal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
+        int[] civil = Commitment.civilDay(due, cal);
+        String day = persian ? faDigits(String.valueOf(civil[2])) : String.valueOf(civil[2]);
+        String year = persian ? faDigits(String.valueOf(civil[0])) : String.valueOf(civil[0]);
+        return day + " " + CalDate.monthName(civil[1], iran, persian) + " " + year;
     }
 
     private static String faDigits(String s) {

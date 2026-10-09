@@ -1,6 +1,7 @@
 package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
@@ -84,5 +85,23 @@ public class CommitmentReminderTest {
 
     @Test public void ensureChannel_doesNotCrash() {
         CommitmentReminders.ensureChannel(ctx);
+    }
+
+    @Test public void notificationContent_namesEachSameTimeDue() {
+        long due = inDays(5);
+        Commitment rent = Commitment.create("rent", -5000, Commitment.MONTHLY, due, null,
+            true, 0);
+        Commitment loan = Commitment.create("loan", -9000, Commitment.MONTHLY, due, null,
+            true, 0);
+        String rentTitle = CommitmentReminders.notificationTitle(rent);
+        String loanTitle = CommitmentReminders.notificationTitle(loan);
+        assertEquals("rent", rentTitle);
+        assertEquals("loan", loanTitle);
+        String rentDetail = CommitmentReminders.notificationDetail(ctx, rent, due);
+        String loanDetail = CommitmentReminders.notificationDetail(ctx, loan, due);
+        assertTrue(rentDetail.contains(CurrencyHelper.display(ctx, -5000)));
+        assertTrue(loanDetail.contains(CurrencyHelper.display(ctx, -9000)));
+        assertFalse("same-time dues must stay distinguishable", rentTitle.equals(loanTitle)
+            && rentDetail.equals(loanDetail));
     }
 }

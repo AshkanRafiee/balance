@@ -245,8 +245,6 @@
     <string name="commitments_bad_date">Enter a valid date</string>
     <string name="commitments_end_before_start">The end date is before the start</string>
     <string name="commitments_channel">Commitment reminders</string>
-    <string name="commitments_notification_title">Commitment reminder</string>
-    <string name="commitments_notification_text">A commitment is due. Open Balance for details.</string>
     <string name="commitments_remind">Reminder</string>
     <string name="commitments_remind_me">Remind me</string>
     <string name="commitments_unit_minutes">Minutes</string>
