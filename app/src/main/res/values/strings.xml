@@ -146,6 +146,11 @@
     <string name="backup_restore_info">Enter the password used when this backup was created. Restored banks are merged with your current data, keeping the newest balance for each bank.</string>
     <string name="backup_progress_creating">Creating encrypted backup…</string>
     <string name="backup_progress_restoring">Decrypting backup…</string>
+    <string name="backup_stage_reading">Reading saved data…</string>
+    <string name="backup_stage_merging">Merging backup…</string>
+    <string name="scan_stage_reading">Reading bank SMS…</string>
+    <string name="scan_stage_saving">Saving…</string>
+    <string name="reset_progress">Clearing saved data…</string>
     <string name="backup_created">Backup saved</string>
     <string name="backup_create_failed">Backup failed</string>
     <string name="backup_restored">Restore finished</string>
@@ -332,6 +337,12 @@
     <string name="history_export_label">Export</string>
     <string name="history_export_saved">CSV saved</string>
     <string name="history_export_failed">CSV export failed</string>
+    <string name="history_stage_loading">Loading saved movements…</string>
+    <string name="history_stage_gaps">Checking for gaps…</string>
+    <string name="history_stage_building">Building the view…</string>
+    <string name="export_progress_title">Exporting CSV…</string>
+    <string name="export_stage_preparing">Gathering rows…</string>
+    <string name="export_stage_writing">Writing file…</string>
 
     <!-- Unaccounted money: a balance change the bank reported for which no message arrived. -->
     <string name="residual_label">Unaccounted</string>

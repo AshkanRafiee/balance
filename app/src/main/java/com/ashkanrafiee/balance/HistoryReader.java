@@ -340,6 +340,12 @@ final class HistoryReader {
         return timelineSummary(context, request, true);
     }
 
+    /** Same as {@link #summaryWithResiduals(Context, Request)} with advisory progress. */
+    static Result summaryWithResiduals(Context context, Request request, WorkProgress progress)
+            throws Exception {
+        return timelineSummary(context, request, true, progress);
+    }
+
     /**
      * Builds one immutable cross-store snapshot. All transaction, residual and point-metadata
      * passes happen under the same store monitor: a scan cannot publish a new generation between
@@ -348,6 +354,12 @@ final class HistoryReader {
      */
     private static Result timelineSummary(Context context, Request request, boolean residuals)
             throws Exception {
+        return timelineSummary(context, request, residuals, null);
+    }
+
+    /** Same as {@link #timelineSummary(Context, Request, boolean)} with advisory progress. */
+    private static Result timelineSummary(Context context, Request request, boolean residuals,
+            WorkProgress progress) throws Exception {
         if (context == null) throw new NullPointerException("context");
         if (request == null) throw new NullPointerException("request");
         synchronized (BalanceData.class) {
@@ -358,6 +370,7 @@ final class HistoryReader {
                 boolean stageResiduals = residuals && request.selectedTags.isEmpty();
                 try (HistoryResidualReader.Staging residualStaging =
                         stageResiduals ? HistoryResidualReader.Staging.open(context) : null) {
+                    if (progress != null) progress.stage(R.string.history_stage_loading);
                     TransactionStore.forEach(context, request.pageSize, transaction -> {
                         // Scope narrowing precedes all other filters. Residual detection needs the
                         // whole bank/account scope, so staging happens before narrowing predicates.
@@ -369,6 +382,7 @@ final class HistoryReader {
                         accumulator.addTransaction(transaction);
                     });
                     if (residualStaging != null) {
+                        if (progress != null) progress.stage(R.string.history_stage_gaps);
                         residualStaging.emit(residual -> {
                             if (!matchesResidualFilter(residual, request)) return;
                             if (!matcher.matchesResidual(residual)) return;
@@ -376,6 +390,7 @@ final class HistoryReader {
                         }, request.pageSize);
                     }
                 }
+                if (progress != null) progress.stage(R.string.history_stage_building);
                 return accumulator.result(false, residuals, null, null);
             } finally {
                 accumulator.close();

@@ -15,6 +15,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
@@ -305,6 +306,25 @@ public class HistoryReaderTest {
                 null, false, 1);
             assertEquals(1, page.transactions.size());
             assertEquals(119L, page.transactions.get(0).amount);
+        } finally {
+            result.close();
+        }
+    }
+
+    @Test public void summaryWithResiduals_reportsLoadingGapsAndBuildingInOrder() throws Exception {
+        assertTrue(BalanceData.writeTransactions(context, Collections.singletonList(
+            new Transaction(BANK, ACCOUNT, epoch(2026, 9, 10), 1L, null, "one", null))));
+        List<Integer> stages = new ArrayList<>();
+        WorkProgress progress = new WorkProgress() {
+            @Override public void stage(int stageResId) { stages.add(stageResId); }
+            @Override public void progress(long done, long total) { }
+        };
+        HistoryReader.Result result = HistoryReader.summaryWithResiduals(context,
+            HistoryReader.Request.all(false, 1), progress);
+        try {
+            assertEquals(Arrays.asList(R.string.history_stage_loading, R.string.history_stage_gaps,
+                R.string.history_stage_building), stages);
+            assertTrue(result.residualsComplete);
         } finally {
             result.close();
         }
