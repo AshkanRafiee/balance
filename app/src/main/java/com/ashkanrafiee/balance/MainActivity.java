@@ -1648,8 +1648,28 @@ public class MainActivity extends Activity {
                 refreshing = true;
                 new Thread(() -> {
                     final Context app = MainActivity.this.getApplicationContext();
-                    if (hard) BalanceData.reset(app, alsoNotes);
-                    final LinkedHashMap<String, Bank> saved = BalanceData.read(app);
+                    try {
+                        if (hard) BalanceData.reset(app, alsoNotes);
+                    } catch (Exception e) {
+                        // Reset is fail-closed: a store that cannot be cleared must not be
+                        // half-rebuilt silently. Keep the previous screen and say so.
+                        android.util.Log.w("Balance", "reset failed", e);
+                        post(() -> {
+                            toast(R.string.toast_reset_failed);
+                            refreshing = false;
+                            invalidate();
+                        });
+                        return;
+                    }
+                    final LinkedHashMap<String, Bank> saved;
+                    try {
+                        saved = BalanceData.read(app);
+                    } catch (Exception e) {
+                        android.util.Log.w("Balance", "saved balances unreadable", e);
+                        post(() -> applySaved(new LinkedHashMap<>(), app,
+                            getString(R.string.status_sms_unreadable)));
+                        return;
+                    }
                     // Nothing stored yet (a fresh install, or a reset): the empty card wants the
                     // plain "permission is needed" wording, and there is no strip to explain it.
                     post(() -> applySaved(saved, app, saved.isEmpty()
