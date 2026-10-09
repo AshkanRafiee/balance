@@ -126,6 +126,15 @@ final class TransactionStore {
         });
     }
 
+    /**
+     * Cheap total row count for sizing decisions only. Unlike {@link #count(Context)} it does not
+     * walk and validate every payload, so callers must use it only to choose bounded code paths —
+     * both paths stay correct regardless of what it reports.
+     */
+    static long estimateCount(Context context) throws Exception {
+        return access(context, false, true, false, s -> s == null ? 0L : rowCount(s.db));
+    }
+
     /** Live keyset page; use the Page overload when continuing a snapshot. Start at -1. */
     static Page page(Context context, int afterOrdinal, int limit) throws Exception {
         return page(context, (long) afterOrdinal, limit);

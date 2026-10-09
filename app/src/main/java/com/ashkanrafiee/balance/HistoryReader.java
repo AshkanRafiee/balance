@@ -357,6 +357,15 @@ final class HistoryReader {
         return timelineSummary(context, request, residuals, null);
     }
 
+    /**
+     * Scope sizes at or below this run residual detection in memory instead of through the
+     * encrypted staging database. SMS-scale histories (thousands of rows, a few megabytes
+     * transient) take the fast path; anything larger keeps the bounded external walk, so peak
+     * memory never depends on total retained data. The scoped set can never outgrow the store
+     * total the gate measured, and exceeding the bound still fails closed.
+     */
+    static final int MEMORY_RESIDUAL_LIMIT = 20_000;
+
     /** Same as {@link #timelineSummary(Context, Request, boolean)} with advisory progress. */
     private static Result timelineSummary(Context context, Request request, boolean residuals,
             WorkProgress progress) throws Exception {
@@ -368,14 +377,26 @@ final class HistoryReader {
             try (MetadataStore.LookupSession metadata = MetadataStore.LookupSession.open(context)) {
                 Matcher matcher = new Matcher(context, request, metadata);
                 boolean stageResiduals = residuals && request.selectedTags.isEmpty();
+                // SMS-scale scopes skip the encrypted staging database: the scoped rows are
+                // already decrypted in hand, and Residual.between over them is exactly what the
+                // reference oracle computes. Larger scopes keep the bounded external walk.
+                boolean memoryResiduals = stageResiduals
+                    && TransactionStore.estimateCount(context) <= MEMORY_RESIDUAL_LIMIT;
+                List<Transaction> memoryScope = memoryResiduals ? new ArrayList<>() : null;
                 try (HistoryResidualReader.Staging residualStaging =
-                        stageResiduals ? HistoryResidualReader.Staging.open(context) : null) {
+                        stageResiduals && !memoryResiduals
+                            ? HistoryResidualReader.Staging.open(context) : null) {
                     if (progress != null) progress.stage(R.string.history_stage_loading);
                     TransactionStore.forEach(context, request.pageSize, transaction -> {
                         // Scope narrowing precedes all other filters. Residual detection needs the
                         // whole bank/account scope, so staging happens before narrowing predicates.
                         if (!inScope(transaction, request)) return;
                         if (residualStaging != null) residualStaging.add(transaction);
+                        if (memoryScope != null) {
+                            if (memoryScope.size() >= MEMORY_RESIDUAL_LIMIT)
+                                throw new IllegalStateException("residual scope outgrew its bound");
+                            memoryScope.add(transaction);
+                        }
                         if (!matchesMovementFilter(transaction, request)) return;
                         if (!matchesTags(metadata, transaction, request.selectedTags)) return;
                         if (!matcher.matchesTransaction(transaction)) return;
@@ -388,6 +409,13 @@ final class HistoryReader {
                             if (!matcher.matchesResidual(residual)) return;
                             accumulator.addResidual(residual);
                         }, request.pageSize);
+                    } else if (memoryScope != null) {
+                        if (progress != null) progress.stage(R.string.history_stage_gaps);
+                        for (Residual residual : Residual.between(memoryScope)) {
+                            if (!matchesResidualFilter(residual, request)) continue;
+                            if (!matcher.matchesResidual(residual)) continue;
+                            accumulator.addResidual(residual);
+                        }
                     }
                 }
                 if (progress != null) progress.stage(R.string.history_stage_building);

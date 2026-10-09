@@ -330,6 +330,46 @@ public class HistoryReaderTest {
         }
     }
 
+    @Test public void summaryWithResiduals_overLimit_matchesInMemoryPath() throws Exception {
+        // The store total pushes the summary past the in-memory residual bound, so the small
+        // Saman scope below must still come back through the bounded external walk.
+        long base = epoch(2026, 9, 1);
+        List<Transaction> stored = new ArrayList<>(HistoryReader.MEMORY_RESIDUAL_LIMIT + 3);
+        for (int i = 0; i <= HistoryReader.MEMORY_RESIDUAL_LIMIT; i++) {
+            stored.add(new Transaction("Filler", "999", base + i, 1L, null));
+        }
+        long first = epoch(2026, 9, 10);
+        Transaction saman1 = new Transaction("Saman", "222", first, -30L, 290L, "s1", null);
+        Transaction saman2 = new Transaction("Saman", "222", first + 2 * DAY, -5L, 283L, "s2",
+            null);
+        stored.add(saman1);
+        stored.add(saman2);
+        assertTrue(BalanceData.writeTransactions(context, stored));
+
+        List<Residual> expected = Residual.between(Arrays.asList(saman1, saman2));
+        expected.sort((a, b) -> Long.compare(b.toDate, a.toDate));
+        String day1 = CalDate.fromGregorian(2026, 9, 10, false).key();
+        String day2 = CalDate.fromGregorian(2026, 9, 12, false).key();
+        HistoryReader.Request request = new HistoryReader.Request(false, 256, "Saman", "222",
+            HistoryActivity.Filter.ALL, "", null, Arrays.asList(day1, day2), 2, 128);
+        HistoryReader.Result result = HistoryReader.summaryWithResiduals(context, request);
+
+        assertTrue(result.residualsComplete);
+        assertEquals(2L, result.movementCount);
+        List<Residual> actual = new ArrayList<>();
+        for (HistoryReader.DayRows rows : result.requestedDayRows.values()) {
+            actual.addAll(rows.residuals);
+        }
+        actual.sort((a, b) -> Long.compare(b.toDate, a.toDate));
+        assertEquals(expected.size(), actual.size());
+        for (int i = 0; i < expected.size(); i++) {
+            assertEquals(expected.get(i).bank, actual.get(i).bank);
+            assertEquals(expected.get(i).toDate, actual.get(i).toDate);
+            assertEquals(expected.get(i).amount, actual.get(i).amount);
+        }
+        result.close();
+    }
+
     private static long epoch(int year, int month, int day) {
         Calendar calendar = Calendar.getInstance();
         calendar.clear();
