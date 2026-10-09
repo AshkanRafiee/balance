@@ -37,6 +37,7 @@ import android.widget.ProgressBar;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.List;
@@ -1108,7 +1109,7 @@ public class MainActivity extends Activity {
                     pendingBackupPassword = value;
                     pickBackupTarget();
                 } else {
-                    restoreBackup(restoreUri, value);
+                    askRestoreSections(restoreUri, value);
                 }
             }));
         showDialog(dlg);
@@ -1141,14 +1142,45 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void restoreBackup(Uri uri, String password) {
+    /** Lets the user pick which backup sections to merge; the file always carries all of
+     *  them. Everything starts checked, so accepting untouched restores the whole backup. */
+    private void askRestoreSections(Uri uri, String password) {
+        final BackupManager.Section[] sections = BackupManager.Section.values();
+        final String[] labels = {
+            getString(R.string.restore_section_balances),
+            getString(R.string.restore_section_transactions),
+            getString(R.string.restore_section_notes),
+            getString(R.string.restore_section_reasons),
+            getString(R.string.restore_section_channels),
+            getString(R.string.restore_section_tags),
+            getString(R.string.restore_section_commitments),
+            getString(R.string.restore_section_sources)};
+        final boolean[] checked = new boolean[sections.length];
+        java.util.Arrays.fill(checked, true);
+        new android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.restore_sections_title))
+            .setMultiChoiceItems(labels, checked, (d, which, isChecked) -> checked[which] = isChecked)
+            .setNegativeButton(getString(R.string.dialog_hard_refresh_cancel), null)
+            .setPositiveButton(getString(R.string.backup_restore_confirm), (d, which) -> {
+                EnumSet<BackupManager.Section> selection =
+                    EnumSet.noneOf(BackupManager.Section.class);
+                for (int i = 0; i < sections.length; i++) {
+                    if (checked[i]) selection.add(sections[i]);
+                }
+                restoreBackup(uri, password, selection);
+            })
+            .show();
+    }
+
+    private void restoreBackup(Uri uri, String password, Set<BackupManager.Section> selection) {
         showProgress(getString(R.string.backup_progress_restoring));
         final WorkProgress progress = dialogProgress();
         new Thread(() -> {
             final int[] error = {0};
             final BackupManager.RestoreResult[] result = {null};
             try {
-                result[0] = BackupManager.restore(getApplicationContext(), uri, password, progress);
+                result[0] = BackupManager.restore(getApplicationContext(), uri, password,
+                    progress, selection);
             } catch (BackupManager.BackupException e) {
                 error[0] = e.resId;
             } catch (Exception e) {
@@ -1294,6 +1326,10 @@ public class MainActivity extends Activity {
         boolean smsBanner;
         boolean commitmentsCard;
         boolean commitmentSummaryLoaded;
+        /** A summary load already running; the draw path never starts a second one. */
+        boolean commitmentSummaryLoading;
+        /** Bumps on every invalidation so a late worker cannot install a stale summary. */
+        int commitmentSummaryGen;
         boolean hasCommitments;
         CommitmentsActivity.Summary commitmentSummary;
         int insetsTop, insetsBottom;
@@ -1331,6 +1367,7 @@ public class MainActivity extends Activity {
         final Handler handler = new Handler(Looper.getMainLooper());
         final Runnable monthRefresh = () -> {
             commitmentSummaryLoaded = false;
+            commitmentSummaryGen++;
             invalidate();
             scheduleMonthRefresh();
         };
@@ -1638,7 +1675,47 @@ public class MainActivity extends Activity {
 
         void invalidateCommitmentSummary() {
             commitmentSummaryLoaded = false;
+            commitmentSummaryGen++;
             invalidate();
+        }
+
+        /** Loads the commitments summary off the UI thread: the store read can wait behind a
+         *  backup, restore or scan holding the store lock, and the draw path must never wait. */
+        void ensureCommitmentSummary() {
+            if (commitmentSummaryLoaded || commitmentSummaryLoading) return;
+            commitmentSummaryLoading = true;
+            final int gen = commitmentSummaryGen;
+            new Thread(() -> {
+                List<Commitment> commitments;
+                try {
+                    commitments = BalanceData.readCommitments(
+                        MainActivity.this.getApplicationContext());
+                } catch (Exception e) {
+                    android.util.Log.w("Balance", "commitment summary unreadable", e);
+                    post(() -> {
+                        commitmentSummaryLoading = false;
+                        if (gen != commitmentSummaryGen) return;
+                        commitmentSummaryLoaded = true;
+                        hasCommitments = false;
+                        invalidate();
+                    });
+                    return;
+                }
+                final CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
+                    commitments,
+                    RegionHelper.isIran(MainActivity.this)
+                        ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN,
+                    System.currentTimeMillis(), CommitmentsActivity.WINDOW_MONTHS);
+                final boolean any = !commitments.isEmpty();
+                post(() -> {
+                    commitmentSummaryLoading = false;
+                    if (gen != commitmentSummaryGen) return;
+                    commitmentSummary = summary;
+                    hasCommitments = any;
+                    commitmentSummaryLoaded = true;
+                    invalidate();
+                });
+            }, "commitment-summary").start();
         }
 
         void refresh(boolean hard, boolean alsoNotes) { refresh(hard, alsoNotes, false); }
@@ -1704,6 +1781,7 @@ public class MainActivity extends Activity {
                     // plain "permission is needed" wording, and there is no strip to explain it.
                     post(() -> {
                         dismissProgress();
+                        if (hard) view.invalidateCommitmentSummary();
                         applySaved(saved, app, saved.isEmpty()
                             ? getString(R.string.status_permission_needed)
                             : getString(R.string.status_stale_no_permission));
@@ -1733,6 +1811,9 @@ public class MainActivity extends Activity {
                     int count = BalanceData.scanSms(app, saved, refreshProgress);
                     post(() -> {
                         dismissProgress();
+                        // A reset also wipes commitments: drop the cached card summary so the next
+                        // frame reloads it instead of showing the deleted series until reopen.
+                        if (hard) view.invalidateCommitmentSummary();
                         applySaved(saved, app, buildStatus(count, saved.isEmpty(), statusNoSms, updatedNow));
                         if (hard) toast(R.string.toast_reset_done);
                         if (refreshAgain) { refreshAgain = false; refresh(pendingHard, pendingNotes, silent); }
@@ -1741,6 +1822,7 @@ public class MainActivity extends Activity {
                     android.util.Log.w("Balance", "refresh failed", e);
                     post(() -> {
                         dismissProgress();
+                        if (hard) view.invalidateCommitmentSummary();
                         LinkedHashMap<String, Bank> saved2 = new LinkedHashMap<>();
                         try {
                             saved2 = BalanceData.read(app);
@@ -2083,14 +2165,18 @@ public class MainActivity extends Activity {
             text(c, getString(R.string.commitments_card_title, commitmentMonthLabel()),
                 middle, top + 22, 14, fg, Paint.Align.CENTER);
             if (!commitmentSummaryLoaded) {
-                List<Commitment> commitments = BalanceData.readCommitments(MainActivity.this);
-                commitmentSummary = CommitmentsActivity.summarize(
-                    commitments,
-                    RegionHelper.isIran(MainActivity.this)
-                        ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN,
-                    System.currentTimeMillis(), CommitmentsActivity.WINDOW_MONTHS);
-                hasCommitments = !commitments.isEmpty();
-                commitmentSummaryLoaded = true;
+                // The summary may still be loading on a worker (see ensureCommitmentSummary):
+                // draw the empty state meanwhile rather than blocking the frame on the store.
+                ensureCommitmentSummary();
+                if (!commitmentSummaryLoaded) {
+                    Paint.Align align = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
+                    float x = rtl ? right : left;
+                    text(c, fit(getString(R.string.commitments_card_empty), 11, w - 96),
+                        x, top + 43, 11, muted, align);
+                    text(c, fit(getString(R.string.commitments_card_empty_action), 10, w - 96),
+                        x, top + 61, 10, muted, align);
+                    return;
+                }
             }
             CommitmentsActivity.Summary summary = commitmentSummary;
             long pay = summary.overduePay + summary.thisMonthPay;
