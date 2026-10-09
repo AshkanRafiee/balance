@@ -27,8 +27,11 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -43,6 +46,7 @@ import java.util.UUID;
  * beginStage, all merges and publish to prevent a scan/write between the copy and publication.
  */
 final class DataGeneration {
+    private static final String TAG = "BalanceGenerations";
     /** Package-private for instrumentation tests that need to corrupt the selector deliberately. */
     static final String MANIFEST_NAME = "balance_data_generation";
     static final String GENERATIONS_DIRECTORY = ".balance-generations";
@@ -89,6 +93,66 @@ final class DataGeneration {
         synchronized (BalanceData.class) {
             return context(input).getSharedPreferences(BalanceData.PREFS_DATA,
                 Context.MODE_PRIVATE);
+        }
+    }
+
+    /**
+     * Removes superseded generation directories, keeping the newest superseded one: the manifest
+     * fallback can still roll back to it if the fresh selector ever fails to read. Steady state
+     * is therefore at most two generations no matter how many restores happen. Best-effort and
+     * never load-bearing — an uncertain manifest keeps everything, and failures are logged, never
+     * thrown — so publishing cannot fail because cleanup did.
+     */
+    static void pruneOldGenerations(Context input) {
+        synchronized (BalanceData.class) {
+            try {
+                Context root = rootContext(input);
+                Manifest manifest;
+                try {
+                    manifest = readManifest(root);
+                } catch (Exception invalid) {
+                    return;
+                }
+                if (manifest == null) return;
+                File[] children = generationsDirectory(root).listFiles();
+                if (children == null) return;
+                List<File> superseded = new ArrayList<>();
+                for (File child : children) {
+                    if (!child.isDirectory() || child.getName().equals(manifest.generation))
+                        continue;
+                    try {
+                        parseGeneration(child.getName());
+                    } catch (Exception notAGeneration) {
+                        continue;
+                    }
+                    superseded.add(child);
+                }
+                // Newest first; a same-device publish always creates a newer directory.
+                superseded.sort((a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+                for (int i = 1; i < superseded.size(); i++) {
+                    File victim = superseded.get(i);
+                    root.deleteSharedPreferences(prefsName(victim.getName()));
+                    deleteRecursively(victim);
+                }
+            } catch (Exception e) {
+                android.util.Log.w(TAG, "generation prune failed", e);
+            }
+        }
+    }
+
+    /** Test seam: sorted names of retained generation directories. */
+    static List<String> generationNamesForTests(Context input) {
+        synchronized (BalanceData.class) {
+            Context root = rootContext(input);
+            File[] children = generationsDirectory(root).listFiles();
+            List<String> names = new ArrayList<>();
+            if (children != null) {
+                for (File child : children) {
+                    if (child.isDirectory()) names.add(child.getName());
+                }
+            }
+            Collections.sort(names);
+            return names;
         }
     }
 
@@ -654,9 +718,10 @@ final class DataGeneration {
         Manifest selected = readManifest(root);
         if (selected == null || !generation.equals(selected.generation))
             throw new IOException("generation selector was not published");
-        if (hook != null) hook.at(PublishPoint.AFTER_MANIFEST);
-        syncFile(manifestFile(root));
-        syncDirectory(parent);
+                if (hook != null) hook.at(PublishPoint.AFTER_MANIFEST);
+                syncFile(manifestFile(root));
+                syncDirectory(parent);
+                pruneOldGenerations(root);
     }
 
     private static void writeMarker(File directory, String value) throws Exception {

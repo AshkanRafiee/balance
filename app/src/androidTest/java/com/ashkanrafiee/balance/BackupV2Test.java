@@ -326,6 +326,23 @@ public class BackupV2Test {
         assertEquals("Gone", BalanceData.readCommitments(context).get(0).name);
     }
 
+    @Test public void restore_prunesSupersededGenerationsButKeepsData() throws Exception {
+        Commitment commitment = Commitment.create("Kept", -100L, Commitment.ONCE,
+            Commitment.startOfDay(T), null, false, 0);
+        BalanceData.writeCommitments(context, Collections.singletonList(commitment));
+        File backup = file("v2-generations.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+        BalanceData.reset(context, true);
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD);
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD);
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD);
+        List<String> generations = DataGeneration.generationNamesForTests(context);
+        assertTrue("only the current plus rollback generations may remain, got " + generations,
+            generations.size() <= 2);
+        assertEquals(1, BalanceData.readCommitments(context).size());
+        assertEquals("Kept", BalanceData.readCommitments(context).get(0).name);
+    }
+
     @Test public void restore_includeDeleted_bringsBackDeletedAndForgetsTombstone()
             throws Exception {
         Commitment commitment = Commitment.create("Back", -75L, Commitment.ONCE,
