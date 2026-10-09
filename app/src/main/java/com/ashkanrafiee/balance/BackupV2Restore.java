@@ -56,11 +56,14 @@ final class BackupV2Restore {
     private static final int CHANNELS = 5;
     private static final int TAGS = 6;
 
+    private static final int SOURCE = 7;
+
     private static final int SECTION_SCHEMA = 1;
     private static final int SECTION_BALANCES = 1 << 1;
     private static final int SECTION_TRANSACTIONS = 1 << 2;
     private static final int SECTION_METADATA = 1 << 3;
     private static final int SECTION_COMMITMENTS = 1 << 4;
+    private static final int SECTION_SOURCES = 1 << 5;
     private static final int ALL_SECTIONS = SECTION_SCHEMA | SECTION_BALANCES
         | SECTION_TRANSACTIONS | SECTION_METADATA | SECTION_COMMITMENTS;
 
@@ -607,12 +610,20 @@ final class BackupV2Restore {
                     seen |= bit;
                     parseCommitments(json, stage);
                     break;
+                case "sources":
+                    bit = SECTION_SOURCES;
+                    if ((seen & bit) != 0) throw invalid("duplicate sources section");
+                    seen |= bit;
+                    parseSources(json, stage);
+                    break;
                 default:
                     throw invalid("unknown backup section");
             }
         }
         json.endObject();
-        if (seen != ALL_SECTIONS) throw invalid("incomplete backup sections");
+        if ((seen & ALL_SECTIONS) != ALL_SECTIONS
+                || (seen & ~ (ALL_SECTIONS | SECTION_SOURCES)) != 0)
+            throw invalid("incomplete backup sections");
     }
 
     private static void parseBalances(JsonReader json, InputStage stage) throws Exception {
@@ -905,9 +916,102 @@ final class BackupV2Restore {
         return hasDate;
     }
 
+    private static void parseSources(JsonReader json, InputStage stage) throws Exception {
+        json.beginArray();
+        while (json.hasNext()) {
+            String sender = null;
+            String body = null;
+            long arrival = -1;
+            int rule = -1;
+            org.json.JSONObject row = new org.json.JSONObject();
+            json.beginObject();
+            while (json.hasNext()) {
+                String field = json.nextName();
+                switch (field) {
+                    case "sender": sender = requiredString(json); row.put("sender", sender); break;
+                    case "body":
+                        if (json.peek() == JsonToken.NULL) { json.nextNull(); body = null; }
+                        else { body = requiredString(json); }
+                        row.put("body", body == null ? org.json.JSONObject.NULL : body);
+                        break;
+                    case "arrival": arrival = exactLong(json); row.put("arrival", arrival); break;
+                    case "rule": rule = (int) exactLong(json); row.put("rule", rule); break;
+                    case "transactions":
+                        row.put("transactions", readSourceTransactions(json));
+                        break;
+                    case "balances":
+                        row.put("balances", readSourceBalances(json));
+                        break;
+                    default: throw invalid("unknown source field");
+                }
+            }
+            json.endObject();
+            if (sender == null || sender.isEmpty() || arrival < 0 || rule < 0)
+                throw invalid("invalid source row");
+            stage.add(SOURCE, row.toString());
+        }
+        json.endArray();
+    }
+
+    private static org.json.JSONArray readSourceTransactions(JsonReader json) throws Exception {
+        org.json.JSONArray out = new org.json.JSONArray();
+        json.beginArray();
+        while (json.hasNext()) {
+            org.json.JSONObject row = new org.json.JSONObject();
+            boolean parser = false, bank = false, date = false, amount = false;
+            json.beginObject();
+            while (json.hasNext()) {
+                String field = json.nextName();
+                switch (field) {
+                    case "parser": row.put("parser", exactLong(json)); parser = true; break;
+                    case "bank": row.put("bank", requiredString(json)); bank = true; break;
+                    case "date": row.put("date", exactLong(json)); date = true; break;
+                    case "amount": row.put("amount", exactLong(json)); amount = true; break;
+                    case "account": row.put("account", optionalString(json)); break;
+                    case "bal": row.put("bal", optionalLong(json)); break;
+                    case "sig": row.put("sig", optionalString(json)); break;
+                    case "content": row.put("content", optionalString(json)); break;
+                    default: throw invalid("unknown source transaction field");
+                }
+            }
+            json.endObject();
+            if (!parser || !bank || !date || !amount) throw invalid("invalid source transaction");
+            out.put(row);
+        }
+        json.endArray();
+        return out;
+    }
+
+    private static org.json.JSONArray readSourceBalances(JsonReader json) throws Exception {
+        org.json.JSONArray out = new org.json.JSONArray();
+        json.beginArray();
+        while (json.hasNext()) {
+            org.json.JSONObject row = new org.json.JSONObject();
+            boolean parser = false, bank = false, date = false, balance = false;
+            json.beginObject();
+            while (json.hasNext()) {
+                String field = json.nextName();
+                switch (field) {
+                    case "parser": row.put("parser", exactLong(json)); parser = true; break;
+                    case "bank": row.put("bank", requiredString(json)); bank = true; break;
+                    case "date": row.put("date", exactLong(json)); date = true; break;
+                    case "balance": row.put("balance", exactLong(json)); balance = true; break;
+                    case "account": row.put("account", optionalString(json)); break;
+                    default: throw invalid("unknown source balance field");
+                }
+            }
+            json.endObject();
+            if (!parser || !bank || !date || !balance) throw invalid("invalid source balance");
+            out.put(row);
+        }
+        json.endArray();
+        return out;
+    }
+
     private static BackupManager.RestoreResult apply(Context context, InputStage stage)
             throws Exception {
         BackupManager.RestoreResult result = new BackupManager.RestoreResult();
+        mergeSources(context, stage, result);
         mergeBalances(context, stage, result);
 
         TransactionStore.MergeResult merged = TransactionStore.mergeResult(context,
@@ -922,6 +1026,44 @@ final class BackupV2Restore {
 
         mergeCommitments(context, stage, result);
         return result;
+    }
+
+    private static void mergeSources(Context context, InputStage stage,
+            BackupManager.RestoreResult result) throws Exception {
+        stage.forEach(SOURCE, payload -> {
+            org.json.JSONObject row = new org.json.JSONObject(payload);
+            String sender = row.getString("sender");
+            String body = row.isNull("body") ? null : row.getString("body");
+            long arrival = row.getLong("arrival");
+            int rule = row.getInt("rule");
+            SourceStore.Source source = SourceStore.capture(context, sender, body, arrival, rule);
+            if (source == null) return;
+            org.json.JSONArray transactions = row.optJSONArray("transactions");
+            if (transactions != null) {
+                for (int i = 0; i < transactions.length(); i++) {
+                    org.json.JSONObject tx = transactions.getJSONObject(i);
+                    Long bal = tx.isNull("bal") ? null : tx.getLong("bal");
+                    Transaction transaction = new Transaction(tx.getString("bank"),
+                        tx.isNull("account") ? null : tx.getString("account"),
+                        tx.getLong("date"), tx.getLong("amount"), bal,
+                        tx.isNull("sig") ? null : tx.getString("sig"),
+                        tx.isNull("content") ? null : tx.getString("content"));
+                    SourceStore.observeTransaction(context, source, tx.getInt("parser"),
+                        transaction);
+                }
+            }
+            org.json.JSONArray balances = row.optJSONArray("balances");
+            if (balances != null) {
+                for (int i = 0; i < balances.length(); i++) {
+                    org.json.JSONObject bal = balances.getJSONObject(i);
+                    SourceStore.observeBalance(context, source, bal.getInt("parser"),
+                        bal.getString("bank"),
+                        bal.isNull("account") ? null : bal.getString("account"),
+                        bal.getLong("date"), bal.getLong("balance"));
+                }
+            }
+            result.metadataChanged = true;
+        });
     }
 
     private static void mergeBalances(Context context, InputStage stage,

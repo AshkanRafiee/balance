@@ -128,6 +128,43 @@ final class BackupManager {
 
         json.name("commitments");
         CommitmentStore.writeJsonRecords(context, json);
+
+        json.name("sources").beginArray();
+        java.util.List<SourceStore.Source> sources = new java.util.ArrayList<>();
+        SourceStore.forEachSource(context, 256, source -> { sources.add(source); });
+        for (SourceStore.Source source : sources) {
+            json.beginObject();
+            json.name("sender").value(source.sender);
+            json.name("body").value(source.rawBody);
+            json.name("arrival").value(source.arrivalTime);
+            json.name("rule").value(source.ruleVersion);
+            json.name("transactions").beginArray();
+            for (SourceStore.TransactionObservation observation :
+                    SourceStore.transactionObservationsForSource(context, source.id)) {
+                Transaction transaction = observation.transaction;
+                json.beginObject().name("parser").value(observation.parserRevision)
+                    .name("bank").value(transaction.bank).name("date").value(transaction.date)
+                    .name("amount").value(transaction.amount);
+                if (transaction.account != null) json.name("account").value(transaction.account);
+                if (transaction.balance != null) json.name("bal").value(transaction.balance);
+                if (transaction.sig != null) json.name("sig").value(transaction.sig);
+                if (transaction.content != null) json.name("content").value(transaction.content);
+                json.endObject();
+            }
+            json.endArray();
+            json.name("balances").beginArray();
+            for (SourceStore.BalanceObservation observation :
+                    SourceStore.balanceObservationsForSource(context, source.id)) {
+                json.beginObject().name("parser").value(observation.parserRevision)
+                    .name("bank").value(observation.bank).name("date").value(observation.date)
+                    .name("balance").value(observation.balance);
+                if (observation.account != null) json.name("account").value(observation.account);
+                json.endObject();
+            }
+            json.endArray();
+            json.endObject();
+        }
+        json.endArray();
         json.endObject();
     }
 

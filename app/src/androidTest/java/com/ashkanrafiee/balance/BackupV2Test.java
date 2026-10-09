@@ -212,6 +212,44 @@ public class BackupV2Test {
         assertEquals("Local definition", CommitmentStore.get(context, id).name);
     }
 
+    @Test public void sources_roundTripThroughFramedBackup() throws Exception {
+        SourceStore.Source source = SourceStore.capture(context, "Refah", "source body", T, 7);
+        assertNotNull(source);
+        Transaction observed = new Transaction("Refah", "account", T + 1, -100L, 900L,
+            "observed-sig", "observed-content");
+        assertTrue(SourceStore.observeTransaction(context, source, 7, observed));
+        assertTrue(SourceStore.observeBalance(context, source, 7, "Refah", "account", T + 1, 900L));
+
+        assertEquals(1L, SourceStore.sourceCount(context));
+        File backup = file("v2-sources.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+        try (java.io.FileInputStream raw = new java.io.FileInputStream(backup);
+                BackupFrames.AuthenticatedInputStream decrypted = BackupFrames.openInputStream(raw,
+                    PASSWORD.toCharArray());
+                java.io.ByteArrayOutputStream plain = new java.io.ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = decrypted.read(buffer)) != -1) plain.write(buffer, 0, count);
+            String json = plain.toString("UTF-8");
+            assertTrue("framed backup must carry sources, got: "
+                + json.substring(0, Math.min(400, json.length())), json.contains("\"sources\""));
+            org.json.JSONObject payload = new org.json.JSONObject(json);
+            assertEquals("backup must carry the captured source",
+                1, payload.getJSONArray("sources").length());
+        }
+        BalanceData.reset(context, true);
+        assertEquals(0L, SourceStore.sourceCount(context));
+
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD);
+        assertEquals(1L, SourceStore.sourceCount(context));
+        final int[] transactions = {0};
+        SourceStore.forEachTransaction(context, 256, observation -> transactions[0]++);
+        assertEquals(1, transactions[0]);
+        final int[] balances = {0};
+        SourceStore.forEachBalance(context, 256, observation -> balances[0]++);
+        assertEquals(1, balances[0]);
+    }
+
     @Test public void wrongPasswordLateFrameTrailingAndMalformedInputLeaveLiveDataUnchanged()
             throws Exception {
         LinkedHashMap<String, Bank> live = new LinkedHashMap<>();
