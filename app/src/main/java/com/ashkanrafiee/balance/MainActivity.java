@@ -1327,6 +1327,9 @@ public class MainActivity extends Activity {
         /** Set while the shown summary may lag the store; the last summary keeps drawing
          *  meanwhile, the way saved balances stay on screen during a refresh. */
         boolean commitmentSummaryStale = true;
+        /** A failed reload keeps the last-good card up instead of retrying every frame; the
+         *  next explicit invalidation clears it and tries again. */
+        boolean commitmentSummaryFailed;
         /** Bumps on every invalidation so a late worker cannot install a stale summary. */
         int commitmentSummaryGen;
         boolean hasCommitments;
@@ -1366,6 +1369,7 @@ public class MainActivity extends Activity {
         final Handler handler = new Handler(Looper.getMainLooper());
         final Runnable monthRefresh = () -> {
             commitmentSummaryStale = true;
+            commitmentSummaryFailed = false;
             commitmentSummaryGen++;
             invalidate();
             scheduleMonthRefresh();
@@ -1674,6 +1678,7 @@ public class MainActivity extends Activity {
 
         void invalidateCommitmentSummary() {
             commitmentSummaryStale = true;
+            commitmentSummaryFailed = false;
             commitmentSummaryGen++;
             invalidate();
         }
@@ -1684,7 +1689,8 @@ public class MainActivity extends Activity {
          *  the dashboard never flashes the card empty. */
         void ensureCommitmentSummary() {
             if (commitmentSummaryLoading) return;
-            if (commitmentSummaryLoaded && !commitmentSummaryStale) return;
+            if (commitmentSummaryLoaded && (!commitmentSummaryStale || commitmentSummaryFailed))
+                return;
             commitmentSummaryLoading = true;
             final int gen = commitmentSummaryGen;
             new Thread(() -> {
@@ -1697,9 +1703,13 @@ public class MainActivity extends Activity {
                     post(() -> {
                         commitmentSummaryLoading = false;
                         if (gen != commitmentSummaryGen) return;
-                        commitmentSummaryLoaded = true;
-                        commitmentSummaryStale = false;
-                        hasCommitments = false;
+                        if (!commitmentSummaryLoaded) {
+                            commitmentSummaryLoaded = true;
+                            commitmentSummaryStale = false;
+                            hasCommitments = false;
+                        } else {
+                            commitmentSummaryFailed = true;
+                        }
                         invalidate();
                     });
                     return;
@@ -1717,6 +1727,7 @@ public class MainActivity extends Activity {
                     hasCommitments = any;
                     commitmentSummaryLoaded = true;
                     commitmentSummaryStale = false;
+                    commitmentSummaryFailed = false;
                     invalidate();
                 });
             }, "commitment-summary").start();
