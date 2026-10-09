@@ -1584,7 +1584,7 @@ public final class HistoryActivity extends Activity {
     private int pendingScroll;
 
     /** Expands the current year, current month and its days once per screen, so the freshest
-     *  history is visible without any interaction without undoing later collapses. When the Display
+     *  history is visible without any interaction without undoing later collapses. When the debug
      *  menu's "expand all history" option is on, every year, month and day opens instead.
      *
      *  <p>Each level is independent: opening a year does not open its months, and opening a month
@@ -2713,7 +2713,7 @@ public final class HistoryActivity extends Activity {
      * One pass coalesces every {@code requestLayout} into a single traversal.
      *
      * <p>What bounds the cost is therefore which months are open, not how they are filled — which
-     * is what {@link #seedExpanded} decides, and what the Display menu's expand-all choice is for.
+     * is what {@link #seedExpanded} decides, and what the debug menu's expand-all choice is for.
      */
     private void renderDays(LinearLayout daysHost, List<DayGroup> days) {
         for (int i = daysHost.getChildCount() - 1; i >= 0; i--) {

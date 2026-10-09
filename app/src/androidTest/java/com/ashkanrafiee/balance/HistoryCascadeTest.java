@@ -33,7 +33,7 @@ import java.util.function.Predicate;
  * <p>The levels are kept independent deliberately. Cascading them meant one tap on a year built a
  * whole year's movements in a single pass, which is a screen that takes seconds to appear, and a
  * year of a busy account took long enough to be mistaken for a freeze. Asking for the whole
- * history is still possible, but only by choosing it in the Display menu.
+ * history is still possible, but only by choosing it in the hidden debug menu.
  */
 @RunWith(AndroidJUnit4.class)
 public class HistoryCascadeTest {
@@ -147,9 +147,12 @@ public class HistoryCascadeTest {
     }
 
     @Test public void askingToExpandEverything_opensEveryLevelAtOnce() {
-        // The Display menu's switch is the one way to ask for the whole history, so it has to do
+        // The debug menu's switch is the one way to ask for the whole history, so it has to do
         // exactly that: with it on, everything is already on screen and nothing has to be tapped.
+        // Mark the upgrade migration done first: on a fresh install the first activity start
+        // would otherwise reset this opt-in back off.
         storeThisMonth();
+        BalanceData.migrateExpandAllToDebugMenu(ctx);
         BalanceData.setExpandAllHistory(ctx, true);
         launch();
         assertNotNull("today's movement must be there", findByTextContaining("10,000,000"));
