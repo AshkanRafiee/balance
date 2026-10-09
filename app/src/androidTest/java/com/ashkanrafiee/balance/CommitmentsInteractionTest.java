@@ -192,6 +192,7 @@ public class CommitmentsInteractionTest {
             assertTrue(manage.performClick());
 
             AlertDialog manageDialog = dialogField(activity, "manageDialogWindow");
+            assertNotNull("the manage dialog must be showing", manageDialog);
             TextView definition = findText(manageDialog.getWindow().getDecorView(), source.name);
             assertNotNull("the reminder definition must be listed", definition);
             View clickable = definition;
@@ -201,10 +202,9 @@ public class CommitmentsInteractionTest {
             }
             assertNotNull("the reminder row must be clickable", clickable);
             assertTrue(clickable.performClick());
-        });
 
-        commitmentsScenario.onActivity(activity -> {
             AlertDialog editor = dialogField(activity, "activeDialog");
+            assertNotNull("the editor must open synchronously from the row click", editor);
             EditText lead = findEditText(editor.getWindow().getDecorView(), String.valueOf(rawLeadMs));
             assertNotNull("a raw reminder must reopen with its exact milliseconds", lead);
             assertEquals(String.valueOf(rawLeadMs), lead.getText().toString());
