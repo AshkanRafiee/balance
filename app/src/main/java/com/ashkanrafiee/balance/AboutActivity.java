@@ -23,6 +23,8 @@ public final class AboutActivity extends Activity {
     static final String DONATION_URL = "https://balance.ashkanrafiee.com/#donate";
     int bg, card, muted, accent, heroColor, link, footerColor, fg;
     private LockOverlay lockOverlay;
+    /** Version taps towards the hidden debug menu; reset once it unlocks. */
+    int versionTaps;
 
     int color(int res) {
         return getResources().getColor(res, getTheme());
@@ -153,7 +155,37 @@ public final class AboutActivity extends Activity {
 
         TextView footerView = text(getString(R.string.about_footer, appVersion()), 11, footerColor);
         footerView.setGravity(Gravity.CENTER);
+        // Seven taps on the version unlock the hidden debug menu; afterwards tapping it
+        // opens the menu directly.
+        footerView.setOnClickListener(v -> {
+            if (BalanceData.isDebugMenuUnlocked(this)) { debugDialog(); return; }
+            if (++versionTaps >= 7) {
+                versionTaps = 0;
+                BalanceData.setDebugMenuUnlocked(this);
+                android.widget.Toast.makeText(this, getString(R.string.debug_menu_unlocked),
+                    android.widget.Toast.LENGTH_SHORT).show();
+                debugDialog();
+            }
+        });
         body.addView(footerView);
+    }
+
+    /** Hidden diagnostics menu: currently only the expand-everything history switch, which is
+     *  slow by design and therefore kept out of the Display menu. */
+    void debugDialog() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(24), dp(8), dp(24), dp(0));
+        android.widget.CheckBox expandAll = new android.widget.CheckBox(this);
+        expandAll.setText(getString(R.string.settings_history_expand_all_label));
+        expandAll.setChecked(BalanceData.getExpandAllHistory(this));
+        expandAll.setOnCheckedChangeListener((b, on) -> BalanceData.setExpandAllHistory(this, on));
+        box.addView(expandAll, new LinearLayout.LayoutParams(-1, -2));
+        new android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.debug_menu_title))
+            .setView(box)
+            .setPositiveButton(android.R.string.ok, null)
+            .show();
     }
 
     @Override
