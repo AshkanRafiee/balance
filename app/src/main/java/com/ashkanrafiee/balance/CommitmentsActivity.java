@@ -464,20 +464,20 @@ public final class CommitmentsActivity extends Activity {
     private void buttonsRow() {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        TextView add = text(getString(R.string.commitments_add), 15, Color.WHITE, medium());
-        add.setGravity(Gravity.CENTER);
-        add.setBackground(rounded(accent, 14));
-        add.setPadding(dp(16), dp(13), dp(16), dp(13));
-        add.setOnClickListener(v -> editorDialog(null));
-        row.addView(add, new LinearLayout.LayoutParams(0, -2, 1));
         TextView manage = text(getString(R.string.commitments_manage), 15, fg, medium());
         manage.setGravity(Gravity.CENTER);
         manage.setBackground(rounded(chipBg, 14));
         manage.setPadding(dp(16), dp(13), dp(16), dp(13));
         manage.setOnClickListener(v -> manageDialog());
+        row.addView(manage, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView add = text(getString(R.string.commitments_add), 15, Color.WHITE, medium());
+        add.setGravity(Gravity.CENTER);
+        add.setBackground(rounded(accent, 14));
+        add.setPadding(dp(16), dp(13), dp(16), dp(13));
+        add.setOnClickListener(v -> editorDialog(null));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
         lp.setMarginStart(dp(10));
-        row.addView(manage, lp);
+        row.addView(add, lp);
         root.addView(row, margin(0, 0, 0, 12));
     }
 
