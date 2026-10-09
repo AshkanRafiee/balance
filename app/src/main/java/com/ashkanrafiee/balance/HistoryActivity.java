@@ -803,6 +803,10 @@ public final class HistoryActivity extends Activity {
         exportDialog.show();
         new Thread(() -> {
             final int[] error = {0};
+            // One atomic snapshot: a scan publishing mid-export must not mix generations in a
+            // single file. Progress callbacks only post to the UI thread, so holding the store
+            // monitor here cannot deadlock it.
+            synchronized (BalanceData.class) {
             try {
                 final Context app = getApplicationContext();
                 final List<String> tokens = searchTokens(query);
@@ -850,6 +854,16 @@ public final class HistoryActivity extends Activity {
             } catch (Exception e) {
                 error[0] = 1;
                 android.util.Log.w("BalanceHistory", "csv export failed", e);
+                // The destination was already truncated by the "w" open: remove the stub so a
+                // failed export cannot masquerade as a complete one. Best-effort; non-document
+                // destinations simply refuse and keep the stub.
+                try {
+                    android.provider.DocumentsContract.deleteDocument(getContentResolver(), uri);
+                } catch (Exception cleanup) {
+                    android.util.Log.w("BalanceHistory", "truncated export cleanup failed",
+                        cleanup);
+                }
+            }
             }
             runOnUiThread(() -> {
                 if (!isDestroyed() && !isFinishing()) exportDialog.dismiss();
