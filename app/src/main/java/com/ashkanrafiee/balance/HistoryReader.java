@@ -355,22 +355,26 @@ final class HistoryReader {
             Accumulator accumulator = new Accumulator(context, request, timeline);
             try (MetadataStore.LookupSession metadata = MetadataStore.LookupSession.open(context)) {
                 Matcher matcher = new Matcher(context, request, metadata);
-                TransactionStore.forEach(context, request.pageSize, transaction -> {
-                    // Scope narrowing precedes all other filters. Residual detection in the reference path
-                    // uses exactly this bank/account scope before any of these later predicates run.
-                    if (!inScope(transaction, request)) return;
-                    if (!matchesMovementFilter(transaction, request)) return;
-                    if (!matchesTags(metadata, transaction, request.selectedTags)) return;
-                    if (!matcher.matchesTransaction(transaction)) return;
-                    accumulator.addTransaction(transaction);
-                });
-                if (residuals && request.selectedTags.isEmpty()) {
-                    HistoryResidualReader.forEach(context, request.bank, request.account,
-                        request.pageSize, residual -> {
+                boolean stageResiduals = residuals && request.selectedTags.isEmpty();
+                try (HistoryResidualReader.Staging residualStaging =
+                        stageResiduals ? HistoryResidualReader.Staging.open(context) : null) {
+                    TransactionStore.forEach(context, request.pageSize, transaction -> {
+                        // Scope narrowing precedes all other filters. Residual detection needs the
+                        // whole bank/account scope, so staging happens before narrowing predicates.
+                        if (!inScope(transaction, request)) return;
+                        if (residualStaging != null) residualStaging.add(transaction);
+                        if (!matchesMovementFilter(transaction, request)) return;
+                        if (!matchesTags(metadata, transaction, request.selectedTags)) return;
+                        if (!matcher.matchesTransaction(transaction)) return;
+                        accumulator.addTransaction(transaction);
+                    });
+                    if (residualStaging != null) {
+                        residualStaging.emit(residual -> {
                             if (!matchesResidualFilter(residual, request)) return;
                             if (!matcher.matchesResidual(residual)) return;
                             accumulator.addResidual(residual);
-                        });
+                        }, request.pageSize);
+                    }
                 }
                 return accumulator.result(false, residuals, null, null);
             } finally {

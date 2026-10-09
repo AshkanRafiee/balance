@@ -111,6 +111,86 @@ final class HistoryResidualReader {
     }
 
     /**
+     * Feeds scoped transactions from an external store pass and emits residuals, without
+     * re-reading the transaction store. The caller stages every row in the detection scope
+     * (bank/account) before narrowing filters run: dropping a row here would corrupt the
+     * bracketing walk exactly like a page-local residual calculation would.
+     */
+    static final class Staging implements AutoCloseable {
+        private final Stage stage;
+        private long nextOrdinal;
+        private boolean stagingOpen;
+        private boolean emitted;
+        private boolean closed;
+
+        private Staging(Stage stage) {
+            this.stage = stage;
+        }
+
+        static Staging open(Context context) throws Exception {
+            requireContext(context);
+            Stage stage = Stage.open(context);
+            Staging staging = new Staging(stage);
+            try {
+                stage.db.beginTransactionNonExclusive();
+                staging.stagingOpen = true;
+                return staging;
+            } catch (Throwable failure) {
+                Exception cleanup = staging.closeAndDelete();
+                if (cleanup != null) failure.addSuppressed(cleanup);
+                if (failure instanceof Exception) throw (Exception) failure;
+                if (failure instanceof Error) throw (Error) failure;
+                throw new RuntimeException(failure);
+            }
+        }
+
+        void add(Transaction transaction) throws Exception {
+            if (transaction == null) throw new NullPointerException("transaction");
+            if (closed || emitted || !stagingOpen)
+                throw new IllegalStateException("residual staging is not accepting rows");
+            if (nextOrdinal < 0) throw new IllegalStateException("transaction ordinal exhausted");
+            long ordinal = nextOrdinal;
+            nextOrdinal = ordinal == Long.MAX_VALUE ? -1 : ordinal + 1;
+            stage.insertTransaction(stage.slot(transaction), transaction.date, ordinal, transaction);
+        }
+
+        void emit(Visitor visitor, int pageSize) throws Exception {
+            requirePageSize(pageSize);
+            if (visitor == null) throw new NullPointerException("visitor");
+            if (closed || emitted || !stagingOpen)
+                throw new IllegalStateException("residual staging is not emitting");
+            emitted = true;
+            stage.db.setTransactionSuccessful();
+            stage.db.endTransaction();
+            stagingOpen = false;
+            generateCandidates(stage, pageSize);
+            long runs = makeInitialRuns(stage, pageSize);
+            emitSortedRuns(stage, runs, visitor);
+        }
+
+        private Exception closeAndDelete() {
+            Exception failure = null;
+            if (stagingOpen) {
+                try { stage.db.endTransaction(); } catch (Exception e) { failure = e; }
+                stagingOpen = false;
+            }
+            Exception cleanup = stage.closeAndDelete();
+            if (cleanup != null) {
+                if (failure == null) failure = cleanup;
+                else failure.addSuppressed(cleanup);
+            }
+            return failure;
+        }
+
+        @Override public void close() throws Exception {
+            if (closed) return;
+            closed = true;
+            Exception failure = closeAndDelete();
+            if (failure != null) throw failure;
+        }
+    }
+
+    /**
      * Explicitly bounded compatibility read. A bound of zero is valid and requires no residuals;
      * if one is found, {@link ResultLimitExceededException} is thrown.
      */
