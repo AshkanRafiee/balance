@@ -1863,6 +1863,14 @@ public final class HistoryActivity extends Activity {
         final String query = searchQuery == null ? "" : searchQuery.trim();
         final List<String> tagSelection = new ArrayList<>(selectedTags);
         final Set<String> expandedSnapshot = new java.util.LinkedHashSet<>(expandedDays);
+        final boolean seededSnapshot = expandedSeeded;
+        final String expansionKey = expansionQuery(query);
+        final String previousExpansionKey = searchExpandedFor;
+        final Set<String> savedPreSearchDays = preSearchDays == null ? null
+            : new java.util.LinkedHashSet<>(preSearchDays);
+        final boolean expandAll = BalanceData.getExpandAllHistory(this);
+        final boolean discoverExpansion = (!expansionKey.isEmpty()
+            && !expansionKey.equals(previousExpansionKey)) || (!seededSnapshot && expandAll);
         new Thread(() -> {
             HistoryReader.Result result = null;
             try {
@@ -1873,13 +1881,45 @@ public final class HistoryActivity extends Activity {
                     release.await();
                 }
 
-                // Warm one day at most. Every other expanded day displays the same explicit page
-                // affordance and can be opened without rerunning the aggregate scan.
-                Set<String> requestedDays = new java.util.LinkedHashSet<>();
-                if (!expandedSnapshot.isEmpty()) {
-                    requestedDays.add(expandedSnapshot.iterator().next());
-                } else {
-                    requestedDays.add(CalDate.today(iran).key());
+                Set<String> requestedDays;
+                HistoryReader.Result discovery = null;
+                try {
+                    if (discoverExpansion) {
+                        // This pass retains no rows. It is needed only because the screen's
+                        // existing expand-all/search rules discover expanded days from the grouped
+                        // result.
+                        HistoryReader.Request discoveryRequest = new HistoryReader.Request(
+                            iran, HistoryReader.DEFAULT_PAGE_SIZE, bank, acct, f, query,
+                            tagSelection, Collections.emptySet(), 0,
+                            HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
+                        discovery = HistoryReader.summaryWithResiduals(
+                            getApplicationContext(), discoveryRequest);
+                        requestedDays = plannedExpandedDays(discovery, expandedSnapshot,
+                            seededSnapshot, expandAll, expansionKey, previousExpansionKey,
+                            savedPreSearchDays, iran);
+                    } else {
+                        requestedDays = new java.util.LinkedHashSet<>(expandedSnapshot);
+                        if (expansionKey.isEmpty() && previousExpansionKey != null
+                                && savedPreSearchDays != null) {
+                            // Clearing a search restores the exact pre-search day expansion.
+                            requestedDays.clear();
+                            requestedDays.addAll(savedPreSearchDays);
+                        } else if (!seededSnapshot && !expandAll) {
+                            // The normal first-load seed opens every visible day in the current
+                            // month. Nonexistent days simply produce empty pages.
+                            CalDate current = CalDate.today(iran);
+                            for (int day = 1; day <= CalDate.daysInMonth(current.year,
+                                    current.month, iran); day++) {
+                                requestedDays.add(CalDate.of(current.year, current.month, day).key());
+                            }
+                        }
+                    }
+                } finally {
+                    if (discovery != null) {
+                        try { discovery.close(); } catch (Exception e) {
+                            android.util.Log.w("BalanceHistory", "discovery cleanup failed", e);
+                        }
+                    }
                 }
 
                 HistoryReader.Request request = new HistoryReader.Request(
@@ -1967,6 +2007,46 @@ public final class HistoryActivity extends Activity {
                 });
             }
         }).start();
+    }
+
+    /** Determines which visible days the existing seed/search rules will open after this result is
+     *  installed. Collapsed days remain summary-only; stale expansion keys for filtered-out days do
+     *  not consume row pages. */
+    private static Set<String> plannedExpandedDays(HistoryReader.Result result,
+            Set<String> expandedSnapshot, boolean seeded, boolean expandAll, String expansionKey,
+            String previousExpansionKey, Set<String> savedPreSearchDays, boolean iran) {
+        Set<String> visible = new java.util.LinkedHashSet<>(result.daySummaries.keySet());
+        Set<String> requested = new java.util.LinkedHashSet<>();
+        for (String key : expandedSnapshot) {
+            if (visible.contains(key)) requested.add(key);
+        }
+
+        if (!seeded) {
+            if (expandAll) {
+                requested.addAll(visible);
+            } else {
+                CalDate current = CalDate.today(iran);
+                for (HistoryReader.DaySummary day : result.daySummaries.values()) {
+                    if (day.date.year == current.year && day.date.month == current.month) {
+                        requested.add(day.date.key());
+                    }
+                }
+            }
+        }
+
+        if (expansionKey.isEmpty()) {
+            if (previousExpansionKey != null && savedPreSearchDays != null) {
+                requested.clear();
+                for (String key : savedPreSearchDays) {
+                    if (visible.contains(key)) requested.add(key);
+                }
+            }
+        } else if (!expansionKey.equals(previousExpansionKey)) {
+            // expandForSearch opens every group in a fresh search/tag expansion so no match is
+            // hidden inside a collapsed day.
+            requested.addAll(visible);
+        }
+        return requested;
     }
 
     /** Requests an adjacent page without rescanning the aggregate snapshot. */
