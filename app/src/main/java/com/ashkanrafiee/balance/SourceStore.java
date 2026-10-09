@@ -209,7 +209,12 @@ final class SourceStore {
         }
     }
 
-    /** Captures one recognized source, returning null for an unknown sender. */
+    /**
+     * Captures one recognized source, returning null for an unknown sender. Unrecognized
+     * senders are deliberately never stored — keeping every unknown SMS would retain
+     * potentially sensitive personal messages for no balance purpose — and are only counted
+     * in scan diagnostics so the Report screen can still ask for their format.
+     */
     static Source capture(Context context, String sender, String body, long arrival,
             int ruleVersion) throws Exception {
         return runInTransaction(context,
