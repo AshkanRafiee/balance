@@ -141,14 +141,23 @@ final class HistoryWarmup {
         }
     }
 
+    /**
+     * Revisions of exactly the stores a history summary reads. Commitments and sources are
+     * deliberately absent: settling a commitment must not refuse an otherwise valid warm cache.
+     */
     private static String[] revisions(Context context) {
         return new String[]{
             TransactionStore.revision(context),
-            MetadataStore.revision(context),
-            CommitmentStore.revision(context)};
+            MetadataStore.revision(context)};
     }
 
     private static void sweepStaleFiles(Context context) {
+        sweepStaleFiles(context, "history-timeline-");
+        sweepStaleFiles(context, "history-residual-");
+        sweepStaleFiles(context, "history-csv-");
+    }
+
+    private static void sweepStaleFiles(Context context, String prefix) {
         try {
             File directory = context.getNoBackupFilesDir();
             if (directory == null) return;
@@ -156,10 +165,10 @@ final class HistoryWarmup {
             if (files == null) return;
             long now = System.currentTimeMillis();
             for (File file : files) {
-                if (!file.getName().startsWith("history-timeline-")) continue;
+                if (!file.getName().startsWith(prefix)) continue;
                 if (now - file.lastModified() > STALE_FILE_AGE_MS && file.delete()) continue;
                 if (now - file.lastModified() > STALE_FILE_AGE_MS) {
-                    Log.w(TAG, "stale timeline file could not be deleted");
+                    Log.w(TAG, "stale file could not be deleted");
                 }
             }
         } catch (Exception e) {
