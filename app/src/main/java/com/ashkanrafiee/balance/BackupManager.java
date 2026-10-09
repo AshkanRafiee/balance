@@ -84,6 +84,24 @@ final class BackupManager {
         }
     }
 
+    /** One restorable section of a backup. The file always carries every section; the user
+     *  picks which ones a restore merges. */
+    enum Section {
+        BALANCES,
+        TRANSACTIONS,
+        NOTES,
+        REASONS,
+        CHANNELS,
+        TAGS,
+        COMMITMENTS,
+        SOURCES
+    }
+
+    /** All sections, for callers (and tests) that restore a backup whole. */
+    static java.util.EnumSet<Section> allSections() {
+        return java.util.EnumSet.allOf(Section.class);
+    }
+
     /** Result of a restore merge: per-bank newest-wins accounting. */
     static final class RestoreResult {
         int added;
@@ -324,8 +342,16 @@ final class BackupManager {
     /** Same as {@link #restore(Context, Uri, String)} with advisory progress. */
     static RestoreResult restore(Context context, Uri uri, String password, WorkProgress progress)
             throws Exception {
-        if (isFramed(context, uri)) return BackupV2Restore.restore(context, uri, password, progress);
-        return BackupV2Restore.restoreLegacy(context, uri, password, progress);
+        return restore(context, uri, password, progress, allSections());
+    }
+
+    /** Restores only the selected sections; unselected local data is left untouched. */
+    static RestoreResult restore(Context context, Uri uri, String password, WorkProgress progress,
+            java.util.Set<Section> selection) throws Exception {
+        if (selection == null) selection = allSections();
+        if (isFramed(context, uri))
+            return BackupV2Restore.restore(context, uri, password, progress, selection);
+        return BackupV2Restore.restoreLegacy(context, uri, password, progress, selection);
     }
 
     private static boolean isFramed(Context context, Uri uri) throws Exception {

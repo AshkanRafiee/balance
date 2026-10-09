@@ -3,6 +3,7 @@ package com.ashkanrafiee.balance;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -248,6 +249,37 @@ public class BackupV2Test {
         final int[] balances = {0};
         SourceStore.forEachBalance(context, 256, observation -> balances[0]++);
         assertEquals(1, balances[0]);
+    }
+
+    @Test public void restore_selectionMergesOnlySelectedSections() throws Exception {
+        LinkedHashMap<String, Bank> balances = new LinkedHashMap<>();
+        balances.put("Mellat", new Bank("Mellat", 5L, T, "sender"));
+        BalanceData.write(context, balances);
+        Transaction transaction = new Transaction("Mellat", T + 1, -1L, "selection-sig");
+        BalanceData.writeTransactions(context, Collections.singletonList(transaction));
+        BalanceData.setNote(context, transaction, "selection-note");
+        Commitment commitment = Commitment.create("selection", -100L, Commitment.ONCE,
+            Commitment.startOfDay(T), null, false, 0);
+        BalanceData.writeCommitments(context, Collections.singletonList(commitment));
+
+        File backup = file("v2-selection.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+        BalanceData.reset(context, true);
+
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD, null,
+            java.util.EnumSet.of(BackupManager.Section.BALANCES));
+        assertEquals(5L, (long) BalanceData.read(context).get("Mellat").amount);
+        assertTrue("unselected transactions must stay untouched",
+            BalanceData.readTransactions(context).isEmpty());
+        assertNull(BalanceData.getNote(context, transaction));
+        assertTrue(BalanceData.readCommitments(context).isEmpty());
+
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD, null,
+            java.util.EnumSet.of(BackupManager.Section.TRANSACTIONS,
+                BackupManager.Section.NOTES, BackupManager.Section.COMMITMENTS));
+        assertEquals(1, BalanceData.readTransactions(context).size());
+        assertEquals("selection-note", BalanceData.getNote(context, transaction));
+        assertEquals(1, BalanceData.readCommitments(context).size());
     }
 
     @Test public void wrongPasswordLateFrameTrailingAndMalformedInputLeaveLiveDataUnchanged()

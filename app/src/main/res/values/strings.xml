@@ -155,6 +155,15 @@
     <string name="backup_create_failed">Backup failed</string>
     <string name="backup_restored">Restore finished</string>
     <string name="backup_restore_failed">Restore failed</string>
+    <string name="restore_sections_title">Restore what?</string>
+    <string name="restore_section_balances">Balances</string>
+    <string name="restore_section_transactions">Transaction history</string>
+    <string name="restore_section_notes">Notes</string>
+    <string name="restore_section_reasons">Bank reasons</string>
+    <string name="restore_section_channels">Bank channels</string>
+    <string name="restore_section_tags">Tags</string>
+    <string name="restore_section_commitments">Commitments</string>
+    <string name="restore_section_sources">Message records</string>
     <string name="backup_restore_summary">%1$d banks added, %2$d banks updated, %3$d commitments added, %4$d history items restored</string>
     <string name="backup_restore_summary_metadata">History details restored</string>
     <string name="backup_restore_summary_none">The backup holds no newer balances</string>

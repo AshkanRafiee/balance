@@ -123,6 +123,13 @@ final class BackupV2Restore {
     /** Same as {@link #restore(Context, Uri, String)} with advisory progress. */
     static BackupManager.RestoreResult restore(Context context, Uri uri, String password,
             WorkProgress progress) throws Exception {
+        return restore(context, uri, password, progress, BackupManager.allSections());
+    }
+
+    /** Same with a section selection; unselected local data is left untouched. */
+    static BackupManager.RestoreResult restore(Context context, Uri uri, String password,
+            WorkProgress progress, java.util.Set<BackupManager.Section> selection)
+            throws Exception {
         if (password == null) throw new IllegalArgumentException("password");
 
         Context application = context.getApplicationContext();
@@ -143,7 +150,7 @@ final class BackupV2Restore {
                 try (DataGeneration.Stage generation = DataGeneration.beginStage(application)) {
                     generation.setPublishHookForTests(publishHookForTests);
                     if (progress != null) progress.stage(R.string.backup_stage_merging);
-                    result = apply(generation.context(), input);
+                    result = apply(generation.context(), input, selection);
                     generation.publish();
                 }
             }
@@ -175,6 +182,13 @@ final class BackupV2Restore {
     /** Same as {@link #restoreLegacy(Context, Uri, String)} with advisory progress. */
     static BackupManager.RestoreResult restoreLegacy(Context context, Uri uri, String password,
             WorkProgress progress) throws Exception {
+        return restoreLegacy(context, uri, password, progress, BackupManager.allSections());
+    }
+
+    /** Same with a section selection; unselected local data is left untouched. */
+    static BackupManager.RestoreResult restoreLegacy(Context context, Uri uri, String password,
+            WorkProgress progress, java.util.Set<BackupManager.Section> selection)
+            throws Exception {
         if (password == null) throw new IllegalArgumentException("password");
         Context application = context.getApplicationContext();
         if (application == null) application = context;
@@ -205,7 +219,7 @@ final class BackupV2Restore {
                 try (DataGeneration.Stage generation = DataGeneration.beginStage(application)) {
                     generation.setPublishHookForTests(publishHookForTests);
                     if (progress != null) progress.stage(R.string.backup_stage_merging);
-                    result = apply(generation.context(), input);
+                    result = apply(generation.context(), input, selection);
                     generation.publish();
                 }
             }
@@ -1041,23 +1055,33 @@ final class BackupV2Restore {
         return out;
     }
 
-    private static BackupManager.RestoreResult apply(Context context, InputStage stage)
-            throws Exception {
+    private static BackupManager.RestoreResult apply(Context context, InputStage stage,
+            java.util.Set<BackupManager.Section> selection) throws Exception {
+        if (selection == null) selection = BackupManager.allSections();
         BackupManager.RestoreResult result = new BackupManager.RestoreResult();
-        mergeSources(context, stage, result);
-        mergeBalances(context, stage, result);
+        if (selection.contains(BackupManager.Section.SOURCES)) mergeSources(context, stage, result);
+        if (selection.contains(BackupManager.Section.BALANCES))
+            mergeBalances(context, stage, result);
 
-        TransactionStore.MergeResult merged = TransactionStore.mergeResult(context,
-            visitor -> stage.forEach(TRANSACTION, payload -> visitor.accept(readTransaction(payload))),
-            stage::addAlias);
-        result.transactionsAdded = Math.toIntExact(merged.added);
+        if (selection.contains(BackupManager.Section.TRANSACTIONS)) {
+            TransactionStore.MergeResult merged = TransactionStore.mergeResult(context,
+                visitor -> stage.forEach(TRANSACTION,
+                    payload -> visitor.accept(readTransaction(payload))),
+                stage::addAlias);
+            result.transactionsAdded = Math.toIntExact(merged.added);
+        }
 
-        mergeMetadata(context, stage, NOTES, MetadataStore.NOTES, false, result);
-        mergeMetadata(context, stage, REASONS, MetadataStore.REASONS, false, result);
-        mergeMetadata(context, stage, CHANNELS, MetadataStore.CHANNELS, false, result);
-        mergeMetadata(context, stage, TAGS, MetadataStore.TAGS, true, result);
+        if (selection.contains(BackupManager.Section.NOTES))
+            mergeMetadata(context, stage, NOTES, MetadataStore.NOTES, false, result);
+        if (selection.contains(BackupManager.Section.REASONS))
+            mergeMetadata(context, stage, REASONS, MetadataStore.REASONS, false, result);
+        if (selection.contains(BackupManager.Section.CHANNELS))
+            mergeMetadata(context, stage, CHANNELS, MetadataStore.CHANNELS, false, result);
+        if (selection.contains(BackupManager.Section.TAGS))
+            mergeMetadata(context, stage, TAGS, MetadataStore.TAGS, true, result);
 
-        mergeCommitments(context, stage, result);
+        if (selection.contains(BackupManager.Section.COMMITMENTS))
+            mergeCommitments(context, stage, result);
         return result;
     }
 
