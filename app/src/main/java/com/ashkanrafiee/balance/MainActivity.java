@@ -200,6 +200,9 @@ public class MainActivity extends Activity {
         if (view != null) {
             view.enforceAutoHide();
             view.invalidateCommitmentSummary();
+            // Start the reload now rather than on the first draw, so the fresh summary is
+            // usually ready before the card paints; the last summary stays up meanwhile.
+            view.ensureCommitmentSummary();
             view.refresh();
             view.scheduleMonthRefresh();
         }
@@ -516,18 +519,6 @@ public class MainActivity extends Activity {
         staleLp.topMargin = dp(18);
         box.addView(staleLabel, staleLp);
         box.addView(staleSpin);
-
-        // A single on/off choice (not a dropdown): with it on, the history breakdown opens every
-        // year, month and day by default instead of only the current year, month and its days. It is
-        // the only way to ask for the whole history, so it stays off unless it is asked for.
-        CheckBox expandAll = new CheckBox(this);
-        expandAll.setText(getString(R.string.settings_history_expand_all_label));
-        expandAll.setChecked(BalanceData.getExpandAllHistory(MainActivity.this));
-        expandAll.setOnCheckedChangeListener((b, on) ->
-            BalanceData.setExpandAllHistory(MainActivity.this, on));
-        LinearLayout.LayoutParams expandLp = new LinearLayout.LayoutParams(-1, -2);
-        expandLp.topMargin = dp(18);
-        box.addView(expandAll, expandLp);
 
         CheckBox showCommitments = new CheckBox(this);
         showCommitments.setText(getString(R.string.settings_commitments_card_label));
@@ -1332,6 +1323,9 @@ public class MainActivity extends Activity {
         boolean commitmentSummaryLoaded;
         /** A summary load already running; the draw path never starts a second one. */
         boolean commitmentSummaryLoading;
+        /** Set while the shown summary may lag the store; the last summary keeps drawing
+         *  meanwhile, the way saved balances stay on screen during a refresh. */
+        boolean commitmentSummaryStale = true;
         /** Bumps on every invalidation so a late worker cannot install a stale summary. */
         int commitmentSummaryGen;
         boolean hasCommitments;
@@ -1370,7 +1364,7 @@ public class MainActivity extends Activity {
         Runnable clearClipRunnable;
         final Handler handler = new Handler(Looper.getMainLooper());
         final Runnable monthRefresh = () -> {
-            commitmentSummaryLoaded = false;
+            commitmentSummaryStale = true;
             commitmentSummaryGen++;
             invalidate();
             scheduleMonthRefresh();
@@ -1678,15 +1672,18 @@ public class MainActivity extends Activity {
         }
 
         void invalidateCommitmentSummary() {
-            commitmentSummaryLoaded = false;
+            commitmentSummaryStale = true;
             commitmentSummaryGen++;
             invalidate();
         }
 
         /** Loads the commitments summary off the UI thread: the store read can wait behind a
-         *  backup, restore or scan holding the store lock, and the draw path must never wait. */
+         *  backup, restore or scan holding the store lock, and the draw path must never wait.
+         *  Reloads keep drawing the last summary until the fresh one arrives, so returning to
+         *  the dashboard never flashes the card empty. */
         void ensureCommitmentSummary() {
-            if (commitmentSummaryLoaded || commitmentSummaryLoading) return;
+            if (commitmentSummaryLoading) return;
+            if (commitmentSummaryLoaded && !commitmentSummaryStale) return;
             commitmentSummaryLoading = true;
             final int gen = commitmentSummaryGen;
             new Thread(() -> {
@@ -1700,6 +1697,7 @@ public class MainActivity extends Activity {
                         commitmentSummaryLoading = false;
                         if (gen != commitmentSummaryGen) return;
                         commitmentSummaryLoaded = true;
+                        commitmentSummaryStale = false;
                         hasCommitments = false;
                         invalidate();
                     });
@@ -1717,6 +1715,7 @@ public class MainActivity extends Activity {
                     commitmentSummary = summary;
                     hasCommitments = any;
                     commitmentSummaryLoaded = true;
+                    commitmentSummaryStale = false;
                     invalidate();
                 });
             }, "commitment-summary").start();
@@ -2181,6 +2180,10 @@ public class MainActivity extends Activity {
                         x, top + 61, 10, muted, align);
                     return;
                 }
+            } else if (commitmentSummaryStale) {
+                // A reload is due (resume, edit, restore): kick it off but keep drawing the
+                // last summary, so the card never flashes empty on the way back.
+                ensureCommitmentSummary();
             }
             CommitmentsActivity.Summary summary = commitmentSummary;
             long pay = summary.overduePay + summary.thisMonthPay;
