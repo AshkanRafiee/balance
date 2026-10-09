@@ -78,6 +78,15 @@ final class HistoryCsvExport {
      */
     static void writeLookup(Context context, int pageSize, TransactionStore.StreamSource transactions,
             ResidualSource residuals, Writer writer, CsvExport.TextLookup text) throws Exception {
+        writeLookup(context, pageSize, transactions, residuals, writer, text, null);
+    }
+
+    /** Same as {@link #writeLookup(Context, int, TransactionStore.StreamSource, ResidualSource,
+     *  Writer, CsvExport.TextLookup)} with advisory progress: gathering while staging, then a
+     *  determinate write over the staged row count. */
+    static void writeLookup(Context context, int pageSize, TransactionStore.StreamSource transactions,
+            ResidualSource residuals, Writer writer, CsvExport.TextLookup text,
+            WorkProgress progress) throws Exception {
         requireContext(context);
         requirePageSize(pageSize);
         if (transactions == null) throw new NullPointerException("transactions");
@@ -87,12 +96,15 @@ final class HistoryCsvExport {
         Stage stage = Stage.open(context);
         Throwable operationFailure = null;
         try {
+            if (progress != null) progress.stage(R.string.export_stage_preparing);
             stage.stageTransactions(transactions);
             if (residuals != null) stage.stageResiduals(residuals);
 
             CsvExport.CellWriter cells = new CsvExport.CellWriter(context);
             cells.header(writer);
-            stage.emit(writer, cells, text, pageSize);
+            if (progress != null) progress.stage(R.string.export_stage_writing);
+            stage.emit(writer, cells, text, pageSize, progress,
+                progress == null ? 0 : stage.count());
         } catch (Throwable failure) {
             operationFailure = failure;
         }
@@ -317,7 +329,13 @@ final class HistoryCsvExport {
 
         void emit(Writer writer, CsvExport.CellWriter cells, CsvExport.TextLookup text,
                 int pageSize) throws Exception {
+            emit(writer, cells, text, pageSize, null, 0);
+        }
+
+        void emit(Writer writer, CsvExport.CellWriter cells, CsvExport.TextLookup text,
+                int pageSize, WorkProgress progress, long total) throws Exception {
             CursorPage page = new CursorPage(db, pageSize);
+            long done = 0;
             try {
                 while (page.next()) {
                     while (page.cursor.moveToNext()) {
@@ -338,10 +356,18 @@ final class HistoryCsvExport {
                             throw new Exception("invalid history CSV row kind");
                         }
                         page.remember(date, kind, ordinal);
+                        if (progress != null) progress.progress(++done, total);
                     }
                 }
             } finally {
                 page.close();
+            }
+        }
+
+        long count() {
+            try (Cursor cursor = db.rawQuery("SELECT COUNT(*) FROM " + ROWS, null)) {
+                cursor.moveToFirst();
+                return cursor.getLong(0);
             }
         }
 

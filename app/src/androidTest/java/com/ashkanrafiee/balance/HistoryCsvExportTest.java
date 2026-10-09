@@ -86,6 +86,34 @@ public class HistoryCsvExportTest {
         assertTemporaryFilesRemoved();
     }
 
+    @Test public void progress_reportsPreparingWritingAndDeterminateCompletion() throws Exception {
+        List<Integer> stages = new ArrayList<>();
+        long[] lastDone = {-1};
+        long[] lastTotal = {-1};
+        StringWriter output = new StringWriter();
+        WorkProgress progress = new WorkProgress() {
+            @Override public void stage(int stageResId) { stages.add(stageResId); }
+            @Override public void progress(long done, long total) {
+                lastDone[0] = done;
+                lastTotal[0] = total;
+            }
+        };
+        HistoryCsvExport.writeLookup(context, 17,
+            visitor -> {
+                for (int i = 0; i < 40; i++)
+                    visitor.accept(new Transaction("bank_melli", null, DATE + i, i,
+                        "signature-" + i, "content-" + i));
+            },
+            visitor -> visitor.accept(new Residual("bank_melli", null, DATE - 100, DATE, -7L, 1)),
+            output, CsvExport.lookup(null), progress);
+
+        assertEquals(Arrays.asList(R.string.export_stage_preparing, R.string.export_stage_writing),
+            stages);
+        assertEquals(41L, lastTotal[0]);
+        assertEquals(41L, lastDone[0]);
+        assertTemporaryFilesRemoved();
+    }
+
     @Test public void unsortedSources_areSortedAndResidualsLeadEqualMovements() throws Exception {
         List<Transaction> transactions = Arrays.asList(
             new Transaction("bank_melli", "late", DATE + 300, 30, "late"),

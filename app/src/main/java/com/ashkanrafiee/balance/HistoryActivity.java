@@ -110,6 +110,8 @@ public final class HistoryActivity extends Activity {
      *  "we are not sure about this" reading is the app's own, in both themes. */
     private int warnFg, warnBg;
     private LinearLayout body;
+    /** One-line phase label under the loading skeleton (which stage the worker is in). */
+    private TextView loadingStage;
     private LockOverlay lockOverlay;
     /** Draws the pull-to-refresh chip pinned to the true top of the screen — clear of the hero card
      *  and the rows — while the gesture and its state stay in the list's scroll view. */
@@ -771,6 +773,32 @@ public final class HistoryActivity extends Activity {
         final String bank = bankFilter;
         final String account = accountFilter;
         final boolean iran = iranCalendar;
+        final android.app.AlertDialog exportDialog = exportProgressDialog();
+        final android.widget.ProgressBar exportBar =
+            (android.widget.ProgressBar) exportDialog.findViewById(android.R.id.progress);
+        final TextView exportStage =
+            (TextView) exportDialog.findViewById(android.R.id.message);
+        final WorkProgress exportProgress = new WorkProgress() {
+            @Override public void stage(final int stageResId) {
+                runOnUiThread(() -> {
+                    if (!exportDialog.isShowing()) return;
+                    exportStage.setText(stageResId);
+                    exportBar.setIndeterminate(true);
+                });
+            }
+
+            @Override public void progress(final long done, final long total) {
+                runOnUiThread(() -> {
+                    if (!exportDialog.isShowing()) return;
+                    if (total > 0) {
+                        exportBar.setIndeterminate(false);
+                        exportBar.setMax((int) Math.min(total, Integer.MAX_VALUE));
+                        exportBar.setProgress((int) Math.min(done, Integer.MAX_VALUE));
+                    }
+                });
+            }
+        };
+        exportDialog.show();
         new Thread(() -> {
             final int[] error = {0};
             try {
@@ -810,7 +838,7 @@ public final class HistoryActivity extends Activity {
                     try {
                         OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
                         HistoryCsvExport.writeLookup(app, CsvExport.STREAM_PAGE_SIZE, movements,
-                            residuals, writer, lookup);
+                            residuals, writer, lookup, exportProgress);
                     } finally {
                         metadata.close();
                     }
@@ -821,11 +849,40 @@ public final class HistoryActivity extends Activity {
                 error[0] = 1;
                 android.util.Log.w("BalanceHistory", "csv export failed", e);
             }
-            runOnUiThread(() -> Toast.makeText(this,
-                getString(error[0] == 0
-                    ? R.string.history_export_saved : R.string.history_export_failed),
-                Toast.LENGTH_SHORT).show());
+            runOnUiThread(() -> {
+                if (!isDestroyed() && !isFinishing()) exportDialog.dismiss();
+                Toast.makeText(this,
+                    getString(error[0] == 0
+                        ? R.string.history_export_saved : R.string.history_export_failed),
+                    Toast.LENGTH_SHORT).show();
+            });
         }).start();
+    }
+
+    /** Determinate export dialog: a title, a phase line and a horizontal bar. The bar and the
+     *  message are looked up by standard android ids so the worker can drive them. */
+    private android.app.AlertDialog exportProgressDialog() {
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(dp(20), dp(16), dp(20), dp(12));
+        TextView title = text(getString(R.string.export_progress_title), 15, fg, medium());
+        wrap.addView(title);
+        TextView stage = new TextView(this);
+        stage.setId(android.R.id.message);
+        stage.setText(getString(R.string.export_stage_preparing));
+        stage.setTextSize(13);
+        stage.setTextColor(muted);
+        stage.setTypeface(Fonts.text(this), Typeface.NORMAL);
+        LinearLayout.LayoutParams stageLp = new LinearLayout.LayoutParams(-2, -2);
+        stageLp.topMargin = dp(6);
+        wrap.addView(stage, stageLp);
+        android.widget.ProgressBar bar = new android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        bar.setId(android.R.id.progress);
+        bar.setIndeterminate(true);
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(-1, dp(6));
+        barLp.topMargin = dp(12);
+        wrap.addView(bar, barLp);
+        return new android.app.AlertDialog.Builder(this).setView(wrap).setCancelable(false).create();
     }
 
     private boolean exportMovementMatches(Context context, Transaction transaction, String bank,
@@ -1876,6 +1933,18 @@ public final class HistoryActivity extends Activity {
         final boolean expandAll = BalanceData.getExpandAllHistory(this);
         final boolean discoverExpansion = (!expansionKey.isEmpty()
             && !expansionKey.equals(previousExpansionKey)) || (!seededSnapshot && expandAll);
+        final WorkProgress renderProgress = new WorkProgress() {
+            @Override public void stage(int stageResId) {
+                setLoadingStage(gen, stageResId);
+            }
+
+            @Override public void progress(long done, long total) {
+            }
+        };
+        // Replace stale content with the loading shape up front so a slow search or a large
+        // history reads as work in progress (with its current phase underneath) rather than a
+        // frozen screen. The install path below swaps the finished tree back in one frame.
+        showSkeleton();
         new Thread(() -> {
             HistoryReader.Result result = null;
             try {
@@ -1916,7 +1985,7 @@ public final class HistoryActivity extends Activity {
                             tagSelection, Collections.emptySet(), 0,
                             HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
                         discovery = HistoryReader.summaryWithResiduals(
-                            getApplicationContext(), discoveryRequest);
+                            getApplicationContext(), discoveryRequest, renderProgress);
                         requestedDays = plannedExpandedDays(discovery, expandedSnapshot,
                             seededSnapshot, expandAll, expansionKey, previousExpansionKey,
                             savedPreSearchDays, iran);
@@ -1952,7 +2021,7 @@ public final class HistoryActivity extends Activity {
                         requestedDays, 0,
                         HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
                     result = HistoryReader.summaryWithResiduals(
-                        getApplicationContext(), request);
+                        getApplicationContext(), request, renderProgress);
                 }
                 final Lists lists = listsFromSummary(result);
                 final List<Residual> requestedResiduals = residualsFromSummary(result);
@@ -2366,7 +2435,18 @@ public final class HistoryActivity extends Activity {
             }
             body.addView(year, margin(0, i == 0 ? 12 : 10, 0, 0));
         }
+        loadingStage = text(getString(R.string.history_stage_loading), 12, muted, medium());
+        loadingStage.setGravity(Gravity.CENTER);
+        body.addView(loadingStage, margin(0, 12, 0, 0));
         startShimmer();
+    }
+
+    /** Names the loading phase under the skeleton; no-ops once a newer render replaced this one. */
+    private void setLoadingStage(int gen, int stageResId) {
+        runOnUiThread(() -> {
+            if (gen != renderGen || isDestroyed() || isFinishing()) return;
+            if (loadingStage != null) loadingStage.setText(stageResId);
+        });
     }
 
     /** A rounded placeholder bar, in the same neutral the real cards use. Its size comes from
