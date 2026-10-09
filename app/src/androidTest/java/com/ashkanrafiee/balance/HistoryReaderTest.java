@@ -202,19 +202,111 @@ public class HistoryReaderTest {
         assertTrue(collapsed.lines.isEmpty());
     }
 
-    @Test public void requestedDayRows_failInsteadOfSilentlyTruncating() throws Exception {
+    @Test public void requestedDayRows_pageBeyondInitialBatchIsReachable() throws Exception {
         long date = epoch(2026, 9, 15);
-        assertTrue(BalanceData.writeTransactions(context, Arrays.asList(
+        List<Transaction> transactions = Arrays.asList(
+            new Transaction(BANK, ACCOUNT, date - 1_000L, 2L, null, "two", null),
+            // Store order is deliberately opposite the timeline's newest-first order.
             new Transaction(BANK, ACCOUNT, date, 1L, null, "one", null),
-            new Transaction(BANK, ACCOUNT, date - 1_000L, 2L, null, "two", null))));
+            new Transaction(BANK, ACCOUNT, date - 2_000L, 3L, null, "three", null));
+        assertTrue(BalanceData.writeTransactions(context, transactions));
         String key = CalDate.fromGregorian(2026, 9, 15, false).key();
         HistoryReader.Request request = new HistoryReader.Request(false, 1, BANK, ACCOUNT,
             HistoryActivity.Filter.ALL, "", null, Collections.singleton(key), 1, 1);
+        HistoryReader.Result result = HistoryReader.summary(context, request);
         try {
-            HistoryReader.summary(context, request);
-            fail("a bounded expanded day must not silently omit its second row");
-        } catch (UnsupportedOperationException expected) {
-            assertTrue(expected.getMessage().contains("row limit"));
+            HistoryReader.DayRows first = result.requestedDayRows.get(key);
+            assertEquals(1, first.rows.size());
+            assertEquals(1L, first.transactions.get(0).amount);
+            assertTrue(first.hasMore);
+
+            HistoryReader.DayRows second = HistoryReader.readPage(context, result, key,
+                first.lastCursor, false, 1);
+            assertEquals(1, second.rows.size());
+            assertEquals(2L, second.transactions.get(0).amount);
+            assertTrue(second.hasPrevious);
+
+            HistoryReader.DayRows third = HistoryReader.readPage(context, result, key,
+                second.lastCursor, false, 1);
+            assertEquals(1, third.rows.size());
+            assertEquals(3L, third.transactions.get(0).amount);
+            assertFalse(third.hasMore);
+
+            HistoryReader.DayRows back = HistoryReader.readPage(context, result, key,
+                third.firstCursor, true, 1);
+            assertEquals(2L, back.transactions.get(0).amount);
+            assertTrue(back.hasMore);
+        } finally {
+            result.close();
+        }
+    }
+
+    @Test public void moreThan128RowsAndMoreThan64DaysKeepCompleteTotalsAndPages() throws Exception {
+        long newest = epoch(2026, 9, 15);
+        List<Transaction> transactions = new java.util.ArrayList<>();
+        for (int i = 0; i < 130; i++) {
+            transactions.add(new Transaction(BANK, ACCOUNT, newest - i * 1_000L,
+                i + 1L, null, "dense" + i, null));
+        }
+        // Add seventy distinct days to exercise the header/summary path beyond the old day cap.
+        for (int day = 1; day <= 70; day++) {
+            transactions.add(new Transaction(BANK, ACCOUNT, newest - day * DAY,
+                10_000L + day, null, "day" + day, null));
+        }
+        assertTrue(BalanceData.writeTransactions(context, transactions));
+
+        String denseDay = CalDate.fromGregorian(2026, 9, 15, false).key();
+        HistoryReader.Request request = new HistoryReader.Request(false, 2, BANK, ACCOUNT,
+            HistoryActivity.Filter.ALL, "", null, Collections.singleton(denseDay), 64, 128);
+        HistoryReader.Result result = HistoryReader.summary(context, request);
+        try {
+            assertEquals(200L, result.movementCount);
+            assertTrue(result.daySummaries.size() > 64);
+            HistoryReader.DayRows first = result.requestedDayRows.get(denseDay);
+            assertEquals(128, first.rows.size());
+            assertTrue(first.hasMore);
+            HistoryReader.DayRows last = HistoryReader.readPage(context, result, denseDay,
+                first.lastCursor, false, 128);
+            assertEquals(2, last.rows.size());
+            assertFalse(last.hasMore);
+            assertEquals(1L, first.transactions.get(0).amount);
+            assertEquals(130L, last.transactions.get(1).amount);
+        } finally {
+            result.close();
+        }
+    }
+
+    @Test public void searchAcrossMoreThan64DaysKeepsEveryHeaderAndRemoteDayAccessible()
+            throws Exception {
+        long newest = epoch(2026, 9, 15);
+        List<Transaction> transactions = new java.util.ArrayList<>();
+        for (int day = 0; day < 70; day++) {
+            transactions.add(new Transaction(BANK, ACCOUNT, newest - day * DAY,
+                50L + day, null, "needle-" + day, null));
+        }
+        assertTrue(BalanceData.writeTransactions(context, transactions));
+        Calendar oldestCalendar = Calendar.getInstance();
+        oldestCalendar.setTimeInMillis(newest);
+        oldestCalendar.add(Calendar.DAY_OF_YEAR, -69);
+        String oldest = CalDate.fromGregorian(oldestCalendar.get(Calendar.YEAR),
+            oldestCalendar.get(Calendar.MONTH) + 1, oldestCalendar.get(Calendar.DAY_OF_MONTH), false)
+            .key();
+        HistoryReader.Request request = new HistoryReader.Request(false, 1, BANK, ACCOUNT,
+            HistoryActivity.Filter.ALL, "MELLAT", null, null, 64, 1);
+        HistoryReader.Result result = HistoryReader.summary(context, request);
+        try {
+            assertEquals(70, result.daySummaries.size());
+            int headers = 0;
+            for (HistoryReader.YearSummary year : result.years) {
+                for (HistoryReader.MonthSummary month : year.months) headers += month.days.size();
+            }
+            assertEquals(70, headers);
+            HistoryReader.DayRows page = HistoryReader.readPage(context, result, oldest,
+                null, false, 1);
+            assertEquals(1, page.transactions.size());
+            assertEquals(119L, page.transactions.get(0).amount);
+        } finally {
+            result.close();
         }
     }
 

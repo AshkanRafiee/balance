@@ -188,25 +188,8 @@ public final class HistoryActivity extends Activity {
     private final List<ShimmerDrawable> shimmers = new ArrayList<>();
     private android.animation.ValueAnimator shimmer;
 
-    /** The note map for the screen's current data, read once per render on the worker thread
-     *  (decrypting and parsing the store once instead of once per visible row) and consumed only
-     *  by the UI pass that rebuilds the tree. Replenished on every render, which any note edit
-     *  triggers, so it never serves a stale snapshot. */
-    private Map<String, String> notes;
-
-    /** The reasons the bank stated, read alongside the notes on the same worker pass and looked up the
-     *  same way. A separate store from the notes, so what the bank said and what the user wrote are
-     *  never the same field: a note can be edited or cleared without touching a reason, and a reason
-     *  can never stand in for a note the user has not written. */
-    private Map<String, String> reasons;
-
-    /** The channels the bank stated, read and held exactly like the reasons. A third store of its own,
-     *  so the way a movement happened stays as separate from what the user wrote about it as the bank's
-     *  reason for it is. */
-    private Map<String, String> channels;
-
-    /** User-created tags keyed by transaction identity, loaded once per render like other metadata. */
-    private Map<String, List<String>> tags;
+    /** Metadata for the currently loaded row pages only; collapsed/unloaded history has no map entry. */
+    private Map<String, HistoryReader.Metadata> pageMetadata = Collections.emptyMap();
 
     /** Exact tag selection applied in addition to the direction/date filter and text search. */
     private final List<String> selectedTags = new ArrayList<>();
@@ -597,6 +580,12 @@ public final class HistoryActivity extends Activity {
         // into a finished screen (harmlessly gated, but pointless work either way).
         searchHandler.removeCallbacksAndMessages(null);
         searchPending = null;
+        if (historyResult != null) {
+            try { historyResult.close(); } catch (Exception e) {
+                android.util.Log.w("BalanceHistory", "timeline cleanup failed", e);
+            }
+            historyResult = null;
+        }
         // Same reasoning for the skeleton sweep: it repeats forever and holds the activity with it.
         stopShimmer();
         super.onDestroy();
@@ -1510,13 +1499,19 @@ public final class HistoryActivity extends Activity {
     /** Cached reference to the year list so year-header taps can re-render the whole section. */
     private List<YearGroup> allYears;
 
+    /** The current aggregate snapshot; its encrypted timeline serves lazy day-page requests. */
+    private HistoryReader.Result historyResult;
+
+    /** At most one day's row page is kept in the activity heap. The disk timeline retains the rest. */
+    private final Map<String, HistoryReader.DayRows> loadedDayPages = new java.util.LinkedHashMap<>();
+
     /** The unaccounted money on screen for the current data, newest first. Drives the explainer
      *  affordance next to the breakdown heading; empty whenever the history fully adds up. */
     private List<Residual> allResiduals = new ArrayList<>();
+    /** All visible residuals, including collapsed days, are represented by this count. */
+    private long residualCount;
 
-    /** Day rows retained by the current bounded history result. A day outside this set must be
-     *  re-read before it can be opened, rather than appearing open with silently missing rows. */
-    private Set<String> loadedDayKeys = Collections.emptySet();
+    /** Day pages currently materialized in the activity. Every other day remains page-addressable. */
 
     /** Scroll container, kept so the list position survives rotation. */
     private PullRefreshScrollView scrollView;
@@ -1542,7 +1537,7 @@ public final class HistoryActivity extends Activity {
                 for (MonthGroup m : y.months) {
                     expandedMonths.add(m.key());
                     for (DayGroup d : m.days) {
-                        if (loadedDayKeys.contains(d.key())) expandedDays.add(d.key());
+                        expandedDays.add(d.key());
                     }
                 }
             }
@@ -1556,7 +1551,7 @@ public final class HistoryActivity extends Activity {
             for (MonthGroup m : y.months) {
                 if (m.month != now.month) continue;
                 for (DayGroup d : m.days) {
-                    if (loadedDayKeys.contains(d.key())) expandedDays.add(d.key());
+                    expandedDays.add(d.key());
                 }
             }
         }
@@ -1608,7 +1603,7 @@ public final class HistoryActivity extends Activity {
             for (MonthGroup m : y.months) {
                 expandedMonths.add(m.key());
                 for (DayGroup d : m.days) {
-                    if (loadedDayKeys.contains(d.key())) expandedDays.add(d.key());
+                    expandedDays.add(d.key());
                 }
             }
         }
@@ -1856,11 +1851,9 @@ public final class HistoryActivity extends Activity {
     // Screen rendering
     // ====================================================================
 
-    /** Reads a bounded history summary and rebuilds the screen from it. The first pass discovers
-     *  the visible day keys needed by fresh, expand-all, or new-search expansion; the second pass
-     *  retains rows only for the days this render will actually open. The decrypt-and-parse plus
-     *  the per-movement calendar math run on a worker thread so a large story never stalls the UI;
-     *  only the finished groups are drawn here. */
+    /** Reads one complete aggregate snapshot and rebuilds the headers. Row pages are loaded lazily
+     *  from the encrypted snapshot timeline, so expand-all and searches never create a history-sized
+     *  view tree or metadata map. */
     private void render() {
         final int gen = ++renderGen;
         final Filter f = filter;
@@ -1870,15 +1863,8 @@ public final class HistoryActivity extends Activity {
         final String query = searchQuery == null ? "" : searchQuery.trim();
         final List<String> tagSelection = new ArrayList<>(selectedTags);
         final Set<String> expandedSnapshot = new java.util.LinkedHashSet<>(expandedDays);
-        final boolean seededSnapshot = expandedSeeded;
-        final String expansionKey = expansionQuery(query);
-        final String previousExpansionKey = searchExpandedFor;
-        final Set<String> savedPreSearchDays = preSearchDays == null ? null
-            : new java.util.LinkedHashSet<>(preSearchDays);
-        final boolean expandAll = BalanceData.getExpandAllHistory(this);
-        final boolean discoverExpansion = (!expansionKey.isEmpty()
-            && !expansionKey.equals(previousExpansionKey)) || (!seededSnapshot && expandAll);
         new Thread(() -> {
+            HistoryReader.Result result = null;
             try {
                 CountDownLatch started = renderGateStarted;
                 CountDownLatch release = renderGateRelease;
@@ -1887,73 +1873,43 @@ public final class HistoryActivity extends Activity {
                     release.await();
                 }
 
-                if (expandedSnapshot.size() > HistoryReader.DEFAULT_MAX_REQUESTED_DAYS) {
-                    throw new UnsupportedOperationException(
-                        "expanded history exceeds the bounded day batch");
-                }
-
-                Set<String> requestedDays;
-                if (discoverExpansion) {
-                    // This pass retains no rows. It is needed only because the screen's existing
-                    // expand-all/search rules discover some expanded days from the grouped result.
-                    HistoryReader.Request discoveryRequest = new HistoryReader.Request(
-                        iran, HistoryReader.DEFAULT_PAGE_SIZE, bank, acct, f, query, tagSelection,
-                        Collections.emptySet(), HistoryReader.DEFAULT_MAX_REQUESTED_DAYS,
-                        HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
-                    HistoryReader.Result discovery = HistoryReader.summaryWithResiduals(
-                        getApplicationContext(), discoveryRequest);
-                    requestedDays = plannedExpandedDays(discovery, expandedSnapshot,
-                        seededSnapshot, expandAll, expansionKey, previousExpansionKey,
-                        savedPreSearchDays, iran);
+                // Warm one day at most. Every other expanded day displays the same explicit page
+                // affordance and can be opened without rerunning the aggregate scan.
+                Set<String> requestedDays = new java.util.LinkedHashSet<>();
+                if (!expandedSnapshot.isEmpty()) {
+                    requestedDays.add(expandedSnapshot.iterator().next());
                 } else {
-                    requestedDays = new java.util.LinkedHashSet<>(expandedSnapshot);
-                    if (expansionKey.isEmpty() && previousExpansionKey != null
-                            && savedPreSearchDays != null) {
-                        // Clearing a search restores the exact pre-search day expansion after the
-                        // result is installed, so the transient search expansion is not requested.
-                        requestedDays.clear();
-                        requestedDays.addAll(savedPreSearchDays);
-                    } else if (!seededSnapshot && !expandAll) {
-                        // The normal first-load seed opens every visible day in the current month.
-                        // Request the calendar's complete month; nonexistent days simply produce
-                        // empty DayRows and never affect the summary.
-                        CalDate current = CalDate.today(iran);
-                        for (int day = 1; day <= CalDate.daysInMonth(current.year,
-                                current.month, iran); day++) {
-                            requestedDays.add(CalDate.of(current.year, current.month, day).key());
-                        }
-                    }
-                }
-                if (requestedDays.size() > HistoryReader.DEFAULT_MAX_REQUESTED_DAYS) {
-                    throw new UnsupportedOperationException(
-                        "expanded history does not fit the bounded day batch");
+                    requestedDays.add(CalDate.today(iran).key());
                 }
 
                 HistoryReader.Request request = new HistoryReader.Request(
                     iran, HistoryReader.DEFAULT_PAGE_SIZE, bank, acct, f, query, tagSelection,
-                    requestedDays, HistoryReader.DEFAULT_MAX_REQUESTED_DAYS,
+                    requestedDays, 0,
                     HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
-                HistoryReader.Result result = HistoryReader.summaryWithResiduals(
+                result = HistoryReader.summaryWithResiduals(
                     getApplicationContext(), request);
-                final Map<String, String> notesNow =
-                    BalanceData.readNotes(getApplicationContext());
-                final Map<String, String> reasonsNow =
-                    BalanceData.readReasons(getApplicationContext());
-                final Map<String, String> channelsNow =
-                    BalanceData.readChannels(getApplicationContext());
-                final Map<String, List<String>> tagsNow =
-                    BalanceData.readTags(getApplicationContext());
                 final Lists lists = listsFromSummary(result);
                 final List<Residual> requestedResiduals = residualsFromSummary(result);
+                final HistoryReader.Result completed = result;
                 runOnUiThread(() -> {
-                    if (gen != renderGen || isDestroyed() || isFinishing()) return;
+                    if (gen != renderGen || isDestroyed() || isFinishing()) {
+                        try { completed.close(); } catch (Exception e) {
+                            android.util.Log.w("BalanceHistory", "stale timeline cleanup failed", e);
+                        }
+                        return;
+                    }
+                    HistoryReader.Result old = historyResult;
+                    historyResult = completed;
+                    if (old != null) {
+                        try { old.close(); } catch (Exception e) {
+                            android.util.Log.w("BalanceHistory", "old timeline cleanup failed", e);
+                        }
+                    }
+                    loadedDayPages.clear();
+                    loadedDayPages.putAll(completed.requestedDayRows);
+                    pageMetadata = collectPageMetadata(loadedDayPages);
                     allResiduals = requestedResiduals;
-                    loadedDayKeys = Collections.unmodifiableSet(
-                        new java.util.LinkedHashSet<>(result.requestedDayRows.keySet()));
-                    notes = notesNow;
-                    reasons = reasonsNow;
-                    channels = channelsNow;
-                    tags = tagsNow;
+                    residualCount = completed.residualCount;
                     refreshDates();
                     rebuildFilterBar();
                     stopShimmer();
@@ -1970,7 +1926,7 @@ public final class HistoryActivity extends Activity {
                         emptyState();
                     } else {
                         body.addView(heroCard(lists), margin(0, 0, 0, 6));
-                        body.addView(breakdownHeading(result.movementCount),
+                        body.addView(breakdownHeading(completed.movementCount),
                             margin(0, 16, 0, 12));
                         allYears = lists.years;
                         seedExpanded();
@@ -1980,6 +1936,11 @@ public final class HistoryActivity extends Activity {
                     body.setVisibility(View.VISIBLE);
                 });
             } catch (Throwable e) {
+                if (result != null) {
+                    try { result.close(); } catch (Exception cleanup) {
+                        e.addSuppressed(cleanup);
+                    }
+                }
                 // A corrupt store or a scan race must never blank the screen; keep the previous
                 // render and flag the failure quietly. On a first load there is no previous render,
                 // so the placeholder would be left sweeping over nothing, which reads as a screen
@@ -2008,44 +1969,64 @@ public final class HistoryActivity extends Activity {
         }).start();
     }
 
-    /** Determines which visible days the existing seed/search rules will open after this result is
-     *  installed. Collapsed days remain summary-only; stale expansion keys for filtered-out days do
-     *  not consume the bounded row batch. */
-    private static Set<String> plannedExpandedDays(HistoryReader.Result result,
-            Set<String> expandedSnapshot, boolean seeded, boolean expandAll, String expansionKey,
-            String previousExpansionKey, Set<String> savedPreSearchDays, boolean iran) {
-        Set<String> visible = new java.util.LinkedHashSet<>(result.daySummaries.keySet());
-        Set<String> requested = new java.util.LinkedHashSet<>();
-        for (String key : expandedSnapshot) {
-            if (visible.contains(key)) requested.add(key);
-        }
-
-        if (!seeded) {
-            if (expandAll) {
-                requested.addAll(visible);
-            } else {
-                CalDate current = CalDate.today(iran);
-                for (HistoryReader.DaySummary day : result.daySummaries.values()) {
-                    if (day.date.year == current.year && day.date.month == current.month) {
-                        requested.add(day.date.key());
+    /** Requests an adjacent page without rescanning the aggregate snapshot. */
+    private void loadDayPage(String dayKey, HistoryTimeline.CursorKey cursor, boolean previous) {
+        final HistoryReader.Result snapshot = historyResult;
+        if (snapshot == null) return;
+        final int gen = renderGen;
+        new Thread(() -> {
+            try {
+                HistoryReader.DayRows page = HistoryReader.readPage(getApplicationContext(), snapshot,
+                    dayKey, cursor, previous, HistoryReader.DEFAULT_ROW_PAGE_SIZE);
+                runOnUiThread(() -> {
+                    if (gen != renderGen || historyResult != snapshot || isDestroyed()
+                            || isFinishing()) return;
+                    // A page request is the explicit act of opening a day. Keep the heap bounded and
+                    // collapse the evicted day rather than leaving an apparently open empty card.
+                    String evicted = null;
+                    if (!loadedDayPages.containsKey(dayKey)) {
+                        for (String key : loadedDayPages.keySet()) {
+                            if (!key.equals(dayKey)) { evicted = key; break; }
+                        }
                     }
-                }
+                    if (evicted != null) {
+                        loadedDayPages.remove(evicted);
+                        expandedDays.remove(evicted);
+                    }
+                    loadedDayPages.put(dayKey, page);
+                    pageMetadata = collectPageMetadata(loadedDayPages);
+                    allResiduals = residualsFromPages(loadedDayPages);
+                    rebuildLoadedBreakdown();
+                });
+            } catch (Exception e) {
+                android.util.Log.w("BalanceHistory", "history page failed", e);
+                runOnUiThread(() -> Toast.makeText(this, pageLoadFailure(), Toast.LENGTH_SHORT).show());
             }
-        }
+        }).start();
+    }
 
-        if (expansionKey.isEmpty()) {
-            if (previousExpansionKey != null && savedPreSearchDays != null) {
-                requested.clear();
-                for (String key : savedPreSearchDays) {
-                    if (visible.contains(key)) requested.add(key);
-                }
-            }
-        } else if (!expansionKey.equals(previousExpansionKey)) {
-            // expandForSearch opens every group in a fresh search/tag expansion so no match is
-            // hidden inside a collapsed day.
-            requested.addAll(visible);
+    /** Rebuilds only the breakdown cards after a page or its metadata has arrived. */
+    private void rebuildLoadedBreakdown() {
+        if (historyResult == null || allYears == null) return;
+        Lists lists = listsFromSummary(historyResult, loadedDayPages);
+        allYears = lists.years;
+        body.setVisibility(View.GONE);
+        renderYears(body, allYears);
+        body.setVisibility(View.VISIBLE);
+    }
+
+    private List<Residual> residualsFromPages(Map<String, HistoryReader.DayRows> pages) {
+        List<Residual> out = new ArrayList<>();
+        if (pages != null) for (HistoryReader.DayRows page : pages.values()) {
+            out.addAll(page.residuals);
         }
-        return requested;
+        out.sort((a, b) -> Long.compare(b.toDate, a.toDate));
+        return out;
+    }
+
+    private String pageLoadFailure() {
+        return LocaleHelper.isPersian(this) ? "بارگذاری صفحهٔ تاریخچه ناموفق بود"
+            : "History page could not be loaded";
     }
 
     /** Returns only the transactions whose bank equals {@code bank}, preserving input order.
@@ -2217,7 +2198,7 @@ public final class HistoryActivity extends Activity {
         row.addView(text(getResources().getQuantityString(
             R.plurals.history_n_tx, quantity(shown), shown), 12, muted, medium()));
 
-        if (allResiduals.isEmpty()) return row;
+        if (residualCount == 0) return row;
 
         TextView ask = text("?", 12, warnFg, medium());
         ask.setGravity(Gravity.CENTER);
@@ -2580,10 +2561,11 @@ public final class HistoryActivity extends Activity {
         }
     }
 
-    /** A collapsible day row: caret, a Today/Yesterday tag over the date, transaction count and
-     *  the day's net; expanding it lists that day's transactions newest first. */
+    /** A collapsible day row: headers are always complete, while its rows are an explicit disk-backed
+     *  page. Opening a day never implies that every row for that day is in memory. */
     private LinearLayout dayCard(DayGroup g, LinearLayout daysHost, List<DayGroup> days) {
-        boolean open = expandedDays.contains(g.key()) && loadedDayKeys.contains(g.key());
+        boolean open = expandedDays.contains(g.key());
+        HistoryReader.DayRows page = loadedDayPages.get(g.key());
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPaddingRelative(dp(2), dp(2), dp(2), dp(2));
@@ -2600,8 +2582,8 @@ public final class HistoryActivity extends Activity {
                 renderDays(daysHost, days);
             } else {
                 expandedDays.add(g.key());
-                if (loadedDayKeys.contains(g.key())) renderDays(daysHost, days);
-                else render();
+                renderDays(daysHost, days);
+                if (!loadedDayPages.containsKey(g.key())) loadDayPage(g.key(), null, false);
             }
         });
         head.addView(caret(open, 13), new LinearLayout.LayoutParams(dp(22), -2));
@@ -2639,7 +2621,7 @@ public final class HistoryActivity extends Activity {
         head.setContentDescription(state(dateText(g.date), g.sum, open));
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
 
-        if (open) {
+        if (open && page != null) {
             LinearLayout rows = new LinearLayout(this);
             rows.setOrientation(LinearLayout.VERTICAL);
             rows.setPaddingRelative(dp(8), dp(2), 0, 0);
@@ -2658,8 +2640,60 @@ public final class HistoryActivity extends Activity {
                     new LinearLayout.LayoutParams(-1, -2));
             }
             box.addView(rows, new LinearLayout.LayoutParams(-1, -2));
+            box.addView(pageControls(g, page), margin(0, 4, 0, 2));
+        } else if (open) {
+            box.addView(pageLoadControl(g.key()), margin(8, 4, 4, 2));
         }
         return box;
+    }
+
+    /** A visible control for loading a day that is expanded but not in the one-day page cache. */
+    private TextView pageLoadControl(String dayKey) {
+        TextView load = pageButton(pageLoadLabel(), pageLoadLabel());
+        load.setOnClickListener(v -> loadDayPage(dayKey, null, false));
+        return load;
+    }
+
+    /** Previous/More controls use keyset cursors, so neither control relies on an in-memory offset. */
+    private LinearLayout pageControls(DayGroup group, HistoryReader.DayRows page) {
+        LinearLayout controls = new LinearLayout(this);
+        controls.setGravity(Gravity.CENTER_VERTICAL);
+        if (page.hasPrevious) {
+            TextView previous = pageButton(pagePreviousLabel(), pagePreviousLabel());
+            previous.setOnClickListener(v -> loadDayPage(group.key(), page.firstCursor, true));
+            controls.addView(previous, new LinearLayout.LayoutParams(0, -2, 1));
+        }
+        if (page.hasMore) {
+            TextView more = pageButton(pageMoreLabel(), pageMoreLabel());
+            more.setOnClickListener(v -> loadDayPage(group.key(), page.lastCursor, false));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
+            lp.setMarginStart(dp(6));
+            controls.addView(more, lp);
+        }
+        return controls;
+    }
+
+    private TextView pageButton(String label, String description) {
+        TextView button = text(label, 12, accent, medium());
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(dp(10), dp(7), dp(10), dp(7));
+        button.setBackground(ripple(rounded(chipBg, 10)));
+        button.setClickable(true);
+        button.setFocusable(true);
+        button.setContentDescription(description);
+        return button;
+    }
+
+    private String pageLoadLabel() {
+        return LocaleHelper.isPersian(this) ? "بارگذاری ردیف‌ها" : "Load rows";
+    }
+
+    private String pagePreviousLabel() {
+        return LocaleHelper.isPersian(this) ? "قبلی" : "Previous";
+    }
+
+    private String pageMoreLabel() {
+        return LocaleHelper.isPersian(this) ? "بیشتر" : "More";
     }
 
     /**
@@ -2788,6 +2822,9 @@ public final class HistoryActivity extends Activity {
     private void residualExplainer() {
         LockManager.holdUnlock();
         StringBuilder body = new StringBuilder(getString(R.string.residual_explainer_body));
+        body.append("\n\n").append(LocaleHelper.isPersian(this)
+            ? "تعداد مبالغ بی‌حساب: " + faDigits(residualCount)
+            : "Unaccounted amounts: " + residualCount);
         for (Residual r : allResiduals) {
             body.append("\n\n• ")
                 .append(BankRules.displayName(this, r.bank))
@@ -2795,6 +2832,11 @@ public final class HistoryActivity extends Activity {
                 .append(" — ").append(signedAmount(r.amount))
                 .append(" (").append(dateText(calOfResidual(r.fromDate)))
                 .append(" → ").append(dateText(calOfResidual(r.toDate))).append(")");
+        }
+        if (residualCount > allResiduals.size()) {
+            body.append("\n\n").append(LocaleHelper.isPersian(this)
+                ? "برای دیدن جزئیات مبالغ دیگر، روزهای تاریخچه را باز کنید."
+                : "Open the relevant history days to see the other details.");
         }
         android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
             .setTitle(R.string.residual_explainer_title)
@@ -2864,13 +2906,14 @@ public final class HistoryActivity extends Activity {
         // are the bank's own words, read out of the message, not a note anyone can change here.
         int inset = perBank ? 0 : 39;
         String key = BalanceData.noteKey(t);
-        String caption = BankRules.reasonCaption(this, reasons == null ? null : reasons.get(key));
+        HistoryReader.Metadata metadata = pageMetadata.get(key);
+        String caption = BankRules.reasonCaption(this, metadata == null ? null : metadata.reason);
         if (caption != null) addChip(cell, caption, false, chipBg, muted, medium(), inset);
-        String channel = BankRules.channelCaption(this, channels == null ? null : channels.get(key));
+        String channel = BankRules.channelCaption(this, metadata == null ? null : metadata.channel);
         if (channel != null) addChip(cell, channel, false, chipBg, muted, medium(), inset);
-        String note = notes == null ? null : notes.get(key);
+        String note = metadata == null ? null : metadata.note;
         if (note != null) addChip(cell, note, true, badgeBg, badgeFg, null, inset);
-        List<String> tagValues = tags == null ? null : tags.get(key);
+        List<String> tagValues = metadata == null ? null : metadata.tags;
         if (tagValues != null && !tagValues.isEmpty()) tagFlow(cell, tagValues, inset);
         // The row is a single clickable node, so a screen reader announces this description and never
         // reaches the chips below it. Everything the row says therefore belongs here rather than on a
@@ -3640,9 +3683,14 @@ public final class HistoryActivity extends Activity {
     }
 
     /** Adapts the bounded reader's aggregates and requested rows to the established screen model.
-     *  Every group is retained for headers, while row lists are filled only when the reader was
-     *  explicitly asked for that day's rows. */
+     *  Every group is retained for headers, while row lists are filled only for the page cache passed
+     *  by the caller. */
     static Lists listsFromSummary(HistoryReader.Result result) {
+        return listsFromSummary(result, result == null ? null : result.requestedDayRows);
+    }
+
+    static Lists listsFromSummary(HistoryReader.Result result,
+            Map<String, HistoryReader.DayRows> loadedPages) {
         if (result == null) throw new NullPointerException("result");
         Lists lists = new Lists();
         lists.today = result.todayTotal;
@@ -3672,7 +3720,7 @@ public final class HistoryActivity extends Activity {
                     DayGroup day = new DayGroup(summaryDay.date);
                     day.sum = summaryDay.stats.sum;
                     day.n = summaryDay.stats.movementCount;
-                    HistoryReader.DayRows rows = result.requestedDayRows.get(day.key());
+                    HistoryReader.DayRows rows = loadedPages == null ? null : loadedPages.get(day.key());
                     if (rows != null) {
                         day.txs.addAll(rows.transactions);
                         day.residuals.addAll(rows.residuals);
@@ -3687,6 +3735,16 @@ public final class HistoryActivity extends Activity {
             lists.years.add(year);
         }
         return lists;
+    }
+
+    /** Collects only the metadata carried by the currently visible page cache. */
+    private Map<String, HistoryReader.Metadata> collectPageMetadata(
+            Map<String, HistoryReader.DayRows> pages) {
+        Map<String, HistoryReader.Metadata> out = new HashMap<>();
+        if (pages != null) {
+            for (HistoryReader.DayRows page : pages.values()) out.putAll(page.metadata);
+        }
+        return out;
     }
 
     /** Returns the residual objects retained for requested day rows, which is the bounded subset

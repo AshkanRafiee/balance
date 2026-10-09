@@ -17,14 +17,12 @@ import java.util.Set;
 import java.util.TreeMap;
 
 /**
- * Bounded-memory history projection for the next history screen.
+ * Bounded-memory history projection for the history screen.
  *
  * <p>{@link #summary(Context, Request)} is the production-shaped path. It consumes the stable
  * {@link TransactionStore#forEach} snapshot once, retains aggregates for calendar periods, and
- * retains movement rows only for the requested expanded days. It deliberately does not calculate
- * residuals: {@link Residual#between(List)} needs all rows in date order, while the transaction
- * store's stable order is ordinal order. The limitation is visible in {@link Result}, rather than
- * turning a residual-bearing history into an apparently complete one.
+ * writes visible rows to an encrypted disk timeline. Only requested page rows and their point
+ * metadata are retained in the result heap.
  *
  * <p>{@link #reference(Context, Request)} is intentionally named as a compatibility method. It
  * materializes the scoped transaction list, calls {@link Residual#between(List)}, and applies the
@@ -33,7 +31,10 @@ import java.util.TreeMap;
  */
 final class HistoryReader {
     static final int DEFAULT_PAGE_SIZE = 256;
+    static final int DEFAULT_ROW_PAGE_SIZE = HistoryTimeline.DEFAULT_PAGE_SIZE;
+    /** Source-compatible name from the old bounded prototype; it is no longer a hard limit. */
     static final int DEFAULT_MAX_REQUESTED_DAYS = 64;
+    /** Source-compatible name; it selects the initial/page batch size now. */
     static final int DEFAULT_MAX_ROWS_PER_DAY = 128;
 
     static final String SUMMARY_RESIDUAL_LIMITATION =
@@ -44,7 +45,7 @@ final class HistoryReader {
 
     enum Mode { SUMMARY, RESIDUAL_SUMMARY, REFERENCE }
 
-    /** The immutable scope and bounded row-retention policy for one read. */
+    /** The immutable scope and page policy for one read. */
     static final class Request {
         final boolean iran;
         final int pageSize;
@@ -58,18 +59,16 @@ final class HistoryReader {
         final int maxRowsPerDay;
 
         /**
-         * Creates a read request. {@code maxRowsPerDay} is a UI batch bound, not a history cap: a
-         * row beyond it fails the read explicitly instead of being silently omitted.
+         * Creates a read request. The old day value is retained for source compatibility but is
+         * ignored as a cap. The old row value selects the initial page size; no history rows are
+         * rejected or silently omitted.
          */
         Request(boolean iran, int pageSize, String bank, String account,
                 HistoryActivity.Filter filter, String searchQuery,
                 Collection<String> selectedTags, Collection<String> requestedDayKeys,
                 int maxRequestedDays, int maxRowsPerDay) {
-            if (maxRequestedDays < 0) throw new IllegalArgumentException("invalid requested-day limit");
-            if (maxRowsPerDay < 0) throw new IllegalArgumentException("invalid row limit");
-            if (requestedDayKeys != null && requestedDayKeys.size() > maxRequestedDays) {
-                throw new IllegalArgumentException("requested day set exceeds its batch bound");
-            }
+            if (maxRequestedDays < 0) throw new IllegalArgumentException("invalid page-day hint");
+            if (maxRowsPerDay < 0) throw new IllegalArgumentException("invalid row page size");
             this.iran = iran;
             this.pageSize = pageSize;
             this.bank = bank;
@@ -79,7 +78,7 @@ final class HistoryReader {
             this.selectedTags = immutableStrings(selectedTags);
             this.requestedDayKeys = immutableSet(requestedDayKeys);
             this.maxRequestedDays = maxRequestedDays;
-            this.maxRowsPerDay = maxRowsPerDay;
+            this.maxRowsPerDay = maxRowsPerDay == 0 ? DEFAULT_ROW_PAGE_SIZE : maxRowsPerDay;
         }
 
         /** A no-filter request with no expanded rows. */
@@ -102,14 +101,18 @@ final class HistoryReader {
     }
 
     /**
-     * One history result. The summary fields are complete for visible movements. Full visible
-     * lists are populated only by {@link #reference(Context, Request)}; calling the accessor on a
-     * summary result fails explicitly so a caller cannot mistake an omitted list for an empty one.
+     * One history result. The summary fields are complete for visible rows. Full visible lists are
+     * populated only by {@link #reference(Context, Request)}; the normal path exposes all rows by
+     * keyset pages through its encrypted timeline.
      */
     static final class Result {
         final boolean reference;
         final boolean residualsComplete;
         final String limitation;
+        final boolean iranCalendar;
+        /** Count of visible residual rows, including rows outside the currently loaded pages. */
+        final long residualCount;
+        final boolean hasResiduals;
 
         final Stats allTime;
         final Stats today;
@@ -135,21 +138,26 @@ final class HistoryReader {
         final List<YearSummary> years;
         /** Every visible movement day, newest first, keyed by CalDate.key(). */
         final Map<String, DaySummary> daySummaries;
-        /** Only requested expanded days; each list is bounded by Request.maxRowsPerDay. */
+        /** Initial pages for requested days; adjacent pages are loaded through {@link #readPage}. */
         final Map<String, DayRows> requestedDayRows;
 
         /** Full visible lists in reference mode; null in summary mode by design. */
         final List<Transaction> visibleTransactions;
         final List<Residual> visibleResiduals;
+        private HistoryTimeline timeline;
 
         private Result(boolean reference, boolean residualsComplete, Stats allTime, Stats today,
                 Stats month, Stats year,
                 List<YearSummary> years, Map<String, DaySummary> daySummaries,
                 Map<String, DayRows> requestedDayRows, List<Transaction> visibleTransactions,
-                List<Residual> visibleResiduals) {
+                List<Residual> visibleResiduals, long residualCount, HistoryTimeline timeline,
+                boolean iranCalendar) {
             this.reference = reference;
             this.residualsComplete = residualsComplete;
             this.limitation = residualsComplete ? null : SUMMARY_RESIDUAL_LIMITATION;
+            this.iranCalendar = iranCalendar;
+            this.residualCount = residualCount;
+            this.hasResiduals = residualCount != 0;
             this.allTime = allTime;
             this.today = today;
             this.month = month;
@@ -172,6 +180,7 @@ final class HistoryReader {
             this.requestedDayRows = Collections.unmodifiableMap(requestedDayRows);
             this.visibleTransactions = visibleTransactions;
             this.visibleResiduals = visibleResiduals;
+            this.timeline = timeline;
         }
 
         /** Returns the full visible movement list only for the explicitly unbounded reference path. */
@@ -189,7 +198,14 @@ final class HistoryReader {
 
         private UnsupportedOperationException unsupportedRows() {
             return new UnsupportedOperationException(
-                "summary mode retains only requested day rows; use reference mode for full rows");
+                "summary mode exposes rows through day pages; use readPage for additional rows");
+        }
+
+        /** Releases the encrypted disk snapshot held by this result. Safe to call more than once. */
+        void close() throws Exception {
+            HistoryTimeline old = timeline;
+            timeline = null;
+            if (old != null) old.close();
         }
     }
 
@@ -244,6 +260,22 @@ final class HistoryReader {
         }
     }
 
+    /** Point metadata for one transaction in a loaded page. */
+    static final class Metadata {
+        final String note;
+        final String reason;
+        final String channel;
+        final List<String> tags;
+
+        Metadata(String note, String reason, String channel, List<String> tags) {
+            this.note = note;
+            this.reason = reason;
+            this.channel = channel;
+            this.tags = tags == null ? Collections.emptyList()
+                : Collections.unmodifiableList(new ArrayList<>(tags));
+        }
+    }
+
     /** Rows for one requested expanded day, in the same newest-first/tie order as the screen. */
     static final class DayRows {
         final String key;
@@ -251,14 +283,26 @@ final class HistoryReader {
         final List<Row> rows;
         final List<Transaction> transactions;
         final List<Residual> residuals;
+        final Map<String, Metadata> metadata;
+        final boolean hasPrevious;
+        final boolean hasMore;
+        final HistoryTimeline.CursorKey firstCursor;
+        final HistoryTimeline.CursorKey lastCursor;
 
         private DayRows(String key, CalDate date, List<Row> rows,
-                List<Transaction> transactions, List<Residual> residuals) {
+                List<Transaction> transactions, List<Residual> residuals,
+                Map<String, Metadata> metadata, boolean hasPrevious, boolean hasMore,
+                HistoryTimeline.CursorKey firstCursor, HistoryTimeline.CursorKey lastCursor) {
             this.key = key;
             this.date = date;
             this.rows = Collections.unmodifiableList(rows);
             this.transactions = Collections.unmodifiableList(transactions);
             this.residuals = Collections.unmodifiableList(residuals);
+            this.metadata = Collections.unmodifiableMap(new LinkedHashMap<>(metadata));
+            this.hasPrevious = hasPrevious;
+            this.hasMore = hasMore;
+            this.firstCursor = firstCursor;
+            this.lastCursor = lastCursor;
         }
     }
 
@@ -286,42 +330,53 @@ final class HistoryReader {
         return reference(context, request);
     }
 
-    /** One stable, bounded-memory pass over the transaction store. */
+    /** One stable pass over the transaction store; rows remain available through the timeline. */
     static Result summary(Context context, Request request) throws Exception {
-        final Accumulator accumulator = new Accumulator(request);
-        final Matcher matcher = new Matcher(context, request);
-        TransactionStore.forEach(context, request.pageSize, transaction -> {
-            // Scope narrowing precedes all other filters. Residual detection in the reference path
-            // uses exactly this bank/account scope before any of these later predicates run.
-            if (!inScope(transaction, request)) return;
-            if (!matchesMovementFilter(transaction, request)) return;
-            if (!matchesTags(context, transaction, request.selectedTags)) return;
-            if (!matcher.matchesTransaction(transaction)) return;
-            accumulator.addTransaction(transaction);
-        });
-        return accumulator.result(false, false, null, null);
+        return timelineSummary(context, request, false);
     }
 
-    /** Bounded summary plus date-ordered residuals emitted from encrypted disk staging. */
+    /** Complete summary plus date-ordered residuals emitted into the encrypted timeline. */
     static Result summaryWithResiduals(Context context, Request request) throws Exception {
-        final Accumulator accumulator = new Accumulator(request);
-        final Matcher matcher = new Matcher(context, request);
-        TransactionStore.forEach(context, request.pageSize, transaction -> {
-            if (!inScope(transaction, request)) return;
-            if (!matchesMovementFilter(transaction, request)) return;
-            if (!matchesTags(context, transaction, request.selectedTags)) return;
-            if (!matcher.matchesTransaction(transaction)) return;
-            accumulator.addTransaction(transaction);
-        });
-        if (request.selectedTags.isEmpty()) {
-            HistoryResidualReader.forEach(context, request.bank, request.account,
-                request.pageSize, residual -> {
-                    if (!matchesResidualFilter(residual, request)) return;
-                    if (!matcher.matchesResidual(residual)) return;
-                    accumulator.addResidual(residual);
+        return timelineSummary(context, request, true);
+    }
+
+    /**
+     * Builds one immutable cross-store snapshot. All transaction, residual and point-metadata
+     * passes happen under the same store monitor: a scan cannot publish a new generation between
+     * the summary and the residual walk, and a metadata edit cannot make a page disagree with the
+     * search that selected it.
+     */
+    private static Result timelineSummary(Context context, Request request, boolean residuals)
+            throws Exception {
+        if (context == null) throw new NullPointerException("context");
+        if (request == null) throw new NullPointerException("request");
+        synchronized (BalanceData.class) {
+            HistoryTimeline.Builder timeline = HistoryTimeline.open(context);
+            Accumulator accumulator = new Accumulator(context, request, timeline);
+            try {
+                Matcher matcher = new Matcher(context, request);
+                TransactionStore.forEach(context, request.pageSize, transaction -> {
+                    // Scope narrowing precedes all other filters. Residual detection in the
+                    // reference path uses exactly this bank/account scope before later predicates.
+                    if (!inScope(transaction, request)) return;
+                    if (!matchesMovementFilter(transaction, request)) return;
+                    if (!matchesTags(context, transaction, request.selectedTags)) return;
+                    if (!matcher.matchesTransaction(transaction)) return;
+                    accumulator.addTransaction(transaction);
                 });
+                if (residuals && request.selectedTags.isEmpty()) {
+                    HistoryResidualReader.forEach(context, request.bank, request.account,
+                        request.pageSize, residual -> {
+                            if (!matchesResidualFilter(residual, request)) return;
+                            if (!matcher.matchesResidual(residual)) return;
+                            accumulator.addResidual(residual);
+                        });
+                }
+                return accumulator.result(false, residuals, null, null);
+            } finally {
+                accumulator.close();
+            }
         }
-        return accumulator.result(false, true, null, null);
     }
 
     static Result readSummaryWithResiduals(Context context, Request request) throws Exception {
@@ -372,7 +427,7 @@ final class HistoryReader {
             visibleResiduals = searchedResiduals;
         }
 
-        Accumulator accumulator = new Accumulator(request);
+        Accumulator accumulator = new Accumulator(context, request);
         for (Transaction transaction : visibleTransactions) accumulator.addTransaction(transaction);
         for (Residual residual : visibleResiduals) accumulator.addResidual(residual);
         return accumulator.result(true, true, visibleTransactions, visibleResiduals);
@@ -475,8 +530,8 @@ final class HistoryReader {
                 BankRules.displayName(context, transaction.bank), note, reason,
                 BankRules.reasonCaption(context, reason), channel,
                 BankRules.channelCaption(context, channel),
-                CurrencyHelper.amount(toman, persian, transaction.amount),
-                direction(transaction.amount), dateText(date), clock.format(transaction.date),
+                 CurrencyHelper.amount(toman, persian, transaction.amount),
+                 direction(transaction.amount), dateText(date), timeText(transaction.date),
                 CalDate.monthName(date.month, request.iran, persian), compactDate(date), tags);
             return HistoryActivity.matchesTokens(haystack, tokens);
         }
@@ -509,6 +564,11 @@ final class HistoryReader {
 
         private String compactDate(CalDate date) {
             String value = date.year + "/" + date.month + "/" + date.day;
+            return persian ? HistoryActivity.faDigitsString(value) : value;
+        }
+
+        private String timeText(long millis) {
+            String value = clock.format(millis);
             return persian ? HistoryActivity.faDigitsString(value) : value;
         }
     }
@@ -558,51 +618,46 @@ final class HistoryReader {
         MutableYear(int year) { this.year = year; }
     }
 
-    private static final class RowBucket {
-        final String key;
-        final List<Row> rows = new ArrayList<>();
-
-        RowBucket(String key) { this.key = key; }
-
-        void add(Row row, int limit) {
-            if (rows.size() >= limit) {
-                throw new UnsupportedOperationException(
-                    "requested day row limit exceeded for " + key
-                        + "; increase maxRowsPerDay or request a smaller expanded batch");
-            }
-            rows.add(row);
-        }
-    }
-
     private static final class Accumulator {
+        final Context context;
         final Request request;
+        HistoryTimeline.Builder timeline;
         final MutableStats allTime = new MutableStats();
         final MutableStats today = new MutableStats();
         final MutableStats month = new MutableStats();
         final MutableStats year = new MutableStats();
         final TreeMap<Integer, MutableYear> years = new TreeMap<>(Collections.reverseOrder());
-        final Map<String, RowBucket> requested = new LinkedHashMap<>();
         final CalDate todayDate;
-        long sequence;
+        long transactionOrdinal;
+        long residualOrdinal;
+        long residualCount;
 
-        Accumulator(Request request) {
+        Accumulator(Context context, Request request, HistoryTimeline.Builder timeline) {
+            this.context = context;
             this.request = request;
+            this.timeline = timeline;
             this.todayDate = CalDate.today(request.iran);
-            for (String key : request.requestedDayKeys) requested.put(key, new RowBucket(key));
         }
 
-        void addTransaction(Transaction transaction) {
+        Accumulator(Context context, Request request) {
+            this(context, request, null);
+        }
+
+        void addTransaction(Transaction transaction) throws Exception {
             add(transaction.date, transaction.amount, true);
-            RowBucket bucket = requested.get(dayKey(transaction.date));
-            if (bucket != null) bucket.add(new Row(transaction.date, transaction, null, sequence++),
-                request.maxRowsPerDay);
+            if (timeline != null) {
+                timeline.addTransaction(dayKey(transaction.date), transaction, transactionOrdinal);
+                transactionOrdinal = nextOrdinal(transactionOrdinal);
+            }
         }
 
-        void addResidual(Residual residual) {
+        void addResidual(Residual residual) throws Exception {
             add(residual.toDate, residual.amount, false);
-            RowBucket bucket = requested.get(dayKey(residual.toDate));
-            if (bucket != null) bucket.add(new Row(residual.toDate, null, residual, sequence++),
-                request.maxRowsPerDay);
+            residualCount++;
+            if (timeline != null) {
+                timeline.addResidual(dayKey(residual.toDate), residual, residualOrdinal);
+                residualOrdinal = nextOrdinal(residualOrdinal);
+            }
         }
 
         private void add(long dateMillis, long amount, boolean movement) {
@@ -641,8 +696,14 @@ final class HistoryReader {
                 Calendar.getInstance(Locale.getDefault())).key();
         }
 
+        private long nextOrdinal(long ordinal) {
+            return ordinal == Long.MAX_VALUE ? -1 : ordinal + 1;
+        }
+
         Result result(boolean reference, boolean residualsComplete, List<Transaction> transactions,
-                List<Residual> residuals) {
+                List<Residual> residuals) throws Exception {
+            HistoryTimeline snapshot = timeline == null ? null : timeline.finish();
+            timeline = null;
             List<YearSummary> yearResults = new ArrayList<>();
             LinkedHashMap<String, DaySummary> dayResults = new LinkedHashMap<>();
             for (MutableYear yearGroup : years.values()) {
@@ -662,36 +723,78 @@ final class HistoryReader {
 
             LinkedHashMap<String, DayRows> rowResults = new LinkedHashMap<>();
             for (String key : request.requestedDayKeys) {
-                RowBucket bucket = requested.get(key);
-                if (bucket == null) bucket = new RowBucket(key);
-                bucket.rows.sort(new Comparator<Row>() {
-                    @Override public int compare(Row a, Row b) {
-                        int byDate = Long.compare(b.date, a.date);
-                        if (byDate != 0) return byDate;
-                        if ((a.residual == null) != (b.residual == null))
-                            return a.residual == null ? 1 : -1;
-                        return Long.compare(a.sequence, b.sequence);
-                    }
-                });
-                CalDate date = bucket.rows.isEmpty() ? null
-                    : calendarDate(bucket.rows.get(0).date, request.iran,
-                        Calendar.getInstance(Locale.getDefault()));
-                List<Transaction> dayTransactions = new ArrayList<>();
-                List<Residual> dayResiduals = new ArrayList<>();
-                for (Row row : bucket.rows) {
-                    if (row.transaction != null) dayTransactions.add(row.transaction);
-                    else dayResiduals.add(row.residual);
+                if (snapshot != null) {
+                    rowResults.put(key, fromPage(context, snapshot,
+                        snapshot.firstPage(key, request.maxRowsPerDay), request.iran));
                 }
-                rowResults.put(key, new DayRows(key, date, new ArrayList<>(bucket.rows),
-                    dayTransactions, dayResiduals));
             }
             List<Transaction> visibleTx = transactions == null ? null
                 : Collections.unmodifiableList(new ArrayList<>(transactions));
             List<Residual> visibleResidual = residuals == null ? null
                 : Collections.unmodifiableList(new ArrayList<>(residuals));
             return new Result(reference, residualsComplete, allTime.freeze(), today.freeze(), month.freeze(),
-                year.freeze(), yearResults, dayResults, rowResults, visibleTx, visibleResidual);
+                year.freeze(), yearResults, dayResults, rowResults, visibleTx, visibleResidual,
+                residualCount, snapshot, request.iran);
         }
+
+        void close() throws Exception {
+            if (timeline != null) {
+                timeline.close();
+                timeline = null;
+            }
+        }
+    }
+
+    /** Loads one timeline page and the metadata needed to render only that page. */
+    static DayRows readPage(Context context, Result result, String dayKey,
+            HistoryTimeline.CursorKey cursor, boolean previous, int pageSize) throws Exception {
+        if (context == null) throw new NullPointerException("context");
+        if (result == null) throw new NullPointerException("result");
+        synchronized (BalanceData.class) {
+            HistoryTimeline snapshot = result.timeline;
+            if (snapshot == null) throw new IllegalStateException("history result is closed");
+            HistoryTimeline.Page page;
+            if (cursor == null) {
+                if (previous) throw new IllegalArgumentException("previous page needs a cursor");
+                page = snapshot.firstPage(dayKey, pageSize);
+            } else if (previous) {
+                page = snapshot.previousPage(dayKey, cursor, pageSize);
+            } else {
+                page = snapshot.nextPage(dayKey, cursor, pageSize);
+            }
+            return fromPage(context, snapshot, page, result.iranCalendar);
+        }
+    }
+
+    private static DayRows fromPage(Context context, HistoryTimeline snapshot,
+            HistoryTimeline.Page page, boolean iran) throws Exception {
+        List<Row> rows = new ArrayList<>(page.entries.size());
+        List<Transaction> transactions = new ArrayList<>();
+        List<Residual> residuals = new ArrayList<>();
+        Map<String, Metadata> metadata = new LinkedHashMap<>();
+        CalDate date = null;
+        for (HistoryTimeline.Entry entry : page.entries) {
+            if (date == null) date = calendarDate(entry.date, iran,
+                Calendar.getInstance(Locale.getDefault()));
+            Row row = new Row(entry.date, entry.transaction, entry.residual, entry.tie);
+            rows.add(row);
+            if (entry.transaction != null) {
+                transactions.add(entry.transaction);
+                String key = BalanceData.noteKey(entry.transaction);
+                metadata.put(key, pointMetadata(context, key));
+            } else {
+                residuals.add(entry.residual);
+            }
+        }
+        return new DayRows(page.dayKey, date, rows, transactions, residuals, metadata,
+            page.hasPrevious, page.hasMore, page.first, page.last);
+    }
+
+    private static Metadata pointMetadata(Context context, String key) throws Exception {
+        return new Metadata(MetadataStore.getText(context, MetadataStore.NOTES, key),
+            MetadataStore.getText(context, MetadataStore.REASONS, key),
+            MetadataStore.getText(context, MetadataStore.CHANNELS, key),
+            MetadataStore.getTags(context, key));
     }
 
     private static CalDate calendarDate(long millis, boolean iran, Calendar calendar) {
