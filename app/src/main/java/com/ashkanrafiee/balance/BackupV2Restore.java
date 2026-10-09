@@ -99,7 +99,7 @@ final class BackupV2Restore {
     private static final String LEGACY_CIPHER = "AES/GCM/NoPadding";
     private static final int LEGACY_IV_BYTES = 12;
     private static final int LEGACY_TAG_BYTES = 16;
-    private static final int LEGACY_MAX_HEADER_BYTES = 1024 * 1024;
+    private static final int LEGACY_MAX_HEADER_BYTES = 4 * 1024 * 1024;
     private static final int LEGACY_MAX_ITERATIONS = 6_000_000;
     private static final int LEGACY_MAX_SALT_BYTES = 256;
     private static final byte[] PLAINTEXT_STAGE_MAGIC = {
@@ -235,8 +235,9 @@ final class BackupV2Restore {
             } catch (Throwable failure) {
                 throw new BackupManager.BackupException(R.string.backup_error_not_backup);
             }
-            if (header.optInt("format", -1) != LEGACY_FORMAT_VERSION)
-                throw new BackupManager.BackupException(R.string.backup_error_unsupported);
+            // The format marker is authenticated as part of the header AAD: it is checked only
+            // after the GCM tag verifies, so a tampered header reports an authentication failure
+            // while a genuinely newer (validly encrypted) format reports unsupported.
 
             String kdfAlgorithm;
             int iterations;
@@ -297,7 +298,10 @@ final class BackupV2Restore {
                 if (tailLength != LEGACY_TAG_BYTES)
                     throw new javax.crypto.AEADBadTagException("legacy ciphertext is truncated");
                 writeStageBytes(output, stageCipher, oldCipher.doFinal(tail, 0, tailLength));
-                writeStageBytes(output, stageCipher, stageCipher.doFinal());
+                if (header.optInt("format", -1) != LEGACY_FORMAT_VERSION)
+                    throw new BackupManager.BackupException(R.string.backup_error_unsupported);
+                byte[] stageTag = stageCipher.doFinal();
+                if (stageTag != null && stageTag.length != 0) output.write(stageTag);
                 output.getFD().sync();
             } catch (javax.crypto.AEADBadTagException failure) {
                 throw new BackupManager.BackupException(R.string.backup_error_password);
@@ -447,24 +451,18 @@ final class BackupV2Restore {
                     bit = 1 << 7;
                     if ((seen & bit) != 0) throw invalid("duplicate legacy commitments");
                     seen |= bit;
-                    parseCommitments(json, stage);
+                    parseLegacyCommitments(json, stage);
                     break;
                 default:
                     throw invalid("unknown legacy payload field");
             }
         }
         json.endObject();
-        if (format < 1 || (seen & (1 << 1)) == 0)
+        // Like the original importer, a section the payload omits leaves the local store
+        // untouched. Only the format marker and balances are mandatory; unknown fields were
+        // already rejected above, and the GCM tag guarantees the payload is complete.
+        if (format < 1 || (seen & (1 | (1 << 1))) != (1 | (1 << 1)))
             throw invalid("incomplete legacy payload");
-        int expected = 1 | (1 << 1);
-        if (format >= 2) expected |= 1 << 2;
-        if (format >= 3) expected |= 1 << 3;
-        if (format >= 4) expected |= 1 << 4;
-        if (format >= 5) expected |= 1 << 5;
-        if (format >= 6) expected |= 1 << 6;
-        if (format >= 7) expected |= 1 << 7;
-        if ((seen & expected) != expected || (seen & ~expected) != 0)
-            throw invalid("legacy payload sections do not match format");
     }
 
     private static void parseLegacyBalances(JsonReader json, InputStage stage) throws Exception {
@@ -528,7 +526,7 @@ final class BackupV2Restore {
             parseTransactionsArray(json, stage);
         }
         json.endObject();
-        if (seen != 1) throw invalid("missing legacy transaction array");
+        // An empty object carries no movements, mirroring the original importer.
     }
 
     private static void parseLegacyTextMap(JsonReader json, InputStage stage, int kind)
@@ -817,6 +815,25 @@ final class BackupV2Restore {
         json.beginArray();
         while (json.hasNext()) parseCommitment(json, stage);
         json.endArray();
+    }
+
+    /** Reads legacy commitments in either envelope shape: the {@code {"commitments":[...]}} object
+     *  written by old releases and the bare array used by some fixtures. Entries share the v2 shape. */
+    private static void parseLegacyCommitments(JsonReader json, InputStage stage) throws Exception {
+        if (json.peek() == JsonToken.BEGIN_ARRAY) {
+            json.beginArray();
+            while (json.hasNext()) parseCommitment(json, stage);
+            json.endArray();
+            return;
+        }
+        json.beginObject();
+        if (!json.hasNext() || !"commitments".equals(json.nextName()))
+            throw invalid("invalid legacy commitments");
+        json.beginArray();
+        while (json.hasNext()) parseCommitment(json, stage);
+        json.endArray();
+        if (json.hasNext()) throw invalid("unexpected legacy commitments field");
+        json.endObject();
     }
 
     /** Reads one definition while emitting each settlement date immediately to encrypted staging. */
@@ -1210,6 +1227,14 @@ final class BackupV2Restore {
         if (bank == null || bank.isEmpty()) {
             throw invalid("invalid transaction");
         }
+        try {
+            TransactionStore.requireFieldLength(bank);
+            TransactionStore.requireFieldLength(account);
+            TransactionStore.requireFieldLength(sig);
+            TransactionStore.requireFieldLength(content);
+        } catch (IllegalArgumentException e) {
+            throw invalid("transaction field too large");
+        }
     }
 
     private static int once(int seen, int bit, String message) throws Exception {
@@ -1315,14 +1340,25 @@ final class BackupV2Restore {
             }
         }
 
+        /** Rows larger than a cursor window are split into chunks and reassembled on read, so
+         *  one very large record cannot overflow the cursor window. */
         void add(int kind, String payload) throws Exception {
             long ordinal = nextRow;
             nextRow = Math.incrementExact(nextRow);
-            ContentValues values = new ContentValues();
-            values.put("kind", kind);
-            values.put("ordinal", ordinal);
-            values.put("payload", codec.encrypt(payload, rowIdentity(kind, ordinal)));
-            db.insertOrThrow("rows", null, values);
+            int start = 0;
+            int seq = 0;
+            do {
+                int end = Math.min(payload.length(), start + ROW_CHUNK_CHARS);
+                ContentValues values = new ContentValues();
+                values.put("kind", kind);
+                values.put("ordinal", ordinal);
+                values.put("seq", seq);
+                values.put("payload", codec.encrypt(payload.substring(start, end),
+                    rowIdentity(kind, ordinal, seq)));
+                db.insertOrThrow("rows", null, values);
+                start = end;
+                seq = Math.incrementExact(seq);
+            } while (start < payload.length());
         }
 
         void addBalance(String key, String payload) throws Exception {
@@ -1438,13 +1474,38 @@ final class BackupV2Restore {
         }
 
         void forEach(int kind, RowVisitor visitor) throws Exception {
-            try (Cursor cursor = db.query("rows", new String[]{"ordinal", "payload"}, "kind=?",
-                    new String[]{Integer.toString(kind)}, null, null, "ordinal ASC")) {
+            try (Cursor cursor = db.query("rows", new String[]{"ordinal", "seq", "payload"}, "kind=?",
+                    new String[]{Integer.toString(kind)}, null, null, "ordinal ASC, seq ASC")) {
+                long current = Long.MIN_VALUE;
+                StringBuilder assembled = new StringBuilder();
+                int expectedSeq = 0;
                 while (cursor.moveToNext()) {
                     long ordinal = cursor.getLong(0);
-                    visitor.accept(codec.decrypt(cursor.getString(1), rowIdentity(kind, ordinal)));
+                    int seq = cursor.getInt(1);
+                    if (ordinal != current) {
+                        if (current != Long.MIN_VALUE) throw invalid("missing staged row chunk");
+                        current = ordinal;
+                        expectedSeq = 0;
+                    }
+                    if (seq != expectedSeq) throw invalid("missing staged row chunk");
+                    expectedSeq = Math.incrementExact(expectedSeq);
+                    assembled.append(codec.decrypt(cursor.getString(2),
+                        rowIdentity(kind, ordinal, seq)));
+                    if (cursor.isLast() || peekOrdinal(cursor) != current) {
+                        visitor.accept(assembled.toString());
+                        assembled.setLength(0);
+                        current = Long.MIN_VALUE;
+                    }
                 }
+                if (current != Long.MIN_VALUE) throw invalid("missing staged row chunk");
             }
+        }
+
+        private static long peekOrdinal(Cursor cursor) throws Exception {
+            if (!cursor.moveToNext()) return Long.MIN_VALUE;
+            long next = cursor.getLong(0);
+            cursor.moveToPrevious();
+            return next;
         }
 
         void forEachCommitment(CommitmentVisitor visitor) throws Exception {
@@ -1503,8 +1564,15 @@ final class BackupV2Restore {
 
     }
 
+    /** Staged row chunks stay well under the cursor window; rows reassemble per ordinal. */
+    private static final int ROW_CHUNK_CHARS = 256 * 1024;
+
     private static String rowIdentity(int kind, long ordinal) {
-        return "row\n" + kind + "\n" + ordinal;
+        return "row\n" + kind + "\n" + ordinal + "\n0";
+    }
+
+    private static String rowIdentity(int kind, long ordinal, int seq) {
+        return "row\n" + kind + "\n" + ordinal + "\n" + seq;
     }
 
     private static String commitmentIdentity(long ordinal) {
@@ -1524,7 +1592,7 @@ final class BackupV2Restore {
 
         @Override public void onCreate(SQLiteDatabase db) {
             db.execSQL("CREATE TABLE rows (kind INTEGER NOT NULL, ordinal INTEGER NOT NULL,"
-                + " payload TEXT NOT NULL, PRIMARY KEY(kind, ordinal))");
+                + " seq INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(kind, ordinal, seq))");
             db.execSQL("CREATE TABLE balance_keys (key_digest TEXT PRIMARY KEY)");
             db.execSQL("CREATE TABLE metadata_keys (kind INTEGER NOT NULL,"
                 + " key_digest TEXT NOT NULL, PRIMARY KEY(kind, key_digest))");

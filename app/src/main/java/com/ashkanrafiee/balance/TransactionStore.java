@@ -46,6 +46,10 @@ final class TransactionStore {
     static final String DB_NAME = "balance_transactions.db";
     static final String TABLE = "transactions";
     static final int MAX_PAGE_SIZE = 1_000;
+    /** Per-value memory-safety bound for one bank/account/signature/content string. SMS-derived
+     *  values are at most a few kilobytes; this bound only stops a crafted backup from forcing
+     *  multi-megabyte transient allocations. It is not a cap on the number of retained rows. */
+    static final int MAX_FIELD_CHARS = 1024 * 1024;
     private static final int DEFAULT_PAGE_SIZE = 256;
     private static final int DB_VERSION = 2;
     private static final String META = "store_meta";
@@ -653,7 +657,14 @@ final class TransactionStore {
     private static String string(JsonReader json, boolean nullable) throws Exception {
         if (nullable && json.peek() == JsonToken.NULL) { json.nextNull(); return null; }
         if (json.peek() != JsonToken.STRING) throw new Exception("invalid transaction string");
-        return json.nextString();
+        String value = json.nextString();
+        requireFieldLength(value);
+        return value;
+    }
+
+    static void requireFieldLength(String value) {
+        if (value != null && value.length() > MAX_FIELD_CHARS)
+            throw new IllegalArgumentException("transaction field too large");
     }
 
     private static long integer(JsonReader json) throws Exception {
@@ -666,6 +677,10 @@ final class TransactionStore {
     private static void requireTransaction(Transaction transaction) {
         if (transaction == null || transaction.bank == null || transaction.bank.isEmpty())
             throw new IllegalArgumentException("transaction must have a bank");
+        requireFieldLength(transaction.bank);
+        requireFieldLength(transaction.account);
+        requireFieldLength(transaction.sig);
+        requireFieldLength(transaction.content);
     }
 
     private static void requirePageSize(int size) {

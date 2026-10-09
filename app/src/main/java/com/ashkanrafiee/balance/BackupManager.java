@@ -2,6 +2,7 @@ package com.ashkanrafiee.balance;
 
 import android.content.Context;
 import android.net.Uri;
+import android.util.Base64;
 import android.util.JsonWriter;
 import java.io.File;
 import java.io.FileInputStream;
@@ -9,8 +10,19 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
+import java.security.spec.KeySpec;
 import java.util.Map;
+import javax.crypto.Cipher;
+import javax.crypto.CipherOutputStream;
+import javax.crypto.SecretKey;
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.PBEKeySpec;
+import javax.crypto.spec.SecretKeySpec;
+import org.json.JSONObject;
 
 /**
  * Encrypted, self-describing backups of the saved balances.
@@ -35,6 +47,33 @@ import java.util.Map;
  * 600,000 iterations, a fresh 128-bit random salt per backup and AES-256-GCM with a 128-bit tag.
  */
 final class BackupManager {
+    private static final byte[] MAGIC = {'B', 'A', 'L', 'N', 'C', 'E', 'B', 'K'};
+    private static final int FORMAT_VERSION = 1;
+    /** Payload shape: 1 = balances only, 2 = balances + transactions, 3 = balances + transactions +
+     *  notes, 4 = those plus the reasons the banks stated, 5 = those plus the channels they stated,
+     *  6 = those plus user-created transaction tags, 7 = those plus user-created commitments.
+     *  Older backups are still read and missing
+     *  metadata sections are left untouched during restore. */
+    private static final int PAYLOAD_FORMAT = 7;
+    private static final String KDF_ALGORITHM = "PBKDF2WithHmacSHA256";
+    private static final String CIPHER_ALGORITHM = "AES/GCM/NoPadding";
+    private static final int ITERATIONS = 600_000;
+    private static final int KEY_BITS = 256;
+    private static final int SALT_BYTES = 16;
+    private static final int IV_BYTES = 12;
+    private static final int TAG_BITS = 128;
+    /** Upper bound on a legacy restore's claimed KDF work. A hostile or corrupt header must never
+     *  drive the app into a multi-minute PBKDF2 burn (or a huge derived-key allocation) before the
+     *  GCM tag is checked: the value comes from the file, so it is validated before any key
+     *  derivation runs. Ours is 600k; anything farther above it is reported as unsupported rather
+     *  than attempted. */
+    private static final int MAX_ITERATIONS = 6_000_000;
+    private static final int MAX_SALT_BYTES = 256;
+    private static final int MIN_KEY_BITS = 128;
+    private static final int MAX_KEY_BITS = 256;
+    /** Legacy creation refuses to emit a backup file larger than this. Framed creation has no
+     *  total-size cap; legacy restore streams through the staged path without a record cap. */
+    private static final long MAX_BACKUP_BYTES = 10L * 1024 * 1024;
 
     /** Human-readable error carrying the string resource that describes it. */
     static final class BackupException extends Exception {
@@ -60,11 +99,75 @@ final class BackupManager {
 
     private BackupManager() {}
 
-    /** Builds an encrypted backup of the current balances and transaction history and writes it to
-     *  {@code uri}. Synchronized on {@link BalanceData} like {@link #restore} so the snapshot can
-     *  never interleave with a background {@link BalanceData#scanSms} scan. */
+    /** Builds a legacy encrypted backup of the current balances and transaction history and writes
+     *  it to {@code uri}. Synchronized on {@link BalanceData} like {@link #restore} so the snapshot
+     *  can never interleave with a background {@link BalanceData#scanSms} scan. New backups created
+     *  by the app use {@link #createFramed}; this legacy writer remains for compatibility tests and
+     *  callers that need the original on-disk layout. */
     static void create(Context context, Uri uri, String password) throws Exception {
-        createFramed(context, uri, password);
+        byte[] salt = randomBytes(SALT_BYTES);
+        byte[] iv = randomBytes(IV_BYTES);
+
+        JSONObject header = new JSONObject()
+            .put("format", FORMAT_VERSION)
+            .put("createdAt", System.currentTimeMillis())
+            .put("appVersion", appVersion(context))
+            .put("kdf", new JSONObject()
+                .put("algorithm", KDF_ALGORITHM)
+                .put("iterations", ITERATIONS)
+                .put("salt", Base64.encodeToString(salt, Base64.NO_WRAP))
+                .put("keyBits", KEY_BITS))
+            .put("cipher", new JSONObject()
+                .put("algorithm", CIPHER_ALGORITHM)
+                .put("iv", Base64.encodeToString(iv, Base64.NO_WRAP))
+                .put("tagBits", TAG_BITS));
+        byte[] headerBytes = header.toString().getBytes(StandardCharsets.UTF_8);
+        File temp = File.createTempFile("balance-backup-", ".tmp", context.getCacheDir());
+        try {
+            synchronized (BalanceData.class) {
+                SecretKey key = deriveKey(KDF_ALGORITHM, password, salt, ITERATIONS, KEY_BITS);
+                Cipher cipher = Cipher.getInstance(CIPHER_ALGORITHM);
+                cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(TAG_BITS, iv));
+                cipher.updateAAD(headerBytes);
+                try (FileOutputStream raw = new FileOutputStream(temp)) {
+                    raw.write(MAGIC);
+                    raw.write(FORMAT_VERSION);
+                    raw.write(toIntBytes(headerBytes.length));
+                    raw.write(headerBytes);
+                    try (Writer writer = new OutputStreamWriter(
+                            new CipherOutputStream(raw, cipher), StandardCharsets.UTF_8)) {
+                        writeStreamingPayload(context, writer);
+                    }
+                }
+            }
+            if (temp.length() > MAX_BACKUP_BYTES) throw new Exception("backup too large");
+            copyFileToUri(context, temp, uri);
+        } finally {
+            temp.delete();
+        }
+    }
+
+    private static void writeStreamingPayload(Context context, Writer writer) throws Exception {
+        writer.write("{\"payloadFormat\":" + PAYLOAD_FORMAT + ",\"balances\":");
+        writer.write(BalanceData.serialize(BalanceData.read(context)));
+        writer.write(",\"transactions\":{\"transactions\":[");
+        final boolean[] first = {true};
+        TransactionStore.forEach(context, 256, transaction -> {
+            if (!first[0]) writer.write(",");
+            first[0] = false;
+            writer.write(BalanceData.transactionJson(transaction).toString());
+        });
+        writer.write("]},\"txNotes\":");
+        writer.write(BalanceData.serializeTextMap(BalanceData.readNotes(context)));
+        writer.write(",\"txReasons\":");
+        writer.write(BalanceData.serializeTextMap(BalanceData.readReasons(context)));
+        writer.write(",\"txChannels\":");
+        writer.write(BalanceData.serializeTextMap(BalanceData.readChannels(context)));
+        writer.write(",\"txTags\":");
+        writer.write(BalanceData.serializeTagsMap(BalanceData.readTags(context)));
+        writer.write(",\"commitments\":");
+        writer.write(BalanceData.serializeCommitments(BalanceData.readCommitments(context)));
+        writer.write("}");
     }
 
     /**
@@ -234,6 +337,31 @@ final class BackupManager {
             byte[] buffer = new byte[8192];
             int n;
             while ((n = in.read(buffer)) >= 0) out.write(buffer, 0, n);
+        }
+    }
+
+    private static SecretKey deriveKey(String kdfAlgorithm, String password, byte[] salt,
+            int iterations, int keyBits) throws Exception {
+        KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, iterations, keyBits);
+        SecretKeyFactory factory = SecretKeyFactory.getInstance(kdfAlgorithm);
+        return new SecretKeySpec(factory.generateSecret(spec).getEncoded(), "AES");
+    }
+
+    private static byte[] randomBytes(int n) {
+        byte[] out = new byte[n];
+        new SecureRandom().nextBytes(out);
+        return out;
+    }
+
+    private static byte[] toIntBytes(int v) {
+        return new byte[]{(byte) (v >>> 24), (byte) (v >>> 16), (byte) (v >>> 8), (byte) v};
+    }
+
+    private static String appVersion(Context context) {
+        try {
+            return context.getPackageManager().getPackageInfo(context.getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "unknown";
         }
     }
 

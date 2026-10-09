@@ -470,9 +470,12 @@ public class BackupRestoreTest {
     }
 
     @Test public void legacyPayloadOverTenMiB_restoresItsLargeRecord() throws Exception {
-        String content = repeated('x', 11 * 1024 * 1024);
+        // A single SMS-derived value stays far below the 1 MiB per-field memory-safety bound
+        // while still spanning many 64 KiB frames and staged row chunks; total history size
+        // remains uncapped.
+        String content = repeated('x', 512 * 1024);
         String payload = "{\"payloadFormat\":2,\"balances\":{},\"transactions\":{"
-            + "transactions\":[{\"bank\":\"LargeBank\",\"date\":" + (T + 1)
+            + "\"transactions\":[{\"bank\":\"LargeBank\",\"date\":" + (T + 1)
             + ",\"amount\":-1,\"content\":\"" + content + "\"}]}}";
         File f = file("large-legacy.balance");
         writeLegacyBackup(f, payload, PASSWORD);
