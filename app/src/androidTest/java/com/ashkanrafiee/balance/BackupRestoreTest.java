@@ -253,7 +253,10 @@ public class BackupRestoreTest {
     @Test public void headerCarriesSelfDescribingEncryptionParameters() throws Exception {
         BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
         File f = file("header.balance");
-        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        String payload = "{\"payloadFormat\":1,\"balances\":{"
+            + "\"Tejarat\":{\"amount\":1000000,\"date\":" + (T + 1000)
+            + ",\"sender\":\"Tejarat\"}}}";
+        writeLegacyBackup(f, payload, PASSWORD);
 
         byte[] bytes = readFile(f);
         assertEquals("BALNCEBK", new String(bytes, 0, 8, StandardCharsets.US_ASCII));
@@ -466,19 +469,18 @@ public class BackupRestoreTest {
             restoreExpecting(b -> rewriteHeaderField(b, "kdf", "salt", b64), f).resId);
     }
 
-    @Test public void oversizedFile_isRejected() throws Exception {
-        // Just past the 10 MB cap: a file far larger than any real backup must not be read into memory.
-        long over = 10L * 1024 * 1024 + 1;
-        File f = file("huge.balance");
-        try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) {
-            out.write(new byte[(int) over]);
-        }
-        try {
-            BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
-            fail("oversized backup must be rejected");
-        } catch (BackupManager.BackupException e) {
-            assertEquals(R.string.backup_error_not_backup, e.resId);
-        }
+    @Test public void legacyPayloadOverTenMiB_restoresItsLargeRecord() throws Exception {
+        String content = repeated('x', 11 * 1024 * 1024);
+        String payload = "{\"payloadFormat\":2,\"balances\":{},\"transactions\":{"
+            + "transactions\":[{\"bank\":\"LargeBank\",\"date\":" + (T + 1)
+            + ",\"amount\":-1,\"content\":\"" + content + "\"}]}}";
+        File f = file("large-legacy.balance");
+        writeLegacyBackup(f, payload, PASSWORD);
+
+        BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
+        List<Transaction> restored = BalanceData.readTransactions(ctx);
+        assertEquals(1, restored.size());
+        assertEquals(content, restored.get(0).content);
     }
 
     // ============================================================
@@ -612,6 +614,12 @@ public class BackupRestoreTest {
         assertEquals("Melat", txs.get(0).bank);
     }
 
+    private static String repeated(char value, int count) {
+        char[] out = new char[count];
+        java.util.Arrays.fill(out, value);
+        return new String(out);
+    }
+
     /** Writes a balances-only (payloadFormat 1) backup exactly as older releases produced them:
      *  same header shape, KDF and cipher, but no "transactions" section in the payload. */
     private void writeLegacyBackup(File f, String payloadJson, String password) throws Exception {
@@ -731,24 +739,24 @@ public class BackupRestoreTest {
         assertEquals(1, BalanceData.readTransactions(ctx).size());
     }
 
-    @Test public void restore_commitmentsPreservesTheLocalCapacityCap() throws Exception {
-        List<Commitment> one = new ArrayList<>();
-        one.add(Commitment.create("backup", -100, Commitment.ONCE, T + 100, null, false, 0));
-        BalanceData.writeCommitments(ctx, one);
-        Uri u = uri("commitment-cap.balance");
-        BackupManager.create(ctx, u, PASSWORD);
-
-        List<Commitment> full = new ArrayList<>();
-        for (int i = 0; i < Commitment.MAX_COMMITMENTS; i++) {
-            full.add(Commitment.create("local-" + i, -100, Commitment.ONCE,
-                T + 1000 + i, null, false, 0));
+    @Test public void restore_legacyCommitmentsHasNoLifetimeCapacityCap() throws Exception {
+        List<Commitment> backup = new ArrayList<>();
+        for (int i = 0; i < Commitment.MAX_COMMITMENTS + 1; i++) {
+            backup.add(Commitment.create("backup-" + i, -100, Commitment.ONCE,
+                T + 100 + i, null, false, 0));
         }
-        BalanceData.reset(ctx, true);
-        BalanceData.writeCommitments(ctx, full);
+        String commitments = new org.json.JSONObject(BalanceData.serializeCommitments(backup))
+            .getJSONArray("commitments").toString();
+        String payload = "{\"payloadFormat\":7,\"balances\":{},"
+            + "\"transactions\":{\"transactions\":[]},\"txNotes\":{},"
+            + "\"txReasons\":{},\"txChannels\":{},\"txTags\":{},"
+            + "\"commitments\":" + commitments + "}";
+        File f = file("commitment-uncapped-legacy.balance");
+        writeLegacyBackup(f, payload, PASSWORD);
 
-        BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
-        assertEquals(0, res.commitmentsAdded);
-        assertEquals(Commitment.MAX_COMMITMENTS, BalanceData.readCommitments(ctx).size());
+        BackupManager.RestoreResult res = BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
+        assertEquals(Commitment.MAX_COMMITMENTS + 1, res.commitmentsAdded);
+        assertEquals(Commitment.MAX_COMMITMENTS + 1, BalanceData.readCommitments(ctx).size());
     }
 
     @Test public void merge_transactions_sameAmountSameTimeDifferentAccounts_staySeparate() throws Exception {

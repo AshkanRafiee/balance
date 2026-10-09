@@ -11,17 +11,29 @@ import android.util.Base64;
 import android.util.JsonReader;
 import android.util.JsonToken;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.charset.CodingErrorAction;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 
+import javax.crypto.Cipher;
+import javax.crypto.CipherInputStream;
 import javax.crypto.Mac;
+import javax.crypto.SecretKey;
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
 
 import org.json.JSONArray;
@@ -76,7 +88,29 @@ final class BackupV2Restore {
     private static final String DB_PREFIX = "balance_backup_stage_";
     private static final String INDEX_DOMAIN = "backup-stage-index";
 
+    private static final byte[] LEGACY_MAGIC = {
+        'B', 'A', 'L', 'N', 'C', 'E', 'B', 'K'
+    };
+    private static final int LEGACY_FORMAT_VERSION = 1;
+    private static final String LEGACY_KDF = "PBKDF2WithHmacSHA256";
+    private static final String LEGACY_CIPHER = "AES/GCM/NoPadding";
+    private static final int LEGACY_IV_BYTES = 12;
+    private static final int LEGACY_TAG_BYTES = 16;
+    private static final int LEGACY_MAX_HEADER_BYTES = 1024 * 1024;
+    private static final int LEGACY_MAX_ITERATIONS = 6_000_000;
+    private static final int LEGACY_MAX_SALT_BYTES = 256;
+    private static final byte[] PLAINTEXT_STAGE_MAGIC = {
+        'B', 'A', 'L', 'S', 'T', 'G', '0', '1'
+    };
+    private static final int PLAINTEXT_STAGE_IV_BYTES = 12;
+
+    private static volatile DataGeneration.PublishHook publishHookForTests;
+
     private BackupV2Restore() {}
+
+    static void setPublishHookForTests(DataGeneration.PublishHook hook) {
+        publishHookForTests = hook;
+    }
 
     static BackupManager.RestoreResult restore(Context context, Uri uri, String password)
             throws Exception {
@@ -97,6 +131,7 @@ final class BackupV2Restore {
                 // No BalanceData, transaction, metadata or commitment write below may use the live
                 // context. Stage.publish() is the only operation that makes the merge visible.
                 try (DataGeneration.Stage generation = DataGeneration.beginStage(application)) {
+                    generation.setPublishHookForTests(publishHookForTests);
                     result = apply(generation.context(), input);
                     generation.publish();
                 }
@@ -113,6 +148,220 @@ final class BackupV2Restore {
             if (input != null) input.close();
             Arrays.fill(chars, '\0');
         }
+    }
+
+    /**
+     * Imports the original AES-GCM backup formats 1 through 7. The old ciphertext is consumed in
+     * bounded chunks. Plaintext is first written to an encrypted disposable file and is not parsed
+     * until the old GCM tag has been authenticated; parsing then feeds the same encrypted row stage
+     * and generation publisher used by framed restore.
+     */
+    static BackupManager.RestoreResult restoreLegacy(Context context, Uri uri, String password)
+            throws Exception {
+        if (password == null) throw new IllegalArgumentException("password");
+        Context application = context.getApplicationContext();
+        if (application == null) application = context;
+        char[] chars = password.toCharArray();
+        byte[] stageKey = randomBytes(32);
+        byte[] stageIv = randomBytes(PLAINTEXT_STAGE_IV_BYTES);
+        File plaintext = File.createTempFile("balance-legacy-", ".stage", application.getCacheDir());
+        InputStage input = null;
+        try {
+            decryptLegacy(application, uri, chars, plaintext, stageKey, stageIv);
+            input = new InputStage(application);
+            try (InputStream staged = openPlaintextStage(plaintext, stageKey, stageIv);
+                    InputStreamReader reader = new InputStreamReader(staged,
+                        StandardCharsets.UTF_8.newDecoder()
+                            .onMalformedInput(CodingErrorAction.REPORT)
+                            .onUnmappableCharacter(CodingErrorAction.REPORT));
+                    JsonReader json = new JsonReader(reader)) {
+                json.setLenient(false);
+                parseLegacyPayload(json, input);
+                if (json.peek() != JsonToken.END_DOCUMENT)
+                    throw invalid("trailing legacy payload");
+            }
+            input.commitInput();
+
+            BackupManager.RestoreResult result;
+            synchronized (BalanceData.class) {
+                try (DataGeneration.Stage generation = DataGeneration.beginStage(application)) {
+                    generation.setPublishHookForTests(publishHookForTests);
+                    result = apply(generation.context(), input);
+                    generation.publish();
+                }
+            }
+            CommitmentReminders.scheduleAll(application);
+            return result;
+        } finally {
+            if (input != null) input.close();
+            plaintext.delete();
+            Arrays.fill(chars, '\0');
+            Arrays.fill(stageKey, (byte) 0);
+            Arrays.fill(stageIv, (byte) 0);
+        }
+    }
+
+    private static void decryptLegacy(Context context, Uri uri, char[] password, File target,
+            byte[] stageKey, byte[] stageIv) throws Exception {
+        try (InputStream raw = context.getContentResolver().openInputStream(uri)) {
+            if (raw == null) throw new Exception("null input stream");
+            byte[] magic = new byte[LEGACY_MAGIC.length];
+            if (!readFully(raw, magic)) throw new BackupManager.BackupException(
+                R.string.backup_error_not_backup);
+            if (!Arrays.equals(magic, LEGACY_MAGIC))
+                throw new BackupManager.BackupException(R.string.backup_error_not_backup);
+
+            int version = readUnsignedByte(raw);
+            if (version < 0) throw new BackupManager.BackupException(
+                R.string.backup_error_not_backup);
+            if (version != LEGACY_FORMAT_VERSION)
+                throw new BackupManager.BackupException(R.string.backup_error_unsupported);
+            byte[] length = new byte[4];
+            if (!readFully(raw, length)) throw new BackupManager.BackupException(
+                R.string.backup_error_not_backup);
+            int headerLength = fromIntBytes(length, 0);
+            if (headerLength <= 0 || headerLength > LEGACY_MAX_HEADER_BYTES)
+                throw new BackupManager.BackupException(R.string.backup_error_not_backup);
+            byte[] headerBytes = new byte[headerLength];
+            if (!readFully(raw, headerBytes)) throw new BackupManager.BackupException(
+                R.string.backup_error_not_backup);
+
+            JSONObject header;
+            try {
+                header = new JSONObject(new String(headerBytes, StandardCharsets.UTF_8));
+            } catch (Throwable failure) {
+                throw new BackupManager.BackupException(R.string.backup_error_not_backup);
+            }
+            if (header.optInt("format", -1) != LEGACY_FORMAT_VERSION)
+                throw new BackupManager.BackupException(R.string.backup_error_unsupported);
+
+            String kdfAlgorithm;
+            int iterations;
+            byte[] salt;
+            int keyBits;
+            String cipherAlgorithm;
+            byte[] iv;
+            int tagBits;
+            try {
+                JSONObject kdf = header.getJSONObject("kdf");
+                kdfAlgorithm = kdf.getString("algorithm");
+                iterations = kdf.getInt("iterations");
+                salt = Base64.decode(kdf.getString("salt"), Base64.NO_WRAP);
+                keyBits = kdf.optInt("keyBits", 256);
+                JSONObject cipher = header.getJSONObject("cipher");
+                cipherAlgorithm = cipher.getString("algorithm");
+                iv = Base64.decode(cipher.getString("iv"), Base64.NO_WRAP);
+                tagBits = cipher.getInt("tagBits");
+            } catch (Exception failure) {
+                throw new BackupManager.BackupException(R.string.backup_error_not_backup);
+            }
+            if (!LEGACY_KDF.equals(kdfAlgorithm) || !LEGACY_CIPHER.equals(cipherAlgorithm))
+                throw new BackupManager.BackupException(R.string.backup_error_unsupported);
+            if (iterations <= 0 || iterations > LEGACY_MAX_ITERATIONS || keyBits != 256
+                    || tagBits != 128 || iv.length != LEGACY_IV_BYTES || salt.length == 0
+                    || salt.length > LEGACY_MAX_SALT_BYTES) {
+                throw new BackupManager.BackupException(R.string.backup_error_unsupported);
+            }
+
+            SecretKey oldKey = deriveLegacyKey(password, salt, iterations, keyBits);
+            Cipher oldCipher = Cipher.getInstance(LEGACY_CIPHER);
+            oldCipher.init(Cipher.DECRYPT_MODE, oldKey, new GCMParameterSpec(tagBits, iv));
+            oldCipher.updateAAD(headerBytes);
+
+            Cipher stageCipher = Cipher.getInstance(LEGACY_CIPHER);
+            stageCipher.init(Cipher.ENCRYPT_MODE,
+                new SecretKeySpec(stageKey, "AES"), new GCMParameterSpec(128, stageIv));
+            try (FileOutputStream output = new FileOutputStream(target)) {
+                output.write(PLAINTEXT_STAGE_MAGIC);
+                output.write(stageIv);
+                byte[] input = new byte[16 * 1024];
+                byte[] tail = new byte[LEGACY_TAG_BYTES];
+                int tailLength = 0;
+                int count;
+                while ((count = raw.read(input)) != -1) {
+                    if (count == 0) continue;
+                    byte[] combined = new byte[tailLength + count];
+                    System.arraycopy(tail, 0, combined, 0, tailLength);
+                    System.arraycopy(input, 0, combined, tailLength, count);
+                    int ciphertextLength = combined.length - LEGACY_TAG_BYTES;
+                    if (ciphertextLength > 0) {
+                        writeStageBytes(output, stageCipher,
+                            oldCipher.update(combined, 0, ciphertextLength));
+                    }
+                    tailLength = Math.min(LEGACY_TAG_BYTES, combined.length);
+                    System.arraycopy(combined, combined.length - tailLength, tail, 0, tailLength);
+                }
+                if (tailLength != LEGACY_TAG_BYTES)
+                    throw new javax.crypto.AEADBadTagException("legacy ciphertext is truncated");
+                writeStageBytes(output, stageCipher, oldCipher.doFinal(tail, 0, tailLength));
+                writeStageBytes(output, stageCipher, stageCipher.doFinal());
+                output.getFD().sync();
+            } catch (javax.crypto.AEADBadTagException failure) {
+                throw new BackupManager.BackupException(R.string.backup_error_password);
+            } catch (javax.crypto.BadPaddingException failure) {
+                throw new BackupManager.BackupException(R.string.backup_error_password);
+            }
+        }
+    }
+
+    private static InputStream openPlaintextStage(File file, byte[] key, byte[] iv)
+            throws Exception {
+        FileInputStream input = new FileInputStream(file);
+        try {
+            byte[] magic = new byte[PLAINTEXT_STAGE_MAGIC.length];
+            if (!readFully(input, magic) || !Arrays.equals(magic, PLAINTEXT_STAGE_MAGIC))
+                throw new Exception("invalid plaintext stage");
+            byte[] storedIv = new byte[PLAINTEXT_STAGE_IV_BYTES];
+            if (!readFully(input, storedIv) || !Arrays.equals(storedIv, iv))
+                throw new Exception("invalid plaintext stage iv");
+            Cipher cipher = Cipher.getInstance(LEGACY_CIPHER);
+            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, "AES"),
+                new GCMParameterSpec(128, storedIv));
+            return new CipherInputStream(input, cipher);
+        } catch (Exception failure) {
+            input.close();
+            throw failure;
+        }
+    }
+
+    private static void writeStageBytes(OutputStream output, Cipher cipher, byte[] bytes)
+            throws Exception {
+        if (bytes == null || bytes.length == 0) return;
+        byte[] encrypted = cipher.update(bytes);
+        if (encrypted != null && encrypted.length != 0) output.write(encrypted);
+    }
+
+    private static SecretKey deriveLegacyKey(char[] password, byte[] salt, int iterations,
+            int keyBits) throws Exception {
+        PBEKeySpec spec = new PBEKeySpec(password, salt, iterations, keyBits);
+        SecretKeyFactory factory = SecretKeyFactory.getInstance(LEGACY_KDF);
+        return new SecretKeySpec(factory.generateSecret(spec).getEncoded(), "AES");
+    }
+
+    private static int readUnsignedByte(InputStream input) throws Exception {
+        return input.read();
+    }
+
+    private static boolean readFully(InputStream input, byte[] destination) throws Exception {
+        int offset = 0;
+        while (offset < destination.length) {
+            int count = input.read(destination, offset, destination.length - offset);
+            if (count < 0) return false;
+            if (count == 0) continue;
+            offset += count;
+        }
+        return true;
+    }
+
+    private static byte[] randomBytes(int count) {
+        byte[] bytes = new byte[count];
+        new SecureRandom().nextBytes(bytes);
+        return bytes;
+    }
+
+    private static int fromIntBytes(byte[] bytes, int offset) {
+        return ((bytes[offset] & 0xFF) << 24) | ((bytes[offset + 1] & 0xFF) << 16)
+            | ((bytes[offset + 2] & 0xFF) << 8) | (bytes[offset + 3] & 0xFF);
     }
 
     private static void readAuthenticated(Context context, Uri uri, char[] password, InputStage stage)
@@ -137,6 +386,188 @@ final class BackupV2Restore {
                 authenticated.finish();
             }
         }
+    }
+
+    private static void parseLegacyPayload(JsonReader json, InputStage stage) throws Exception {
+        int seen = 0;
+        int format = -1;
+        json.beginObject();
+        while (json.hasNext()) {
+            String name = json.nextName();
+            int bit;
+            switch (name) {
+                case "payloadFormat":
+                    bit = 1;
+                    if ((seen & bit) != 0) throw invalid("duplicate legacy payload format");
+                    seen |= bit;
+                    long value = exactLong(json);
+                    if (value < 1 || value > 7) throw invalid("unsupported legacy payload format");
+                    format = (int) value;
+                    break;
+                case "balances":
+                    bit = 1 << 1;
+                    if ((seen & bit) != 0) throw invalid("duplicate legacy balances");
+                    seen |= bit;
+                    parseLegacyBalances(json, stage);
+                    break;
+                case "transactions":
+                    bit = 1 << 2;
+                    if ((seen & bit) != 0) throw invalid("duplicate legacy transactions");
+                    seen |= bit;
+                    parseLegacyTransactions(json, stage);
+                    break;
+                case "txNotes":
+                    bit = 1 << 3;
+                    if ((seen & bit) != 0) throw invalid("duplicate legacy notes");
+                    seen |= bit;
+                    parseLegacyTextMap(json, stage, NOTES);
+                    break;
+                case "txReasons":
+                    bit = 1 << 4;
+                    if ((seen & bit) != 0) throw invalid("duplicate legacy reasons");
+                    seen |= bit;
+                    parseLegacyTextMap(json, stage, REASONS);
+                    break;
+                case "txChannels":
+                    bit = 1 << 5;
+                    if ((seen & bit) != 0) throw invalid("duplicate legacy channels");
+                    seen |= bit;
+                    parseLegacyTextMap(json, stage, CHANNELS);
+                    break;
+                case "txTags":
+                    bit = 1 << 6;
+                    if ((seen & bit) != 0) throw invalid("duplicate legacy tags");
+                    seen |= bit;
+                    parseLegacyTags(json, stage);
+                    break;
+                case "commitments":
+                    bit = 1 << 7;
+                    if ((seen & bit) != 0) throw invalid("duplicate legacy commitments");
+                    seen |= bit;
+                    parseCommitments(json, stage);
+                    break;
+                default:
+                    throw invalid("unknown legacy payload field");
+            }
+        }
+        json.endObject();
+        if (format < 1 || (seen & (1 << 1)) == 0)
+            throw invalid("incomplete legacy payload");
+        int expected = 1 | (1 << 1);
+        if (format >= 2) expected |= 1 << 2;
+        if (format >= 3) expected |= 1 << 3;
+        if (format >= 4) expected |= 1 << 4;
+        if (format >= 5) expected |= 1 << 5;
+        if (format >= 6) expected |= 1 << 6;
+        if (format >= 7) expected |= 1 << 7;
+        if ((seen & expected) != expected || (seen & ~expected) != 0)
+            throw invalid("legacy payload sections do not match format");
+    }
+
+    private static void parseLegacyBalances(JsonReader json, InputStage stage) throws Exception {
+        json.beginObject();
+        while (json.hasNext()) {
+            String key = json.nextName();
+            String name = null;
+            String sender = null;
+            String account = null;
+            long amount = 0;
+            long date = 0;
+            int seen = 0;
+            json.beginObject();
+            while (json.hasNext()) {
+                String field = json.nextName();
+                switch (field) {
+                    case "amount":
+                        seen = once(seen, 1, "duplicate legacy balance amount");
+                        amount = exactLong(json);
+                        break;
+                    case "date":
+                        seen = once(seen, 1 << 1, "duplicate legacy balance date");
+                        date = exactLong(json);
+                        break;
+                    case "sender":
+                        seen = once(seen, 1 << 2, "duplicate legacy balance sender");
+                        sender = requiredString(json);
+                        break;
+                    case "account":
+                        seen = once(seen, 1 << 3, "duplicate legacy balance account");
+                        account = optionalString(json);
+                        break;
+                    case "name":
+                        seen = once(seen, 1 << 4, "duplicate legacy balance name");
+                        name = requiredString(json);
+                        break;
+                    default:
+                        throw invalid("unknown legacy balance field");
+                }
+            }
+            json.endObject();
+            if ((seen & 7) != 7) throw invalid("missing legacy balance field");
+            if (name == null) name = BalanceData.bankOfKey(key);
+            if (account == null && key != null) account = accountFromStorageKey(key);
+            requireBalanceIdentity(key, name, account, sender, date);
+            JSONObject row = new JSONObject().put("key", key).put("name", name)
+                .put("amount", amount).put("date", date).put("sender", sender);
+            if (account != null) row.put("account", account);
+            stage.addBalance(key, row.toString());
+        }
+        json.endObject();
+    }
+
+    private static void parseLegacyTransactions(JsonReader json, InputStage stage) throws Exception {
+        int seen = 0;
+        json.beginObject();
+        while (json.hasNext()) {
+            String field = json.nextName();
+            if (!"transactions".equals(field)) throw invalid("unknown legacy transaction field");
+            seen = once(seen, 1, "duplicate legacy transaction array");
+            parseTransactionsArray(json, stage);
+        }
+        json.endObject();
+        if (seen != 1) throw invalid("missing legacy transaction array");
+    }
+
+    private static void parseLegacyTextMap(JsonReader json, InputStage stage, int kind)
+            throws Exception {
+        json.beginObject();
+        while (json.hasNext()) {
+            String key = json.nextName();
+            requireMetadataKey(key);
+            String text = requiredString(json);
+            if (text.isEmpty()) throw invalid("empty legacy metadata text");
+            stage.addMetadata(kind, key, new JSONObject().put("key", key)
+                .put("text", text).toString());
+        }
+        json.endObject();
+    }
+
+    private static void parseLegacyTags(JsonReader json, InputStage stage) throws Exception {
+        json.beginObject();
+        while (json.hasNext()) {
+            String key = json.nextName();
+            requireMetadataKey(key);
+            List<String> tags = readTags(json);
+            if (tags.isEmpty()) throw invalid("empty legacy metadata tags");
+            JSONArray values = new JSONArray();
+            for (String tag : tags) values.put(tag);
+            stage.addMetadata(TAGS, key, new JSONObject().put("key", key)
+                .put("tags", values).toString());
+        }
+        json.endObject();
+    }
+
+    private static void requireMetadataKey(String key) throws Exception {
+        if (key == null || key.isEmpty() || key.length() > 1024)
+            throw invalid("invalid metadata key");
+    }
+
+    private static String accountFromStorageKey(String key) throws Exception {
+        int separator = key.indexOf('|');
+        if (separator < 0) return null;
+        if (separator == 0 || separator != key.lastIndexOf('|') || separator == key.length() - 1)
+            throw invalid("invalid balance key");
+        return key.substring(separator + 1);
     }
 
     private static void parsePayload(JsonReader json, InputStage stage) throws Exception {
@@ -234,12 +665,16 @@ final class BackupV2Restore {
             JSONObject row = new JSONObject().put("key", key).put("name", name)
                 .put("amount", amount).put("date", date).put("sender", sender);
             if (account != null) row.put("account", account);
-            stage.add(BALANCE, row.toString());
+            stage.addBalance(key, row.toString());
         }
         json.endArray();
     }
 
     private static void parseTransactions(JsonReader json, InputStage stage) throws Exception {
+        parseTransactionsArray(json, stage);
+    }
+
+    private static void parseTransactionsArray(JsonReader json, InputStage stage) throws Exception {
         json.beginArray();
         while (json.hasNext()) {
             String bank = null;
@@ -338,7 +773,8 @@ final class BackupV2Restore {
                 }
             }
             json.endObject();
-            if ((seen & 3) != 3 || key.isEmpty()) throw invalid("invalid metadata row");
+            if ((seen & 3) != 3) throw invalid("invalid metadata row");
+            requireMetadataKey(key);
             JSONObject row = new JSONObject().put("key", key);
             if (tags) {
                 if (tagValues == null || tagValues.isEmpty()) throw invalid("empty metadata tags");
@@ -747,6 +1183,17 @@ final class BackupV2Restore {
             db.insertOrThrow("rows", null, values);
         }
 
+        void addBalance(String key, String payload) throws Exception {
+            ContentValues unique = new ContentValues();
+            unique.put("key_digest", digest("balance\n" + key));
+            try {
+                db.insertOrThrow("balance_keys", null, unique);
+            } catch (SQLiteConstraintException e) {
+                throw invalid("duplicate balance key");
+            }
+            add(BALANCE, payload);
+        }
+
         void addMetadata(int kind, String key, String payload) throws Exception {
             ContentValues unique = new ContentValues();
             unique.put("kind", kind);
@@ -936,6 +1383,7 @@ final class BackupV2Restore {
         @Override public void onCreate(SQLiteDatabase db) {
             db.execSQL("CREATE TABLE rows (kind INTEGER NOT NULL, ordinal INTEGER NOT NULL,"
                 + " payload TEXT NOT NULL, PRIMARY KEY(kind, ordinal))");
+            db.execSQL("CREATE TABLE balance_keys (key_digest TEXT PRIMARY KEY)");
             db.execSQL("CREATE TABLE metadata_keys (kind INTEGER NOT NULL,"
                 + " key_digest TEXT NOT NULL, PRIMARY KEY(kind, key_digest))");
             db.execSQL("CREATE TABLE commitment_definitions (ordinal INTEGER PRIMARY KEY,"
