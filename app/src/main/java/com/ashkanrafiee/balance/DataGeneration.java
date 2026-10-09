@@ -58,7 +58,8 @@ final class DataGeneration {
     private static final String[] DATABASES = {
         TransactionStore.DB_NAME,
         MetadataStore.DB_NAME,
-        CommitmentStore.DB_NAME
+        CommitmentStore.DB_NAME,
+        SourceStore.DB_NAME
     };
 
     private DataGeneration() {}

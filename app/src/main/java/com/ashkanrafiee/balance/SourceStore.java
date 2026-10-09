@@ -415,6 +415,32 @@ final class SourceStore {
         });
     }
 
+    /** Transaction observations for one source row; per-SMS counts stay small. */
+    static List<TransactionObservation> transactionObservationsForSource(Context context,
+            long sourceId) throws Exception {
+        return read(context, session -> {
+            List<TransactionObservation> out = new ArrayList<>();
+            try (Cursor cursor = session.db.query(TRANSACTION_TABLE, OBSERVATION_COLUMNS,
+                    "source_id=?", new String[]{Long.toString(sourceId)}, null, null, "id ASC")) {
+                while (cursor.moveToNext()) out.add(session.decodeTransaction(cursor));
+            }
+            return out;
+        });
+    }
+
+    /** Balance observations for one source row; per-SMS counts stay small. */
+    static List<BalanceObservation> balanceObservationsForSource(Context context,
+            long sourceId) throws Exception {
+        return read(context, session -> {
+            List<BalanceObservation> out = new ArrayList<>();
+            try (Cursor cursor = session.db.query(BALANCE_TABLE, OBSERVATION_COLUMNS,
+                    "source_id=?", new String[]{Long.toString(sourceId)}, null, null, "id ASC")) {
+                while (cursor.moveToNext()) out.add(session.decodeBalance(cursor));
+            }
+            return out;
+        });
+    }
+
     /** Explicit destructive reset. It does not open a missing/corrupt database. */
     static void clear(Context context) {
         if (context == null) throw new NullPointerException("context");
@@ -440,6 +466,10 @@ final class SourceStore {
             java.io.File receipt = receiptFile(dataContext);
             if (receipt.exists() && !receipt.delete() && receipt.exists())
                 throw new IllegalStateException("source store receipt could not be deleted");
+            try { DataGeneration.refreshMarker(dataContext); }
+            catch (Exception e) {
+                throw new IllegalStateException("source generation marker could not be refreshed", e);
+            }
         }
     }
 
@@ -583,6 +613,7 @@ final class SourceStore {
 
     private static <T> T read(Context context, SessionWork<T> work) throws Exception {
         synchronized (BalanceData.class) {
+            context = DataGeneration.context(context);
             if (Boolean.TRUE.equals(ACTIVE.get()))
                 throw new IllegalStateException("source store callback cannot reenter the store");
             ACTIVE.set(true);

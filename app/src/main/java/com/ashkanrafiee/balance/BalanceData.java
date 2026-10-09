@@ -884,6 +884,8 @@ final class BalanceData {
         TransactionStore.clear(context);
         try { MetadataStore.reset(context, alsoNotes); }
         catch (Exception e) { throw new IllegalStateException("metadata reset failed", e); }
+        try { SourceStore.clear(context); }
+        catch (Exception e) { throw new IllegalStateException("source reset failed", e); }
         android.content.SharedPreferences.Editor data =
             DataGeneration.dataPrefs(context).edit()
                 .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS)
@@ -1167,6 +1169,8 @@ final class BalanceData {
                 String sender = cursor.getString(0);
                 String bank = BankRules.resolve(sender);
                 if (bank == null) continue;
+                try { SourceStore.capture(context, sender, cursor.getString(1), arrival, BankRules.VERSION); }
+                catch (Exception se) { Log.w(TAG, "source capture failed", se); }
                 long value = extract(cursor.getString(1));
                 if (value < 0) continue;
                 String key = storageKey(bank, BankRules.extractAccount(bank, cursor.getString(1)));
@@ -1341,6 +1345,8 @@ final class BalanceData {
                     String bank = BankRules.resolve(sender);
                     if (bank == null) continue;
                     String body = cursor.getString(1);
+                    try { SourceStore.capture(context, sender, body, arrival, BankRules.VERSION); }
+                    catch (Exception se) { Log.w(TAG, "source capture failed", se); }
                     rows.add(new Object[]{bank, sender, body,
                         MessageDate.eventTime(body, arrival, BankRules.calendar(bank))});
                 }
