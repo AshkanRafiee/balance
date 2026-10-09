@@ -46,12 +46,14 @@ public class BackupRestoreTest {
 
     @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        DataGeneration.clearForTests(ctx);
         BalanceData.reset(ctx, true);
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
     }
 
     @After public void tearDown() throws Exception {
         BalanceData.reset(ctx, true);
+        DataGeneration.clearForTests(ctx);
     }
 
     private File file(String name) {
