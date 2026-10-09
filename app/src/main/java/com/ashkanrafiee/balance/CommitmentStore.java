@@ -791,6 +791,10 @@ final class CommitmentStore {
                 ContentValues values = new ContentValues();
                 values.put("payload", definitionPayload(updated));
                 db.update(DEFINITIONS, values, "id=?", new String[]{Long.toString(definition.rowId)});
+                // Drop any orphan marks (e.g. from an older restore): the done flag alone is
+                // the state, and leftovers would resurrect if this ever became recurring.
+                db.delete(SETTLEMENTS, "definition_id=?",
+                    new String[]{Long.toString(definition.rowId)});
             } else {
                 Settlement old = mark(definition.rowId, date);
                 boolean implicit = c.legacyPaidThrough > 0 && date <= c.legacyPaidThrough;
@@ -876,8 +880,13 @@ final class CommitmentStore {
                 db.execSQL("CREATE TEMP TABLE IF NOT EXISTS incoming_marks (id INTEGER PRIMARY KEY,"
                     + " definition_id INTEGER NOT NULL, lookup TEXT NOT NULL UNIQUE, payload TEXT NOT NULL)");
                 db.delete("incoming_marks", null, null);
-                for (Long date : c.paid) putIncomingMark("incoming_marks", rowId, date, true);
-                for (Long date : c.unpaid) putIncomingMark("incoming_marks", rowId, date, false);
+                // A one-time definition's state is its done flag alone: marks for it would be
+                // invisible orphans today and resurrected history if it ever became recurring.
+                if (c.frequency != Commitment.ONCE) {
+                    for (Long date : c.paid) putIncomingMark("incoming_marks", rowId, date, true);
+                    for (Long date : c.unpaid)
+                        putIncomingMark("incoming_marks", rowId, date, false);
+                }
                 db.delete(SETTLEMENTS, "definition_id=?", new String[]{Long.toString(rowId)});
                 db.execSQL("INSERT INTO " + SETTLEMENTS + " (definition_id,lookup,payload)"
                     + " SELECT definition_id,lookup,payload FROM incoming_marks ORDER BY id");
@@ -913,8 +922,14 @@ final class CommitmentStore {
                 // tombstone so backups taken afterwards stay self-consistent. Ids absent from
                 // the set keep their tombstones.
                 db.delete(META, "key=?", new String[]{DELETED_PREFIX + definitionLookup(c.id)});
-                for (Long date : c.paid) putIncomingMark("replacement_marks", rowId, date, true);
-                for (Long date : c.unpaid) putIncomingMark("replacement_marks", rowId, date, false);
+                // Marks on a one-time definition would be invisible orphans (its state is the
+                // done flag alone) and resurrected history if it ever became recurring.
+                if (c.frequency != Commitment.ONCE) {
+                    for (Long date : c.paid)
+                        putIncomingMark("replacement_marks", rowId, date, true);
+                    for (Long date : c.unpaid)
+                        putIncomingMark("replacement_marks", rowId, date, false);
+                }
                 rowId = Math.incrementExact(rowId);
             }
             db.delete(DEFINITIONS, null, null);

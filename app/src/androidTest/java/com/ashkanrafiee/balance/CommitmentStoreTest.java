@@ -10,7 +10,9 @@ import android.content.Context;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 
+import java.io.StringWriter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
@@ -31,6 +33,27 @@ public class CommitmentStoreTest {
 
     @After public void tearDown() throws Exception {
         CommitmentStore.clear(context);
+    }
+
+    @Test public void onceDefinitionsKeepNoSettlementMarks() throws Exception {
+        // A one-time definition's state is its done flag alone: paid/unpaid dates handed in
+        // with it (e.g. from an old backup) must not become settlement rows that a later
+        // edit to recurring would resurrect, and settling must drop any leftovers.
+        long day = Commitment.startOfDay(System.currentTimeMillis());
+        Commitment once = new Commitment("once-marks", "One", -10L, Commitment.ONCE, day, null,
+            false, Collections.singletonList(day), 0,
+            Collections.singletonList(day + 86400000L), false, 0);
+        assertTrue(CommitmentStore.upsert(context, once));
+        assertEquals("{\"paidThrough\":0,\"paid\":[],\"unpaid\":[]}", exportedSettlements("once-marks"));
+        assertTrue(CommitmentStore.settle(context, "once-marks", day));
+        assertTrue(CommitmentStore.get(context, "once-marks").done);
+        assertEquals("{\"paidThrough\":0,\"paid\":[],\"unpaid\":[]}", exportedSettlements("once-marks"));
+    }
+
+    private String exportedSettlements(String id) throws Exception {
+        StringWriter writer = new StringWriter();
+        CommitmentStore.exportSettlements(context, id, writer);
+        return writer.toString();
     }
 
     @Test public void definitionsAndSettlementRowsHaveNoLegacyCaps() throws Exception {
