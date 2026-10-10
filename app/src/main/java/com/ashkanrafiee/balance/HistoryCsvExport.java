@@ -55,6 +55,15 @@ final class HistoryCsvExport {
         void forEach(HistoryResidualReader.Visitor visitor) throws Exception;
     }
 
+    /** Supplies both CSV kinds from a single store pass: movements as they stream, then the
+     *  residuals detected over that same pass. Lets the caller stage the bank/account scope once
+     *  (e.g. through {@link HistoryResidualReader.Staging}) instead of re-reading the whole store
+     *  for the residual walk, so movements and residuals always come from the same snapshot. */
+    interface CombinedSource {
+        void forEach(TransactionStore.Visitor movements, HistoryResidualReader.Visitor residuals)
+            throws Exception;
+    }
+
     private HistoryCsvExport() {}
 
     /** Writes a filtered history using metadata maps that the caller has already loaded. */
@@ -100,11 +109,7 @@ final class HistoryCsvExport {
             stage.stageTransactions(transactions);
             if (residuals != null) stage.stageResiduals(residuals);
 
-            CsvExport.CellWriter cells = new CsvExport.CellWriter(context);
-            cells.header(writer);
-            if (progress != null) progress.stage(R.string.export_stage_writing);
-            stage.emit(writer, cells, text, pageSize, progress,
-                progress == null ? 0 : stage.count());
+            emitStaged(context, stage, pageSize, writer, text, progress);
         } catch (Throwable failure) {
             operationFailure = failure;
         }
@@ -117,6 +122,56 @@ final class HistoryCsvExport {
         // Do not flush from a catch/finally path. A flush is the completion signal only after every
         // source row, payload check, row write and temporary-file cleanup succeeds.
         writer.flush();
+    }
+
+    /** Writes a filtered history whose movements and residuals arrive from one store pass (see
+     *  {@link CombinedSource}), without holding any store monitor across the whole export: every
+     *  row still comes from the same snapshot because the caller stages one pass, while each store
+     *  keeps its own short per-operation locking. */
+    static void writeCombined(Context context, int pageSize, CombinedSource source, Writer writer,
+            CsvExport.TextLookup text) throws Exception {
+        writeCombined(context, pageSize, source, writer, text, null);
+    }
+
+    /** Same as {@link #writeCombined(Context, int, CombinedSource, Writer, CsvExport.TextLookup)}
+     *  with advisory progress: gathering while staging, then a determinate write over the staged
+     *  row count. */
+    static void writeCombined(Context context, int pageSize, CombinedSource source, Writer writer,
+            CsvExport.TextLookup text, WorkProgress progress) throws Exception {
+        requireContext(context);
+        requirePageSize(pageSize);
+        if (source == null) throw new NullPointerException("source");
+        if (writer == null) throw new NullPointerException("writer");
+        if (text == null) text = CsvExport.lookup(null);
+
+        Stage stage = Stage.open(context);
+        Throwable operationFailure = null;
+        try {
+            if (progress != null) progress.stage(R.string.export_stage_preparing);
+            stage.stageCombined(source);
+
+            emitStaged(context, stage, pageSize, writer, text, progress);
+        } catch (Throwable failure) {
+            operationFailure = failure;
+        }
+        Exception cleanupFailure = stage.closeAndDelete();
+        if (cleanupFailure != null) {
+            if (operationFailure == null) operationFailure = cleanupFailure;
+            else operationFailure.addSuppressed(cleanupFailure);
+        }
+        if (operationFailure != null) throwFailure(operationFailure);
+        // Same completion signal as the two-source path: flush only after every staged row,
+        // payload check, row write and temporary-file cleanup succeeds.
+        writer.flush();
+    }
+
+    private static void emitStaged(Context context, Stage stage, int pageSize, Writer writer,
+            CsvExport.TextLookup text, WorkProgress progress) throws Exception {
+        CsvExport.CellWriter cells = new CsvExport.CellWriter(context);
+        cells.header(writer);
+        if (progress != null) progress.stage(R.string.export_stage_writing);
+        stage.emit(writer, cells, text, pageSize, progress,
+            progress == null ? 0 : stage.count());
     }
 
     private static void throwFailure(Throwable failure) throws Exception {
@@ -196,6 +251,42 @@ final class HistoryCsvExport {
             if (failure.get() != null) throw failure.get();
         } finally {
             open.set(false);
+        }
+    }
+
+    private static void consumeCombined(CombinedSource source, TransactionStore.Visitor movements,
+            HistoryResidualReader.Visitor residuals) throws Exception {
+        Thread owner = Thread.currentThread();
+        AtomicBoolean open = new AtomicBoolean(true);
+        AtomicReference<Exception> failure = new AtomicReference<>();
+        try {
+            source.forEach(
+                transaction -> acceptSynchronous(open, owner, failure, "movement",
+                    () -> movements.accept(transaction)),
+                residual -> acceptSynchronous(open, owner, failure, "residual",
+                    () -> residuals.accept(residual)));
+            if (failure.get() != null) throw failure.get();
+        } finally {
+            open.set(false);
+        }
+    }
+
+    private interface ThrowingRunnable { void run() throws Exception; }
+
+    private static void acceptSynchronous(AtomicBoolean open, Thread owner,
+            AtomicReference<Exception> failure, String kind, ThrowingRunnable accept)
+            throws Exception {
+        if (!open.get() || Thread.currentThread() != owner) {
+            Exception error = new IllegalStateException(kind + " producer must be synchronous");
+            failure.compareAndSet(null, error);
+            throw error;
+        }
+        if (failure.get() != null) throw failure.get();
+        try {
+            accept.run();
+        } catch (Exception error) {
+            failure.compareAndSet(null, error);
+            throw error;
         }
     }
 
@@ -285,6 +376,30 @@ final class HistoryCsvExport {
                     nextOrdinal[0] = ordinal == Long.MAX_VALUE ? -1 : ordinal + 1;
                     insertResidual(ordinal, residual);
                 });
+                db.setTransactionSuccessful();
+            } finally {
+                db.endTransaction();
+            }
+        }
+
+        void stageCombined(CombinedSource source) throws Exception {
+            db.beginTransactionNonExclusive();
+            try {
+                final long[] nextMovement = {0};
+                final long[] nextResidual = {0};
+                consumeCombined(source,
+                    transaction -> {
+                        requireOrdinal(nextMovement[0], "movement ordinal exhausted");
+                        long ordinal = nextMovement[0];
+                        nextMovement[0] = ordinal == Long.MAX_VALUE ? -1 : ordinal + 1;
+                        insertMovement(ordinal, transaction);
+                    },
+                    residual -> {
+                        requireOrdinal(nextResidual[0], "residual ordinal exhausted");
+                        long ordinal = nextResidual[0];
+                        nextResidual[0] = ordinal == Long.MAX_VALUE ? -1 : ordinal + 1;
+                        insertResidual(ordinal, residual);
+                    });
                 db.setTransactionSuccessful();
             } finally {
                 db.endTransaction();
