@@ -178,6 +178,9 @@ public class HistorySearchTest {
     @Test public void search_narrowsTheCountToMatches() {
         storeTwoNotes();
         launch();
+        // The heading is built by the background render, after the header launch() waits for —
+        // asserting it instantly races the worker. Every other on-screen assertion below waits.
+        await(() -> findCountInHeading(counted(2)) != null, 20_000);
         assertNotNull(findCountInHeading(counted(2)));
         setSearch("groceries");
         await(() -> findCountInHeading(counted(1)) != null, 20_000);
