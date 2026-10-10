@@ -219,6 +219,10 @@ public final class HistoryActivity extends Activity {
     /** Bumped on every export start and on destroy; a worker completion touches the UI only if
      *  it is still the newest, so a late finish never reaches into a dead screen. */
     private int exportGen;
+    /** Test-only hook run at the end of every export completion (even a stale one), so tests can
+     *  join the worker instead of racing it — a worker left running leaks its staging files into
+     *  the next test's temporary-file assertion. */
+    static volatile Runnable exportDoneHookForTest;
     /** Minimum gap between export progress-bar posts. The emit phase reports per row, and posting
      *  every row to the main thread (each post laying the bar out again) is what hung the UI
      *  behind the dialog; the final row always posts, so the bar still ends full. */
@@ -794,6 +798,13 @@ public final class HistoryActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQ_EXPORT && resultCode == RESULT_OK
                 && data != null && data.getData() != null) {
+            if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) {
+                // The file picker can outlive the temporary unlock hold, so the session may be
+                // locked again by the time the pick returns. Never write an export over the
+                // lock; re-cover the screen and let the user restart the export after unlocking.
+                if (lockOverlay != null) lockOverlay.showLock();
+                return;
+            }
             writeExport(data.getData());
         }
     }
@@ -848,6 +859,10 @@ public final class HistoryActivity extends Activity {
             final int[] error = {0};
             try {
                 final List<String> tokens = searchTokens(query);
+                // The destination opens before the metadata session: if the open itself throws,
+                // there is no session yet to leak. Past this point both are closed in finally.
+                OutputStream out = resolver.openOutputStream(uri, "w");
+                if (out == null) throw new IOException("no output stream");
                 final MetadataStore.LookupSession metadata = MetadataStore.LookupSession.open(app);
                 final CsvExport.TextLookup lookup = new CsvExport.TextLookup() {
                     @Override public String note(String key) throws Exception {
@@ -885,8 +900,6 @@ public final class HistoryActivity extends Activity {
                         }, CsvExport.STREAM_PAGE_SIZE);
                     }
                 };
-                OutputStream out = resolver.openOutputStream(uri, "w");
-                if (out == null) throw new IOException("no output stream");
                 try {
                     try {
                         OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
@@ -898,7 +911,7 @@ public final class HistoryActivity extends Activity {
                 } finally {
                     out.close();
                 }
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 error[0] = 1;
                 android.util.Log.w("BalanceHistory", "csv export failed", e);
                 // The destination was already truncated by the "w" open: remove the stub so a
@@ -912,22 +925,27 @@ public final class HistoryActivity extends Activity {
                 }
             }
             runOnUiThread(() -> {
-                if (gen != exportGen) return;
-                exportRunning = false;
-                if (exportDialog != null) {
-                    try { exportDialog.dismiss(); } catch (Exception dismissed) {
-                        android.util.Log.w("BalanceHistory", "export dialog dismiss failed",
-                            dismissed);
+                try {
+                    if (gen != exportGen) return;
+                    exportRunning = false;
+                    if (exportDialog != null) {
+                        try { exportDialog.dismiss(); } catch (Exception dismissed) {
+                            android.util.Log.w("BalanceHistory", "export dialog dismiss failed",
+                                dismissed);
+                        }
+                        exportDialog = null;
+                        exportBar = null;
+                        exportStage = null;
                     }
-                    exportDialog = null;
-                    exportBar = null;
-                    exportStage = null;
+                    if (isDestroyed() || isFinishing()) return;
+                    Toast.makeText(app,
+                        getString(error[0] == 0
+                            ? R.string.history_export_saved : R.string.history_export_failed),
+                        Toast.LENGTH_SHORT).show();
+                } finally {
+                    Runnable hook = exportDoneHookForTest;
+                    if (hook != null) hook.run();
                 }
-                if (isDestroyed() || isFinishing()) return;
-                Toast.makeText(app,
-                    getString(error[0] == 0
-                        ? R.string.history_export_saved : R.string.history_export_failed),
-                    Toast.LENGTH_SHORT).show();
             });
         }).start();
     }
