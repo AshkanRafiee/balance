@@ -242,6 +242,16 @@ public final class CommitmentsActivity extends Activity {
     private LinearLayout root;
     private AlertDialog manageDialogWindow;
     private AlertDialog activeDialog;
+    /** Snapshots the open editor's typed input, while it is open. A pause inventories the form
+     *  before the editor is dismissed, so the data survives the round-trip. */
+    private java.util.function.Supplier<Draft> editorSnapshotter;
+    /** Unfinished editor input from an editor dismissed by a pause (permission prompt, screen
+     *  off, Home, settings link) instead of by save/cancel. Reopened on the next unlocked
+     *  resume; never reopened over the lock. */
+    private Draft pendingEditorDraft;
+    /** True while onPause's dismiss is in flight, so the editor's dismiss listener keeps the
+     *  just-snapshotted draft instead of discarding it the way a save/cancel dismissal does. */
+    private boolean pausing;
     private LockOverlay lockOverlay;
     private final Handler monthHandler = new Handler(Looper.getMainLooper());
     private final Runnable monthRefresh = () -> {
@@ -257,6 +267,9 @@ public final class CommitmentsActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        // A draft snapshotted before rotation or process death comes back with the screen; the
+        // next unlocked resume reopens it, exactly like a plain pause round-trip.
+        if (state != null) pendingEditorDraft = Draft.readFrom(state);
         iran = RegionHelper.isIran(this);
         persian = LocaleHelper.isPersian(this);
         fg = color(R.color.fg);
@@ -293,7 +306,12 @@ public final class CommitmentsActivity extends Activity {
         setContentView(host);
         host.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
         lockOverlay = new LockOverlay(this);
-        lockOverlay.setUnlockListener(this::updateSecureFlag);
+        lockOverlay.setUnlockListener(() -> {
+            updateSecureFlag();
+            // An unlock is a resume the lifecycle never delivers: reopen a paused-away editor
+            // here instead of leaving its draft stranded behind the lock.
+            restorePendingEditor();
+        });
         lockOverlay.setCancelListener(() -> lockOverlay.hide());
         host.addView(lockOverlay, new FrameLayout.LayoutParams(-1, -1));
         lockOverlay.setVisibility(View.GONE);
@@ -301,14 +319,33 @@ public final class CommitmentsActivity extends Activity {
     }
 
     @Override
+    protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        if (pendingEditorDraft != null) pendingEditorDraft.writeTo(out);
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
+        pausing = false;
         // Re-arm reminders whenever the screen is seen: edits elsewhere, a restored backup or
         // a granted permission all land here before the next due.
         LockManager.cancelPendingLock();
         CommitmentReminders.scheduleAll(this);
         render();
         scheduleMonthRefresh();
+        restorePendingEditor();
+    }
+
+    /** Reopens an editor dismissed by a pause with its typed data intact. Never over the lock:
+     *  a locked resume keeps the draft for the unlock listener instead. The draft is consumed
+     *  before reopening, so a failed open cannot loop back into itself. */
+    private void restorePendingEditor() {
+        if (pendingEditorDraft == null) return;
+        if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) return;
+        Draft draft = pendingEditorDraft;
+        pendingEditorDraft = null;
+        editorDialog(draft.id, draft);
     }
 
     @Override
@@ -326,6 +363,12 @@ public final class CommitmentsActivity extends Activity {
     @Override
     protected void onPause() {
         monthHandler.removeCallbacks(monthRefresh);
+        // Inventory the open editor before it goes away: the permission prompt, the screen going
+        // off, Home and the exact-alarm settings link all pause here, and the dismiss below must
+        // not eat what was typed. Save/cancel/back dismiss without pausing, so those still drop
+        // the draft in the dismiss listener.
+        pausing = true;
+        if (editorSnapshotter != null) pendingEditorDraft = editorSnapshotter.get();
         dismissActiveDialog();
         if (LockManager.isEnabled(this)) {
             LockManager.scheduleLock(this);
@@ -384,6 +427,73 @@ public final class CommitmentsActivity extends Activity {
         if (manageDialogWindow != null) {
             manageDialogWindow.dismiss();
             manageDialogWindow = null;
+        }
+    }
+
+    /** Typed-but-unsaved editor input: every field as raw text, so half-typed values round-trip
+     *  without parsing. Small enough for the saved-state bundle (rotation/process death); never
+     *  written to disk. */
+    static final class Draft {
+        final String id; // null for a new commitment
+        final String name;
+        final String amount;
+        final boolean pay;
+        final int frequency;
+        final String[] start; // raw year/month/day text
+        final boolean openEnded;
+        final String[] end;
+        final boolean remind;
+        final String leadNumber;
+        final int unit;
+
+        Draft(String id, String name, String amount, boolean pay, int frequency, String[] start,
+                boolean openEnded, String[] end, boolean remind, String leadNumber, int unit) {
+            this.id = id;
+            this.name = name;
+            this.amount = amount;
+            this.pay = pay;
+            this.frequency = frequency;
+            this.start = start;
+            this.openEnded = openEnded;
+            this.end = end;
+            this.remind = remind;
+            this.leadNumber = leadNumber;
+            this.unit = unit;
+        }
+
+        void writeTo(Bundle out) {
+            out.putBoolean("editor_draft", true);
+            out.putString("editor_id", id);
+            out.putString("editor_name", name);
+            out.putString("editor_amount", amount);
+            out.putBoolean("editor_pay", pay);
+            out.putInt("editor_frequency", frequency);
+            out.putStringArray("editor_start", start);
+            out.putBoolean("editor_open_ended", openEnded);
+            out.putStringArray("editor_end", end);
+            out.putBoolean("editor_remind", remind);
+            out.putString("editor_lead", leadNumber);
+            out.putInt("editor_unit", unit);
+        }
+
+        static Draft readFrom(Bundle in) {
+            if (in == null || !in.getBoolean("editor_draft", false)) return null;
+            return new Draft(in.getString("editor_id"), string(in, "editor_name"),
+                string(in, "editor_amount"), in.getBoolean("editor_pay", true),
+                in.getInt("editor_frequency", Commitment.MONTHLY),
+                strings(in, "editor_start"), in.getBoolean("editor_open_ended", false),
+                strings(in, "editor_end"), in.getBoolean("editor_remind", false),
+                string(in, "editor_lead"), in.getInt("editor_unit", 2));
+        }
+
+        private static String string(Bundle in, String key) {
+            String value = in.getString(key);
+            return value == null ? "" : value;
+        }
+
+        private static String[] strings(Bundle in, String key) {
+            String[] values = in.getStringArray(key);
+            return values != null && values.length == 3 ? values : new String[]{"", "", ""};
         }
     }
 
@@ -752,6 +862,13 @@ public final class CommitmentsActivity extends Activity {
     // ====================================================================
 
     private void editorDialog(String commitmentId) {
+        editorDialog(commitmentId, null);
+    }
+
+    /** The new/edit commitment form, optionally reseeded with unfinished input from an editor
+     *  dismissed by a pause (see {@link #pendingEditorDraft}). A null seed behaves exactly as
+     *  before. */
+    private void editorDialog(String commitmentId, Draft seed) {
         final Commitment existing;
         if (commitmentId == null) {
             existing = null;
@@ -799,6 +916,9 @@ public final class CommitmentsActivity extends Activity {
         final int[] directionSelected = {pay[0] ? 0 : 1};
         Runnable[] directionActions = new Runnable[2];
         final Runnable[] validateSave = {() -> {}};
+        /** True while a paused-away draft is being reapplied below, so restoring a checked
+         *  "remind me" never re-fires the permission prompt it just returned from. */
+        final boolean[] seeding = {false};
         for (int i = 0; i < 2; i++) {
             final int index = i;
             directionActions[i] = () -> {
@@ -908,7 +1028,8 @@ public final class CommitmentsActivity extends Activity {
             exactNote.setVisibility(
                 checked && !CommitmentReminders.canScheduleExact(this) ? View.VISIBLE
                     : View.GONE);
-            if (checked && needsNotificationPermission()) requestNotificationPermission();
+            if (checked && needsNotificationPermission() && !seeding[0])
+                requestNotificationPermission();
         });
         form.addView(leadRow, margin(0, 4, 0, 0));
         form.addView(exactNote, margin(0, 4, 0, 0));
@@ -965,9 +1086,21 @@ public final class CommitmentsActivity extends Activity {
         });
         dlg.show();
         activeDialog = dlg;
+        editorSnapshotter = () -> snapshotForm(commitmentId, name, amount, pay, frequency,
+            startFields, openEnded, endFields, remindBox, leadNumber, unitSelected);
         dlg.setOnDismissListener(d -> {
             if (activeDialog == dlg) activeDialog = null;
+            editorSnapshotter = null;
+            // A pause inventories the form into the draft first and reopens it on return; any
+            // other dismissal (save, cancel, back, delete-confirm) discards it.
+            if (!pausing) pendingEditorDraft = null;
         });
+        if (seed != null) {
+            seeding[0] = true;
+            applyDraft(seed, name, amount, directionActions, freqActions, startFields, openEnded,
+                endFields, remindBox, leadNumber, unitActions);
+            seeding[0] = false;
+        }
         if (existing != null) {
             int titleId = getResources().getIdentifier("alertTitle", "id", "android");
             View title = titleId == 0 ? null : dlg.findViewById(titleId);
@@ -981,6 +1114,45 @@ public final class CommitmentsActivity extends Activity {
     private static final long[] UNIT_MS = {60_000L, 3600_000L, 86400_000L, 604800_000L};
     static final int RAW_LEAD_UNIT = UNIT_MS.length;
     private static final int REQUEST_NOTIFY = 41;
+
+    /** Inventories the live form as raw text, so a pause round-trip never parses (and never
+     *  rejects) half-typed input. */
+    private static Draft snapshotForm(String id, EditText name, EditText amount, boolean[] pay,
+            int[] frequency, EditText[] start, CheckBox openEnded, EditText[] end,
+            CheckBox remind, EditText lead, int[] unit) {
+        return new Draft(id, name.getText().toString(), amount.getText().toString(), pay[0],
+            frequency[0], texts(start), openEnded.isChecked(), texts(end), remind.isChecked(),
+            lead.getText().toString(), unit[0]);
+    }
+
+    private static String[] texts(EditText[] fields) {
+        return new String[]{fields[0].getText().toString(), fields[1].getText().toString(),
+            fields[2].getText().toString()};
+    }
+
+    private static void setTexts(EditText[] fields, String[] values) {
+        for (int i = 0; i < 3; i++) fields[i].setText(values[i]);
+    }
+
+    /** Reapplies a paused-away draft onto a fresh form by driving the same chip actions a user
+     *  would, so highlights, end-control visibility and the save gate all follow. Runs under the
+     *  seeding guard, so restoring a checked box never re-fires the permission prompt. */
+    private static void applyDraft(Draft seed, EditText name, EditText amount,
+            Runnable[] directionActions, Runnable[] freqActions, EditText[] startFields,
+            CheckBox openEnded, EditText[] endFields, CheckBox remind, EditText lead,
+            Runnable[] unitActions) {
+        name.setText(seed.name);
+        amount.setText(seed.amount);
+        directionActions[seed.pay ? 0 : 1].run();
+        if (seed.frequency >= 0 && seed.frequency < freqActions.length)
+            freqActions[seed.frequency].run();
+        setTexts(startFields, seed.start);
+        openEnded.setChecked(seed.openEnded);
+        setTexts(endFields, seed.end);
+        remind.setChecked(seed.remind);
+        lead.setText(seed.leadNumber);
+        if (seed.unit >= 0 && seed.unit < unitActions.length) unitActions[seed.unit].run();
+    }
 
     /** Splits a lead time into the largest whole unit that divides it (weeks down to minutes).
      *  A raw-millisecond unit is used for values that cannot be represented by whole minutes, so
