@@ -326,17 +326,17 @@ final class CsvExport {
             if (values != null && !values.isEmpty()) tagJson = new JSONArray(values).toString();
         }
         return new String[]{
-            BankRules.displayName(context, t.bank),
-            t.account == null ? "" : t.account,
+            guardFormula(BankRules.displayName(context, t.bank)),
+            guardFormula(t.account == null ? "" : t.account),
             iso.format(new Date(t.date)),
             local.year + "/" + local.month + "/" + local.day,
             time.format(new Date(t.date)),
             String.valueOf(t.amount),
             CurrencyHelper.amount(context, t.amount),
             CurrencyHelper.label(context),
-            note == null ? "" : note,
-            reason == null ? "" : reason,
-            channel == null ? "" : channel,
+            guardFormula(note == null ? "" : note),
+            guardFormula(reason == null ? "" : reason),
+            guardFormula(channel == null ? "" : channel),
             KIND_MOVEMENT,
             tagJson
         };
@@ -359,17 +359,17 @@ final class CsvExport {
         List<String> values = text.tags(key);
         if (values != null && !values.isEmpty()) tagJson = new JSONArray(values).toString();
         return new String[]{
-            BankRules.displayName(context, t.bank),
-            t.account == null ? "" : t.account,
+            guardFormula(BankRules.displayName(context, t.bank)),
+            guardFormula(t.account == null ? "" : t.account),
             iso.format(new Date(t.date)),
             local.year + "/" + local.month + "/" + local.day,
             time.format(new Date(t.date)),
             String.valueOf(t.amount),
             CurrencyHelper.amount(context, t.amount),
             CurrencyHelper.label(context),
-            note == null ? "" : note,
-            reason == null ? "" : reason,
-            channel == null ? "" : channel,
+            guardFormula(note == null ? "" : note),
+            guardFormula(reason == null ? "" : reason),
+            guardFormula(channel == null ? "" : channel),
             KIND_MOVEMENT,
             tagJson
         };
@@ -381,6 +381,24 @@ final class CsvExport {
         if (s == null) return "";
         if (!s.contains(",") && !s.contains("\"") && !s.contains("\n") && !s.contains("\r")) return s;
         return "\"" + s.replace("\"", "\"\"") + "\"";
+    }
+
+    /** Prefixes a free-text cell that a spreadsheet would otherwise run as a formula. A value
+     *  starting (after blanks) with {@code = + - @ | %} executes on open in Excel and Sheets, so
+     *  a note, tag-adjacent bank word or sender-derived reason could turn the export into code
+     *  execution on the importing machine (OWASP CSV Injection). The leading apostrophe is the
+     *  spreadsheet text marker: it keeps the cell inert without changing its reading. Applied to
+     *  text cells only — numeric, date and fixed-kind cells never reach it, so sums keep working. */
+    static String guardFormula(String s) {
+        if (s == null || s.isEmpty()) return s;
+        int i = 0;
+        while (i < s.length() && (s.charAt(i) == ' ' || s.charAt(i) == '\t')) i++;
+        if (i < s.length()) {
+            char c = s.charAt(i);
+            if (c == '=' || c == '+' || c == '-' || c == '@' || c == '|' || c == '%')
+                return "'" + s;
+        }
+        return s;
     }
 
     private static void appendRow(StringBuilder out, String... cells) {

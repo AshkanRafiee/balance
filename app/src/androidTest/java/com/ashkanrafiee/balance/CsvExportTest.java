@@ -131,6 +131,24 @@ public class CsvExportTest {
         assertEquals("\"a\r\nb\"", CsvExport.escape("a\r\nb"));
     }
 
+    @Test public void guardFormula_plainAndNumericValues_stayUntouched() {
+        assertEquals("plain", CsvExport.guardFormula("plain"));
+        assertEquals("", CsvExport.guardFormula(""));
+        // The raw amount column never reaches the guard (sums keep working); a text cell that
+        // merely looks numeric is still marked, exactly like any other `-` starter.
+        assertEquals("2026-01-01T00:00:00Z", CsvExport.guardFormula("2026-01-01T00:00:00Z"));
+    }
+
+    @Test public void guardFormula_formulaStarters_gainATextMarker() {
+        assertEquals("'=1+1", CsvExport.guardFormula("=1+1"));
+        assertEquals("'+cmd|' /C calc'!A0", CsvExport.guardFormula("+cmd|' /C calc'!A0"));
+        assertEquals("'@evil", CsvExport.guardFormula("@evil"));
+        assertEquals("'-2+3+cmd|' /C calc'!A0", CsvExport.guardFormula("-2+3+cmd|' /C calc'!A0"));
+        assertEquals("'|run", CsvExport.guardFormula("|run"));
+        assertEquals("'%run", CsvExport.guardFormula("%run"));
+        assertEquals("'  =1+1", CsvExport.guardFormula("  =1+1"));
+    }
+
     @Test public void row_oneTransaction_laysOutCellsInFixedOrder() {
         Transaction t = new Transaction("bank_melli", "910251846", DATE_2026, 1_250_000L, "sig");
         String row = line(CsvExport.csv(ctx, Arrays.asList(t), noText()), 1);
@@ -195,6 +213,27 @@ public class CsvExportTest {
         assertEquals("", cells.get(9));
         assertEquals("", cells.get(10));
         assertEquals(CsvExport.KIND_MOVEMENT, cells.get(11));
+    }
+
+    @Test public void row_formulaStarterNotes_gainATextMarkerWhileAmountsStayRaw() {
+        // A note is free text: one starting like a spreadsheet formula must come out inert, or
+        // opening the export runs it on the importing machine. The raw amount column is numeric
+        // by construction and never guarded, so spreadsheet sums keep working.
+        Transaction t = new Transaction("bank_melli", null, DATE_2026, -5_000L, "sig",
+            "content-formula");
+        java.util.Map<String, String> notes = new java.util.HashMap<>();
+        notes.put(BalanceData.noteKey(t), "=1+1");
+        List<String> cells = parse(line(CsvExport.csv(ctx, Arrays.asList(t), withNotes(notes)), 1));
+        assertEquals("'=1+1", cells.get(8));
+        assertEquals("-5000", cells.get(5));
+
+        Transaction plain = new Transaction("bank_melli", null, DATE_2026, 7L, "sig2",
+            "content-plain");
+        java.util.Map<String, String> plainNotes = new java.util.HashMap<>();
+        plainNotes.put(BalanceData.noteKey(plain), "bought milk");
+        List<String> plainCells =
+            parse(line(CsvExport.csv(ctx, Arrays.asList(plain), withNotes(plainNotes)), 1));
+        assertEquals("bought milk", plainCells.get(8));
     }
 
     @Test public void row_withMultipleTags_writesLosslessJsonArray() {
