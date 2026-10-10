@@ -1552,6 +1552,25 @@ public class MainActivity extends Activity {
             invalidate();
         }
 
+        /** Spins the refresh chip for a load that starts with nothing on screen (first install):
+         *  with no saved balances the status line alone reads as a frozen empty screen while the
+         *  first scan runs, so the chip says loading is in progress. Reuses the pull-to-refresh
+         *  spin and its settle-glide, stopping the moment the scan settles like a pulled spin; a
+         *  pull already in progress keeps owning the indicator. */
+        void spinForEmptyLoad() {
+            if (!banks.isEmpty() || indicatorVisible) return;
+            spinnerRunning = true;
+            retracting = false;
+            indicatorVisible = true;
+            pullFade = 1;
+            pullFrac = 1;
+            pullShift = PULL_CAP;
+            spinDeadline = System.currentTimeMillis() + 400;
+            handler.removeCallbacks(refreshTicker);
+            handler.postDelayed(refreshTicker, 16);
+            invalidate();
+        }
+
         /** Lift short of the trigger (or a cancelled gesture): glide the arrow back up. */
         void retractIndicator() {
             if (!indicatorVisible) {
@@ -1757,6 +1776,10 @@ public class MainActivity extends Activity {
             // this one was in flight has now been folded into it, so leaving the flag set would make
             // the first refresh after permission is granted run the whole inbox a second time.
             refreshAgain = false;
+            // A load starting with nothing on screen spins the refresh chip: the status line alone
+            // reads as a frozen empty screen while the first scan runs. Silent background updates
+            // and hard resets (which already raise their own modal progress) are left alone.
+            if (!silent && !hard) spinForEmptyLoad();
             if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
                 // Without SMS access the saved store is all that is left, and it is the app's only
                 // remaining record of the user's balances — so show it rather than an empty
