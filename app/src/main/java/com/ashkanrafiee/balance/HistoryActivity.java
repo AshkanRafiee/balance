@@ -204,6 +204,21 @@ public final class HistoryActivity extends Activity {
     private static final Handler clipHandler = new Handler(Looper.getMainLooper());
     private Runnable clearClipRunnable;
 
+    /** True while a CSV export worker is running. The export action is single-flight: a second
+     *  tap while one is in flight is ignored instead of stacking another dialog and worker on
+     *  top of it, which is what froze the screen and then crashed on an immediate re-export. */
+    private boolean exportRunning;
+    /** The progress dialog of the running export, if any. Dismissed in {@link #onDestroy} so
+     *  leaving mid-export cannot leak its window. */
+    private android.app.AlertDialog exportDialog;
+    /** Bumped on every export start and on destroy; a worker completion touches the UI only if
+     *  it is still the newest, so a late finish never reaches into a dead screen. */
+    private int exportGen;
+    /** Minimum gap between export progress-bar posts. The emit phase reports per row, and posting
+     *  every row to the main thread (each post laying the bar out again) is what hung the UI
+     *  behind the dialog; the final row always posts, so the bar still ends full. */
+    private static final long EXPORT_PROGRESS_THROTTLE_MS = 120L;
+
     // ====================================================================
     // Shared drawing helpers
     // ====================================================================
@@ -592,6 +607,16 @@ public final class HistoryActivity extends Activity {
         }
         // Same reasoning for the skeleton sweep: it repeats forever and holds the activity with it.
         stopShimmer();
+        // An export dialog belongs to this screen: dismiss it here so rotating or leaving
+        // mid-export cannot leak its window, and invalidate its generation so the late worker
+        // completion skips its UI instead of touching a dead screen.
+        if (exportDialog != null) {
+            try { exportDialog.dismiss(); } catch (Exception e) {
+                android.util.Log.w("BalanceHistory", "export dialog dismiss failed", e);
+            }
+            exportDialog = null;
+        }
+        exportGen++;
         super.onDestroy();
     }
 
@@ -739,8 +764,10 @@ public final class HistoryActivity extends Activity {
     // ====================================================================
 
     /** Asks the system file picker (SAF) for a location to write the CSV of the transactions the
-     *  user currently sees into. */
+     *  user currently sees into. Single-flight: while an export is running a further tap is
+     *  ignored, so workers and their dialogs can never stack. */
     private void startExport() {
+        if (exportRunning) return;
         LockManager.holdUnlock();
         Intent create = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         create.addCategory(Intent.CATEGORY_OPENABLE);
@@ -766,8 +793,9 @@ public final class HistoryActivity extends Activity {
 
     /** Builds the CSV of the on-screen transactions and writes it to the SAF uri on a worker
      *  thread. The current filters and the search query shape the snapshot (with none active that
-     *  is the full history), and the store lock keeps it from ever racing a background scan
-     *  mid-write. */
+     *  is the full history). Movements and residuals come from a single store pass, so the file
+     *  cannot mix generations even though no store monitor is held across the whole export —
+     *  holding it is what starved renders and scans behind the dialog and hung the screen. */
     private void writeExport(Uri uri) {
         final String query = searchQuery == null ? "" : searchQuery.trim();
         final List<String> tagSelection = new ArrayList<>(selectedTags);
@@ -775,23 +803,35 @@ public final class HistoryActivity extends Activity {
         final String bank = bankFilter;
         final String account = accountFilter;
         final boolean iran = iranCalendar;
-        final android.app.AlertDialog exportDialog = exportProgressDialog();
+        // App-owned handles captured up front: the worker below must not call back into the
+        // activity except through runOnUiThread, so a late finish after destroy stays safe.
+        final Context app = getApplicationContext();
+        final android.content.ContentResolver resolver = getContentResolver();
+        final int gen = ++exportGen;
+        exportRunning = true;
+        exportDialog = exportProgressDialog();
         final android.widget.ProgressBar exportBar =
             (android.widget.ProgressBar) exportDialog.findViewById(android.R.id.progress);
         final TextView exportStage =
             (TextView) exportDialog.findViewById(android.R.id.message);
+        final long[] lastPost = {0};
         final WorkProgress exportProgress = new WorkProgress() {
             @Override public void stage(final int stageResId) {
                 runOnUiThread(() -> {
-                    if (!exportDialog.isShowing()) return;
+                    if (gen != exportGen || exportDialog == null
+                            || !exportDialog.isShowing()) return;
                     exportStage.setText(stageResId);
                     exportBar.setIndeterminate(true);
                 });
             }
 
             @Override public void progress(final long done, final long total) {
+                long now = android.os.SystemClock.uptimeMillis();
+                if (done < total && now - lastPost[0] < EXPORT_PROGRESS_THROTTLE_MS) return;
+                lastPost[0] = now;
                 runOnUiThread(() -> {
-                    if (!exportDialog.isShowing()) return;
+                    if (gen != exportGen || exportDialog == null
+                            || !exportDialog.isShowing()) return;
                     if (total > 0) {
                         exportBar.setIndeterminate(false);
                         exportBar.setMax((int) Math.min(total, Integer.MAX_VALUE));
@@ -803,12 +843,7 @@ public final class HistoryActivity extends Activity {
         exportDialog.show();
         new Thread(() -> {
             final int[] error = {0};
-            // One atomic snapshot: a scan publishing mid-export must not mix generations in a
-            // single file. Progress callbacks only post to the UI thread, so holding the store
-            // monitor here cannot deadlock it.
-            synchronized (BalanceData.class) {
             try {
-                final Context app = getApplicationContext();
                 final List<String> tokens = searchTokens(query);
                 final MetadataStore.LookupSession metadata = MetadataStore.LookupSession.open(app);
                 final CsvExport.TextLookup lookup = new CsvExport.TextLookup() {
@@ -825,26 +860,35 @@ public final class HistoryActivity extends Activity {
                         return metadata.tags(key);
                     }
                 };
-                TransactionStore.StreamSource movements = visitor ->
-                    TransactionStore.forEach(app, CsvExport.STREAM_PAGE_SIZE, transaction -> {
-                        if (!exportMovementMatches(app, transaction, bank, account, activeFilter,
-                                iran, tagSelection, tokens, lookup)) return;
-                        visitor.accept(transaction);
-                    });
-                HistoryCsvExport.ResidualSource residuals = visitor ->
-                    HistoryResidualReader.forEach(app, bank, account,
-                        CsvExport.STREAM_PAGE_SIZE, residual -> {
+                // One store pass feeds both CSV kinds, exactly like the history render: the
+                // in-scope rows stage the residual walk while the fully matching rows stage as
+                // movements. Residual detection needs the whole bank/account scope before the
+                // direction/date/tag/search narrowing runs, so the scope check precedes it —
+                // dropping a row here would corrupt the bracketing walk like a page-local
+                // residual calculation would.
+                final HistoryCsvExport.CombinedSource both = (movements, residuals) -> {
+                    try (HistoryResidualReader.Staging staging =
+                            HistoryResidualReader.Staging.open(app)) {
+                        TransactionStore.forEach(app, CsvExport.STREAM_PAGE_SIZE, transaction -> {
+                            if (inExportScope(transaction, bank, account)) staging.add(transaction);
+                            if (!exportMovementMatches(app, transaction, bank, account,
+                                    activeFilter, iran, tagSelection, tokens, lookup)) return;
+                            movements.accept(transaction);
+                        });
+                        staging.emit(residual -> {
                             if (!tagSelection.isEmpty() || !exportResidualMatches(app, residual,
                                     activeFilter, iran, tokens)) return;
-                            visitor.accept(residual);
-                        });
-                OutputStream out = getContentResolver().openOutputStream(uri, "w");
+                            residuals.accept(residual);
+                        }, CsvExport.STREAM_PAGE_SIZE);
+                    }
+                };
+                OutputStream out = resolver.openOutputStream(uri, "w");
                 if (out == null) throw new IOException("no output stream");
                 try {
                     try {
                         OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
-                        HistoryCsvExport.writeLookup(app, CsvExport.STREAM_PAGE_SIZE, movements,
-                            residuals, writer, lookup, exportProgress);
+                        HistoryCsvExport.writeCombined(app, CsvExport.STREAM_PAGE_SIZE, both,
+                            writer, lookup, exportProgress);
                     } finally {
                         metadata.close();
                     }
@@ -858,16 +902,24 @@ public final class HistoryActivity extends Activity {
                 // failed export cannot masquerade as a complete one. Best-effort; non-document
                 // destinations simply refuse and keep the stub.
                 try {
-                    android.provider.DocumentsContract.deleteDocument(getContentResolver(), uri);
+                    android.provider.DocumentsContract.deleteDocument(resolver, uri);
                 } catch (Exception cleanup) {
                     android.util.Log.w("BalanceHistory", "truncated export cleanup failed",
                         cleanup);
                 }
             }
-            }
             runOnUiThread(() -> {
-                if (!isDestroyed() && !isFinishing()) exportDialog.dismiss();
-                Toast.makeText(this,
+                if (gen != exportGen) return;
+                exportRunning = false;
+                if (exportDialog != null) {
+                    try { exportDialog.dismiss(); } catch (Exception dismissed) {
+                        android.util.Log.w("BalanceHistory", "export dialog dismiss failed",
+                            dismissed);
+                    }
+                    exportDialog = null;
+                }
+                if (isDestroyed() || isFinishing()) return;
+                Toast.makeText(app,
                     getString(error[0] == 0
                         ? R.string.history_export_saved : R.string.history_export_failed),
                     Toast.LENGTH_SHORT).show();
@@ -912,7 +964,12 @@ public final class HistoryActivity extends Activity {
         if (activeFilter.from != null && date.compare(activeFilter.from) < 0) return false;
         if (activeFilter.to != null && date.compare(activeFilter.to) > 0) return false;
         String key = BalanceData.noteKey(transaction);
-        List<String> tags = lookup.tags(key);
+        // The tags store is only read when something actually needs it: the selection check, or
+        // the search haystack below. A plain export otherwise pays one indexed query per row
+        // for nothing.
+        List<String> tags = (selected.isEmpty() && tokens.isEmpty())
+            ? Collections.emptyList() : lookup.tags(key);
+        if (tags == null) tags = Collections.emptyList();
         for (String wanted : selected) {
             boolean found = false;
             for (String actual : tags) {
@@ -953,6 +1010,15 @@ public final class HistoryActivity extends Activity {
             dateText(date, fa), timeText(residual.toDate, fa),
             CalDate.monthName(date.month, iran, fa), compactDate(date, fa));
         return matchesTokens(haystack, tokens);
+    }
+
+    /** The bank/account scope the export stages for its residual walk: the whole scope, before
+     *  direction, date, tag and search narrowing. A null bank means every bank; a non-null account
+     *  without a bank matches across banks, exactly like the history reader's scope. */
+    private static boolean inExportScope(Transaction transaction, String bank, String account) {
+        if (transaction == null) return false;
+        if (bank != null && !bank.equals(transaction.bank)) return false;
+        return account == null || account.equals(transaction.account);
     }
 
     // ====================================================================
