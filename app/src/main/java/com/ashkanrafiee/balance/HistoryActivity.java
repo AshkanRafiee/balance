@@ -211,6 +211,11 @@ public final class HistoryActivity extends Activity {
     /** The progress dialog of the running export, if any. Dismissed in {@link #onDestroy} so
      *  leaving mid-export cannot leak its window. */
     private android.app.AlertDialog exportDialog;
+    /** The live bar and phase line of the running export's dialog, held directly instead of
+     *  looked up through the dialog: the custom content is only installed at show time, so a
+     *  pre-show lookup misses and the first progress callback crashes on it. */
+    private android.widget.ProgressBar exportBar;
+    private TextView exportStage;
     /** Bumped on every export start and on destroy; a worker completion touches the UI only if
      *  it is still the newest, so a late finish never reaches into a dead screen. */
     private int exportGen;
@@ -615,6 +620,8 @@ public final class HistoryActivity extends Activity {
                 android.util.Log.w("BalanceHistory", "export dialog dismiss failed", e);
             }
             exportDialog = null;
+            exportBar = null;
+            exportStage = null;
         }
         exportGen++;
         super.onDestroy();
@@ -810,16 +817,12 @@ public final class HistoryActivity extends Activity {
         final int gen = ++exportGen;
         exportRunning = true;
         exportDialog = exportProgressDialog();
-        final android.widget.ProgressBar exportBar =
-            (android.widget.ProgressBar) exportDialog.findViewById(android.R.id.progress);
-        final TextView exportStage =
-            (TextView) exportDialog.findViewById(android.R.id.message);
         final long[] lastPost = {0};
         final WorkProgress exportProgress = new WorkProgress() {
             @Override public void stage(final int stageResId) {
                 runOnUiThread(() -> {
-                    if (gen != exportGen || exportDialog == null
-                            || !exportDialog.isShowing()) return;
+                    if (gen != exportGen || exportDialog == null || exportStage == null
+                            || exportBar == null || !exportDialog.isShowing()) return;
                     exportStage.setText(stageResId);
                     exportBar.setIndeterminate(true);
                 });
@@ -830,8 +833,8 @@ public final class HistoryActivity extends Activity {
                 if (done < total && now - lastPost[0] < EXPORT_PROGRESS_THROTTLE_MS) return;
                 lastPost[0] = now;
                 runOnUiThread(() -> {
-                    if (gen != exportGen || exportDialog == null
-                            || !exportDialog.isShowing()) return;
+                    if (gen != exportGen || exportDialog == null || exportStage == null
+                            || exportBar == null || !exportDialog.isShowing()) return;
                     if (total > 0) {
                         exportBar.setIndeterminate(false);
                         exportBar.setMax((int) Math.min(total, Integer.MAX_VALUE));
@@ -917,6 +920,8 @@ public final class HistoryActivity extends Activity {
                             dismissed);
                     }
                     exportDialog = null;
+                    exportBar = null;
+                    exportStage = null;
                 }
                 if (isDestroyed() || isFinishing()) return;
                 Toast.makeText(app,
@@ -928,28 +933,27 @@ public final class HistoryActivity extends Activity {
     }
 
     /** Determinate export dialog: a title, a phase line and a horizontal bar. The bar and the
-     *  message are looked up by standard android ids so the worker can drive them. */
+     *  phase views are kept in fields as they are built, so the worker drives the very instances
+     *  on screen instead of looking them up through a dialog whose content is not installed yet. */
     private android.app.AlertDialog exportProgressDialog() {
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setPadding(dp(20), dp(16), dp(20), dp(12));
         TextView title = text(getString(R.string.export_progress_title), 15, fg, medium());
         wrap.addView(title);
-        TextView stage = new TextView(this);
-        stage.setId(android.R.id.message);
-        stage.setText(getString(R.string.export_stage_preparing));
-        stage.setTextSize(13);
-        stage.setTextColor(muted);
-        stage.setTypeface(Fonts.text(this), Typeface.NORMAL);
+        exportStage = new TextView(this);
+        exportStage.setText(getString(R.string.export_stage_preparing));
+        exportStage.setTextSize(13);
+        exportStage.setTextColor(muted);
+        exportStage.setTypeface(Fonts.text(this), Typeface.NORMAL);
         LinearLayout.LayoutParams stageLp = new LinearLayout.LayoutParams(-2, -2);
         stageLp.topMargin = dp(6);
-        wrap.addView(stage, stageLp);
-        android.widget.ProgressBar bar = new android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        bar.setId(android.R.id.progress);
-        bar.setIndeterminate(true);
+        wrap.addView(exportStage, stageLp);
+        exportBar = new android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        exportBar.setIndeterminate(true);
         LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(-1, dp(6));
         barLp.topMargin = dp(12);
-        wrap.addView(bar, barLp);
+        wrap.addView(exportBar, barLp);
         return new android.app.AlertDialog.Builder(this).setView(wrap).setCancelable(false).create();
     }
 
