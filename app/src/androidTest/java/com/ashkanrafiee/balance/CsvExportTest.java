@@ -496,6 +496,15 @@ public class CsvExportTest {
         assertEquals(CsvExport.KIND_UNACCOUNTED, cells.get(11));
     }
 
+    @Test public void csv_unaccountedTextCells_areSpreadsheetInert() {
+        Residual gap = new Residual("=bank", "+account", DATE_2026, DATE_2026_LATER,
+            -2_000_000L, 1);
+        List<String> cells = parse(line(CsvExport.csv(ctx, new ArrayList<Transaction>(),
+            Arrays.asList(gap), noText()), 1));
+        assertEquals("'=bank", cells.get(0));
+        assertEquals("'+account", cells.get(1));
+    }
+
     @Test public void csv_nullResiduals_behavesAsThePlainExport() {
         Transaction t = new Transaction("bank_melli", "910251846", DATE_2026, 1_250_000L, "sig");
         assertEquals(CsvExport.csv(ctx, Arrays.asList(t), noText()),

@@ -74,6 +74,10 @@ public final class HistoryActivity extends Activity {
     private static final int INITIAL_EXPANDED_DAY_LIMIT = 7;
     /** Keep the initial recent pages plus one explicitly opened older day in memory. */
     private static final int MAX_LOADED_DAY_PAGES = INITIAL_EXPANDED_DAY_LIMIT + 1;
+    /** A search can match rows across an unbounded number of days; the other matching days keep
+     *  their complete summaries and a load control, while only this bounded first window gets rows
+     *  materialized immediately. */
+    private static final int MAX_INITIAL_SEARCH_DAY_PAGES = MAX_LOADED_DAY_PAGES;
     /** Visible to the instrumented tests so a test can tell an open year from a closed one, and one
      *  year's months from another's, by what is on screen rather than by reading its text. */
     static final String MONTH_TAG = "history_month";
@@ -212,17 +216,20 @@ public final class HistoryActivity extends Activity {
      *  tap while one is in flight is ignored instead of stacking another dialog and worker on
      *  top of it, which is what froze the screen and then crashed on an immediate re-export. */
     private boolean exportRunning;
-    /** The progress dialog of the running export, if any. Dismissed in {@link #onDestroy} so
-     *  leaving mid-export cannot leak its window. */
+    /** The progress dialog of the running export, if any. Detached on pause/destroy while the
+     *  worker continues without a window. */
     private android.app.AlertDialog exportDialog;
     /** The live bar and phase line of the running export's dialog, held directly instead of
      *  looked up through the dialog: the custom content is only installed at show time, so a
      *  pre-show lookup misses and the first progress callback crashes on it. */
     private android.widget.ProgressBar exportBar;
     private TextView exportStage;
-    /** Bumped on every export start and on destroy; a worker completion touches the UI only if
-     *  it is still the newest, so a late finish never reaches into a dead screen. */
+    /** Bumped for each worker. It remains valid until that worker completes, even when its dialog
+     *  is detached while the activity is paused. */
     private int exportGen;
+    /** UI-only generation for export progress callbacks. Pausing detaches the dialog without
+     *  making the worker eligible for a second export. */
+    private int exportUiGen;
     /** Test-only hook run at the end of every export completion (even a stale one), so tests can
      *  join the worker instead of racing it — a worker left running leaks its staging files into
      *  the next test's temporary-file assertion. */
@@ -231,6 +238,11 @@ public final class HistoryActivity extends Activity {
      *  every row to the main thread (each post laying the bar out again) is what hung the UI
      *  behind the dialog; the final row always posts, so the bar still ends full. */
     private static final long EXPORT_PROGRESS_THROTTLE_MS = 120L;
+
+    /** Every history dialog is owned by this activity and must disappear before its lock
+     *  overlay is allowed to cover the screen. More than one can exist briefly when the range
+     *  picker opens its month jump dialog. */
+    private final Set<android.app.AlertDialog> activeDialogs = new LinkedHashSet<>();
 
     // ====================================================================
     // Shared drawing helpers
@@ -453,6 +465,33 @@ public final class HistoryActivity extends Activity {
     // Activity lifecycle
     // ====================================================================
 
+    /** Shows a dialog owned by this screen and remembers it until it is dismissed. */
+    private android.app.AlertDialog showDialog(android.app.AlertDialog dialog) {
+        activeDialogs.add(dialog);
+        dialog.setOnDismissListener(d -> activeDialogs.remove(dialog));
+        dialog.show();
+        return dialog;
+    }
+
+    /** Drops every dialog window before the activity can be covered by the lock or destroyed. */
+    private void dismissDialogs() {
+        // Invalidate progress posts before dismissing windows. Neither operation ends the worker.
+        exportUiGen++;
+        for (android.app.AlertDialog dialog : new ArrayList<>(activeDialogs)) {
+            try {
+                dialog.dismiss();
+            } catch (Exception e) {
+                android.util.Log.w("BalanceHistory", "history dialog dismiss failed", e);
+            }
+        }
+        activeDialogs.clear();
+        // Dismissing the progress window is a UI action only. The export worker stays single-flight
+        // until its own completion callback clears exportRunning.
+        exportDialog = null;
+        exportBar = null;
+        exportStage = null;
+    }
+
     @Override
     protected void attachBaseContext(Context base) {
         super.attachBaseContext(LocaleHelper.wrap(ThemeHelper.wrap(base)));
@@ -603,6 +642,12 @@ public final class HistoryActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        historyResumed = false;
+        historyListenerGen++;
+        historyUiGen++;
+        BalanceData.removeHistoryListener(onHistoryChanged);
+        unregisterSmsObserver();
+        dismissDialogs();
         // Drop a pull-refresh ticker that may still be mid-animation (its own guards keep it from
         // touching a destroyed screen, but nothing should keep posting into a finished activity).
         if (scrollView != null) {
@@ -620,18 +665,6 @@ public final class HistoryActivity extends Activity {
         }
         // Same reasoning for the skeleton sweep: it repeats forever and holds the activity with it.
         stopShimmer();
-        // An export dialog belongs to this screen: dismiss it here so rotating or leaving
-        // mid-export cannot leak its window, and invalidate its generation so the late worker
-        // completion skips its UI instead of touching a dead screen.
-        if (exportDialog != null) {
-            try { exportDialog.dismiss(); } catch (Exception e) {
-                android.util.Log.w("BalanceHistory", "export dialog dismiss failed", e);
-            }
-            exportDialog = null;
-            exportBar = null;
-            exportStage = null;
-        }
-        exportGen++;
         super.onDestroy();
     }
 
@@ -788,7 +821,16 @@ public final class HistoryActivity extends Activity {
         create.addCategory(Intent.CATEGORY_OPENABLE);
         create.setType("text/csv");
         create.putExtra(Intent.EXTRA_TITLE, exportFileName());
-        startActivityForResult(create, REQ_EXPORT);
+        try {
+            startActivityForResult(create, REQ_EXPORT);
+        } catch (android.content.ActivityNotFoundException | SecurityException e) {
+            // The hold is only for a picker hand-off. A device without a document provider (or a
+            // provider blocked by policy) never made that hand-off, so leaving the hold set would
+            // incorrectly keep the next background transition unlocked.
+            LockManager.cancelUnlockHold();
+            Toast.makeText(this, getString(R.string.history_export_failed), Toast.LENGTH_SHORT)
+                .show();
+        }
     }
 
     private String exportFileName() {
@@ -800,6 +842,12 @@ public final class HistoryActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_EXPORT) {
+            // RESULT_CANCELED, RESULT_OK without a Uri, and every other terminal result all end
+            // the picker hand-off. Do this before inspecting the result so no terminal path can
+            // leave the temporary unlock hold behind.
+            LockManager.cancelUnlockHold();
+        }
         if (requestCode == REQ_EXPORT && resultCode == RESULT_OK
                 && data != null && data.getData() != null) {
             if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) {
@@ -819,6 +867,7 @@ public final class HistoryActivity extends Activity {
      *  cannot mix generations even though no store monitor is held across the whole export —
      *  holding it is what starved renders and scans behind the dialog and hung the screen. */
     private void writeExport(Uri uri) {
+        if (exportRunning) return;
         final String query = searchQuery == null ? "" : searchQuery.trim();
         final List<String> tagSelection = new ArrayList<>(selectedTags);
         final Filter activeFilter = filter;
@@ -830,13 +879,15 @@ public final class HistoryActivity extends Activity {
         final Context app = getApplicationContext();
         final android.content.ContentResolver resolver = getContentResolver();
         final int gen = ++exportGen;
+        final int uiGen = ++exportUiGen;
         exportRunning = true;
         exportDialog = exportProgressDialog();
         final long[] lastPost = {0};
         final WorkProgress exportProgress = new WorkProgress() {
             @Override public void stage(final int stageResId) {
                 runOnUiThread(() -> {
-                    if (gen != exportGen || exportDialog == null || exportStage == null
+                    if (gen != exportGen || uiGen != exportUiGen || exportDialog == null
+                            || exportStage == null
                             || exportBar == null || !exportDialog.isShowing()) return;
                     exportStage.setText(stageResId);
                     exportBar.setIndeterminate(true);
@@ -848,7 +899,8 @@ public final class HistoryActivity extends Activity {
                 if (done < total && now - lastPost[0] < EXPORT_PROGRESS_THROTTLE_MS) return;
                 lastPost[0] = now;
                 runOnUiThread(() -> {
-                    if (gen != exportGen || exportDialog == null || exportStage == null
+                    if (gen != exportGen || uiGen != exportUiGen || exportDialog == null
+                            || exportStage == null
                             || exportBar == null || !exportDialog.isShowing()) return;
                     if (total > 0) {
                         exportBar.setIndeterminate(false);
@@ -858,62 +910,59 @@ public final class HistoryActivity extends Activity {
                 });
             }
         };
-        exportDialog.show();
+        showDialog(exportDialog);
         new Thread(() -> {
             final int[] error = {0};
             try {
                 final List<String> tokens = searchTokens(query);
-                // The destination opens before the metadata session: if the open itself throws,
-                // there is no session yet to leak. Past this point both are closed in finally.
-                OutputStream out = resolver.openOutputStream(uri, "w");
-                if (out == null) throw new IOException("no output stream");
-                final MetadataStore.LookupSession metadata = MetadataStore.LookupSession.open(app);
-                final CsvExport.TextLookup lookup = new CsvExport.TextLookup() {
-                    @Override public String note(String key) throws Exception {
-                        return metadata.text(MetadataStore.NOTES, key);
-                    }
-                    @Override public String reason(String key) throws Exception {
-                        return metadata.text(MetadataStore.REASONS, key);
-                    }
-                    @Override public String channel(String key) throws Exception {
-                        return metadata.text(MetadataStore.CHANNELS, key);
-                    }
-                    @Override public List<String> tags(String key) throws Exception {
-                        return metadata.tags(key);
-                    }
-                };
-                // One store pass feeds both CSV kinds, exactly like the history render: the
-                // in-scope rows stage the residual walk while the fully matching rows stage as
-                // movements. Residual detection needs the whole bank/account scope before the
-                // direction/date/tag/search narrowing runs, so the scope check precedes it —
-                // dropping a row here would corrupt the bracketing walk like a page-local
-                // residual calculation would.
-                final HistoryCsvExport.CombinedSource both = (movements, residuals) -> {
-                    try (HistoryResidualReader.Staging staging =
-                            HistoryResidualReader.Staging.open(app)) {
-                        TransactionStore.forEach(app, CsvExport.STREAM_PAGE_SIZE, transaction -> {
-                            if (inExportScope(transaction, bank, account)) staging.add(transaction);
-                            if (!exportMovementMatches(app, transaction, bank, account,
-                                    activeFilter, iran, tagSelection, tokens, lookup)) return;
-                            movements.accept(transaction);
-                        });
-                        staging.emit(residual -> {
-                            if (!tagSelection.isEmpty() || !exportResidualMatches(app, residual,
-                                    activeFilter, iran, tokens)) return;
-                            residuals.accept(residual);
-                        }, CsvExport.STREAM_PAGE_SIZE);
-                    }
-                };
-                try {
-                    try {
-                        OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
+                // Both handles are caller-owned and are opened in one try-with-resources scope.
+                // In particular, if metadata initialization fails after the destination was
+                // truncated, the destination stream is still closed before failure cleanup runs.
+                try (OutputStream out = resolver.openOutputStream(uri, "w")) {
+                    if (out == null) throw new IOException("no output stream");
+                    try (MetadataStore.LookupSession metadata =
+                            MetadataStore.LookupSession.open(app)) {
+                        final CsvExport.TextLookup lookup = new CsvExport.TextLookup() {
+                            @Override public String note(String key) throws Exception {
+                                return metadata.text(MetadataStore.NOTES, key);
+                            }
+                            @Override public String reason(String key) throws Exception {
+                                return metadata.text(MetadataStore.REASONS, key);
+                            }
+                            @Override public String channel(String key) throws Exception {
+                                return metadata.text(MetadataStore.CHANNELS, key);
+                            }
+                            @Override public List<String> tags(String key) throws Exception {
+                                return metadata.tags(key);
+                            }
+                        };
+                        // One store pass feeds both CSV kinds, exactly like the history render: the
+                        // in-scope rows stage the residual walk while the fully matching rows stage as
+                        // movements. Residual detection needs the whole bank/account scope before the
+                        // direction/date/tag/search narrowing runs, so the scope check precedes it —
+                        // dropping a row here would corrupt the bracketing walk like a page-local
+                        // residual calculation would.
+                        final HistoryCsvExport.CombinedSource both = (movements, residuals) -> {
+                            try (HistoryResidualReader.Staging staging =
+                                    HistoryResidualReader.Staging.open(app)) {
+                                TransactionStore.forEach(app, CsvExport.STREAM_PAGE_SIZE, transaction -> {
+                                    if (inExportScope(transaction, bank, account)) staging.add(transaction);
+                                    if (!exportMovementMatches(app, transaction, bank, account,
+                                            activeFilter, iran, tagSelection, tokens, lookup)) return;
+                                    movements.accept(transaction);
+                                });
+                                staging.emit(residual -> {
+                                    if (!tagSelection.isEmpty() || !exportResidualMatches(app, residual,
+                                            activeFilter, iran, tokens)) return;
+                                    residuals.accept(residual);
+                                }, CsvExport.STREAM_PAGE_SIZE);
+                            }
+                        };
+                        OutputStreamWriter writer = new OutputStreamWriter(out,
+                            StandardCharsets.UTF_8);
                         HistoryCsvExport.writeCombined(app, CsvExport.STREAM_PAGE_SIZE, both,
                             writer, lookup, exportProgress);
-                    } finally {
-                        metadata.close();
                     }
-                } finally {
-                    out.close();
                 }
             } catch (Throwable e) {
                 error[0] = 1;
@@ -941,7 +990,10 @@ public final class HistoryActivity extends Activity {
                         exportBar = null;
                         exportStage = null;
                     }
-                    if (isDestroyed() || isFinishing()) return;
+                    // Completion must never lock a session. The normal activity lifecycle owns
+                    // that decision: a resumed activity stays usable, while onPause/onStop keep
+                    // the usual safety lock path. Suppress feedback if this screen is paused.
+                    if (isDestroyed() || isFinishing() || !historyResumed) return;
                     Toast.makeText(app,
                         getString(error[0] == 0
                             ? R.string.history_export_saved : R.string.history_export_failed),
@@ -1218,7 +1270,7 @@ public final class HistoryActivity extends Activity {
                     render();
                 });
             });
-            dlg.show();
+            showDialog(dlg);
             return;
         }
 
@@ -1234,7 +1286,7 @@ public final class HistoryActivity extends Activity {
                 dlg.dismiss();
                 render();
             }));
-        dlg.show();
+        showDialog(dlg);
     }
 
     private static boolean containsTag(Collection<String> tags, String wanted) {
@@ -1400,7 +1452,7 @@ public final class HistoryActivity extends Activity {
                 dlg.dismiss();
                 render();
             }));
-        dlg.show();
+        showDialog(dlg);
     }
 
     /** The From/To month-grid picker used inside the custom-range dialog. Navigate the active
@@ -1476,7 +1528,7 @@ public final class HistoryActivity extends Activity {
                     dlg.dismiss();
                     render();
                 }));
-            dlg.show();
+            showDialog(dlg);
         }
 
         /** Reads the entered year, accepting Latin or Persian digits, and clamps it to the
@@ -1672,6 +1724,12 @@ public final class HistoryActivity extends Activity {
     /** The current aggregate snapshot; its encrypted timeline serves lazy day-page requests. */
     private HistoryReader.Result historyResult;
 
+    /** Lifecycle generations keep callbacks that crossed pause/resume from rebuilding this screen. */
+    private int historyUiGen;
+    private int historyListenerGen;
+    private boolean historyResumed;
+    private boolean renderAfterResume;
+
     /** A small bounded set of day pages is kept in the activity heap. The disk timeline retains the rest. */
     private final Map<String, HistoryReader.DayRows> loadedDayPages = new java.util.LinkedHashMap<>();
 
@@ -1840,14 +1898,28 @@ public final class HistoryActivity extends Activity {
         return CalDate.of(y, m, d);
     }
 
-    private final Runnable onHistoryChanged = () -> runOnUiThread(this::render);
+    /** Each resume gets its own listener identity, so even a notification copied before removal
+     *  cannot render after a later pause/resume. All lifecycle checks run on the UI thread. */
+    private Runnable onHistoryChanged;
 
     @Override
     protected void onResume() {
         super.onResume();
         LockManager.cancelPendingLock();
+        historyResumed = true;
+        historyUiGen++;
+        final int listenerGen = ++historyListenerGen;
+        onHistoryChanged = () -> runOnUiThread(() -> {
+            if (listenerGen != historyListenerGen || !historyResumed
+                    || isDestroyed() || isFinishing()) return;
+            render();
+        });
         BalanceData.addHistoryListener(onHistoryChanged);
         registerSmsObserver();
+        if (renderAfterResume) {
+            renderAfterResume = false;
+            render();
+        }
         // The delayed lock may have engaged while we were paused on a ROM that skipped onStop;
         // reflect it now that we are back in the foreground.
         if (LockManager.isEnabled(this) && LockManager.isSessionLocked()
@@ -1856,12 +1928,25 @@ public final class HistoryActivity extends Activity {
         }
         // Re-scan in the background (a no-op if a scan is already running) so messages that
         // arrived while the screen was closed are reflected as soon as it opens.
-        new Thread(() -> BalanceData.scanHistory(HistoryActivity.this)).start();
+        final Context app = getApplicationContext();
+        new Thread(() -> {
+            try {
+                BalanceData.scanHistory(app);
+            } catch (Exception e) {
+                android.util.Log.w("BalanceHistory", "resume history scan failed", e);
+            }
+        }, "history-scan").start();
     }
 
     @Override
     protected void onPause() {
+        historyResumed = false;
+        renderAfterResume = true;
+        renderGen++;
+        historyUiGen++;
+        historyListenerGen++;
         unregisterSmsObserver();
+        dismissDialogs();
         if (LockManager.isEnabled(this)) {
             // Arm the lock now so it engages even on ROMs that delay or skip onStop; the next
             // screen's start cancels it, so navigating between our own screens never locks.
@@ -1888,7 +1973,14 @@ public final class HistoryActivity extends Activity {
                 scanPending = true;
                 smsHandler.postDelayed(() -> {
                     scanPending = false;
-                    new Thread(() -> BalanceData.scanHistory(HistoryActivity.this)).start();
+                    final Context app = getApplicationContext();
+                    new Thread(() -> {
+                        try {
+                            BalanceData.scanHistory(app);
+                        } catch (Exception e) {
+                            android.util.Log.w("BalanceHistory", "observer history scan failed", e);
+                        }
+                    }, "history-scan").start();
                 }, 400);
             }
         };
@@ -2026,6 +2118,7 @@ public final class HistoryActivity extends Activity {
      *  from the encrypted snapshot timeline, so expand-all and searches never create a history-sized
      *  view tree or metadata map. */
     private void render() {
+        if (isDestroyed() || isFinishing()) return;
         final int gen = ++renderGen;
         final Filter f = filter;
         final String bank = bankFilter;
@@ -2100,6 +2193,13 @@ public final class HistoryActivity extends Activity {
                     Set<String> requestedDays = plannedExpandedDays(result, expandedSnapshot,
                         seededSnapshot, expandAll, expansionKey, previousExpansionKey,
                         savedPreSearchDays, iran);
+                    if (!query.isEmpty() && requestedDays.size() > MAX_INITIAL_SEARCH_DAY_PAGES) {
+                        // Search summaries already contain every matching day and every matching-row
+                        // count. Limit only the eager row pages, leaving the rest expanded with an
+                        // explicit load control so no match disappears or becomes unsearchable.
+                        requestedDays = new java.util.LinkedHashSet<>(
+                            new ArrayList<>(requestedDays).subList(0, MAX_INITIAL_SEARCH_DAY_PAGES));
+                    }
                     java.util.LinkedHashMap<String, HistoryReader.DayRows> pages =
                         new java.util.LinkedHashMap<>();
                     // One shared metadata session for the whole seed set: opening one per day
@@ -2246,13 +2346,14 @@ public final class HistoryActivity extends Activity {
         final HistoryReader.Result snapshot = historyResult;
         if (snapshot == null) return;
         final int gen = renderGen;
+        final int uiGen = historyUiGen;
         new Thread(() -> {
             try {
                 HistoryReader.DayRows page = HistoryReader.readPage(getApplicationContext(), snapshot,
                     dayKey, cursor, previous, HistoryReader.DEFAULT_ROW_PAGE_SIZE);
                 runOnUiThread(() -> {
                     if (gen != renderGen || historyResult != snapshot || isDestroyed()
-                            || isFinishing()) return;
+                            || isFinishing() || uiGen != historyUiGen || !historyResumed) return;
                     // A page request is the explicit act of opening a day. Keep the heap bounded and
                     // collapse only the oldest evicted day rather than dropping the current page when
                     // the initial recent-day window is still resident.
@@ -2276,7 +2377,11 @@ public final class HistoryActivity extends Activity {
                 });
             } catch (Exception e) {
                 android.util.Log.w("BalanceHistory", "history page failed", e);
-                runOnUiThread(() -> Toast.makeText(this, pageLoadFailure(), Toast.LENGTH_SHORT).show());
+                runOnUiThread(() -> {
+                    if (gen != renderGen || historyResult != snapshot || isDestroyed()
+                            || isFinishing() || uiGen != historyUiGen || !historyResumed) return;
+                    Toast.makeText(this, pageLoadFailure(), Toast.LENGTH_SHORT).show();
+                });
             }
         }).start();
     }
@@ -3102,7 +3207,6 @@ public final class HistoryActivity extends Activity {
      * difference — with an explicit note that the app will not guess what it was.
      */
     private void residualDetail(Residual r) {
-        LockManager.holdUnlock();
         String body = getString(R.string.residual_detail_body,
             dateText(calOfResidual(r.fromDate)),
             dateText(calOfResidual(r.toDate)),
@@ -3112,7 +3216,7 @@ public final class HistoryActivity extends Activity {
             .setMessage(body)
             .setPositiveButton(android.R.string.ok, null)
             .create();
-        dlg.show();
+        showDialog(dlg);
     }
 
     /**
@@ -3120,7 +3224,6 @@ public final class HistoryActivity extends Activity {
      * the "?" once can see the whole picture rather than hunting row by row.
      */
     private void residualExplainer() {
-        LockManager.holdUnlock();
         StringBuilder body = new StringBuilder(getString(R.string.residual_explainer_body));
         body.append("\n\n").append(LocaleHelper.isPersian(this)
             ? "تعداد مبالغ بی‌حساب: " + faDigits(residualCount)
@@ -3143,7 +3246,7 @@ public final class HistoryActivity extends Activity {
             .setMessage(body.toString())
             .setPositiveButton(android.R.string.ok, null)
             .create();
-        dlg.show();
+        showDialog(dlg);
     }
 
     private CalDate calOfResidual(long date) {
@@ -3498,7 +3601,7 @@ public final class HistoryActivity extends Activity {
                     render();
                 });
         });
-        dlg.show();
+        showDialog(dlg);
     }
 
     /** Rebuilds the compact, horizontally scrollable selected-tag row in the editor. */

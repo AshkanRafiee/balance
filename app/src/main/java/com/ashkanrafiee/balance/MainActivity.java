@@ -743,6 +743,7 @@ public class MainActivity extends Activity {
             boolean ok = LockManager.setFingerprintEnabled(this, true);
             final boolean result = ok;
             runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
                 lockChangeBusy = false;
                 toast(result ? R.string.lock_fp_on_toast : R.string.lock_fingerprint_unavailable);
             });
@@ -761,6 +762,7 @@ public class MainActivity extends Activity {
                 new Thread(() -> {
                     LockManager.disable(this);
                     runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
                         dismissProgress();
                         lockChangeBusy = false;
                         updateSecureFlag();
@@ -893,6 +895,7 @@ public class MainActivity extends Activity {
                         if (changing) LockManager.changeCode(this, value, isPin);
                         else LockManager.enable(this, value, isPin, wantFp);
                         runOnUiThread(() -> {
+                            if (isFinishing() || isDestroyed()) return;
                             dismissProgress();
                             lockChangeBusy = false;
                             updateSecureFlag();
@@ -902,6 +905,7 @@ public class MainActivity extends Activity {
                     } catch (Exception e) {
                         android.util.Log.w("BalanceLock", "setup failed", e);
                         runOnUiThread(() -> {
+                            if (isFinishing() || isDestroyed()) return;
                             dismissProgress();
                             lockChangeBusy = false;
                             toast(R.string.lock_error_generic);
@@ -1017,11 +1021,13 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQ_CREATE_BACKUP) {
+            LockManager.cancelUnlockHold();
             String password = pendingBackupPassword;
             pendingBackupPassword = null;
             if (resultCode != RESULT_OK || data == null || data.getData() == null || password == null) return;
             createBackup(data.getData(), password);
         } else if (requestCode == REQ_PICK_RESTORE) {
+            LockManager.cancelUnlockHold();
             if (resultCode == RESULT_OK && data != null && data.getData() != null) {
                 if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) {
                     // The SAF picker can outlive the temporary unlock hold (LockManager.holdUnlock
@@ -1737,6 +1743,7 @@ public class MainActivity extends Activity {
                         commitmentSummaryLoading = false;
                         if (gen != commitmentSummaryGen) return;
                         if (!commitmentSummaryLoaded) {
+                            commitmentSummary = new CommitmentsActivity.Summary();
                             commitmentSummaryLoaded = true;
                             commitmentSummaryStale = false;
                             hasCommitments = false;
@@ -1832,6 +1839,7 @@ public class MainActivity extends Activity {
                     // Nothing stored yet (a fresh install, or a reset): the empty card wants the
                     // plain "permission is needed" wording, and there is no strip to explain it.
                     post(() -> {
+                        if (isFinishing() || isDestroyed()) return;
                         dismissProgress();
                         if (hard) view.invalidateCommitmentSummary();
                         applySaved(saved, app, saved.isEmpty()
@@ -1862,6 +1870,7 @@ public class MainActivity extends Activity {
                     LinkedHashMap<String, Bank> saved = BalanceData.read(app);
                     int count = BalanceData.scanSms(app, saved, refreshProgress);
                     post(() -> {
+                        if (isFinishing() || isDestroyed()) return;
                         dismissProgress();
                         // A reset also wipes commitments: drop the cached card summary so the next
                         // frame reloads it instead of showing the deleted series until reopen.
@@ -1887,7 +1896,11 @@ public class MainActivity extends Activity {
                         if (refreshAgain) { refreshAgain = false; refresh(pendingHard, pendingNotes, silent); }
                     });
                 }
-                BalanceData.scanHistory(app, refreshProgress);
+                try {
+                    BalanceData.scanHistory(app, refreshProgress);
+                } catch (Exception historyError) {
+                    android.util.Log.w("Balance", "history refresh failed", historyError);
+                }
             }).start();
         }
 

@@ -1,0 +1,96 @@
+package com.ashkanrafiee.balance;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertTrue;
+
+import android.content.Context;
+import android.view.View;
+import android.widget.RemoteViews;
+import android.widget.TextView;
+
+import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.platform.app.InstrumentationRegistry;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+
+import java.util.LinkedHashMap;
+
+/** Corruption boundaries for the home-screen widget's encrypted balance store. */
+@RunWith(AndroidJUnit4.class)
+public class WidgetStabilityTest {
+    private Context context;
+
+    @Before public void setUp() {
+        context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        LockManager.disable(context);
+        LockManager.resetSessionForTest();
+        DataGeneration.clearForTests(context);
+        BalanceData.reset(context, true);
+    }
+
+    @After public void tearDown() {
+        LockManager.disable(context);
+        LockManager.resetSessionForTest();
+        BalanceData.reset(context, true);
+        DataGeneration.clearForTests(context);
+    }
+
+    @Test public void corruptEncryptedStore_summaryShowsUnknownAndReadableError() throws Exception {
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        saved.put("Tejarat", new Bank("Tejarat", 12_345L, 1000L, "5000"));
+        assertTrue(BalanceData.write(context, saved));
+        DataGeneration.dataPrefs(context).edit()
+            .putString(BalanceData.KEY_BALANCES, "not-an-encrypted-balance").commit();
+
+        View root = BalanceWidgetProvider.buildViews(context).apply(context, null);
+        assertEquals("—", ((TextView) root.findViewById(R.id.widget_total)).getText().toString());
+        assertNotEquals("0", ((TextView) root.findViewById(R.id.widget_total)).getText().toString());
+        TextView hint = root.findViewById(R.id.widget_hint);
+        assertEquals(View.VISIBLE, hint.getVisibility());
+        assertEquals(context.getString(R.string.status_sms_unreadable), hint.getText().toString());
+    }
+
+    @Test public void corruptEncryptedStore_datasetShowsErrorRowInsteadOfEmptyState() throws Exception {
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        saved.put("Tejarat", new Bank("Tejarat", 12_345L, 1000L, "5000"));
+        assertTrue(BalanceData.write(context, saved));
+        DataGeneration.dataPrefs(context).edit()
+            .putString(BalanceData.KEY_BALANCES, "not-an-encrypted-balance").commit();
+
+        BalanceWidgetService.Factory factory = new BalanceWidgetService.Factory(context);
+        factory.onDataSetChanged();
+        assertEquals(1, factory.getCount());
+        View row = factory.getViewAt(0).apply(context, null);
+        assertEquals(context.getString(R.string.status_sms_unreadable),
+            ((TextView) row.findViewById(R.id.widget_empty)).getText().toString());
+    }
+
+    @Test public void lockedWidgetDoesNotReadCorruptStoreOrExposeItsError() throws Exception {
+        LockManager.enable(context, "1234", true, false);
+        DataGeneration.dataPrefs(context).edit()
+            .putString(BalanceData.KEY_BALANCES, "not-an-encrypted-balance").commit();
+
+        View root = BalanceWidgetProvider.buildViews(context).apply(context, null);
+        assertTrue(containsText(root, context.getString(R.string.widget_locked_message)));
+
+        BalanceWidgetService.Factory factory = new BalanceWidgetService.Factory(context);
+        factory.onDataSetChanged();
+        assertEquals(1, factory.getCount());
+        View row = factory.getViewAt(0).apply(context, null);
+        assertTrue(containsText(row, context.getString(R.string.widget_locked_message)));
+    }
+
+    private static boolean containsText(View view, String expected) {
+        if (view instanceof TextView && expected.contentEquals(((TextView) view).getText())) return true;
+        if (view instanceof android.view.ViewGroup) {
+            android.view.ViewGroup group = (android.view.ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++)
+                if (containsText(group.getChildAt(i), expected)) return true;
+        }
+        return false;
+    }
+}

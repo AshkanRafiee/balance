@@ -290,8 +290,8 @@ final class CsvExport {
             calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH) + 1,
             calendar.get(Calendar.DAY_OF_MONTH), iran);
         return new String[]{
-            BankRules.displayName(context, r.bank),
-            r.account == null ? "" : r.account,
+            guardFormula(BankRules.displayName(context, r.bank)),
+            guardFormula(r.account == null ? "" : r.account),
             iso.format(new Date(r.toDate)),
             local.year + "/" + local.month + "/" + local.day,
             time.format(new Date(r.toDate)),

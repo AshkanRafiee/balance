@@ -10,6 +10,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.SystemClock;
+import android.util.Log;
 import android.view.View;
 import android.widget.RemoteViews;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -35,95 +36,144 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
      *  rebuilding (and re-decrypting) the whole widget on every tick. */
     private static volatile RemoteViews spinBase;
 
-    /** Re-scans SMS on a worker thread while spinning the refresh icon, then renders the final widget.
-     *  While the app lock is enabled the widget does not rescan and shows the locked state instead. */
-    private static void refreshData(Context context) {
-        if (LockManager.isEnabled(context)) {
-            updateAll(context);
-            return;
-        }
-        if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
-            // No point scanning without the permission: render the saved values plus the hint row
-            // (and never risk the scan thread crashing on the denied read).
-            updateAll(context);
-            return;
-        }
-        new Thread(() -> {
-            if (!REFRESHING.compareAndSet(false, true)) return;
-            try {
-                AtomicBoolean done = new AtomicBoolean(false);
-                new Thread(() -> {
-                    try {
-                        BalanceData.scanSms(context, BalanceData.read(context));
-                    } finally {
-                        done.set(true);
-                    }
-                }, "balance-scan").start();
+    private static Context appContext(Context context) {
+        Context app = context.getApplicationContext();
+        return app == null ? context : app;
+    }
 
-                long start = SystemClock.uptimeMillis();
-                spinBase = buildViews(context);
-                int step = 0;
-                while (!done.get()) {
-                    step++;
-                    spin = (float) ((step * 45) % 360);
-                    applySpin(context);
-                    SystemClock.sleep(60);
+    /** An unreadable lock preference must never reveal balances. */
+    static boolean widgetLocked(Context context) {
+        try {
+            return LockManager.isEnabled(appContext(context));
+        } catch (Exception e) {
+            Log.w(TAG, "widget lock state unreadable");
+            return true;
+        }
+    }
+
+    /** Re-scans SMS on a worker thread while spinning the refresh icon, then renders the final widget
+     *  without allowing a store, worker, or launcher failure to escape its boundary. While the app
+     *  lock is enabled the widget does not rescan and shows the locked state instead. */
+    private static void refreshData(Context context) {
+        boolean refreshing = false;
+        try {
+            final Context app = appContext(context);
+            if (widgetLocked(app) || app.checkSelfPermission(Manifest.permission.READ_SMS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                // No point scanning without the permission: render the saved values plus the hint row
+                // (and never risk the scan thread crashing on the denied read).
+                updateAll(app);
+                return;
+            }
+            refreshing = REFRESHING.compareAndSet(false, true);
+            if (!refreshing) return;
+            new Thread(() -> {
+                try {
+                    long start = SystemClock.uptimeMillis();
+                    // Build before starting the scan: a rendering failure must not leave an
+                    // untracked scan behind when the outer worker releases REFRESHING.
+                    spinBase = buildViews(app);
+                    AtomicBoolean done = new AtomicBoolean(false);
+                    new Thread(() -> {
+                        try {
+                            if (!widgetLocked(app))
+                                BalanceData.scanSms(app, BalanceData.read(app));
+                        } catch (Exception e) {
+                            Log.w(TAG, "widget scan failed");
+                        } finally {
+                            done.set(true);
+                        }
+                    }, "balance-scan").start();
+                    int step = 0;
+                    while (!done.get()) {
+                        step++;
+                        spin = (float) ((step * 45) % 360);
+                        applySpin(app);
+                        SystemClock.sleep(60);
+                    }
+                    while (SystemClock.uptimeMillis() - start < MIN_SPIN_DURATION)
+                        SystemClock.sleep(40);
+                } catch (Exception e) {
+                    Log.w(TAG, "widget refresh failed");
+                } finally {
+                    // Do this even when building RemoteViews or talking to AppWidgetManager failed.
+                    spin = 0f;
+                    spinBase = null;
+                    try {
+                        updateAll(app);
+                    } finally {
+                        REFRESHING.set(false);
+                    }
                 }
-                while (SystemClock.uptimeMillis() - start < MIN_SPIN_DURATION) SystemClock.sleep(40);
+            }, "balance-refresh").start();
+        } catch (Exception e) {
+            Log.w(TAG, "widget refresh could not start");
+            if (refreshing) {
                 spin = 0f;
-                applySpin(context);
                 spinBase = null;
-                updateAll(context);
-            } finally {
                 REFRESHING.set(false);
             }
-        }, "balance-refresh").start();
+            updateAll(context);
+        }
     }
 
     /** Renders the widget again from saved balances; called by the app after its own refresh. */
     static void push(Context context) {
-        AppWidgetManager manager = AppWidgetManager.getInstance(context);
-        if (manager.getAppWidgetIds(new ComponentName(context, BalanceWidgetProvider.class)).length > 0)
-            updateAll(context);
+        updateAll(context);
     }
 
     static void updateAll(Context context) {
-        AppWidgetManager manager = AppWidgetManager.getInstance(context);
-        int[] ids = manager.getAppWidgetIds(new ComponentName(context, BalanceWidgetProvider.class));
-        if (ids.length == 0) return;
-        RemoteViews views = buildViews(context);
-        // While a scan is spinning, applySpin re-pushes spinBase every tick, so a frame cached
-        // before a language, theme or currency change would overwrite the one just rendered and
-        // hold the old direction and the old strings until the scan ended. Handing the animation
-        // the fresh frame keeps it spinning and keeps the change.
-        if (spinBase != null) spinBase = views;
-        if (LockManager.isEnabled(context)) {
-            // The lock hides the balances: no list data is bound and no refresh is kicked off.
+        try {
+            AppWidgetManager manager = AppWidgetManager.getInstance(context);
+            int[] ids = manager.getAppWidgetIds(new ComponentName(context, BalanceWidgetProvider.class));
+            if (ids.length == 0) return;
+            RemoteViews views = buildViews(context);
+            boolean locked = widgetLocked(context);
+            if (locked) views = lockedViews(context);
+            // While a scan is spinning, applySpin re-pushes spinBase every tick, so a frame cached
+            // before a language, theme or currency change would overwrite the one just rendered and
+            // hold the old direction and the old strings until the scan ended. Handing the animation
+            // the fresh frame keeps it spinning and keeps the change.
+            if (spinBase != null) spinBase = views;
+            // Push the safe frame first, even if notifying the launcher fails afterwards.
             for (int id : ids) manager.updateAppWidget(id, views);
-            return;
+            if (!locked) manager.notifyAppWidgetViewDataChanged(ids, R.id.widget_list);
+        } catch (Exception e) {
+            Log.w(TAG, "widget update failed");
         }
-        manager.notifyAppWidgetViewDataChanged(ids, R.id.widget_list);
-        for (int id : ids) manager.updateAppWidget(id, views);
     }
 
     /** Rotates the refresh icon on the fully rendered widget, so no other element is ever dropped. */
     private static void applySpin(Context context) {
-        AppWidgetManager manager = AppWidgetManager.getInstance(context);
-        int[] ids = manager.getAppWidgetIds(new ComponentName(context, BalanceWidgetProvider.class));
-        if (ids.length == 0) return;
-        RemoteViews views = spinBase;
-        if (views == null) return;
-        views.setFloat(R.id.widget_refresh, "setRotation", spin);
-        for (int id : ids) manager.updateAppWidget(id, views);
+        try {
+            AppWidgetManager manager = AppWidgetManager.getInstance(context);
+            int[] ids = manager.getAppWidgetIds(new ComponentName(context, BalanceWidgetProvider.class));
+            if (ids.length == 0) return;
+            RemoteViews views = spinBase;
+            if (views == null) return;
+            if (widgetLocked(context)) {
+                // Do not replay a cached balance frame when lock state is uncertain.
+                views = lockedViews(context);
+                spinBase = views;
+            } else views.setFloat(R.id.widget_refresh, "setRotation", spin);
+            for (int id : ids) manager.updateAppWidget(id, views);
+        } catch (Exception e) {
+            Log.w(TAG, "widget spin update failed");
+        }
     }
 
     static RemoteViews buildViews(Context context) {
         Context c = WidgetTheme.context(context);
-        if (LockManager.isEnabled(c)) return lockedViews(c);
+        if (widgetLocked(c)) return lockedViews(c);
         boolean hidden = BalanceData.isWidgetHidden(c);
         long total = 0;
-        for (java.util.Map.Entry<String, Bank> e : BalanceData.read(c).entrySet())
-            if (!BalanceData.isExcluded(c, e.getKey())) total += e.getValue().amount;
+        try {
+            for (java.util.Map.Entry<String, Bank> e : BalanceData.read(c).entrySet())
+                if (!BalanceData.isExcluded(c, e.getKey())) total += e.getValue().amount;
+        } catch (Exception e) {
+            Log.w(TAG, "widget balance store unreadable");
+            return unreadableViews(c);
+        }
         RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance);
         views.setRemoteAdapter(R.id.widget_list, new Intent(c, BalanceWidgetService.class));
         views.setInt(R.id.widget_root, "setLayoutDirection",
@@ -147,6 +197,30 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         views.setContentDescription(R.id.widget_mask, c.getString(R.string.widget_action_mask));
         views.setContentDescription(R.id.widget_refresh, c.getString(R.string.widget_action_refresh));
         views.setFloat(R.id.widget_refresh, "setRotation", spin);
+        views.setOnClickPendingIntent(R.id.widget_root, openApp(c));
+        views.setOnClickPendingIntent(R.id.widget_mask, pending(c, ACTION_MASK, REQ_MASK));
+        views.setOnClickPendingIntent(R.id.widget_refresh, pending(c, ACTION_REFRESH, REQ_REFRESH));
+        return views;
+    }
+
+    /** The store exists but cannot be decrypted/read; never substitute a numeric zero. */
+    static RemoteViews unreadableViews(Context context) {
+        Context c = WidgetTheme.context(context);
+        RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance);
+        views.setRemoteAdapter(R.id.widget_list, new Intent(c, BalanceWidgetService.class));
+        views.setInt(R.id.widget_root, "setLayoutDirection",
+            c.getResources().getConfiguration().getLayoutDirection());
+        views.setInt(R.id.widget_root, "setBackgroundResource", WidgetTheme.background(c));
+        views.setTextColor(R.id.widget_total, c.getColor(R.color.accent));
+        views.setTextColor(R.id.widget_unit, c.getColor(R.color.muted));
+        views.setTextColor(R.id.widget_hint, c.getColor(R.color.muted));
+        views.setTextViewText(R.id.widget_total, "\u2014");
+        views.setTextViewText(R.id.widget_unit, "");
+        views.setViewVisibility(R.id.widget_hint, View.VISIBLE);
+        views.setTextViewText(R.id.widget_hint, c.getString(R.string.status_sms_unreadable));
+        views.setImageViewResource(R.id.widget_mask, R.drawable.ic_visibility);
+        views.setContentDescription(R.id.widget_mask, c.getString(R.string.widget_action_mask));
+        views.setContentDescription(R.id.widget_refresh, c.getString(R.string.widget_action_refresh));
         views.setOnClickPendingIntent(R.id.widget_root, openApp(c));
         views.setOnClickPendingIntent(R.id.widget_mask, pending(c, ACTION_MASK, REQ_MASK));
         views.setOnClickPendingIntent(R.id.widget_refresh, pending(c, ACTION_REFRESH, REQ_REFRESH));
@@ -212,11 +286,15 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     }
 
     static void scheduleAlarm(Context context) {
-        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-        if (am == null) return;
-        cancelLegacyAlarms(context);
-        am.setRepeating(AlarmManager.RTC, System.currentTimeMillis() + REFRESH_INTERVAL,
-            REFRESH_INTERVAL, alarmPending(context));
+        try {
+            AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+            if (am == null) return;
+            cancelLegacyAlarms(context);
+            am.setRepeating(AlarmManager.RTC, System.currentTimeMillis() + REFRESH_INTERVAL,
+                REFRESH_INTERVAL, alarmPending(context));
+        } catch (Exception e) {
+            Log.w(TAG, "widget alarm schedule failed");
+        }
     }
 
     /** The widget releases v1.4.0 and v1.4.1 minted the repeating alarm at REQ_ALARM + versionCode * 1000
@@ -236,33 +314,53 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     }
 
     private static void cancelAlarm(Context context) {
-        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-        if (am == null) return;
-        am.cancel(alarmPending(context));
+        try {
+            AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+            if (am == null) return;
+            am.cancel(alarmPending(context));
+        } catch (Exception e) {
+            Log.w(TAG, "widget alarm cancel failed");
+        }
     }
 
     @Override
     public void onEnabled(Context context) {
-        super.onEnabled(context);
-        scheduleAlarm(context);
+        try {
+            super.onEnabled(context);
+            scheduleAlarm(context);
+        } catch (Exception e) {
+            Log.w(TAG, "widget enable failed");
+        }
     }
 
     @Override
     public void onDisabled(Context context) {
-        super.onDisabled(context);
-        cancelAlarm(context);
+        try {
+            super.onDisabled(context);
+            cancelAlarm(context);
+        } catch (Exception e) {
+            Log.w(TAG, "widget disable failed");
+        }
     }
 
     @Override
     public void onDeleted(Context context, int[] appWidgetIds) {
-        super.onDeleted(context, appWidgetIds);
-        if (!hasWidgets(context)) cancelAlarm(context);
+        try {
+            super.onDeleted(context, appWidgetIds);
+            if (!hasWidgets(context)) cancelAlarm(context);
+        } catch (Exception e) {
+            Log.w(TAG, "widget delete failed");
+        }
     }
 
     @Override
     public void onUpdate(Context context, AppWidgetManager appWidgetManager, int[] appWidgetIds) {
-        scheduleAlarm(context);
-        refreshData(context);
+        try {
+            scheduleAlarm(context);
+            refreshData(context);
+        } catch (Exception e) {
+            Log.w(TAG, "widget update callback failed");
+        }
     }
 
     /**
@@ -279,18 +377,23 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
      */
     @Override
     public void onReceive(Context context, Intent intent) {
-        String action = intent.getAction();
-        if (action == null) return;
-        super.onReceive(context, intent);
-        if (ACTION_REFRESH.equals(action) || ACTION_ALARM.equals(action)) {
-            if (ACTION_ALARM.equals(action)) scheduleAlarm(context);
-            refreshData(context);
-        } else if (ACTION_MASK.equals(action)) {
-            BalanceData.setWidgetHidden(context, !BalanceData.isWidgetHidden(context));
-            updateAll(context);
-        } else if (ACTION_BOOT_COMPLETED.equals(action) && hasWidgets(context)) {
-            scheduleAlarm(context);
-        } else if (Intent.ACTION_CONFIGURATION_CHANGED.equals(action) && hasWidgets(context)) {
+        try {
+            String action = intent.getAction();
+            if (action == null) return;
+            super.onReceive(context, intent);
+            if (ACTION_REFRESH.equals(action) || ACTION_ALARM.equals(action)) {
+                if (ACTION_ALARM.equals(action)) scheduleAlarm(context);
+                refreshData(context);
+            } else if (ACTION_MASK.equals(action)) {
+                BalanceData.setWidgetHidden(context, !BalanceData.isWidgetHidden(context));
+                updateAll(context);
+            } else if (ACTION_BOOT_COMPLETED.equals(action) && hasWidgets(context)) {
+                scheduleAlarm(context);
+            } else if (Intent.ACTION_CONFIGURATION_CHANGED.equals(action) && hasWidgets(context)) {
+                updateAll(context);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "widget receiver failed");
             updateAll(context);
         }
     }

@@ -2,6 +2,7 @@ package com.ashkanrafiee.balance;
 
 import android.content.Context;
 import android.content.Intent;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.RemoteViews;
@@ -11,6 +12,8 @@ import java.util.List;
 import java.util.Set;
 
 public class BalanceWidgetService extends RemoteViewsService {
+    private static final String TAG = "BalanceWidget";
+
     @Override
     public RemoteViewsFactory onGetViewFactory(Intent intent) {
         return new Factory(getApplicationContext());
@@ -21,6 +24,7 @@ public class BalanceWidgetService extends RemoteViewsService {
      *  same order the app shows them (persisted sort mode), with excluded accounts dropped entirely
      *  so the widget stays a glanceable summary of the total. */
     static List<Bank> widgetBanks(Context context) {
+        if (BalanceWidgetProvider.widgetLocked(context)) return new ArrayList<>();
         Context c = WidgetTheme.context(context);
         Set<String> excluded = BalanceData.getExcluded(c);
         List<Bank> included = new ArrayList<>();
@@ -89,40 +93,69 @@ public class BalanceWidgetService extends RemoteViewsService {
 
     /** The "no balances yet" row. */
     static RemoteViews emptyViews(Context context) {
+        return messageViews(context, R.string.widget_empty);
+    }
+
+    /** The list counterpart of the summary's unknown total. */
+    static RemoteViews unreadableViews(Context context) {
+        return messageViews(context, R.string.status_sms_unreadable);
+    }
+
+    private static RemoteViews messageViews(Context context, int message) {
         Context c = WidgetTheme.context(context);
         RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance_empty);
         views.setInt(R.id.widget_empty, "setLayoutDirection",
             c.getResources().getConfiguration().getLayoutDirection());
         views.setTextColor(R.id.widget_empty, c.getColor(R.color.empty));
+        views.setTextViewText(R.id.widget_empty, c.getString(message));
         views.setViewVisibility(R.id.widget_empty, View.VISIBLE);
         views.setOnClickPendingIntent(R.id.widget_empty, BalanceWidgetProvider.openApp(c));
         return views;
     }
 
-    private static final class Factory implements RemoteViewsService.RemoteViewsFactory {
+    static final class Factory implements RemoteViewsService.RemoteViewsFactory {
         private final Context context;
-        private volatile List<Bank> banks = new ArrayList<>();
-        private volatile boolean locked;
+        private List<Bank> banks = new ArrayList<>();
+        private boolean locked = true;
+        private boolean unreadable;
 
-        Factory(Context context) { this.context = context; }
+        Factory(Context context) {
+            Context app = context.getApplicationContext();
+            this.context = app == null ? context : app;
+        }
 
         @Override public void onCreate() { }
 
-        @Override public void onDataSetChanged() {
-            locked = LockManager.isEnabled(context);
-            banks = widgetBanks(context);
+        @Override public synchronized void onDataSetChanged() {
+            // Drop the previous snapshot even when loading the replacement fails.
+            banks = new ArrayList<>();
+            unreadable = false;
+            locked = BalanceWidgetProvider.widgetLocked(context);
+            if (locked) return;
+            try {
+                banks = widgetBanks(context);
+            } catch (Exception e) {
+                Log.w(TAG, "widget dataset load failed");
+                unreadable = true;
+            }
         }
 
-        @Override public int getCount() {
+        @Override public synchronized int getCount() {
             if (locked) return 1;
             return banks.isEmpty() ? 1 : banks.size();
         }
 
-        @Override public RemoteViews getViewAt(int i) {
-            if (locked) return lockedViews(context);
-            List<Bank> snapshot = banks;
-            if (snapshot.isEmpty() || i < 0 || i >= snapshot.size()) return emptyViews(context);
-            return bankViews(context, snapshot.get(i));
+        @Override public synchronized RemoteViews getViewAt(int i) {
+            try {
+                if (locked || BalanceWidgetProvider.widgetLocked(context)) return lockedViews(context);
+                if (unreadable) return unreadableViews(context);
+                List<Bank> snapshot = banks;
+                if (snapshot.isEmpty() || i < 0 || i >= snapshot.size()) return emptyViews(context);
+                return bankViews(context, snapshot.get(i));
+            } catch (Exception e) {
+                Log.w(TAG, "widget row build failed");
+                return null;
+            }
         }
 
         @Override public long getItemId(int i) { return i; }

@@ -23,6 +23,8 @@ public final class AboutActivity extends Activity {
     static final String DONATION_URL = "https://balance.ashkanrafiee.com/#donate";
     int bg, card, muted, accent, heroColor, link, footerColor, fg;
     private LockOverlay lockOverlay;
+    /** The debug menu belongs to this activity and must not remain above its lock overlay. */
+    private android.app.AlertDialog activeDialog;
     /** Version taps towards the hidden debug menu; reset once it unlocks. */
     int versionTaps;
 
@@ -53,6 +55,23 @@ public final class AboutActivity extends Activity {
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
         p.setMargins(dp(l), dp(t), dp(r), dp(b));
         return p;
+    }
+
+    /** Shows the one About dialog and remembers it across the activity lifecycle. */
+    private void showDialog(android.app.AlertDialog dialog) {
+        if (activeDialog != null && activeDialog.isShowing()) activeDialog.dismiss();
+        activeDialog = dialog;
+        dialog.setOnDismissListener(d -> {
+            if (activeDialog == d) activeDialog = null;
+        });
+        dialog.show();
+    }
+
+    private void dismissDialog() {
+        if (activeDialog != null) {
+            activeDialog.dismiss();
+            activeDialog = null;
+        }
     }
 
     @Override
@@ -181,11 +200,11 @@ public final class AboutActivity extends Activity {
         expandAll.setChecked(BalanceData.getExpandAllHistory(this));
         expandAll.setOnCheckedChangeListener((b, on) -> BalanceData.setExpandAllHistory(this, on));
         box.addView(expandAll, new LinearLayout.LayoutParams(-1, -2));
-        new android.app.AlertDialog.Builder(this)
+        showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.debug_menu_title))
             .setView(box)
             .setPositiveButton(android.R.string.ok, null)
-            .show();
+            .create());
     }
 
     @Override
@@ -214,6 +233,7 @@ public final class AboutActivity extends Activity {
 
     @Override
     protected void onPause() {
+        dismissDialog();
         if (LockManager.isEnabled(this)) {
             // Arm the lock now so it engages even on ROMs that delay or skip onStop; the next
             // screen's start cancels it, so navigating between our own screens never locks.
@@ -225,6 +245,12 @@ public final class AboutActivity extends Activity {
         }
         updateSecureFlag();
         super.onPause();
+    }
+
+    @Override
+    protected void onDestroy() {
+        dismissDialog();
+        super.onDestroy();
     }
 
     @Override

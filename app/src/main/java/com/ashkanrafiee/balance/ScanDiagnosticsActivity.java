@@ -36,6 +36,7 @@ public final class ScanDiagnosticsActivity extends Activity {
     int bg, card, muted, accent, heroColor, fg;
     private LockOverlay lockOverlay;
     private LinearLayout body;
+    private boolean permissionCardShown;
 
     int color(int res) {
         return getResources().getColor(res, getTheme());
@@ -145,9 +146,16 @@ public final class ScanDiagnosticsActivity extends Activity {
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
         if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+            permissionCardShown = true;
             permissionCard();
             return;
         }
+        startReading();
+    }
+
+    private void startReading() {
+        permissionCardShown = false;
+        body.removeAllViews();
         TextView reading = text(getString(R.string.scan_diag_reading), 14, muted);
         reading.setGravity(Gravity.CENTER);
         reading.setPadding(0, dp(40), 0, dp(40));
@@ -385,6 +393,10 @@ public final class ScanDiagnosticsActivity extends Activity {
     protected void onResume() {
         super.onResume();
         LockManager.cancelPendingLock();
+        if (permissionCardShown
+                && checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED) {
+            startReading();
+        }
         if (LockManager.isEnabled(this) && LockManager.isSessionLocked()
                 && lockOverlay != null && !lockOverlay.isShowing()) lockOverlay.showLock();
     }

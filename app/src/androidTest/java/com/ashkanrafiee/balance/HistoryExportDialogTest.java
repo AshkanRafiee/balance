@@ -1,6 +1,7 @@
 package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.fail;
 
 import android.app.Activity;
@@ -150,6 +151,62 @@ public class HistoryExportDialogTest {
         }
     }
 
+    @Test public void pickerTerminalResults_releaseUnlockHold() throws Exception {
+        Intent i = new Intent(ctx, HistoryActivity.class);
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        InstrumentationRegistry.getInstrumentation().startActivitySync(i);
+        HistoryActivity activity = history();
+        int request = exportRequestCode();
+
+        // Cancellation is the common terminal path, while RESULT_OK without a returned Uri is a
+        // provider failure path. Both must release the temporary picker hand-off hold.
+        LockManager.holdUnlock();
+        callActivityResult(activity, request, Activity.RESULT_CANCELED, null);
+        assertFalse("cancelled picker must not keep the session hold",
+            unlockHoldStillActive());
+
+        LockManager.holdUnlock();
+        callActivityResult(activity, request, Activity.RESULT_OK, new Intent());
+        assertFalse("picker result without a Uri must not keep the session hold",
+            unlockHoldStillActive());
+    }
+
+    @Test public void pausedExport_keepsSingleFlightUntilWorkerCompletes() throws Exception {
+        List<Transaction> txs = new ArrayList<>();
+        long now = System.currentTimeMillis();
+        // Keep the worker busy long enough for the lifecycle transition to race its UI cleanup.
+        for (int k = 0; k < 5_000; k++) {
+            txs.add(new Transaction("bank_melli", "acc-" + k, now + k, k + 1,
+                "sig-" + k, "content-" + k));
+        }
+        BalanceData.writeTransactions(ctx, txs);
+
+        Intent i = new Intent(ctx, HistoryActivity.class);
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        InstrumentationRegistry.getInstrumentation().startActivitySync(i);
+        HistoryActivity activity = history();
+        File dest = new File(ctx.getCacheDir(), "export-dialog-pause-test.csv");
+        if (dest.exists() && !dest.delete()) fail("stale export destination");
+        java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+        HistoryActivity.exportDoneHookForTest = done::countDown;
+        try {
+            runWriteExport(activity, Uri.fromFile(dest));
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(activity::onPause);
+            assertTrue("pausing must not release the export worker", boolField(activity,
+                "exportRunning"));
+            assertTrue("pausing must detach the export window", privateField(activity,
+                "exportDialog") == null);
+            assertTrue("export worker did not finish",
+                done.await(60, java.util.concurrent.TimeUnit.SECONDS));
+            assertFalse("single-flight must end only after completion", boolField(activity,
+                "exportRunning"));
+        } finally {
+            HistoryActivity.exportDoneHookForTest = null;
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(activity::finish);
+            dest.delete();
+        }
+    }
+
     @Test public void writeExport_manyRows_writesEveryRow() throws Exception {
         List<Transaction> txs = new ArrayList<>();
         long now = System.currentTimeMillis();
@@ -213,6 +270,34 @@ public class HistoryExportDialogTest {
             }
         });
         if (failure[0] != null) throw failure[0];
+    }
+
+    private static void callActivityResult(final HistoryActivity activity, final int request,
+            final int result, final Intent data) {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(
+            () -> activity.onActivityResult(request, result, data));
+    }
+
+    private static int exportRequestCode() throws Exception {
+        java.lang.reflect.Field field = HistoryActivity.class.getDeclaredField("REQ_EXPORT");
+        field.setAccessible(true);
+        return field.getInt(null);
+    }
+
+    private static boolean unlockHoldStillActive() throws Exception {
+        java.lang.reflect.Method method = LockManager.class.getDeclaredMethod("holdingUnlock");
+        method.setAccessible(true);
+        return (Boolean) method.invoke(null);
+    }
+
+    private static Object privateField(Object target, String name) throws Exception {
+        java.lang.reflect.Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(target);
+    }
+
+    private static boolean boolField(Object target, String name) throws Exception {
+        return (Boolean) privateField(target, name);
     }
 
     private static HistoryActivity history() {
