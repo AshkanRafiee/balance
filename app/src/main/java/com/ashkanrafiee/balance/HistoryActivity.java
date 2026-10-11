@@ -714,7 +714,11 @@ public final class HistoryActivity extends Activity {
                 : getString(R.string.history_bank_chip);
             TextView chip = text(chipText, 11, badgeFg, medium());
             chip.setMaxLines(1);
-            chip.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            // Keep ordinary account numbers fully readable. Only unusually long values need the
+            // ellipsis; applying it to every chip can truncate a short account while the header is
+            // still settling its weighted width on older devices.
+            boolean longAccount = accountFilter != null && accountFilter.length() > 12;
+            chip.setEllipsize(longAccount ? android.text.TextUtils.TruncateAt.END : null);
             chip.setMinWidth(0);
             // Tighter sides than the plain chips: the copy glyph eats this chip's width too, and a
             // ten-digit number plus a long label has to fit beside it before the bar starts

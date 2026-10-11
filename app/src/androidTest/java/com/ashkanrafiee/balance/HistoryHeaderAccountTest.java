@@ -37,9 +37,12 @@ public class HistoryHeaderAccountTest {
     private static final String SHORT_ACCOUNT = "5000973189";
 
     private Context ctx;
+    private String originalLanguage;
 
     @Before public void setUp() {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        originalLanguage = LocaleHelper.currentTag(ctx);
+        LocaleHelper.setLanguage(ctx, "en");
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
     }
@@ -53,6 +56,7 @@ public class HistoryHeaderAccountTest {
                 }
             }
         });
+        LocaleHelper.setLanguage(ctx, originalLanguage);
     }
 
     @Test public void longAccountNumber_keepsTheExportButtonOnScreen() throws Exception {
