@@ -188,6 +188,11 @@ final class SourceStore {
         void accept(Source source) throws Exception;
     }
 
+    interface SourceWithObservationsVisitor {
+        void accept(Source source, List<TransactionObservation> transactions,
+                List<BalanceObservation> balances) throws Exception;
+    }
+
     interface TransactionVisitor {
         void accept(TransactionObservation observation) throws Exception;
     }
@@ -316,6 +321,21 @@ final class SourceStore {
         });
     }
 
+    /** Streams each source and its observations from one read transaction. Only one source's
+     * observations are retained for the callback, so backup creation does not retain every raw SMS
+     * body in the heap before writing it. */
+    static void forEachSourceWithObservations(Context context, int pageSize,
+            SourceWithObservationsVisitor visitor) throws Exception {
+        requirePageSize(pageSize);
+        if (visitor == null) throw new NullPointerException("visitor");
+        read(context, session -> {
+            visitSources(session, pageSize, source -> visitor.accept(source,
+                transactionObservations(session, source.id),
+                balanceObservations(session, source.id)));
+            return null;
+        });
+    }
+
     /** Streams transaction observations from one read transaction without retaining a full history. */
     static void forEachTransaction(Context context, int pageSize, TransactionVisitor visitor)
             throws Exception {
@@ -423,27 +443,13 @@ final class SourceStore {
     /** Transaction observations for one source row; per-SMS counts stay small. */
     static List<TransactionObservation> transactionObservationsForSource(Context context,
             long sourceId) throws Exception {
-        return read(context, session -> {
-            List<TransactionObservation> out = new ArrayList<>();
-            try (Cursor cursor = session.db.query(TRANSACTION_TABLE, OBSERVATION_COLUMNS,
-                    "source_id=?", new String[]{Long.toString(sourceId)}, null, null, "id ASC")) {
-                while (cursor.moveToNext()) out.add(session.decodeTransaction(cursor));
-            }
-            return out;
-        });
+        return read(context, session -> transactionObservations(session, sourceId));
     }
 
     /** Balance observations for one source row; per-SMS counts stay small. */
     static List<BalanceObservation> balanceObservationsForSource(Context context,
             long sourceId) throws Exception {
-        return read(context, session -> {
-            List<BalanceObservation> out = new ArrayList<>();
-            try (Cursor cursor = session.db.query(BALANCE_TABLE, OBSERVATION_COLUMNS,
-                    "source_id=?", new String[]{Long.toString(sourceId)}, null, null, "id ASC")) {
-                while (cursor.moveToNext()) out.add(session.decodeBalance(cursor));
-            }
-            return out;
-        });
+        return read(context, session -> balanceObservations(session, sourceId));
     }
 
     /** Explicit destructive reset. It does not open a missing/corrupt database. */
@@ -664,6 +670,26 @@ final class SourceStore {
 
     private static java.io.File receiptFile(Context context) {
         return new java.io.File(context.getNoBackupFilesDir(), RECEIPT);
+    }
+
+    private static List<TransactionObservation> transactionObservations(Session session,
+            long sourceId) throws Exception {
+        List<TransactionObservation> out = new ArrayList<>();
+        try (Cursor cursor = session.db.query(TRANSACTION_TABLE, OBSERVATION_COLUMNS,
+                "source_id=?", new String[]{Long.toString(sourceId)}, null, null, "id ASC")) {
+            while (cursor.moveToNext()) out.add(session.decodeTransaction(cursor));
+        }
+        return out;
+    }
+
+    private static List<BalanceObservation> balanceObservations(Session session, long sourceId)
+            throws Exception {
+        List<BalanceObservation> out = new ArrayList<>();
+        try (Cursor cursor = session.db.query(BALANCE_TABLE, OBSERVATION_COLUMNS,
+                "source_id=?", new String[]{Long.toString(sourceId)}, null, null, "id ASC")) {
+            while (cursor.moveToNext()) out.add(session.decodeBalance(cursor));
+        }
+        return out;
     }
 
     private static void visitSources(Session session, int pageSize, SourceVisitor visitor)

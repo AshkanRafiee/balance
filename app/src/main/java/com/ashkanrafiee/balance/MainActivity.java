@@ -985,7 +985,13 @@ public class MainActivity extends Activity {
         create.addCategory(Intent.CATEGORY_OPENABLE);
         create.setType("application/octet-stream");
         create.putExtra(Intent.EXTRA_TITLE, backupFileName());
-        startActivityForResult(create, REQ_CREATE_BACKUP);
+        try {
+            startActivityForResult(create, REQ_CREATE_BACKUP);
+        } catch (android.content.ActivityNotFoundException | SecurityException e) {
+            pendingBackupPassword = null;
+            LockManager.cancelUnlockHold();
+            Toast.makeText(this, getString(R.string.backup_create_failed), Toast.LENGTH_LONG).show();
+        }
     }
 
     private void pickRestoreSource() {
@@ -993,7 +999,12 @@ public class MainActivity extends Activity {
         Intent open = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         open.addCategory(Intent.CATEGORY_OPENABLE);
         open.setType("*/*");
-        startActivityForResult(open, REQ_PICK_RESTORE);
+        try {
+            startActivityForResult(open, REQ_PICK_RESTORE);
+        } catch (android.content.ActivityNotFoundException | SecurityException e) {
+            LockManager.cancelUnlockHold();
+            Toast.makeText(this, getString(R.string.backup_restore_failed), Toast.LENGTH_LONG).show();
+        }
     }
 
     private String backupFileName() {
@@ -1149,7 +1160,7 @@ public class MainActivity extends Activity {
         java.util.Arrays.fill(checked, true);
         // Bringing back deleted commitments is opt-in: it starts unchecked.
         checked[sections.length] = false;
-        new android.app.AlertDialog.Builder(this)
+        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.restore_sections_title))
             .setMultiChoiceItems(labels, checked, (d, which, isChecked) -> checked[which] = isChecked)
             .setNegativeButton(getString(R.string.dialog_hard_refresh_cancel), null)
@@ -1161,7 +1172,8 @@ public class MainActivity extends Activity {
                 }
                 restoreBackup(uri, password, selection, checked[sections.length]);
             })
-            .show();
+            .create();
+        showDialog(dialog);
     }
 
     private void restoreBackup(Uri uri, String password, Set<BackupManager.Section> selection,

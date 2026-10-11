@@ -1,3 +1,4 @@
 • Fixed slow balance refreshes and history loading on devices with large SMS histories.
 • Fixed crashes on older Android versions and prevented temporary storage failures from replacing saved history with an empty screen.
 • History now opens with recent days first; older days remain available on demand.
+• Improved backup reliability for large histories and document providers on newer Android versions.

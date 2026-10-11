@@ -230,6 +230,12 @@ final class LockManager {
         holdSince = android.os.SystemClock.elapsedRealtime();
     }
 
+    /** Cancels a picker hold when launching the system activity failed before it could take over. */
+    static void cancelUnlockHold() {
+        holdUnlock = false;
+        holdSince = 0;
+    }
+
     private static boolean holdingUnlock() {
         return holdUnlock
             && android.os.SystemClock.elapsedRealtime() - holdSince < HOLD_GRACE_MS;
