@@ -123,6 +123,22 @@ public class BackupV2Test {
         assertTrue(commitments.get(1).done);
     }
 
+    @Test public void newFramedPayloadCarriesNumericProducerVersionCode() throws Exception {
+        File backup = file("v2-versioned-payload.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+
+        try (java.io.FileInputStream raw = new java.io.FileInputStream(backup);
+                BackupFrames.AuthenticatedInputStream decrypted = BackupFrames.openInputStream(raw,
+                    PASSWORD.toCharArray());
+                java.io.InputStreamReader reader = new java.io.InputStreamReader(decrypted,
+                    StandardCharsets.UTF_8)) {
+            org.json.JSONObject payload = new org.json.JSONObject(
+                readAll(reader));
+            assertEquals(BackupManager.appVersionCode(context),
+                payload.getInt("appVersionCode"));
+        }
+    }
+
     @Test public void restore_isUncappedForCommitmentsAndSettlementEvents() throws Exception {
         List<Commitment> source = new ArrayList<>();
         for (int i = 0; i < 501; i++) {
@@ -411,6 +427,40 @@ public class BackupV2Test {
         assertLiveData(liveTransaction);
     }
 
+    @Test public void newerFramedProducerVersion_isRejectedBeforePublication() throws Exception {
+        LinkedHashMap<String, Bank> live = new LinkedHashMap<>();
+        live.put("Live", new Bank("Live", 10L, T, "sender"));
+        BalanceData.write(context, live);
+
+        File future = file("v2-newer-producer.bin");
+        writePayload(future, "{\"schema\":2,\"appVersionCode\":"
+            + (BackupManager.appVersionCode(context) + 1)
+            + ",\"balances\":[],\"transactions\":[],"
+            + "\"metadata\":{\"notes\":[],\"reasons\":[],\"channels\":[],\"tags\":[]},"
+            + "\"commitments\":[]}");
+
+        try {
+            BackupManager.restore(context, Uri.fromFile(future), PASSWORD);
+            fail("a newer framed producer must be rejected");
+        } catch (BackupManager.BackupException e) {
+            assertEquals(R.string.backup_error_newer_version, e.resId);
+        }
+        assertEquals(10L, BalanceData.read(context).get("Live").amount);
+        assertTrue(BalanceData.readTransactions(context).isEmpty());
+    }
+
+    @Test public void framedPayloadWithoutVersionMetadata_remainsCompatible() throws Exception {
+        File old = file("v2-without-producer-version.bin");
+        writePayload(old, "{\"schema\":2,\"balances\":[],\"transactions\":[],"
+            + "\"metadata\":{\"notes\":[],\"reasons\":[],\"channels\":[],\"tags\":[]},"
+            + "\"commitments\":[]}");
+
+        BackupManager.RestoreResult result = BackupManager.restore(context,
+            Uri.fromFile(old), PASSWORD);
+        assertEquals(0, result.added);
+        assertTrue(BalanceData.read(context).isEmpty());
+    }
+
     private void expectRestoreFailure(File file, String description, String password)
             throws Exception {
         try {
@@ -455,6 +505,14 @@ public class BackupV2Test {
             assertEquals(bytes.length, offset);
         }
         return bytes;
+    }
+
+    private static String readAll(java.io.Reader reader) throws Exception {
+        StringBuilder out = new StringBuilder();
+        char[] buffer = new char[4096];
+        int count;
+        while ((count = reader.read(buffer)) != -1) out.append(buffer, 0, count);
+        return out.toString();
     }
 
     private static void write(File file, byte[] bytes) throws Exception {

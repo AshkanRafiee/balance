@@ -279,6 +279,18 @@ public class BackupRestoreTest {
         assertTrue(bytes.length > 13 + headerLen);
     }
 
+    @Test public void newLegacyHeaderCarriesNumericProducerVersionCode() throws Exception {
+        File f = file("versioned-header.balance");
+        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+
+        byte[] bytes = readFile(f);
+        int headerLen = ((bytes[9] & 0xFF) << 24) | ((bytes[10] & 0xFF) << 16)
+            | ((bytes[11] & 0xFF) << 8) | (bytes[12] & 0xFF);
+        org.json.JSONObject header = new org.json.JSONObject(
+            new String(bytes, 13, headerLen, StandardCharsets.UTF_8));
+        assertEquals(BackupManager.appVersionCode(ctx), header.getInt("appVersionCode"));
+    }
+
     // ============================================================
     // Rejection paths
     // ============================================================
@@ -326,6 +338,24 @@ public class BackupRestoreTest {
         } catch (BackupManager.BackupException e) {
             assertEquals(R.string.backup_error_unsupported, e.resId);
         }
+    }
+
+    @Test public void newerLegacyProducerVersion_isRejectedBeforePublication() throws Exception {
+        BalanceData.write(ctx, map(bank("Local", 7L, T + 1000)));
+        String payload = "{\"payloadFormat\":1,\"balances\":{"
+            + "\"Tejarat\":{\"amount\":1000000,\"date\":" + (T + 2000)
+            + ",\"sender\":\"Tejarat\"}}}";
+        File f = file("newer-legacy-producer.balance");
+        writeLegacyBackup(f, payload, PASSWORD, BackupManager.appVersionCode(ctx) + 1);
+
+        try {
+            BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
+            fail("a newer legacy producer must be rejected");
+        } catch (BackupManager.BackupException e) {
+            assertEquals(R.string.backup_error_newer_version, e.resId);
+        }
+        assertEquals(1, BalanceData.read(ctx).size());
+        assertEquals(7L, BalanceData.read(ctx).get("Local").amount);
     }
 
     @Test public void tamperedCiphertext_isRejected() throws Exception {
@@ -628,6 +658,11 @@ public class BackupRestoreTest {
     /** Writes a balances-only (payloadFormat 1) backup exactly as older releases produced them:
      *  same header shape, KDF and cipher, but no "transactions" section in the payload. */
     private void writeLegacyBackup(File f, String payloadJson, String password) throws Exception {
+        writeLegacyBackup(f, payloadJson, password, null);
+    }
+
+    private void writeLegacyBackup(File f, String payloadJson, String password,
+            Integer producerVersionCode) throws Exception {
         byte[] salt = new byte[16];
         byte[] iv = new byte[12];
         new SecureRandom().nextBytes(salt);
@@ -645,6 +680,7 @@ public class BackupRestoreTest {
                 .put("algorithm", "AES/GCM/NoPadding")
                 .put("iv", android.util.Base64.encodeToString(iv, android.util.Base64.NO_WRAP))
                 .put("tagBits", 128));
+        if (producerVersionCode != null) header.put("appVersionCode", producerVersionCode);
         byte[] headerBytes = header.toString().getBytes(StandardCharsets.UTF_8);
         KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, 600000, 256);
         SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");

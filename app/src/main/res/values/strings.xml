@@ -176,6 +176,7 @@
     <string name="backup_validate_mismatch">Passwords do not match</string>
     <string name="backup_error_not_backup">This file is not a Balance backup</string>
     <string name="backup_error_unsupported">This backup uses an unsupported format</string>
+    <string name="backup_error_newer_version">Update Balance before restoring this backup</string>
     <string name="backup_error_password">Wrong password or corrupted backup</string>
     <string name="backup_error_generic">Backup operation failed</string>
 
@@ -260,14 +261,18 @@
     <string name="scan_diag_permission_action">Open settings</string>
     <string name="scan_diag_recognized">Recognized bank messages</string>
     <string name="scan_diag_summary">%1$d SMS read · %2$d not recognized</string>
+    <string name="scan_diag_summary_restricted">%1$d accessible SMS read · %2$d not recognized</string>
+    <string name="scan_diag_restricted_messages">Android 17 may hide some restricted SMS from apps like Balance. SMS read permission cannot grant access to them. The results below cover accessible SMS only; an empty result does not mean your inbox is empty.</string>
     <string name="scan_diag_recognized_banks">Recognized banks</string>
     <string name="scan_diag_recognized_hint">Tap a sender to report a wrong amount, date, account, reason or channel in a message that parsed.</string>
     <string name="scan_diag_all_recognized">Every message is recognized. If an amount, date, account, reason or channel looks wrong, tap its sender above to report it.</string>
+    <string name="scan_diag_all_recognized_restricted">Every accessible message is recognized. Some restricted SMS may be hidden by Android. If an amount, date, account, reason or channel looks wrong, tap its sender above to report it.</string>
     <string name="scan_diag_unparsed_banks_title">Known senders, unrecognized messages</string>
     <string name="scan_diag_unparsed_bank_hint">The sender is a supported bank, but this message layout could not be parsed — a format gap just like an unknown sender.</string>
     <string name="scan_diag_skipped_senders">Senders not recognized yet</string>
     <string name="scan_diag_skipped_hint">Tap a sender to open its messages and tick the ones to share — nothing is sent until you confirm.</string>
     <string name="scan_diag_none_skipped">Every message is recognized — nothing to report.</string>
+    <string name="scan_diag_none_skipped_restricted">No accessible SMS to report. Some restricted SMS may be hidden by Android, so this does not mean your inbox is empty.</string>
     <string name="scan_diag_open_sender">Report sender %1$s</string>
     <string name="scan_diag_privacy">Nothing leaves this device unless you copy it or send it yourself.</string>
 

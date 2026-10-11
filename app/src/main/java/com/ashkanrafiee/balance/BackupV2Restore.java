@@ -67,6 +67,8 @@ final class BackupV2Restore {
     /** Tombstones of explicitly deleted commitments. Optional like sources: backups written
      *  before deletions were recorded carry no such section. */
     private static final int SECTION_COMMITMENT_DELETIONS = 1 << 6;
+    /** Numeric producer metadata; optional for framed backups written before version metadata. */
+    private static final int SECTION_APP_VERSION = 1 << 7;
     private static final int ALL_SECTIONS = SECTION_SCHEMA | SECTION_BALANCES
         | SECTION_TRANSACTIONS | SECTION_METADATA | SECTION_COMMITMENTS;
 
@@ -351,6 +353,7 @@ final class BackupV2Restore {
                 writeStageBytes(output, stageCipher, oldCipher.doFinal(tail, 0, tailLength));
                 if (header.optInt("format", -1) != LEGACY_FORMAT_VERSION)
                     throw new BackupManager.BackupException(R.string.backup_error_unsupported);
+                validateLegacyProducerVersion(context, header);
                 byte[] stageTag = stageCipher.doFinal();
                 if (stageTag != null && stageTag.length != 0) output.write(stageTag);
                 output.getFD().sync();
@@ -434,7 +437,7 @@ final class BackupV2Restore {
                             .onUnmappableCharacter(CodingErrorAction.REPORT));
                     JsonReader json = new JsonReader(reader)) {
                 json.setLenient(false);
-                parsePayload(json, stage);
+                parsePayload(context, json, stage);
 
                 // Parsing an object is not enough. JsonReader must observe END_DOCUMENT so it reads
                 // through all plaintext, and the frame reader must then authenticate the footer and
@@ -622,7 +625,8 @@ final class BackupV2Restore {
         return key.substring(separator + 1);
     }
 
-    private static void parsePayload(JsonReader json, InputStage stage) throws Exception {
+    private static void parsePayload(Context context, JsonReader json, InputStage stage)
+            throws Exception {
         int seen = 0;
         json.beginObject();
         while (json.hasNext()) {
@@ -634,6 +638,12 @@ final class BackupV2Restore {
                     if ((seen & bit) != 0) throw invalid("duplicate schema");
                     seen |= bit;
                     if (exactLong(json) != 2) throw invalid("unsupported backup schema");
+                    break;
+                case "appVersionCode":
+                    bit = SECTION_APP_VERSION;
+                    if ((seen & bit) != 0) throw invalid("duplicate app version code");
+                    seen |= bit;
+                    BackupManager.validateProducerVersionCode(context, exactLong(json));
                     break;
                 case "balances":
                     bit = SECTION_BALANCES;
@@ -677,7 +687,8 @@ final class BackupV2Restore {
         }
         json.endObject();
         if ((seen & ALL_SECTIONS) != ALL_SECTIONS
-                || (seen & ~ (ALL_SECTIONS | SECTION_SOURCES | SECTION_COMMITMENT_DELETIONS)) != 0)
+                || (seen & ~(ALL_SECTIONS | SECTION_SOURCES | SECTION_COMMITMENT_DELETIONS
+                    | SECTION_APP_VERSION)) != 0)
             throw invalid("incomplete backup sections");
     }
 
@@ -1328,6 +1339,22 @@ final class BackupV2Restore {
                 || !key.equals(BalanceData.storageKey(name, account))) {
             throw invalid("invalid balance identity");
         }
+    }
+
+    private static void validateLegacyProducerVersion(Context context, JSONObject header)
+            throws BackupManager.BackupException {
+        if (!header.has("appVersionCode")) return;
+        Object value;
+        try {
+            value = header.get("appVersionCode");
+        } catch (Exception failure) {
+            throw new BackupManager.BackupException(R.string.backup_error_unsupported);
+        }
+        // JSONObject represents integral JSON values as Integer or Long. Requiring that shape
+        // keeps a decimal or string version from being silently truncated.
+        if (!(value instanceof Integer) && !(value instanceof Long))
+            throw new BackupManager.BackupException(R.string.backup_error_unsupported);
+        BackupManager.validateProducerVersionCode(context, ((Number) value).longValue());
     }
 
     private static void requireTransaction(String bank, String account, long date, String sig,

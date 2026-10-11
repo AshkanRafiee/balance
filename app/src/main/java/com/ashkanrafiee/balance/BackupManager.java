@@ -38,6 +38,7 @@ import org.json.JSONObject;
  *   0x01                   format version
  *   [headerLen:4 BE]       length of the JSON header below
  *   header JSON (plain)    {"format","createdAt","appVersion",
+ *                            "appVersionCode",
  *                            "kdf":{"algorithm","iterations","salt","keyBits"},
  *                            "cipher":{"algorithm","iv","tagBits"}}
  *   ciphertext             AES-256-GCM(payload JSON), header bytes used as AAD
@@ -130,6 +131,7 @@ final class BackupManager {
             .put("format", FORMAT_VERSION)
             .put("createdAt", System.currentTimeMillis())
             .put("appVersion", appVersion(context))
+            .put("appVersionCode", appVersionCode(context))
             .put("kdf", new JSONObject()
                 .put("algorithm", KDF_ALGORITHM)
                 .put("iterations", ITERATIONS)
@@ -231,6 +233,9 @@ final class BackupManager {
     private static void writeFramedPayload(Context context, JsonWriter json) throws Exception {
         json.beginObject();
         json.name("schema").value(2);
+        // This is part of the authenticated JSON envelope. Older framed backups omit it and are
+        // intentionally accepted as legacy-compatible.
+        json.name("appVersionCode").value(appVersionCode(context));
 
         json.name("balances").beginArray();
         for (Map.Entry<String, Bank> entry : BalanceData.read(context).entrySet()) {
@@ -413,6 +418,26 @@ final class BackupManager {
         } catch (Exception e) {
             return "unknown";
         }
+    }
+
+    /** Numeric producer version used to prevent an older install from consuming a newer backup. */
+    static int appVersionCode(Context context) {
+        try {
+            return context.getPackageManager().getPackageInfo(context.getPackageName(), 0).versionCode;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /** Checks an authenticated producer code. A missing code is handled by the caller for
+     * pre-metadata backups; a present but invalid code is an unsupported format. */
+    static void validateProducerVersionCode(Context context, long producerVersionCode)
+            throws BackupException {
+        if (producerVersionCode <= 0 || producerVersionCode > Integer.MAX_VALUE)
+            throw new BackupException(R.string.backup_error_unsupported);
+        int currentVersionCode = appVersionCode(context);
+        if (currentVersionCode > 0 && producerVersionCode > currentVersionCode)
+            throw new BackupException(R.string.backup_error_newer_version);
     }
 
 }
