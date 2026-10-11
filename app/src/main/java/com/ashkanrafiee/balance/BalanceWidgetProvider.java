@@ -49,8 +49,9 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
      *  launcher delivers the tap twice in rapid succession. Intentional re-taps land well after
      *  the list rebind (~1s+) and are unaffected. */
     private static final long MASK_DEBOUNCE_MS = 500L;
-    /** Delay before re-asserting a mask toggle, letting the list rebind settle first. */
-    private static final long MASK_REASSERT_DELAY_MS = 600L;
+    /** Delays before re-asserting a mask toggle, letting slow list rebinds settle first. */
+    private static final long MASK_REASSERT_DELAY_MS = 1200L;
+    private static final long MASK_REASSERT_DELAY_MS_2 = 1500L;
 
     private static Context appContext(Context context) {
         Context app = context.getApplicationContext();
@@ -172,6 +173,26 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         }
     }
 
+    /** Re-pushes only the header (total, icons, actions) without touching the list adapter or
+     *  notifying a rebind. Used to re-assert a mask toggle after the toggle-triggered rebind has
+     *  settled: on some launchers the rebind completion re-displays a stale header, and a second
+     *  full update plus notify would only retrigger the same cycle. */
+    static void pushHeaderOnly(Context context) {
+        synchronized (WIDGET_UPDATE_LOCK) {
+            try {
+                AppWidgetManager manager = AppWidgetManager.getInstance(context);
+                int[] ids = manager.getAppWidgetIds(new ComponentName(context, BalanceWidgetProvider.class));
+                if (ids.length == 0) return;
+                RemoteViews views = buildViews(context, false);
+                if (widgetLocked(context)) views = lockedViews(context);
+                for (int id : ids) manager.updateAppWidget(id, views);
+            } catch (Exception e) {
+                refreshAnimation = false;
+                Log.w(TAG, "widget update failed");
+            }
+        }
+    }
+
     /** One bounded, refresh-local cache: at most 512 KiB of pixels, independent of scan duration. */
     static Bitmap[] refreshFrames(Context context) {
         Drawable icon = context.getDrawable(R.drawable.ic_refresh);
@@ -219,6 +240,14 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     }
 
     static RemoteViews buildViews(Context context) {
+        return buildViews(context, true);
+    }
+
+    /** Same header with or without the list-adapter binding. The delayed mask re-assertion
+     *  below uses the adapter-free form: the adapter is already bound by the toggle's full
+     *  update, and re-setting it plus another notify would only retrigger the list rebind
+     *  whose completion is what clobbers the header on some launchers. */
+    static RemoteViews buildViews(Context context, boolean includeAdapter) {
         Context c = WidgetTheme.context(context);
         if (widgetLocked(c)) return lockedViews(c);
         boolean hidden = BalanceData.isWidgetHidden(c);
@@ -231,7 +260,8 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
             return unreadableViews(c);
         }
         RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance);
-        views.setRemoteAdapter(R.id.widget_list, new Intent(c, BalanceWidgetService.class));
+        if (includeAdapter)
+            views.setRemoteAdapter(R.id.widget_list, new Intent(c, BalanceWidgetService.class));
         views.setInt(R.id.widget_root, "setLayoutDirection",
             c.getResources().getConfiguration().getLayoutDirection());
         views.setInt(R.id.widget_root, "setBackgroundResource", WidgetTheme.background(c));
@@ -444,10 +474,11 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
                 refreshData(context);
             } else if (ACTION_MASK.equals(action)) {
                 // The header and the rows update through two separate mechanisms (a pushed
-                // RemoteViews vs. an adapter rebind), so a mask toggle re-asserts itself: stop
-                // any refresh animation that could interleave icon-only ticks, push the new
-                // state, then push it once more after the rebind settles in case the launcher
-                // dropped either update and left header and rows disagreeing.
+                // RemoteViews vs. an adapter rebind). Some launchers re-display a stale header
+                // when that rebind settles, so a mask toggle re-asserts the header twice after
+                // the rebind, header-only (no adapter reset, no new notify) so the re-assertion
+                // itself cannot retrigger the cycle. Refresh animation ticks are stopped first
+                // so none can interleave either.
                 final Context app = appContext(context);
                 final int toggleGen;
                 synchronized (WIDGET_UPDATE_LOCK) {
@@ -457,18 +488,20 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
                     refreshAnimation = false;
                     toggleGen = ++maskToggleGen;
                 }
-                BalanceData.setWidgetHidden(app, !BalanceData.isWidgetHidden(app));
+                boolean before = BalanceData.isWidgetHidden(app);
+                BalanceData.setWidgetHidden(app, !before);
                 updateAll(app);
                 new Thread(() -> {
                     SystemClock.sleep(MASK_REASSERT_DELAY_MS);
                     synchronized (WIDGET_UPDATE_LOCK) {
                         if (toggleGen != maskToggleGen) return;
                     }
-                    try {
-                        updateAll(app);
-                    } catch (Exception e) {
-                        Log.w(TAG, "widget mask re-assert failed");
+                    pushHeaderOnly(app);
+                    SystemClock.sleep(MASK_REASSERT_DELAY_MS_2);
+                    synchronized (WIDGET_UPDATE_LOCK) {
+                        if (toggleGen != maskToggleGen) return;
                     }
+                    pushHeaderOnly(app);
                 }, "balance-widget-mask").start();
             } else if (ACTION_BOOT_COMPLETED.equals(action) && hasWidgets(context)) {
                 scheduleAlarm(context);

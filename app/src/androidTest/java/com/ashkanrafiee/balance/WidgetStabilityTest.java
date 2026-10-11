@@ -102,6 +102,21 @@ public class WidgetStabilityTest {
             true, BalanceData.isWidgetHidden(context));
     }
 
+    @Test public void headerOnlyViews_maskTotalWithoutAdapterBinding() throws Exception {
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        saved.put("Tejarat", new Bank("Tejarat", 1_000_000L, 1000L, "5000"));
+        assertTrue(BalanceData.write(context, saved));
+        BalanceData.setWidgetHidden(context, true);
+        try {
+            View masked = BalanceWidgetProvider.buildViews(context, false)
+                .apply(context, null);
+            assertEquals("\u2022\u2022\u2022\u2022\u2022\u2022",
+                ((TextView) masked.findViewById(R.id.widget_total)).getText().toString());
+        } finally {
+            BalanceData.setWidgetHidden(context, false);
+        }
+    }
+
     @Test public void corruptEncryptedStore_summaryShowsUnknownAndReadableError() throws Exception {
         LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
         saved.put("Tejarat", new Bank("Tejarat", 12_345L, 1000L, "5000"));
