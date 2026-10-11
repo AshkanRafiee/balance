@@ -1754,22 +1754,39 @@ public class MainActivity extends Activity {
                     });
                     return;
                 }
-                final CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
-                    commitments,
-                    RegionHelper.isIran(MainActivity.this)
-                        ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN,
-                    System.currentTimeMillis(), CommitmentsActivity.WINDOW_MONTHS);
-                final boolean any = !commitments.isEmpty();
-                post(() -> {
-                    commitmentSummaryLoading = false;
-                    if (gen != commitmentSummaryGen) return;
-                    commitmentSummary = summary;
-                    hasCommitments = any;
-                    commitmentSummaryLoaded = true;
-                    commitmentSummaryStale = false;
-                    commitmentSummaryFailed = false;
-                    invalidate();
-                });
+                try {
+                    final CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
+                        commitments,
+                        RegionHelper.isIran(MainActivity.this)
+                            ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN,
+                        System.currentTimeMillis(), CommitmentsActivity.WINDOW_MONTHS);
+                    final boolean any = !commitments.isEmpty();
+                    post(() -> {
+                        commitmentSummaryLoading = false;
+                        if (gen != commitmentSummaryGen) return;
+                        commitmentSummary = summary;
+                        hasCommitments = any;
+                        commitmentSummaryLoaded = true;
+                        commitmentSummaryStale = false;
+                        commitmentSummaryFailed = false;
+                        invalidate();
+                    });
+                } catch (Exception e) {
+                    android.util.Log.w("Balance", "commitment summary calculation failed", e);
+                    post(() -> {
+                        commitmentSummaryLoading = false;
+                        if (gen != commitmentSummaryGen) return;
+                        if (!commitmentSummaryLoaded) {
+                            commitmentSummary = new CommitmentsActivity.Summary();
+                            commitmentSummaryLoaded = true;
+                            commitmentSummaryStale = false;
+                            hasCommitments = false;
+                        } else {
+                            commitmentSummaryFailed = true;
+                        }
+                        invalidate();
+                    });
+                }
             }, "commitment-summary").start();
         }
 

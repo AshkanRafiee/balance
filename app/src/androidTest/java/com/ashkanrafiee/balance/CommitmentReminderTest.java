@@ -88,7 +88,7 @@ public class CommitmentReminderTest {
         CommitmentReminders.ensureChannel(ctx);
     }
 
-    @Test public void fire_whenNotificationsDenied_keepsDuePendingWithoutMinuteRearm() {
+    @Test public void scheduleAll_whenNotificationsDenied_cancelsAndRearmsAfterGrant() {
         if (Build.VERSION.SDK_INT < 33) return;
         boolean originallyGranted = ctx.checkSelfPermission(
             android.Manifest.permission.POST_NOTIFICATIONS)
@@ -96,23 +96,26 @@ public class CommitmentReminderTest {
         android.app.UiAutomation automation = InstrumentationRegistry.getInstrumentation()
             .getUiAutomation();
         try {
-            automation.revokeRuntimePermission(ctx.getPackageName(),
+            automation.grantRuntimePermission(ctx.getPackageName(),
                 android.Manifest.permission.POST_NOTIFICATIONS);
-            long due = inDays(0);
+            long due = inDays(5);
             Commitment c = Commitment.create("rent", -5000, Commitment.ONCE, due, null,
                 true, 0);
             BalanceData.writeCommitments(ctx, java.util.Collections.singletonList(c));
+            CommitmentReminders.scheduleAll(ctx);
+            assertTrue("granted notifications must arm the reminder",
+                CommitmentReminders.scheduledIds(ctx).contains(c.id));
 
-            CommitmentReminders.fire(ctx, c.id);
-            assertTrue("the undelivered due must remain recoverable",
-                CommitmentReminders.pendingDueTokens(ctx).contains(c.id + "|" + due));
-            assertTrue("a denied notification must not be rearmed one minute later",
+            automation.revokeRuntimePermission(ctx.getPackageName(),
+                android.Manifest.permission.POST_NOTIFICATIONS);
+            CommitmentReminders.scheduleAll(ctx);
+            assertTrue("denied notifications must leave no armed reminders",
                 CommitmentReminders.scheduledIds(ctx).isEmpty());
 
             automation.grantRuntimePermission(ctx.getPackageName(),
                 android.Manifest.permission.POST_NOTIFICATIONS);
             CommitmentReminders.scheduleAll(ctx);
-            assertTrue("granting notifications must rearm the pending due",
+            assertTrue("granting notifications must rearm the reminder",
                 CommitmentReminders.scheduledIds(ctx).contains(c.id));
         } finally {
             if (originallyGranted) {

@@ -510,7 +510,13 @@ public final class CommitmentsActivity extends Activity {
         root.removeAllViews();
         CalendarSystem cal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
         long now = System.currentTimeMillis();
-        Summary summary = summarize(commitments, cal, now, WINDOW_MONTHS);
+        final Summary summary;
+        try {
+            summary = summarize(commitments, cal, now, WINDOW_MONTHS);
+        } catch (RuntimeException error) {
+            android.util.Log.w("CommitmentsActivity", "commitment summary calculation failed", error);
+            return;
+        }
 
         LinearLayout titleBar = new LinearLayout(this);
         titleBar.setOrientation(LinearLayout.HORIZONTAL);
@@ -888,7 +894,14 @@ public final class CommitmentsActivity extends Activity {
             existing = null;
         } else {
             try {
-                existing = CommitmentStore.get(this, commitmentId);
+                Commitment found = null;
+                for (Commitment candidate : BalanceData.readCommitments(this)) {
+                    if (commitmentId.equals(candidate.id)) {
+                        found = candidate;
+                        break;
+                    }
+                }
+                existing = found;
                 if (existing == null) {
                     showCommitmentError(null);
                     return;
@@ -1048,7 +1061,12 @@ public final class CommitmentsActivity extends Activity {
         form.addView(exactNote, margin(0, 4, 0, 0));
 
         if (existing != null) {
-            form.addView(text(seriesSummary(existing, cal), 12, muted), margin(0, 12, 0, 0));
+            try {
+                form.addView(text(seriesSummary(existing, cal), 12, muted),
+                    margin(0, 12, 0, 0));
+            } catch (RuntimeException error) {
+                android.util.Log.w("CommitmentsActivity", "commitment series summary failed", error);
+            }
         }
 
         AlertDialog.Builder builder = new AlertDialog.Builder(this)
@@ -1312,6 +1330,7 @@ public final class CommitmentsActivity extends Activity {
                 updated = Commitment.create(title, signedAmount, frequency, start, end,
                     remind, remindBeforeMs);
             } else {
+                BalanceData.ensureResetComplete(this);
                 // The editor may have been open while another screen changed this definition.
                 // Fetch again so the upsert reuses the current lazy settlement lists rather than
                 // attempting to write an invalidated snapshot or dropping a newer mark.

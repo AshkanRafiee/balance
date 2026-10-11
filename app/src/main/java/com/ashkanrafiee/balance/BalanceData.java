@@ -343,6 +343,7 @@ final class BalanceData {
 
     /** Reads all saved transactions, newest first, the order in which they were appended. */
     static List<Transaction> readTransactions(Context context) {
+        ensureResetComplete(context);
         try {
             List<Transaction> database = TransactionStore.read(context);
             return database == null ? new ArrayList<>() : database;
@@ -497,6 +498,7 @@ final class BalanceData {
     /** Reads every saved note ({@code noteKey → text}), newest-first irrelevant since it is a plain
      *  lookup map. A missing or corrupt store reads as empty, never null. */
     static Map<String, String> readNotes(Context context) {
+        ensureResetComplete(context);
         try { return MetadataStore.readNotes(context); }
         catch (Exception e) { throw new IllegalStateException("metadata notes read failed", e); }
     }
@@ -511,6 +513,7 @@ final class BalanceData {
     /** Every reason the bank stated ({@code noteKey → title}), the same plain lookup map the notes are
      *  read as. Never null, and entirely separate from them. */
     static Map<String, String> readReasons(Context context) {
+        ensureResetComplete(context);
         try { return MetadataStore.readReasons(context); }
         catch (Exception e) { throw new IllegalStateException("metadata reasons read failed", e); }
     }
@@ -524,6 +527,7 @@ final class BalanceData {
     /** Every channel a bank stated ({@code noteKey → channel}), the same plain lookup map the notes are
      *  read as. Never null, and entirely separate from them. */
     static Map<String, String> readChannels(Context context) {
+        ensureResetComplete(context);
         try { return MetadataStore.readChannels(context); }
         catch (Exception e) { throw new IllegalStateException("metadata channels read failed", e); }
     }
@@ -536,6 +540,7 @@ final class BalanceData {
 
     /** Reads every saved tag assignment ({@code noteKey → ordered tag names}). */
     static Map<String, List<String>> readTags(Context context) {
+        ensureResetComplete(context);
         try { return MetadataStore.readTags(context); }
         catch (Exception e) { throw new IllegalStateException("metadata tags read failed", e); }
     }
@@ -560,6 +565,7 @@ final class BalanceData {
 
     /** Tags assigned to one transaction, never null and safe for callers to modify. */
     static List<String> getTags(Context context, Transaction t) {
+        ensureResetComplete(context);
         try { return MetadataStore.getTags(context, t); }
         catch (Exception e) { throw new IllegalStateException("metadata tags read failed", e); }
     }
@@ -666,6 +672,7 @@ final class BalanceData {
      *  store cannot be read. Entries that no longer validate are dropped on read, so a corrupt
      *  row can never poison the list. */
     static List<Commitment> readCommitments(Context context) {
+        ensureResetComplete(context);
         try {
             return CommitmentStore.readCommitments(context);
         } catch (Exception e) {
@@ -814,6 +821,7 @@ final class BalanceData {
 
     /** The transaction's note, or null when none is saved. */
     static String getNote(Context context, Transaction t) {
+        ensureResetComplete(context);
         try { return MetadataStore.getNote(context, t); }
         catch (Exception e) { throw new IllegalStateException("metadata note read failed", e); }
     }
@@ -917,7 +925,7 @@ final class BalanceData {
      *  reasons and channels the bank stated go either way: they are the bank's own words, re-read from
      *  the messages the rebuild below reprocesses, and the transactions they describe are deleted here
      *  with everything else — keeping them would only leave entries nothing points at. */
-    static synchronized void reset(Context context, boolean alsoNotes) {
+    static void reset(Context context, boolean alsoNotes) {
         synchronized (BalanceData.class) {
             SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
             if (!prefs.edit().putBoolean(KEY_RESET_IN_PROGRESS, true)
@@ -938,7 +946,6 @@ final class BalanceData {
             if (pending && !recoverReset(context))
                 throw new IllegalStateException("reset recovery failed");
         }
-        if (pending) CommitmentReminders.scheduleAll(context);
     }
 
     /** Retries cleanup before either scan reads its stores. A full history scan alone is not

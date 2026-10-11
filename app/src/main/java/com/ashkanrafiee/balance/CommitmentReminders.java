@@ -44,7 +44,6 @@ final class CommitmentReminders {
     private static final String KEY_SCHEDULED = "scheduled_ids";
     private static final String KEY_FIRED = "fired_due";
     private static final String KEY_OVERDUE_FIRED = "overdue_fired";
-    private static final String KEY_PENDING = "pending_due";
     /** Preference state only. Never hold this while touching CommitmentStore: its reads take
      * BalanceData.class, so the two locks cannot be acquired in the opposite order. */
     private static final Object STATE_LOCK = new Object();
@@ -85,40 +84,42 @@ final class CommitmentReminders {
     /** Re-arms every reminder from the stored commitments: schedules what is due ahead, cancels
      *  whatever is no longer wanted (deleted, settled, switched off, or rescheduled). */
     static void scheduleAll(Context context) {
-        synchronized (SCHEDULE_LOCK) {
-            try {
+        try {
+            BalanceData.ensureResetComplete(context);
+            synchronized (SCHEDULE_LOCK) {
                 scheduleAllLocked(context);
-            } catch (Exception error) {
-                // Alarm delivery is best effort. A launcher/ROM service failure must not crash a
-                // screen or a reset; the next resume/boot retries the authoritative definitions.
-                Log.w(TAG, "commitment reminder scheduling failed", error);
             }
+        } catch (Exception error) {
+            // Alarm delivery is best effort. A launcher/ROM service failure must not crash a
+            // screen or a reset; the next resume/boot retries the authoritative definitions.
+            Log.w(TAG, "commitment reminder scheduling failed", error);
         }
     }
 
     private static void scheduleAllLocked(Context context) {
         AlarmManager alarms = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (alarms == null) return;
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        if (!notificationsAvailable(context)) {
+            synchronized (STATE_LOCK) {
+                for (String id : copySet(prefs, KEY_SCHEDULED))
+                    cancelScheduled(context, alarms, id);
+                prefs.edit().putStringSet(KEY_SCHEDULED, new HashSet<String>()).apply();
+            }
+            return;
+        }
         boolean iran = RegionHelper.isIran(context);
         CalendarSystem cal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
         long now = System.currentTimeMillis();
-        boolean deliveryAvailable = notificationsAvailable(context);
         Set<String> wanted = new HashSet<>();
-        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         try {
             CommitmentStore.forEachDefinition(context, c -> {
                 if (!c.remind) {
                     clearOverdueFired(context, c.id);
-                    clearPending(context, c.id);
                     return;
                 }
-                Long due = reminderDue(context, c, cal, now, deliveryAvailable);
-                if (due == null) {
-                    clearOverdueFired(context, c.id);
-                    // A disabled notification path deliberately keeps a pending one-time due
-                    // until the user grants/reopens notifications.
-                    if (deliveryAvailable) clearPending(context, c.id);
-                }
+                Long due = reminderDue(context, c, cal, now);
+                if (due == null) clearOverdueFired(context, c.id);
                 Long at = due == null ? null : due - Math.max(0, c.remindBeforeMs);
                 if (at == null && c.remind && hasDueBeyondWindow(c, cal, now))
                     at = now + 365L * 86400000L;
@@ -183,28 +184,22 @@ final class CommitmentReminders {
     /** Fires one due reminder: notifies unless the commitment is gone or settled, then re-arms. */
     static void fire(Context context, String id) {
         try {
+            BalanceData.ensureResetComplete(context);
             Commitment found = CommitmentStore.get(context, id);
             if (found != null && found.remind) {
                 boolean iran = RegionHelper.isIran(context);
                 CalendarSystem cal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
-                boolean deliveryAvailable = notificationsAvailable(context);
-                Long due = reminderDue(context, found, cal, System.currentTimeMillis(),
-                    deliveryAvailable);
+                Long due = reminderDue(context, found, cal, System.currentTimeMillis());
                 if (due != null && !found.isSettled(due)) {
-                    boolean notified = false;
-                    if (deliveryAvailable) {
-                        try {
-                            notified = notifyDue(context, found, due, iran);
-                        } catch (Exception error) {
-                            Log.w(TAG, "commitment reminder notification failed", error);
-                        }
+                    try {
+                        if (notifyDue(context, found, due, iran))
+                            rememberFired(context, found.id, due);
+                    } catch (Exception error) {
+                        Log.w(TAG, "commitment reminder notification failed", error);
                     }
-                    if (notified) rememberDelivered(context, found.id, due);
-                    else rememberPending(context, found.id, due);
                 }
             } else {
                 cancelNotification(context, id);
-                clearPending(context, id);
             }
             // Keep this inside the failure boundary: a lazy settlement lookup, notification call,
             // preference mutation or alarm reschedule must never escape a BroadcastReceiver.
@@ -217,16 +212,10 @@ final class CommitmentReminders {
     /** Finds the next unsettled due that has not already produced a notification. Overdue dues
      *  are considered first; once one fires, its {id,due} token prevents a killed/reopened app
      *  from producing the same reminder every minute. */
-    private static Long reminderDue(Context context, Commitment c, CalendarSystem cal, long now,
-            boolean notificationsAvailable) {
+    private static Long reminderDue(Context context, Commitment c, CalendarSystem cal, long now) {
         if (c == null || !c.remind) return null;
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        ReminderState state = state(context);
-        if (notificationsAvailable) {
-            Long pending = pendingDue(c, cal, state.pending);
-            if (pending != null && !c.isSettled(pending)) return pending;
-        }
-        if (notificationsAvailable && !state.overdue.contains(c.id)) {
+        if (!overdueWasFired(prefs, c.id)) {
             final Long[] latest = {null};
             long overdueEnd = Commitment.startOfDay(now) - 1;
             long spanDays = c.frequency == Commitment.WEEKLY
@@ -240,37 +229,15 @@ final class CommitmentReminders {
             long from = Math.max(Commitment.startOfDay(c.start),
                 Commitment.startOfDay(overdueEnd > span ? overdueEnd - span : 0));
             Commitment.visitOccurrences(c, cal, from, overdueEnd, at -> {
-                    String token = firedKey(c.id, at);
-                    if (!c.isSettled(at) && !state.fired.contains(token)) latest[0] = at;
+                    if (!c.isSettled(at) && !wasFired(prefs, c.id, at)) latest[0] = at;
                 }, CommitmentsActivity.MAX_OVERDUE_OCCURRENCES);
             if (latest[0] != null) return latest[0];
         }
         for (long at : Commitment.occurrences(c, cal, Commitment.startOfDay(now),
                  Commitment.startOfDay(now) + 730L * 86400000L)) {
-            String token = firedKey(c.id, at);
-            if (!c.isSettled(at) && !state.fired.contains(token)
-                    && (notificationsAvailable || !state.pending.contains(token))) return at;
+            if (!c.isSettled(at) && !wasFired(prefs, c.id, at)) return at;
         }
         return null;
-    }
-
-    private static Long pendingDue(Commitment c, CalendarSystem cal, Set<String> pending) {
-        String prefix = c.id + "|";
-        Long candidate = null;
-        for (String token : pending) {
-            if (!token.startsWith(prefix)) continue;
-            final long due;
-            try {
-                due = Long.parseLong(token.substring(prefix.length()));
-            } catch (NumberFormatException ignored) {
-                continue;
-            }
-            final boolean[] occurrence = {false};
-            Commitment.visitOccurrences(c, cal, due, due, at -> occurrence[0] = at == due);
-            if (occurrence[0] && (candidate == null || due < candidate))
-                candidate = due;
-        }
-        return candidate;
     }
 
     /** Keeps long-range reminders alive until their real due date enters the planning window. */
@@ -286,6 +253,14 @@ final class CommitmentReminders {
         return id + "|" + due;
     }
 
+    private static boolean wasFired(SharedPreferences prefs, String id, long due) {
+        return prefs.getStringSet(KEY_FIRED, new HashSet<String>()).contains(firedKey(id, due));
+    }
+
+    private static boolean overdueWasFired(SharedPreferences prefs, String id) {
+        return prefs.getStringSet(KEY_OVERDUE_FIRED, new HashSet<String>()).contains(id);
+    }
+
     private static void clearOverdueFired(Context context, String id) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         synchronized (STATE_LOCK) {
@@ -299,12 +274,10 @@ final class CommitmentReminders {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         synchronized (STATE_LOCK) {
             Set<String> fired = copySet(prefs, KEY_FIRED);
-            Set<String> pending = copySet(prefs, KEY_PENDING);
             fired.removeIf(value -> value.startsWith(id + "|"));
-            pending.removeIf(value -> value.startsWith(id + "|"));
             Set<String> overdue = copySet(prefs, KEY_OVERDUE_FIRED);
             overdue.remove(id);
-            prefs.edit().putStringSet(KEY_FIRED, fired).putStringSet(KEY_PENDING, pending)
+            prefs.edit().putStringSet(KEY_FIRED, fired)
                 .putStringSet(KEY_OVERDUE_FIRED, overdue).apply();
         }
     }
@@ -320,67 +293,25 @@ final class CommitmentReminders {
         if (manager != null) manager.cancel("commitment:" + id, 1);
     }
 
-    private static void rememberDelivered(Context context, String id, long due) {
+    private static void rememberFired(Context context, String id, long due) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         synchronized (STATE_LOCK) {
             Set<String> fired = copySet(prefs, KEY_FIRED);
-            Set<String> pending = copySet(prefs, KEY_PENDING);
             Set<String> overdue = copySet(prefs, KEY_OVERDUE_FIRED);
             fired.add(firedKey(id, due));
-            pending.remove(firedKey(id, due));
             while (fired.size() > Commitment.MAX_COMMITMENTS * 4) {
                 String first = fired.iterator().next();
                 fired.remove(first);
             }
             if (due < Commitment.startOfDay(System.currentTimeMillis())) overdue.add(id);
             else overdue.remove(id);
-            prefs.edit().putStringSet(KEY_FIRED, fired).putStringSet(KEY_PENDING, pending)
+            prefs.edit().putStringSet(KEY_FIRED, fired)
                 .putStringSet(KEY_OVERDUE_FIRED, overdue).apply();
-        }
-    }
-
-    private static void rememberPending(Context context, String id, long due) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        synchronized (STATE_LOCK) {
-            Set<String> pending = copySet(prefs, KEY_PENDING);
-            String prefix = id + "|";
-            pending.removeIf(value -> value.startsWith(prefix));
-            pending.add(firedKey(id, due));
-            prefs.edit().putStringSet(KEY_PENDING, pending).apply();
-        }
-    }
-
-    private static void clearPending(Context context, String id) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        synchronized (STATE_LOCK) {
-            Set<String> pending = copySet(prefs, KEY_PENDING);
-            if (pending.removeIf(value -> value.startsWith(id + "|")))
-                prefs.edit().putStringSet(KEY_PENDING, pending).apply();
         }
     }
 
     private static Set<String> copySet(SharedPreferences prefs, String key) {
         return new HashSet<>(prefs.getStringSet(key, new HashSet<String>()));
-    }
-
-    private static ReminderState state(Context context) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        synchronized (STATE_LOCK) {
-            return new ReminderState(copySet(prefs, KEY_FIRED),
-                copySet(prefs, KEY_OVERDUE_FIRED), copySet(prefs, KEY_PENDING));
-        }
-    }
-
-    private static final class ReminderState {
-        final Set<String> fired;
-        final Set<String> overdue;
-        final Set<String> pending;
-
-        ReminderState(Set<String> fired, Set<String> overdue, Set<String> pending) {
-            this.fired = fired;
-            this.overdue = overdue;
-            this.pending = pending;
-        }
     }
 
     private static boolean notificationsAvailable(Context context) {
@@ -466,12 +397,6 @@ final class CommitmentReminders {
     static List<String> scheduledIds(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         synchronized (STATE_LOCK) { return new ArrayList<>(copySet(prefs, KEY_SCHEDULED)); }
-    }
-
-    /** Test-only view of due tokens held back while notification delivery is unavailable. */
-    static List<String> pendingDueTokens(Context context) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        synchronized (STATE_LOCK) { return new ArrayList<>(copySet(prefs, KEY_PENDING)); }
     }
 
     /** Runs receiver database work off the main thread while retaining the broadcast deadline. */
