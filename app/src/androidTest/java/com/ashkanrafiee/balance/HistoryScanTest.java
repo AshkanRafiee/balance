@@ -488,6 +488,16 @@ public class HistoryScanTest {
         assertEquals(1, BalanceData.readTransactions(ctx).size());
     }
 
+    @Test public void incremental_sameTimestamp_readsTheHigherSmsId() throws Exception {
+        seed("500095", DEPOSIT + " A", T + 1000);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+
+        seed("500095", DEPOSIT.replace("200,000", "500,000") + " B", T + 1000);
+
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        assertEquals(2, BalanceData.readTransactions(ctx).size());
+    }
+
     @Test public void twoMessagesSameBank_areBothRecorded() throws Exception {
         seed("500095", DEPOSIT + " \u0645\u0627\u0644 A", T + 1000);
         seed("500095", DEPOSIT.replace("200,000", "500,000") + " \u0645\u0627\u0644 B", T + 2000);

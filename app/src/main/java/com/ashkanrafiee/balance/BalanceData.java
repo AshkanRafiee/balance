@@ -68,8 +68,12 @@ final class BalanceData {
     static final String KEY_WIDGET_HIDDEN = "widget_balances_hidden";
     static final String KEY_AUTO_HIDE = "balances_auto_hide";
     static final String KEY_SCANNED_THROUGH = "scanned_through";
+    static final String KEY_SCANNED_RAW_THROUGH = "scanned_raw_through";
+    static final String KEY_SCANNED_ID = "scanned_id";
     static final String KEY_RULES_VERSION = "rules_version";
     static final String KEY_HISTORY_THROUGH = "history_through";
+    static final String KEY_HISTORY_RAW_THROUGH = "history_raw_through";
+    static final String KEY_HISTORY_ID = "history_id";
     static final String KEY_HISTORY_RULES_VERSION = "history_rules_version";
     /** Which schema generation of the stored history this build writes. Bumped when existing
      *  entries have to be rebuilt from the inbox to acquire a datum older entries lack — today the
@@ -1003,8 +1007,12 @@ final class BalanceData {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
         if (!prefs.edit()
             .remove(KEY_SCANNED_THROUGH)
+            .remove(KEY_SCANNED_RAW_THROUGH)
+            .remove(KEY_SCANNED_ID)
             .remove(KEY_RULES_VERSION)
             .remove(KEY_HISTORY_THROUGH)
+            .remove(KEY_HISTORY_RAW_THROUGH)
+            .remove(KEY_HISTORY_ID)
             .remove(KEY_HISTORY_RULES_VERSION)
             .remove(KEY_HISTORY_SCHEMA)
             .remove(KEY_EXCLUDED)
@@ -1296,6 +1304,8 @@ final class BalanceData {
         LinkedHashMap<String, Bank> current = read(context);
         SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
         long watermark = prefs.getLong(KEY_SCANNED_THROUGH, 0);
+        long cursorDate = prefs.getLong(KEY_SCANNED_RAW_THROUGH, watermark);
+        long cursorId = prefs.getLong(KEY_SCANNED_ID, 0);
         int rulesVersion = BankRules.VERSION;
         // Inbox dates are trusted as-served and each row is clamped to the device clock, so a forged
         // or clock-skewed message dated in the future can never push the watermark past real time.
@@ -1306,11 +1316,20 @@ final class BalanceData {
         long now = System.currentTimeMillis();
         boolean full = resetWasPending || watermark == 0 || watermark > now
             || prefs.getInt(KEY_RULES_VERSION, -1) != rulesVersion;
-        if (full) watermark = 0;
+        if (full) {
+            watermark = 0;
+            cursorDate = 0;
+            cursorId = 0;
+        }
         int matched = 0;
         long newest = 0;
-        String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
-        String[] args = selection != null ? new String[]{Long.toString(watermark)} : null;
+        long newestRaw = 0;
+        long newestId = 0;
+        String selection = !full
+            ? "(" + Telephony.Sms.DATE + " > ? OR (" + Telephony.Sms.DATE
+                + " = ? AND " + Telephony.Sms._ID + " > ?))" : null;
+        String[] args = selection != null ? new String[]{Long.toString(cursorDate),
+            Long.toString(cursorDate), Long.toString(cursorId)} : null;
 
         // Collect every matching message (sender, body, the time it can be dated to, stated
         // balance). A bank that sends a fee and the transfer it belongs to in the wrong order
@@ -1323,15 +1342,25 @@ final class BalanceData {
         boolean scanSucceeded = true;
         try (Cursor cursor = context.getContentResolver().query(
             Telephony.Sms.Inbox.CONTENT_URI,
-            new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
-            selection, args, Telephony.Sms.DATE + " DESC")) {
+            new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE,
+                Telephony.Sms._ID}, selection, args,
+            Telephony.Sms.DATE + " DESC, " + Telephony.Sms._ID + " DESC")) {
             if (cursor == null) {
                 scanSucceeded = false;
             } else {
                 while (cursor.moveToNext()) {
                     long rawArrival = cursor.getLong(2);
+                    long rowId = cursor.getLong(3);
                     long arrival = Math.min(rawArrival, now);
                     if (newest < arrival) newest = arrival;
+                    if (arrival > newestRaw
+                            || (arrival == newestRaw && rowId > newestId)) {
+                        // The cursor follows the clamped delivery time. A future-dated SMS must
+                        // remain queryable without pushing the cursor beyond a genuinely later
+                        // message whose provider date is still before that forged future date.
+                        newestRaw = arrival;
+                        newestId = rowId;
+                    }
                     String sender = cursor.getString(0);
                     String bank = BankRules.resolve(sender);
                     if (bank == null) continue;
@@ -1402,7 +1431,12 @@ final class BalanceData {
                 // Only move the stored balance forward in time. The chain-resolved branch must not
                 // regress a newer stored entry when the last message is gone or a late,
                 // out-of-order movement resolves as the chain tail.
-                boolean changed = existing == null || chosen.date > existing.date;
+                // Incremental rows have already passed the (DATE, _id) cursor, so an equal event
+                // date is a genuinely newer SMS and may carry a newer balance. Full rebuilds still
+                // keep the strict date comparison because their inbox ordering contains old rows.
+                boolean changed = existing == null || chosen.date > existing.date
+                    || (!full && chosen.date == existing.date
+                        && (Long) newestArr[2] == chosen.date);
                 if (changed) {
                     matched++;
                     current.put(key, new Bank(bank, chosen.balance, chosen.date,
@@ -1422,8 +1456,14 @@ final class BalanceData {
         boolean emptyFullScan = full && rowsByKey.isEmpty() && !current.isEmpty();
         if (!emptyFullScan) {
             SharedPreferences.Editor editor = prefs.edit().putInt(KEY_RULES_VERSION, rulesVersion);
-            if (sourceCaptureSucceeded && newest > watermark)
-                editor.putLong(KEY_SCANNED_THROUGH, newest);
+            boolean cursorAdvanced = sourceCaptureSucceeded
+                && (newestRaw > cursorDate
+                    || (newestRaw == cursorDate && newestId > cursorId));
+            if (cursorAdvanced) {
+                editor.putLong(KEY_SCANNED_THROUGH, newest)
+                    .putLong(KEY_SCANNED_RAW_THROUGH, newestRaw)
+                    .putLong(KEY_SCANNED_ID, newestId);
+            }
             if (!sourceCaptureSucceeded) editor.remove(KEY_RULES_VERSION);
             editor.apply();
         }
@@ -1493,6 +1533,8 @@ final class BalanceData {
             List<Transaction> stored = null;
             SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
             long hwm = prefs.getLong(KEY_HISTORY_THROUGH, 0);
+            long cursorDate = prefs.getLong(KEY_HISTORY_RAW_THROUGH, hwm);
+            long cursorId = prefs.getLong(KEY_HISTORY_ID, 0);
             // As in scanSms, a history watermark ahead of the current clock means the device clock
             // moved backward since the last scan; fall back to a full rescan so messages dated after
             // the rollback are not skipped forever by the incremental "newer than watermark" read.
@@ -1500,7 +1542,11 @@ final class BalanceData {
             boolean full = resetWasPending || hwm == 0 || hwm > now
                 || prefs.getInt(KEY_HISTORY_RULES_VERSION, -1) != HISTORY_RULES_VERSION
                 || prefs.getInt(KEY_HISTORY_SCHEMA, -1) != HISTORY_SCHEMA;
-            if (full) hwm = 0;
+            if (full) {
+                hwm = 0;
+                cursorDate = 0;
+                cursorId = 0;
+            }
             // On an incremental scan the stored history doubles as the dedup set: a message already
             // recorded (by fingerprint, or by the legacy bank|date|amount triple) is left alone. On a
             // full scan the inbox is authoritative instead — every present movement is re-parsed under
@@ -1510,6 +1556,8 @@ final class BalanceData {
             Set<String> seenSigs = new HashSet<>();
             Set<String> seenLegacy = new HashSet<>();
             long newest = 0;
+            long newestRaw = 0;
+            long newestId = 0;
             // The reasons and channels this scan reads out of the bank messages, folded into their
             // stores once the movements they belong to are written. Declared out here so they survive
             // the cursor block.
@@ -1517,14 +1565,18 @@ final class BalanceData {
             Map<String, String> detectedChannels = new LinkedHashMap<>();
             Map<String, List<Reconcile.Entry>> windows = null;
             boolean transactionsChanged = full;
-            String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
-            String[] args = selection != null ? new String[]{Long.toString(hwm)} : null;
+            String selection = !full
+                ? "(" + Telephony.Sms.DATE + " > ? OR (" + Telephony.Sms.DATE
+                    + " = ? AND " + Telephony.Sms._ID + " > ?))" : null;
+            String[] args = selection != null ? new String[]{Long.toString(cursorDate),
+                Long.toString(cursorDate), Long.toString(cursorId)} : null;
             Map<String, Long> lastBalance = null;
             boolean sourceCaptureSucceeded = true;
             try (Cursor cursor = context.getContentResolver().query(
                 Telephony.Sms.Inbox.CONTENT_URI,
-                new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
-                selection, args, Telephony.Sms.DATE + " DESC")) {
+                new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE,
+                    Telephony.Sms._ID}, selection, args,
+                Telephony.Sms.DATE + " DESC, " + Telephony.Sms._ID + " DESC")) {
                 if (cursor == null) {
                     failed = true;
                     return 0;
@@ -1540,8 +1592,14 @@ final class BalanceData {
                     // late is filed three weeks late, and the period it belongs to is left looking
                     // short of money the app is already holding.
                     long rawArrival = cursor.getLong(2);
+                    long rowId = cursor.getLong(3);
                     long arrival = Math.min(rawArrival, now);
                     if (arrival > newest) newest = arrival;
+                    if (arrival > newestRaw
+                            || (arrival == newestRaw && rowId > newestId)) {
+                        newestRaw = arrival;
+                        newestId = rowId;
+                    }
                     String sender = cursor.getString(0);
                     String bank = BankRules.resolve(sender);
                     if (bank == null) continue;
@@ -1567,6 +1625,11 @@ final class BalanceData {
                     }
                     if (sourceCaptureSucceeded && newest > 0)
                         emptyEditor.putLong(KEY_HISTORY_THROUGH, newest);
+                    if (sourceCaptureSucceeded && (newestRaw > cursorDate
+                            || (newestRaw == cursorDate && newestId > cursorId))) {
+                        emptyEditor.putLong(KEY_HISTORY_RAW_THROUGH, newestRaw)
+                            .putLong(KEY_HISTORY_ID, newestId);
+                    }
                     if (!sourceCaptureSucceeded) {
                         emptyEditor.remove(KEY_HISTORY_RULES_VERSION)
                             .remove(KEY_HISTORY_SCHEMA);
@@ -1897,6 +1960,11 @@ final class BalanceData {
                 editor.putInt(KEY_HISTORY_SCHEMA, HISTORY_SCHEMA);
             if (completed && sourceCaptureSucceeded && newest > 0)
                 editor.putLong(KEY_HISTORY_THROUGH, newest);
+            if (completed && sourceCaptureSucceeded && (newestRaw > cursorDate
+                    || (newestRaw == cursorDate && newestId > cursorId))) {
+                editor.putLong(KEY_HISTORY_RAW_THROUGH, newestRaw)
+                    .putLong(KEY_HISTORY_ID, newestId);
+            }
             editor.apply();
             return added;
         } finally {

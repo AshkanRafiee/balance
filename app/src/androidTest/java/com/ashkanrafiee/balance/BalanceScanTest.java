@@ -476,7 +476,7 @@ public class BalanceScanTest {
         assertEquals(T + 3500, watermark());
     }
 
-    @Test public void incremental_sameDateAsWatermark_excludedByStrictUpperBound() throws Exception {
+    @Test public void incremental_sameDateAsWatermark_readsTheHigherSmsId() throws Exception {
         seed("5000973189", "\u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000", T + 1000);
         LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
         BalanceData.scanSms(ctx, saved);
@@ -485,8 +485,8 @@ public class BalanceScanTest {
 
         int matched = BalanceData.scanSms(ctx, saved);
 
-        assertEquals(0, matched);
-        assertEquals(1_000_000L, amount(find(saved, "Tejarat")));
+        assertEquals(1, matched);
+        assertEquals(2_000_000L, amount(find(saved, "Tejarat")));
         assertEquals(T + 1000, watermark());
     }
 
