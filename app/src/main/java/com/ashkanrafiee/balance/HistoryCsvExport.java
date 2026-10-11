@@ -50,6 +50,17 @@ final class HistoryCsvExport {
     private static final String ROWS = "history_csv_rows";
     private static final String[] ROW_COLUMNS = {"kind", "slot", "date", "ordinal", "payload"};
 
+    /** A worker-owned cancellation check. A cancelled export never flushes its destination. */
+    interface Cancellation {
+        boolean isCancelled();
+    }
+
+    static final class CancelledException extends Exception {
+        CancelledException() {
+            super("history CSV export cancelled");
+        }
+    }
+
     /** A synchronous source of the rows that survived the caller's residual filter. */
     interface ResidualSource {
         void forEach(HistoryResidualReader.Visitor visitor) throws Exception;
@@ -96,6 +107,13 @@ final class HistoryCsvExport {
     static void writeLookup(Context context, int pageSize, TransactionStore.StreamSource transactions,
             ResidualSource residuals, Writer writer, CsvExport.TextLookup text,
             WorkProgress progress) throws Exception {
+        writeLookup(context, pageSize, transactions, residuals, writer, text, progress, null);
+    }
+
+    /** Same as the progress overload with a cooperative cancellation check. */
+    static void writeLookup(Context context, int pageSize, TransactionStore.StreamSource transactions,
+            ResidualSource residuals, Writer writer, CsvExport.TextLookup text,
+            WorkProgress progress, Cancellation cancellation) throws Exception {
         requireContext(context);
         requirePageSize(pageSize);
         if (transactions == null) throw new NullPointerException("transactions");
@@ -105,11 +123,12 @@ final class HistoryCsvExport {
         Stage stage = Stage.open(context);
         Throwable operationFailure = null;
         try {
+            checkCancelled(cancellation);
             if (progress != null) progress.stage(R.string.export_stage_preparing);
-            stage.stageTransactions(transactions);
-            if (residuals != null) stage.stageResiduals(residuals);
+            stage.stageTransactions(transactions, cancellation);
+            if (residuals != null) stage.stageResiduals(residuals, cancellation);
 
-            emitStaged(context, stage, pageSize, writer, text, progress);
+            emitStaged(context, stage, pageSize, writer, text, progress, cancellation);
         } catch (Throwable failure) {
             operationFailure = failure;
         }
@@ -138,6 +157,13 @@ final class HistoryCsvExport {
      *  row count. */
     static void writeCombined(Context context, int pageSize, CombinedSource source, Writer writer,
             CsvExport.TextLookup text, WorkProgress progress) throws Exception {
+        writeCombined(context, pageSize, source, writer, text, progress, null);
+    }
+
+    /** Same as the progress overload with a cooperative cancellation check. */
+    static void writeCombined(Context context, int pageSize, CombinedSource source, Writer writer,
+            CsvExport.TextLookup text, WorkProgress progress, Cancellation cancellation)
+            throws Exception {
         requireContext(context);
         requirePageSize(pageSize);
         if (source == null) throw new NullPointerException("source");
@@ -147,10 +173,11 @@ final class HistoryCsvExport {
         Stage stage = Stage.open(context);
         Throwable operationFailure = null;
         try {
+            checkCancelled(cancellation);
             if (progress != null) progress.stage(R.string.export_stage_preparing);
-            stage.stageCombined(source);
+            stage.stageCombined(source, cancellation);
 
-            emitStaged(context, stage, pageSize, writer, text, progress);
+            emitStaged(context, stage, pageSize, writer, text, progress, cancellation);
         } catch (Throwable failure) {
             operationFailure = failure;
         }
@@ -166,12 +193,19 @@ final class HistoryCsvExport {
     }
 
     private static void emitStaged(Context context, Stage stage, int pageSize, Writer writer,
-            CsvExport.TextLookup text, WorkProgress progress) throws Exception {
+            CsvExport.TextLookup text, WorkProgress progress, Cancellation cancellation)
+            throws Exception {
+        checkCancelled(cancellation);
         CsvExport.CellWriter cells = new CsvExport.CellWriter(context);
         cells.header(writer);
+        checkCancelled(cancellation);
         if (progress != null) progress.stage(R.string.export_stage_writing);
-        stage.emit(writer, cells, text, pageSize, progress,
+        stage.emit(writer, cells, text, pageSize, progress, cancellation,
             progress == null ? 0 : stage.count());
+    }
+
+    private static void checkCancelled(Cancellation cancellation) throws CancelledException {
+        if (cancellation != null && cancellation.isCancelled()) throw new CancelledException();
     }
 
     private static void throwFailure(Throwable failure) throws Exception {
@@ -200,13 +234,14 @@ final class HistoryCsvExport {
     }
 
     private static void consumeTransactions(TransactionStore.StreamSource source,
-            TransactionStore.Visitor sink)
+            TransactionStore.Visitor sink, Cancellation cancellation)
             throws Exception {
         Thread owner = Thread.currentThread();
         AtomicBoolean open = new AtomicBoolean(true);
         AtomicReference<Exception> failure = new AtomicReference<>();
         try {
             source.forEach(transaction -> {
+                checkCancelled(cancellation);
                 if (!open.get() || Thread.currentThread() != owner) {
                     Exception error = new IllegalStateException(
                         "transaction producer must be synchronous");
@@ -227,13 +262,14 @@ final class HistoryCsvExport {
         }
     }
 
-    private static void consumeResiduals(ResidualSource source, HistoryResidualReader.Visitor sink)
-            throws Exception {
+    private static void consumeResiduals(ResidualSource source, HistoryResidualReader.Visitor sink,
+            Cancellation cancellation) throws Exception {
         Thread owner = Thread.currentThread();
         AtomicBoolean open = new AtomicBoolean(true);
         AtomicReference<Exception> failure = new AtomicReference<>();
         try {
             source.forEach(residual -> {
+                checkCancelled(cancellation);
                 if (!open.get() || Thread.currentThread() != owner) {
                     Exception error = new IllegalStateException(
                         "residual producer must be synchronous");
@@ -255,16 +291,16 @@ final class HistoryCsvExport {
     }
 
     private static void consumeCombined(CombinedSource source, TransactionStore.Visitor movements,
-            HistoryResidualReader.Visitor residuals) throws Exception {
+            HistoryResidualReader.Visitor residuals, Cancellation cancellation) throws Exception {
         Thread owner = Thread.currentThread();
         AtomicBoolean open = new AtomicBoolean(true);
         AtomicReference<Exception> failure = new AtomicReference<>();
         try {
             source.forEach(
                 transaction -> acceptSynchronous(open, owner, failure, "movement",
-                    () -> movements.accept(transaction)),
+                    () -> movements.accept(transaction), cancellation),
                 residual -> acceptSynchronous(open, owner, failure, "residual",
-                    () -> residuals.accept(residual)));
+                    () -> residuals.accept(residual), cancellation));
             if (failure.get() != null) throw failure.get();
         } finally {
             open.set(false);
@@ -274,8 +310,9 @@ final class HistoryCsvExport {
     private interface ThrowingRunnable { void run() throws Exception; }
 
     private static void acceptSynchronous(AtomicBoolean open, Thread owner,
-            AtomicReference<Exception> failure, String kind, ThrowingRunnable accept)
-            throws Exception {
+            AtomicReference<Exception> failure, String kind, ThrowingRunnable accept,
+            Cancellation cancellation) throws Exception {
+        checkCancelled(cancellation);
         if (!open.get() || Thread.currentThread() != owner) {
             Exception error = new IllegalStateException(kind + " producer must be synchronous");
             failure.compareAndSet(null, error);
@@ -350,7 +387,8 @@ final class HistoryCsvExport {
                 + "(date ASC, kind ASC, ordinal ASC)");
         }
 
-        void stageTransactions(TransactionStore.StreamSource source) throws Exception {
+        void stageTransactions(TransactionStore.StreamSource source, Cancellation cancellation)
+                throws Exception {
             db.beginTransactionNonExclusive();
             try {
                 final long[] nextOrdinal = {0};
@@ -359,14 +397,14 @@ final class HistoryCsvExport {
                     long ordinal = nextOrdinal[0];
                     nextOrdinal[0] = ordinal == Long.MAX_VALUE ? -1 : ordinal + 1;
                     insertMovement(ordinal, transaction);
-                });
+                }, cancellation);
                 db.setTransactionSuccessful();
             } finally {
                 db.endTransaction();
             }
         }
 
-        void stageResiduals(ResidualSource source) throws Exception {
+        void stageResiduals(ResidualSource source, Cancellation cancellation) throws Exception {
             db.beginTransactionNonExclusive();
             try {
                 final long[] nextOrdinal = {0};
@@ -375,14 +413,14 @@ final class HistoryCsvExport {
                     long ordinal = nextOrdinal[0];
                     nextOrdinal[0] = ordinal == Long.MAX_VALUE ? -1 : ordinal + 1;
                     insertResidual(ordinal, residual);
-                });
+                }, cancellation);
                 db.setTransactionSuccessful();
             } finally {
                 db.endTransaction();
             }
         }
 
-        void stageCombined(CombinedSource source) throws Exception {
+        void stageCombined(CombinedSource source, Cancellation cancellation) throws Exception {
             db.beginTransactionNonExclusive();
             try {
                 final long[] nextMovement = {0};
@@ -399,7 +437,7 @@ final class HistoryCsvExport {
                         long ordinal = nextResidual[0];
                         nextResidual[0] = ordinal == Long.MAX_VALUE ? -1 : ordinal + 1;
                         insertResidual(ordinal, residual);
-                    });
+                    }, cancellation);
                 db.setTransactionSuccessful();
             } finally {
                 db.endTransaction();
@@ -443,17 +481,14 @@ final class HistoryCsvExport {
         }
 
         void emit(Writer writer, CsvExport.CellWriter cells, CsvExport.TextLookup text,
-                int pageSize) throws Exception {
-            emit(writer, cells, text, pageSize, null, 0);
-        }
-
-        void emit(Writer writer, CsvExport.CellWriter cells, CsvExport.TextLookup text,
-                int pageSize, WorkProgress progress, long total) throws Exception {
+                int pageSize, WorkProgress progress, Cancellation cancellation, long total)
+                throws Exception {
             CursorPage page = new CursorPage(db, pageSize);
             long done = 0;
             try {
                 while (page.next()) {
                     while (page.cursor.moveToNext()) {
+                        checkCancelled(cancellation);
                         int kind = page.cursor.getInt(0);
                         String slot = page.cursor.getString(1);
                         long date = page.cursor.getLong(2);

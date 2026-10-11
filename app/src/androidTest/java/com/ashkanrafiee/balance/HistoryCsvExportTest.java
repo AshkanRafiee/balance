@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Tests the disk-backed, source-driven history CSV path without using the activity's lists. */
@@ -170,6 +171,25 @@ public class HistoryCsvExportTest {
             stages);
         assertEquals(41L, lastTotal[0]);
         assertEquals(41L, lastDone[0]);
+        assertTemporaryFilesRemoved();
+    }
+
+    @Test public void cancelledSource_rollsBackStagingWithoutFlushingOutput() throws Exception {
+        AtomicBoolean cancelled = new AtomicBoolean();
+        StringWriter output = new StringWriter();
+        Transaction first = new Transaction("bank_melli", "one", DATE, 1, "one");
+        Transaction second = new Transaction("bank_melli", "two", DATE + 1, 2, "two");
+        try {
+            HistoryCsvExport.writeCombined(context, 1, (movements, residuals) -> {
+                movements.accept(first);
+                cancelled.set(true);
+                movements.accept(second);
+            }, output, CsvExport.lookup(CsvExport.Text.none()), null, cancelled::get);
+            fail("cancellation must stop the export");
+        } catch (HistoryCsvExport.CancelledException expected) {
+            // The stage transaction is rolled back, and the caller-owned writer is not flushed.
+        }
+        assertEquals("", output.toString());
         assertTemporaryFilesRemoved();
     }
 
