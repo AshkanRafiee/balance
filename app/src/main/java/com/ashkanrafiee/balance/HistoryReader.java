@@ -325,6 +325,7 @@ final class HistoryReader {
         if (context == null) throw new NullPointerException("context");
         if (request == null) throw new NullPointerException("request");
         if (mode == null) throw new NullPointerException("mode");
+        BalanceData.ensureResetComplete(context);
         if (mode == Mode.SUMMARY) return summary(context, request);
         if (mode == Mode.RESIDUAL_SUMMARY) return summaryWithResiduals(context, request);
         return reference(context, request);
@@ -371,6 +372,7 @@ final class HistoryReader {
             WorkProgress progress) throws Exception {
         if (context == null) throw new NullPointerException("context");
         if (request == null) throw new NullPointerException("request");
+        BalanceData.ensureResetComplete(context);
         synchronized (BalanceData.class) {
             HistoryTimeline.Builder timeline = HistoryTimeline.open(context);
             Accumulator accumulator = new Accumulator(context, request, timeline);
@@ -440,6 +442,7 @@ final class HistoryReader {
      * allowed to retain all rows so residual arithmetic can be compared with HistoryActivity.
      */
     static Result reference(Context context, Request request) throws Exception {
+        BalanceData.ensureResetComplete(context);
         List<Transaction> stored = new ArrayList<>();
         TransactionStore.forEach(context, request.pageSize, stored::add);
 

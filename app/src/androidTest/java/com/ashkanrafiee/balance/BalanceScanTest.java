@@ -604,6 +604,132 @@ public class BalanceScanTest {
         assertEquals(1, BalanceData.read(ctx).size());
     }
 
+    @Test public void resetPreservesDisplayPreferencesAndNotesUnlessNotesAreRequested() {
+        Transaction noteTarget = new Transaction("Saman", T, 200_000L);
+        BalanceData.setNote(ctx, noteTarget, "keep this note");
+        prefs().edit()
+            .putBoolean(BalanceData.KEY_HIDDEN, true)
+            .putBoolean(BalanceData.KEY_WIDGET_HIDDEN, true)
+            .putBoolean(BalanceData.KEY_AUTO_HIDE, true)
+            .putInt(BalanceData.KEY_SORT, BalanceData.SORT_DATE_OLDEST)
+            .putInt(BalanceData.KEY_STALE_DAYS, 31)
+            .commit();
+
+        BalanceData.reset(ctx, false);
+
+        assertTrue(BalanceData.isHidden(ctx));
+        assertTrue(BalanceData.isWidgetHidden(ctx));
+        assertTrue(BalanceData.isAutoHide(ctx));
+        assertEquals(BalanceData.SORT_DATE_OLDEST, BalanceData.getSort(ctx));
+        assertEquals(31, BalanceData.getStaleDays(ctx));
+        assertEquals("keep this note", BalanceData.getNote(ctx, noteTarget));
+
+        BalanceData.reset(ctx, true);
+        assertNull(BalanceData.getNote(ctx, noteTarget));
+    }
+
+    @Test public void interruptedReset_balanceScanFirstRebuildsBothStoresWithoutOldData() throws Exception {
+        seed("500095", "برداشت: 100 موجودی: 900", T + 1000);
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        Transaction old = BalanceData.readTransactions(ctx).get(0);
+        BalanceData.setNote(ctx, old, "keep on reset");
+        clearInbox();
+        seed("b.pasargad", "برداشت: 200 موجودی: 800", T + 500);
+        assertTrue(prefs().edit().putBoolean(BalanceData.KEY_RESET_IN_PROGRESS, true)
+            .putBoolean(BalanceData.KEY_RESET_ALSO_NOTES, false).commit());
+
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+        assertEquals(1, saved.size());
+        assertNull(saved.get("Saman"));
+        assertEquals(800L, saved.get("Pasargad").amount);
+        assertEquals(T + 500, watermark());
+        assertEquals(0, BalanceData.readTransactions(ctx).size());
+        assertEquals(0, prefs().getLong(BalanceData.KEY_HISTORY_THROUGH, 0));
+        assertEquals("keep on reset", BalanceData.getNote(ctx, old));
+        assertTrue(!prefs().contains(BalanceData.KEY_RESET_IN_PROGRESS));
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
+        assertEquals("Pasargad", BalanceData.readTransactions(ctx).get(0).bank);
+    }
+
+    @Test public void failedResetKeepsMarkerAndNextScanRetriesCleanup() throws Exception {
+        java.io.File blocker = new java.io.File(ctx.getFilesDir(),
+            "transactions_page_v2_reset_test");
+        java.io.File child = new java.io.File(blocker, "occupied");
+        assertTrue(blocker.mkdir());
+        assertTrue(child.createNewFile());
+        try {
+            try {
+                BalanceData.reset(ctx, true);
+                fail("a non-empty legacy-page directory must fail reset cleanup");
+            } catch (IllegalStateException expected) {
+                assertTrue(prefs().getBoolean(BalanceData.KEY_RESET_IN_PROGRESS, false));
+                assertTrue(prefs().getBoolean(BalanceData.KEY_RESET_ALSO_NOTES, false));
+            }
+            assertEquals(0, BalanceData.scanSms(ctx, new LinkedHashMap<>()));
+            assertTrue("failed cleanup must leave recovery armed",
+                prefs().getBoolean(BalanceData.KEY_RESET_IN_PROGRESS, false));
+        } finally {
+            assertTrue(child.delete());
+            assertTrue(blocker.delete());
+        }
+        assertEquals(0, BalanceData.scanSms(ctx, new LinkedHashMap<>()));
+        assertTrue(!prefs().contains(BalanceData.KEY_RESET_IN_PROGRESS));
+        assertEquals(BankRules.VERSION, storedRulesVersion());
+    }
+
+    @Test public void malformedBalanceJsonThrowsInsteadOfReturningPartialMap() {
+        try {
+            BalanceData.deserialize("{\"valid\":{\"amount\":1,\"date\":2,\"sender\":\"500095\"},"
+                + "\"broken\":{\"amount\":3,\"sender\":\"500095\"}}");
+            fail("malformed balance entries must fail the whole parse");
+        } catch (IllegalArgumentException expected) {
+            // The valid entry must not escape in a partially parsed map.
+        }
+    }
+
+    @Test public void malformedLegacyBalancesAreNotMigratedAsPartialData() {
+        String malformed = "{\"Saman\":{\"amount\":1,\"date\":2,\"sender\":\"500095\"},"
+            + "\"broken\":{\"amount\":3,\"sender\":\"500095\"}}";
+        SharedPreferences data = DataGeneration.dataPrefs(ctx);
+        assertTrue(data.edit().putString(BalanceData.KEY_BALANCES, malformed).commit());
+        try {
+            BalanceData.read(ctx);
+            fail("a corrupt store must not return or persist partial balances");
+        } catch (IllegalStateException expected) {
+            assertEquals(malformed, data.getString(BalanceData.KEY_BALANCES, null));
+        }
+    }
+
+    @Test public void sourceCaptureFailureDoesNotAbortBalanceScan() throws Exception {
+        String sender = "5000973189";
+        String body = "\u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000";
+        long arrival = T + 1000;
+        seed(sender, body, arrival);
+        assertNotNull(SourceStore.capture(ctx, sender, body, arrival, BankRules.VERSION));
+
+        android.database.sqlite.SQLiteDatabase db = android.database.sqlite.SQLiteDatabase.openDatabase(
+            DataGeneration.context(ctx).getDatabasePath(SourceStore.DB_NAME).getPath(), null,
+            android.database.sqlite.SQLiteDatabase.OPEN_READWRITE);
+        try {
+            android.content.ContentValues values = new android.content.ContentValues();
+            values.put("payload", "not-an-encrypted-source-row");
+            assertEquals(1, db.update(SourceStore.TABLE, values, "id=?", new String[]{"1"}));
+        } finally {
+            db.close();
+        }
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+        assertEquals(1_000_000L, amount(find(saved, "Tejarat")));
+        assertEquals(1_000_000L, BalanceData.read(ctx).get("Tejarat").amount);
+        assertEquals("source failure must leave the watermark retryable", 0, watermark());
+        assertEquals(BankRules.VERSION, storedRulesVersion());
+        assertEquals(0, BalanceData.scanSms(ctx, saved));
+    }
+
     @Test public void resetWithEmptyInbox_leavesStoreEmptyAndFullScanArmed() throws Exception {
         seed("5000973189", "\u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000", T + 1000);
         LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();

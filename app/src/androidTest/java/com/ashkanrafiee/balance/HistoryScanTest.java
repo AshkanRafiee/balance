@@ -394,6 +394,70 @@ public class HistoryScanTest {
         assertEquals(200000L, txs.get(1).amount);
     }
 
+    @Test public void interruptedResetMarker_cleansOldHistoryBeforeRebuilding() throws Exception {
+        assertTrue(BalanceData.writeTransactions(ctx,
+            java.util.Collections.singletonList(new Transaction("Saman", T, 200000L, "old"))));
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
+        assertTrue(prefs().edit()
+            .putBoolean(BalanceData.KEY_RESET_IN_PROGRESS, true)
+            .putBoolean(BalanceData.KEY_RESET_ALSO_NOTES, false)
+            .putLong(BalanceData.KEY_HISTORY_THROUGH, T + 1000)
+            .putInt(BalanceData.KEY_HISTORY_RULES_VERSION, BalanceData.HISTORY_RULES_VERSION)
+            .putInt(BalanceData.KEY_HISTORY_SCHEMA, BalanceData.HISTORY_SCHEMA)
+            .commit());
+
+        assertEquals(0, BalanceData.scanHistory(ctx));
+        assertEquals("an interrupted reset must not preserve pre-reset transactions",
+            0, BalanceData.readTransactions(ctx).size());
+        assertFalse(prefs().getBoolean(BalanceData.KEY_RESET_IN_PROGRESS, false));
+    }
+
+    @Test public void interruptedResetMarker_nonemptyInboxDropsOrphansAndHonorsNoteDeletion() throws Exception {
+        seed("500095", DEPOSIT, T + 1000);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        Transaction old = BalanceData.readTransactions(ctx).get(0);
+        BalanceData.setNote(ctx, old, "delete on reset");
+        clearInbox();
+        seed("b.pasargad", WITHDRAWAL, T + 500);
+        assertTrue(prefs().edit().putBoolean(BalanceData.KEY_RESET_IN_PROGRESS, true)
+            .putBoolean(BalanceData.KEY_RESET_ALSO_NOTES, true).commit());
+
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        List<Transaction> rebuilt = BalanceData.readTransactions(ctx);
+        assertEquals(1, rebuilt.size());
+        assertEquals("Pasargad", rebuilt.get(0).bank);
+        assertEquals(-120000L, rebuilt.get(0).amount);
+        assertEquals(T + 500, historyWatermark());
+        assertTrue(BalanceData.readNotes(ctx).isEmpty());
+        assertFalse(prefs().contains(BalanceData.KEY_RESET_IN_PROGRESS));
+    }
+
+    @Test public void sourceCaptureFailureDoesNotAbortHistoryScan() throws Exception {
+        String sender = "500095";
+        long arrival = T + 1000;
+        seed(sender, DEPOSIT, arrival);
+        assertNotNull(SourceStore.capture(ctx, sender, DEPOSIT, arrival, BankRules.VERSION));
+
+        android.database.sqlite.SQLiteDatabase db = android.database.sqlite.SQLiteDatabase.openDatabase(
+            DataGeneration.context(ctx).getDatabasePath(SourceStore.DB_NAME).getPath(), null,
+            android.database.sqlite.SQLiteDatabase.OPEN_READWRITE);
+        try {
+            android.content.ContentValues values = new android.content.ContentValues();
+            values.put("payload", "not-an-encrypted-source-row");
+            assertEquals(1, db.update(SourceStore.TABLE, values, "id=?", new String[]{"1"}));
+        } finally {
+            db.close();
+        }
+
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
+        assertEquals(200000L, BalanceData.readTransactions(ctx).get(0).amount);
+        assertEquals("source failure must leave the watermark retryable", 0, historyWatermark());
+        assertEquals(BalanceData.HISTORY_RULES_VERSION,
+            prefs().getInt(BalanceData.KEY_HISTORY_RULES_VERSION, -1));
+        assertEquals(0, BalanceData.scanHistory(ctx));
+    }
+
     // ============================================================
     // Incremental scans
     // ============================================================

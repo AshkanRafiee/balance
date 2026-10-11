@@ -81,6 +81,9 @@ final class BalanceData {
     static final String KEY_HISTORY_LAST_BALANCE = "history_last_balance";
     static final String KEY_EXCLUDED = "excluded_banks";
     static final String KEY_SORT = "sort_mode";
+    /** Durable reset state; a surviving marker means the next scan must retry cleanup first. */
+    static final String KEY_RESET_IN_PROGRESS = "reset_in_progress";
+    static final String KEY_RESET_ALSO_NOTES = "reset_also_notes";
     static final String KEY_STALE_DAYS = "stale_days";
     static final String KEY_EXPAND_ALL_HISTORY = "expand_all_history";
     /** Whether the optional commitments summary card is shown below the balance card. It is on
@@ -263,13 +266,14 @@ final class BalanceData {
     static String decryptStorePayload(String blob) throws Exception { return decrypt(blob); }
 
     static LinkedHashMap<String, Bank> read(Context context) {
+        ensureResetComplete(context);
         LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
         try {
             String stored = DataGeneration.dataPrefs(context).getString(KEY_BALANCES, null);
             if (stored == null) return map;
             boolean legacy = stored.indexOf('{') == 0;
             String json = legacy ? stored : decrypt(stored);
-            parse(map, json);
+            map = parse(json);
             if (legacy && !map.isEmpty()) write(context, map);
         } catch (Exception e) {
             throw new IllegalStateException("balance store read failed", e);
@@ -277,7 +281,8 @@ final class BalanceData {
         return map;
     }
 
-    private static LinkedHashMap<String, Bank> parse(LinkedHashMap<String, Bank> map, String json) {
+    private static LinkedHashMap<String, Bank> parse(String json) {
+        LinkedHashMap<String, Bank> parsed = new LinkedHashMap<>();
         try {
             JSONObject obj = new JSONObject(json);
             Iterator<String> keys = obj.keys();
@@ -287,13 +292,13 @@ final class BalanceData {
                 String account = entry.has("account") && !entry.isNull("account")
                     ? entry.getString("account") : null;
                 if (account == null) account = accountOfKey(key);
-                map.put(key, new Bank(bankOfKey(key), entry.getLong("amount"),
+                parsed.put(key, new Bank(bankOfKey(key), entry.getLong("amount"),
                     entry.getLong("date"), entry.getString("sender"), account));
             }
         } catch (Exception e) {
-            Log.w(TAG, "stored balances unreadable; starting empty", e);
+            throw new IllegalArgumentException("malformed balance JSON", e);
         }
-        return map;
+        return parsed;
     }
 
     /** Serializes the supplied balances as the same JSON shape used for the local store. */
@@ -311,11 +316,10 @@ final class BalanceData {
         return obj.toString();
     }
 
-    /** Parses a balance JSON (as produced by {@link #serialize}) into a fresh map. */
+    /** Parses a balance JSON (as produced by {@link #serialize}) into a fresh map. Malformed JSON or
+     *  any malformed entry throws before a partial map can be returned or persisted. */
     static LinkedHashMap<String, Bank> deserialize(String json) {
-        LinkedHashMap<String, Bank> map = new LinkedHashMap<>();
-        parse(map, json);
-        return map;
+        return parse(json);
     }
 
     /** The composite storage key for a bank balance/transaction slot: the plain bank name when the
@@ -913,32 +917,112 @@ final class BalanceData {
      *  reasons and channels the bank stated go either way: they are the bank's own words, re-read from
      *  the messages the rebuild below reprocesses, and the transactions they describe are deleted here
      *  with everything else — keeping them would only leave entries nothing points at. */
-    static void reset(Context context, boolean alsoNotes) {
-        try { CommitmentStore.clear(context); }
-        catch (Exception e) { throw new IllegalStateException("commitment reset failed", e); }
-        TransactionStore.clear(context);
-        try { MetadataStore.reset(context, alsoNotes); }
-        catch (Exception e) { throw new IllegalStateException("metadata reset failed", e); }
-        try { SourceStore.clear(context); }
-        catch (Exception e) { throw new IllegalStateException("source reset failed", e); }
-        android.content.SharedPreferences.Editor data =
-            DataGeneration.dataPrefs(context).edit()
-                .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS)
-                .remove(KEY_TRANSACTIONS_MANIFEST).remove(KEY_COMMITMENTS)
-                .remove(KEY_HISTORY_LAST_BALANCE)
-                .remove(KEY_RECENT_MOVEMENTS).remove(KEY_TX_REASONS).remove(KEY_TX_CHANNELS);
-        if (alsoNotes) data.remove(KEY_TX_NOTES).remove(KEY_TX_TAGS);
-        data.commit();
-        removeOldTransactionPages(context, null);
-        context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
+    static synchronized void reset(Context context, boolean alsoNotes) {
+        synchronized (BalanceData.class) {
+            SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
+            if (!prefs.edit().putBoolean(KEY_RESET_IN_PROGRESS, true)
+                    .putBoolean(KEY_RESET_ALSO_NOTES, alsoNotes).commit()) {
+                throw new IllegalStateException("reset marker could not be persisted");
+            }
+            completeReset(context, alsoNotes);
+        }
+        CommitmentReminders.scheduleAll(context);
+    }
+
+    /** Makes every user-visible data projection wait for an interrupted reset to finish. */
+    static void ensureResetComplete(Context context) {
+        boolean pending;
+        synchronized (BalanceData.class) {
+            SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
+            pending = prefs.getBoolean(KEY_RESET_IN_PROGRESS, false);
+            if (pending && !recoverReset(context))
+                throw new IllegalStateException("reset recovery failed");
+        }
+        if (pending) CommitmentReminders.scheduleAll(context);
+    }
+
+    /** Retries cleanup before either scan reads its stores. A full history scan alone is not
+     *  enough: it deliberately preserves deleted-message orphans, which a reset must discard. */
+    private static boolean recoverReset(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
+        if (!prefs.getBoolean(KEY_RESET_IN_PROGRESS, false)) return false;
+        boolean alsoNotes = prefs.getBoolean(KEY_RESET_ALSO_NOTES, false);
+        try {
+            completeReset(context, alsoNotes);
+            return true;
+        } catch (Exception e) {
+            Log.w(TAG, "interrupted reset cleanup failed; retrying on the next scan", e);
+            return false;
+        }
+    }
+
+    /** Performs the idempotent cleanup and clears the marker only after every step commits. */
+    private static void completeReset(Context context, boolean alsoNotes) {
+        try {
+            if (!CommitmentStore.clear(context))
+                throw new IllegalStateException("commitment reset returned false");
+        } catch (Exception e) {
+            throw new IllegalStateException("commitment reset failed", e);
+        }
+        try {
+            TransactionStore.clear(context);
+        } catch (Exception e) {
+            throw new IllegalStateException("transaction reset failed", e);
+        }
+        try {
+            if (!MetadataStore.reset(context, alsoNotes))
+                throw new IllegalStateException("metadata reset returned false");
+        } catch (Exception e) {
+            throw new IllegalStateException("metadata reset failed", e);
+        }
+        try {
+            SourceStore.clear(context);
+        } catch (Exception e) {
+            throw new IllegalStateException("source reset failed", e);
+        }
+        try {
+            android.content.SharedPreferences.Editor data =
+                DataGeneration.dataPrefs(context).edit()
+                    .remove(KEY_BALANCES).remove(KEY_TRANSACTIONS)
+                    .remove(KEY_TRANSACTIONS_MANIFEST).remove(KEY_COMMITMENTS)
+                    .remove(KEY_HISTORY_LAST_BALANCE)
+                    .remove(KEY_RECENT_MOVEMENTS).remove(KEY_TX_REASONS).remove(KEY_TX_CHANNELS);
+            if (alsoNotes) data.remove(KEY_TX_NOTES).remove(KEY_TX_TAGS);
+            if (!data.commit()) throw new IllegalStateException("data reset cleanup failed");
+            removeOldTransactionPagesForReset(context);
+        } catch (Exception e) {
+            throw new IllegalStateException("data reset failed", e);
+        }
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
+        if (!prefs.edit()
             .remove(KEY_SCANNED_THROUGH)
             .remove(KEY_RULES_VERSION)
             .remove(KEY_HISTORY_THROUGH)
             .remove(KEY_HISTORY_RULES_VERSION)
             .remove(KEY_HISTORY_SCHEMA)
             .remove(KEY_EXCLUDED)
-            .commit();
-        CommitmentReminders.scheduleAll(context);
+            .remove(KEY_RESET_IN_PROGRESS)
+            .remove(KEY_RESET_ALSO_NOTES)
+            .commit()) {
+            // A failed commit may already change SharedPreferences' in-memory view. Keep scans in
+            // recovery mode in this process too, as well as after a restart.
+            prefs.edit().putBoolean(KEY_RESET_IN_PROGRESS, true)
+                .putBoolean(KEY_RESET_ALSO_NOTES, alsoNotes).commit();
+            throw new IllegalStateException("reset preference cleanup failed");
+        }
+    }
+
+    private static void removeOldTransactionPagesForReset(Context context) {
+        File directory = context.getFilesDir();
+        if (!directory.exists()) return;
+        File[] files = directory.listFiles();
+        if (files == null) throw new IllegalStateException("transaction page directory unreadable");
+        for (File file : files) {
+            if (file.getName().startsWith(TRANSACTION_PAGE_PREFIX)
+                    && file.exists() && !file.delete() && file.exists()) {
+                throw new IllegalStateException("transaction page could not be deleted");
+            }
+        }
     }
 
     static boolean isHidden(Context context) {
@@ -1198,6 +1282,9 @@ final class BalanceData {
             WorkProgress progress) {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
             return 0;
+        boolean resetWasPending = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+            .getBoolean(KEY_RESET_IN_PROGRESS, false);
+        if (resetWasPending && !recoverReset(context)) return 0;
         if (progress != null) progress.stage(R.string.scan_stage_reading);
         LinkedHashMap<String, Bank> current = read(context);
         SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
@@ -1210,7 +1297,7 @@ final class BalanceData {
         // watermark, so a plain incremental read would skip every one of them. Treat that as a full
         // rescan, which re-reads the whole inbox and re-pins the watermark under the current clock.
         long now = System.currentTimeMillis();
-        boolean full = watermark == 0 || watermark > now
+        boolean full = resetWasPending || watermark == 0 || watermark > now
             || prefs.getInt(KEY_RULES_VERSION, -1) != rulesVersion;
         if (full) watermark = 0;
         int matched = 0;
@@ -1235,13 +1322,17 @@ final class BalanceData {
                 scanSucceeded = false;
             } else {
                 while (cursor.moveToNext()) {
-                    long arrival = Math.min(cursor.getLong(2), now);
+                    long rawArrival = cursor.getLong(2);
+                    long arrival = Math.min(rawArrival, now);
                     if (newest < arrival) newest = arrival;
                     String sender = cursor.getString(0);
                     String bank = BankRules.resolve(sender);
                     if (bank == null) continue;
                     String body = cursor.getString(1);
-                    sourceRows.add(new Object[]{sender, body, arrival});
+                    // Keep the provider's stable timestamp for evidence identity. The clamped
+                    // value above remains the scan watermark/event-time input, so a future-dated
+                    // SMS cannot create a new physical source row on every later scan.
+                    sourceRows.add(new Object[]{sender, body, rawArrival});
                     long value = extract(body);
                     if (value < 0) continue;
                     String key = storageKey(bank, BankRules.extractAccount(bank, body));
@@ -1255,7 +1346,7 @@ final class BalanceData {
             Log.w(TAG, "scan failed", e);
         }
         if (!scanSucceeded) return 0;
-        if (!captureSources(context, sourceRows)) return 0;
+        boolean sourceCaptureSucceeded = captureSources(context, sourceRows);
 
         // A full re-scan that re-keys a bank's messages per account supersedes the legacy plain
         // bank slot (which pre-dates account extraction): drop it so the old merged balance is not
@@ -1324,7 +1415,9 @@ final class BalanceData {
         boolean emptyFullScan = full && rowsByKey.isEmpty() && !current.isEmpty();
         if (!emptyFullScan) {
             SharedPreferences.Editor editor = prefs.edit().putInt(KEY_RULES_VERSION, rulesVersion);
-            if (newest > watermark) editor.putLong(KEY_SCANNED_THROUGH, newest);
+            if (sourceCaptureSucceeded && newest > watermark)
+                editor.putLong(KEY_SCANNED_THROUGH, newest);
+            if (!sourceCaptureSucceeded) editor.remove(KEY_RULES_VERSION);
             editor.apply();
         }
         saved.clear();
@@ -1332,7 +1425,7 @@ final class BalanceData {
         return matched;
     }
 
-    /** Captures all recognized SMS seen by one scan in one source-store transaction. */
+    /** Best-effort evidence capture; source failures must not block the core stores or watermarks. */
     private static boolean captureSources(Context context, List<Object[]> sources) {
         if (sources == null || sources.isEmpty()) return true;
         try {
@@ -1345,7 +1438,7 @@ final class BalanceData {
             });
             return true;
         } catch (Exception e) {
-            Log.w(TAG, "source batch capture failed", e);
+            Log.w(TAG, "source batch capture failed; continuing core scan", e);
             return false;
         }
     }
@@ -1376,6 +1469,9 @@ final class BalanceData {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
             return 0;
         if (HISTORY_SCANNING) return 0;
+        boolean resetWasPending = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+            .getBoolean(KEY_RESET_IN_PROGRESS, false);
+        if (resetWasPending && !recoverReset(context)) return 0;
         if (progress != null) progress.stage(R.string.scan_stage_reading);
         HISTORY_SCANNING = true;
         boolean completed = false;
@@ -1394,7 +1490,7 @@ final class BalanceData {
             // moved backward since the last scan; fall back to a full rescan so messages dated after
             // the rollback are not skipped forever by the incremental "newer than watermark" read.
             long now = System.currentTimeMillis();
-            boolean full = hwm == 0 || hwm > now
+            boolean full = resetWasPending || hwm == 0 || hwm > now
                 || prefs.getInt(KEY_HISTORY_RULES_VERSION, -1) != HISTORY_RULES_VERSION
                 || prefs.getInt(KEY_HISTORY_SCHEMA, -1) != HISTORY_SCHEMA;
             if (full) hwm = 0;
@@ -1417,6 +1513,7 @@ final class BalanceData {
             String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
             String[] args = selection != null ? new String[]{Long.toString(hwm)} : null;
             Map<String, Long> lastBalance = null;
+            boolean sourceCaptureSucceeded = true;
             try (Cursor cursor = context.getContentResolver().query(
                 Telephony.Sms.Inbox.CONTENT_URI,
                 new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
@@ -1435,20 +1532,18 @@ final class BalanceData {
                     // and dates the stored transaction — otherwise a message that arrived three weeks
                     // late is filed three weeks late, and the period it belongs to is left looking
                     // short of money the app is already holding.
-                    long arrival = Math.min(cursor.getLong(2), now);
+                    long rawArrival = cursor.getLong(2);
+                    long arrival = Math.min(rawArrival, now);
                     if (arrival > newest) newest = arrival;
                     String sender = cursor.getString(0);
                     String bank = BankRules.resolve(sender);
                     if (bank == null) continue;
                     String body = cursor.getString(1);
-                    sourceRows.add(new Object[]{sender, body, arrival});
+                    sourceRows.add(new Object[]{sender, body, rawArrival});
                     rows.add(new Object[]{bank, sender, body,
                         MessageDate.eventTime(body, arrival, BankRules.calendar(bank))});
                 }
-                if (!captureSources(context, sourceRows)) {
-                    failed = true;
-                    return 0;
-                }
+                sourceCaptureSucceeded = captureSources(context, sourceRows);
                 if (rows.isEmpty()) {
                     if (full) {
                         if (!saveRecentMovements(context, new HashMap<>())
@@ -1463,7 +1558,12 @@ final class BalanceData {
                         emptyEditor.putInt(KEY_HISTORY_RULES_VERSION, HISTORY_RULES_VERSION);
                         emptyEditor.putInt(KEY_HISTORY_SCHEMA, HISTORY_SCHEMA);
                     }
-                    if (newest > 0) emptyEditor.putLong(KEY_HISTORY_THROUGH, newest);
+                    if (sourceCaptureSucceeded && newest > 0)
+                        emptyEditor.putLong(KEY_HISTORY_THROUGH, newest);
+                    if (!sourceCaptureSucceeded) {
+                        emptyEditor.remove(KEY_HISTORY_RULES_VERSION)
+                            .remove(KEY_HISTORY_SCHEMA);
+                    }
                     emptyEditor.apply();
                     return 0;
                 }
@@ -1784,9 +1884,12 @@ final class BalanceData {
             // Only commit the rules version and watermark when the scan finished cleanly: marking a
             // full rebuild as done (or advancing past rows that failed) would skip the correction
             // forever until the next manual version bump.
-            if (completed && full) editor.putInt(KEY_HISTORY_RULES_VERSION, HISTORY_RULES_VERSION);
-            if (completed && full) editor.putInt(KEY_HISTORY_SCHEMA, HISTORY_SCHEMA);
-            if (completed && newest > 0) editor.putLong(KEY_HISTORY_THROUGH, newest);
+            if (completed && sourceCaptureSucceeded && full)
+                editor.putInt(KEY_HISTORY_RULES_VERSION, HISTORY_RULES_VERSION);
+            if (completed && sourceCaptureSucceeded && full)
+                editor.putInt(KEY_HISTORY_SCHEMA, HISTORY_SCHEMA);
+            if (completed && sourceCaptureSucceeded && newest > 0)
+                editor.putLong(KEY_HISTORY_THROUGH, newest);
             editor.apply();
             return added;
         } finally {

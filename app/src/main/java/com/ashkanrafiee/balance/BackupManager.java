@@ -356,6 +356,7 @@ final class BackupManager {
      */
     static RestoreResult restore(Context context, Uri uri, String password, WorkProgress progress,
             java.util.Set<Section> selection, boolean includeDeleted) throws Exception {
+        BalanceData.ensureResetComplete(context);
         if (selection == null) selection = allSections();
         if (isFramed(context, uri))
             return BackupV2Restore.restore(context, uri, password, progress, selection,
