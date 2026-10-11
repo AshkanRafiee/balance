@@ -11,6 +11,9 @@ public final class CommitmentBootReceiver extends BroadcastReceiver {
                 || Intent.ACTION_TIME_CHANGED.equals(intent.getAction())
                 || Intent.ACTION_TIMEZONE_CHANGED.equals(intent.getAction())
                 || Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction()))) return;
-        CommitmentReminders.scheduleAll(context);
+        BroadcastReceiver.PendingResult pending = goAsync();
+        Context application = context.getApplicationContext();
+        CommitmentReminders.runReceiverWork(pending,
+            () -> CommitmentReminders.scheduleAll(application == null ? context : application));
     }
 }

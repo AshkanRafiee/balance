@@ -5,6 +5,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.SystemClock;
 import android.util.Base64;
 import android.widget.FrameLayout;
@@ -21,6 +22,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import javax.crypto.SecretKeyFactory;
@@ -93,6 +95,44 @@ public class LockManagerTest {
         }
         assertEquals("The lock must be re-derived to the current factor", LockManager.LOCK_ITERATIONS, iterations);
         assertTrue(LockManager.verify(ctx, "1234"));
+    }
+
+    @Test public void legacyRehash_cannotReplaceAChangedCode() throws Exception {
+        LockManager.enable(ctx, "1234", true, false);
+        byte[] salt = new byte[16];
+        String saltB64 = Base64.encodeToString(salt, Base64.NO_WRAP);
+        String legacyHashB64 = Base64.encodeToString(pbkdf2("1234", salt, 30_000), Base64.NO_WRAP);
+        SharedPreferences p = ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE);
+        p.edit()
+            .putString(LockManager.KEY_LOCK_SALT, saltB64)
+            .putInt(LockManager.KEY_LOCK_ITERATIONS, 30_000)
+            .putString(LockManager.KEY_LOCK_HASH, legacyHashB64)
+            .commit();
+
+        LockManager.changeCode(ctx, "5678", true);
+        assertFalse("A stale rehash must lose the compare-and-set", invokeReplaceHash(
+            p, saltB64, legacyHashB64, 30_000, "stale-replacement"));
+        assertTrue(LockManager.verify(ctx, "5678"));
+        assertFalse(LockManager.verify(ctx, "1234"));
+    }
+
+    @Test public void legacyRehash_cannotReenableADisabledLock() throws Exception {
+        LockManager.enable(ctx, "1234", true, false);
+        byte[] salt = new byte[16];
+        String saltB64 = Base64.encodeToString(salt, Base64.NO_WRAP);
+        String legacyHashB64 = Base64.encodeToString(pbkdf2("1234", salt, 30_000), Base64.NO_WRAP);
+        SharedPreferences p = ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE);
+        p.edit()
+            .putString(LockManager.KEY_LOCK_SALT, saltB64)
+            .putInt(LockManager.KEY_LOCK_ITERATIONS, 30_000)
+            .putString(LockManager.KEY_LOCK_HASH, legacyHashB64)
+            .commit();
+
+        LockManager.disable(ctx);
+        assertFalse("A stale rehash must not restore a disabled lock", invokeReplaceHash(
+            p, saltB64, legacyHashB64, 30_000, "stale-replacement"));
+        assertTrue(LockManager.verify(ctx, "anything"));
+        assertFalse(LockManager.isEnabled(ctx));
     }
 
     @Test public void disable_forgetsEverything() {
@@ -190,6 +230,25 @@ public class LockManagerTest {
             LockManager.cooldownRemainingMs(ctx));
         assertTrue("The right code unlocks once a legacy cooldown lapses",
             LockManager.verify(ctx, "1234"));
+    }
+
+    /** A reboot changes uptime's origin. The persisted wall deadline carries the remaining bounded
+     *  cooldown across that change, then the new boot returns to monotonic time. */
+    @Test public void cooldown_survivesRebootWithABoundedWallClockFallback() throws Exception {
+        SharedPreferences p = ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE);
+        p.edit().putLong(LockManager.KEY_LOCK_UNTIL, 80_000L).commit();
+
+        long first = invokeLockoutRemaining(p, 50_000L, 2_000_000_000_000L, 11L);
+        assertEquals(30_000L, first);
+
+        long afterReboot = invokeLockoutRemaining(p, 100L, 2_000_000_005_000L, 12L);
+        assertEquals("The wall-clock fallback preserves the remaining cooldown",
+            25_000L, afterReboot);
+        assertTrue("A fallback must be bounded by the maximum cooldown",
+            afterReboot <= 10 * 60_000L);
+
+        long onSameBoot = invokeLockoutRemaining(p, 10_000L, 2_000_000_006_000L, 12L);
+        assertEquals("The reanchored deadline returns to monotonic time", 15_100L, onSameBoot);
     }
 
     @Test public void secondLockout_outlastsTheFirst() {
@@ -398,5 +457,21 @@ public class LockManagerTest {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static boolean invokeReplaceHash(SharedPreferences p, String saltB64,
+            String hashB64, int iterations, String replacement) throws Exception {
+        Method method = LockManager.class.getDeclaredMethod("replaceHashIfUnchanged",
+            SharedPreferences.class, String.class, String.class, int.class, String.class);
+        method.setAccessible(true);
+        return (Boolean) method.invoke(null, p, saltB64, hashB64, iterations, replacement);
+    }
+
+    private static long invokeLockoutRemaining(SharedPreferences p, long elapsed, long wall,
+            long boot) throws Exception {
+        Method method = LockManager.class.getDeclaredMethod("lockoutRemainingMs",
+            SharedPreferences.class, long.class, long.class, long.class);
+        method.setAccessible(true);
+        return (Long) method.invoke(null, p, elapsed, wall, boot);
     }
 }

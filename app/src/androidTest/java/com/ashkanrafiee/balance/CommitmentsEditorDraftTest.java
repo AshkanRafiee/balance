@@ -45,11 +45,18 @@ public class CommitmentsEditorDraftTest {
 
     @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        CommitmentStore.clear(ctx);
         originalLanguage = LocaleHelper.currentTag(ctx);
         originalCurrency = CurrencyHelper.currency(ctx);
         originalRegion = RegionHelper.region(ctx);
-        originalCommitments = new ArrayList<>(BalanceData.readCommitments(ctx));
+        // Read and detach the snapshot before clearing the store. Store-backed settlement lists
+        // become invalid as soon as clear() advances the store revision.
+        originalCommitments = new ArrayList<>();
+        for (Commitment c : BalanceData.readCommitments(ctx)) {
+            originalCommitments.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start,
+                c.end, c.done, new ArrayList<>(c.paid), c.legacyPaidThrough,
+                new ArrayList<>(c.unpaid), c.remind, c.remindBeforeMs));
+        }
+        CommitmentStore.clear(ctx);
 
         LocaleHelper.setLanguage(ctx, "en");
         CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_RIAL);
@@ -95,6 +102,23 @@ public class CommitmentsEditorDraftTest {
                 editTextByHint(editor, nameHint()).getText().toString());
             assertEquals("150000",
                 editTextByHint(editor, amountHint()).getText().toString());
+        });
+    }
+
+    @Test public void editor_pausedAway_preservesSelectedFrequency() throws Exception {
+        scenario = ActivityScenario.launch(CommitmentsActivity.class);
+        scenario.onActivity(activity -> {
+            openEditor(activity, null);
+            AlertDialog editor = dialogField(activity, "activeDialog");
+            assertNotNull("the editor must open", editor);
+            textByValue(editor, activity.getString(R.string.commitments_freq_weekly)).performClick();
+        });
+
+        scenario.moveToState(Lifecycle.State.STARTED);
+        scenario.onActivity(activity -> {
+            CommitmentsActivity.Draft draft = draftField(activity);
+            assertNotNull("the pause must snapshot the form", draft);
+            assertEquals(Commitment.WEEKLY, draft.frequency);
         });
     }
 
@@ -200,11 +224,28 @@ public class CommitmentsEditorDraftTest {
         throw new AssertionError("no editor field with hint <" + hint + ">");
     }
 
+    private static android.widget.TextView textByValue(AlertDialog dialog, String value) {
+        List<android.widget.TextView> out = new ArrayList<>();
+        collectTexts(dialog.getWindow().getDecorView(), out);
+        for (android.widget.TextView text : out) {
+            if (value.equals(text.getText().toString())) return text;
+        }
+        throw new AssertionError("no editor chip with text <" + value + ">");
+    }
+
     private static void collectEdits(View v, List<EditText> out) {
         if (v instanceof EditText) out.add((EditText) v);
         if (v instanceof ViewGroup) {
             ViewGroup g = (ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) collectEdits(g.getChildAt(i), out);
+        }
+    }
+
+    private static void collectTexts(View v, List<android.widget.TextView> out) {
+        if (v instanceof android.widget.TextView) out.add((android.widget.TextView) v);
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) collectTexts(g.getChildAt(i), out);
         }
     }
 

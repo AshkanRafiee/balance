@@ -5,6 +5,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
+import android.os.Build;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -85,6 +86,43 @@ public class CommitmentReminderTest {
 
     @Test public void ensureChannel_doesNotCrash() {
         CommitmentReminders.ensureChannel(ctx);
+    }
+
+    @Test public void fire_whenNotificationsDenied_keepsDuePendingWithoutMinuteRearm() {
+        if (Build.VERSION.SDK_INT < 33) return;
+        boolean originallyGranted = ctx.checkSelfPermission(
+            android.Manifest.permission.POST_NOTIFICATIONS)
+            == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        android.app.UiAutomation automation = InstrumentationRegistry.getInstrumentation()
+            .getUiAutomation();
+        try {
+            automation.revokeRuntimePermission(ctx.getPackageName(),
+                android.Manifest.permission.POST_NOTIFICATIONS);
+            long due = inDays(0);
+            Commitment c = Commitment.create("rent", -5000, Commitment.ONCE, due, null,
+                true, 0);
+            BalanceData.writeCommitments(ctx, java.util.Collections.singletonList(c));
+
+            CommitmentReminders.fire(ctx, c.id);
+            assertTrue("the undelivered due must remain recoverable",
+                CommitmentReminders.pendingDueTokens(ctx).contains(c.id + "|" + due));
+            assertTrue("a denied notification must not be rearmed one minute later",
+                CommitmentReminders.scheduledIds(ctx).isEmpty());
+
+            automation.grantRuntimePermission(ctx.getPackageName(),
+                android.Manifest.permission.POST_NOTIFICATIONS);
+            CommitmentReminders.scheduleAll(ctx);
+            assertTrue("granting notifications must rearm the pending due",
+                CommitmentReminders.scheduledIds(ctx).contains(c.id));
+        } finally {
+            if (originallyGranted) {
+                automation.grantRuntimePermission(ctx.getPackageName(),
+                    android.Manifest.permission.POST_NOTIFICATIONS);
+            } else {
+                automation.revokeRuntimePermission(ctx.getPackageName(),
+                    android.Manifest.permission.POST_NOTIFICATIONS);
+            }
+        }
     }
 
     @Test public void notificationContent_namesEachSameTimeDue() {

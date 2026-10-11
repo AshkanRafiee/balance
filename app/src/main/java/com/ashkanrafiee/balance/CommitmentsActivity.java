@@ -498,10 +498,18 @@ public final class CommitmentsActivity extends Activity {
     }
 
     private void render() {
+        List<Commitment> commitments;
+        try {
+            commitments = BalanceData.readCommitments(this);
+        } catch (RuntimeException error) {
+            // A transient store/read failure must not take down the activity during resume. Keep
+            // the last rendered state and let the next resume or midnight refresh retry it.
+            android.util.Log.w("CommitmentsActivity", "commitment screen read failed", error);
+            return;
+        }
         root.removeAllViews();
         CalendarSystem cal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
         long now = System.currentTimeMillis();
-        List<Commitment> commitments = BalanceData.readCommitments(this);
         Summary summary = summarize(commitments, cal, now, WINDOW_MONTHS);
 
         LinearLayout titleBar = new LinearLayout(this);
@@ -594,7 +602,13 @@ public final class CommitmentsActivity extends Activity {
     /** The series behind the dues: one row per commitment definition with its schedule, opening
      *  the editor on tap, so a whole series is managed here instead of due by due. */
     private void manageDialog() {
-        List<Commitment> commitments = BalanceData.readCommitments(this);
+        final List<Commitment> commitments;
+        try {
+            commitments = BalanceData.readCommitments(this);
+        } catch (RuntimeException error) {
+            showCommitmentError(error);
+            return;
+        }
         CalendarSystem cal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
@@ -946,6 +960,7 @@ public final class CommitmentsActivity extends Activity {
         for (int i = 0; i < 5; i++) {
             final int index = i;
             freqActions[i] = () -> {
+                frequency[0] = index;
                 freqSelected[0] = index;
                 refreshChips(freqChips, index);
                 endControls.setVisibility(endDateControlsVisible(index) ? View.VISIBLE : View.GONE);
@@ -1018,9 +1033,7 @@ public final class CommitmentsActivity extends Activity {
         leadRow.addView(unitRow, unitLp);
         leadRow.setVisibility(remindBox.isChecked() ? View.VISIBLE : View.GONE);
         TextView exactNote = text(getString(R.string.commitments_exact_note), 12, muted);
-        exactNote.setOnClickListener(v -> startActivity(new android.content.Intent(
-            android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
-            android.net.Uri.parse("package:" + getPackageName()))));
+        exactNote.setOnClickListener(v -> openExactAlarmSettings());
         exactNote.setVisibility(remindBox.isChecked()
             && !CommitmentReminders.canScheduleExact(this) ? View.VISIBLE : View.GONE);
         remindBox.setOnCheckedChangeListener((v, checked) -> {
@@ -1181,6 +1194,18 @@ public final class CommitmentsActivity extends Activity {
     private void requestNotificationPermission() {
         requestPermissions(
             new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, REQUEST_NOTIFY);
+    }
+
+    /** Some devices expose exact-alarm permission in a settings app only conditionally. */
+    private void openExactAlarmSettings() {
+        android.content.Intent settings = new android.content.Intent(
+            android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+            android.net.Uri.parse("package:" + getPackageName()));
+        try {
+            if (settings.resolveActivity(getPackageManager()) != null) startActivity(settings);
+        } catch (android.content.ActivityNotFoundException | SecurityException ignored) {
+            // The reminder still works inexactly; an unavailable settings handler is not fatal.
+        }
     }
 
     @Override

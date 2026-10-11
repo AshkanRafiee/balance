@@ -9,6 +9,7 @@ import android.os.Build;
 import android.os.CancellationSignal;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.security.keystore.KeyPermanentlyInvalidatedException;
@@ -65,6 +66,10 @@ final class LockManager {
     static final String KEY_LOCK_ATTEMPTS = "lock_attempts";
     static final String KEY_LOCK_UNTIL = "lock_locked_until";
     static final String KEY_LOCK_STAGE = "lock_lockout_stage";
+    private static final String KEY_LOCK_UNTIL_WALL = "lock_locked_until_wall";
+    private static final String KEY_LOCK_BOOT = "lock_locked_boot";
+    /** Guards credential snapshots/updates and failed-attempt accounting, never PBKDF2 work. */
+    private static final Object codeSync = new Object();
 
     /** Consecutive wrong codes allowed before an on-device cooldown kicks in, so a four-digit PIN
      *  cannot be brute-forced by hand on a lost or stolen device. */
@@ -72,12 +77,11 @@ final class LockManager {
     /** First cooldown length, doubling per lockout up to {@link #LOCKOUT_MAX_MS}. */
     private static final long LOCKOUT_BASE_MS = 30_000L;
     private static final long LOCKOUT_MAX_MS = 10 * 60_000L;
-    /** Cooldown deadlines use the monotonic clock so the device owner cannot skip them by changing the
-     *  clock (forward), and a wrong zone/NTP rollback (backward) cannot trap the owner in a cooldown
-     *  that never expires. An {@code KEY_LOCK_UNTIL} left behind by an older build is an epoch-millis
-     *  deadline; such values sit astronomically above any plausible reboot uptime, so the two formats
-     *  are told apart by size. */
+    /** Cooldowns use uptime within a boot, with a bounded wall-clock fallback after reboot. Older
+     *  epoch-millis deadlines are still recognised by size. */
     private static final long WALL_CLOCK_EPOCH_MS = 1_000_000_000_000L;
+    /** If BOOT_COUNT is unavailable, a new process conservatively uses the wall-clock fallback. */
+    private static final long PROCESS_BOOT_ID = new SecureRandom().nextLong() | Long.MIN_VALUE;
 
     /** PBKDF2 work factor for the lock code: 100k keeps enabling and verifying snappy on phones.
      *  Stored per-lock, so an existing stronger factor keeps working and is re-derived lazily
@@ -290,16 +294,20 @@ final class LockManager {
         byte[] salt = new byte[16];
         new SecureRandom().nextBytes(salt);
         byte[] hash = hash(code, salt, LOCK_ITERATIONS);
-        prefs(c).edit()
-            .putBoolean(KEY_LOCK_ENABLED, true)
-            .putBoolean(KEY_LOCK_PIN, pin)
-            .putString(KEY_LOCK_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
-            .putInt(KEY_LOCK_ITERATIONS, LOCK_ITERATIONS)
-            .putString(KEY_LOCK_HASH, Base64.encodeToString(hash, Base64.NO_WRAP))
-            .remove(KEY_LOCK_ATTEMPTS)
-            .remove(KEY_LOCK_UNTIL)
-            .remove(KEY_LOCK_STAGE)
-            .apply();
+        synchronized (codeSync) {
+            prefs(c).edit()
+                .putBoolean(KEY_LOCK_ENABLED, true)
+                .putBoolean(KEY_LOCK_PIN, pin)
+                .putString(KEY_LOCK_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
+                .putInt(KEY_LOCK_ITERATIONS, LOCK_ITERATIONS)
+                .putString(KEY_LOCK_HASH, Base64.encodeToString(hash, Base64.NO_WRAP))
+                .remove(KEY_LOCK_ATTEMPTS)
+                .remove(KEY_LOCK_UNTIL)
+                .remove(KEY_LOCK_UNTIL_WALL)
+                .remove(KEY_LOCK_BOOT)
+                .remove(KEY_LOCK_STAGE)
+                .apply();
+        }
         if (wantFingerprint) setFingerprintEnabled(c, true);
         // The user just set this up in a live session: do not lock it immediately.
         unlockSession();
@@ -310,15 +318,19 @@ final class LockManager {
         byte[] salt = new byte[16];
         new SecureRandom().nextBytes(salt);
         byte[] hash = hash(code, salt, LOCK_ITERATIONS);
-        prefs(c).edit()
-            .putBoolean(KEY_LOCK_PIN, pin)
-            .putString(KEY_LOCK_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
-            .putInt(KEY_LOCK_ITERATIONS, LOCK_ITERATIONS)
-            .putString(KEY_LOCK_HASH, Base64.encodeToString(hash, Base64.NO_WRAP))
-            .remove(KEY_LOCK_ATTEMPTS)
-            .remove(KEY_LOCK_UNTIL)
-            .remove(KEY_LOCK_STAGE)
-            .apply();
+        synchronized (codeSync) {
+            prefs(c).edit()
+                .putBoolean(KEY_LOCK_PIN, pin)
+                .putString(KEY_LOCK_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
+                .putInt(KEY_LOCK_ITERATIONS, LOCK_ITERATIONS)
+                .putString(KEY_LOCK_HASH, Base64.encodeToString(hash, Base64.NO_WRAP))
+                .remove(KEY_LOCK_ATTEMPTS)
+                .remove(KEY_LOCK_UNTIL)
+                .remove(KEY_LOCK_UNTIL_WALL)
+                .remove(KEY_LOCK_BOOT)
+                .remove(KEY_LOCK_STAGE)
+                .apply();
+        }
         // Changing the code does not invalidate the fingerprint challenge: that key is independent.
     }
 
@@ -326,68 +338,126 @@ final class LockManager {
      *  Refuses every check while a failed-attempt cooldown is active, and counts consecutive wrong
      *  codes into the next cooldown. */
     static boolean verify(Context c, String code) {
-        if (!isEnabled(c)) return true;
-        if (code == null) return false;
         SharedPreferences p = prefs(c);
-        if (lockoutRemainingMs(p) > 0) return false;
-        String saltB64 = p.getString(KEY_LOCK_SALT, null);
-        String hashB64 = p.getString(KEY_LOCK_HASH, null);
-        if (saltB64 == null || hashB64 == null) return false;
+        final String saltB64, hashB64;
+        final int iterations;
+        synchronized (codeSync) {
+            if (!p.getBoolean(KEY_LOCK_ENABLED, false)) return true;
+            if (code == null || lockoutRemainingMs(c, p) > 0) return false;
+            saltB64 = p.getString(KEY_LOCK_SALT, null);
+            hashB64 = p.getString(KEY_LOCK_HASH, null);
+            iterations = p.getInt(KEY_LOCK_ITERATIONS, LOCK_ITERATIONS);
+            if (saltB64 == null || hashB64 == null) return false;
+        }
         try {
             byte[] salt = Base64.decode(saltB64, Base64.NO_WRAP);
             byte[] expected = Base64.decode(hashB64, Base64.NO_WRAP);
-            int iterations = p.getInt(KEY_LOCK_ITERATIONS, LOCK_ITERATIONS);
             byte[] actual = hash(code, salt, iterations);
             boolean ok = MessageDigest.isEqual(expected, actual);
+            if (!recordVerification(c, p, saltB64, hashB64, iterations, ok)) return false;
             // A lock created by an older build may carry a different work factor; bring it up to
             // the current one in the background after a successful verify, keeping the same salt.
-            if (ok) {
-                clearBackoff(p);
-                if (iterations != LOCK_ITERATIONS) rehashToCurrentFactor(c, code, salt);
-            } else {
-                noteFailure(p);
-            }
-            return ok;
+            if (iterations != LOCK_ITERATIONS)
+                rehashToCurrentFactor(p, code, saltB64, hashB64, iterations);
+            return true;
         } catch (Exception e) {
             Log.w(TAG, "verify failed", e);
             return false;
         }
     }
 
+    /** Applies a completed check only to its original credential and rechecks cooldowns that may
+     *  have started while PBKDF2 ran. Concurrent checks cannot lose failures or clear a new cooldown. */
+    private static boolean recordVerification(Context c, SharedPreferences p, String saltB64,
+            String hashB64, int iterations, boolean ok) {
+        synchronized (codeSync) {
+            if (!codeMatches(p, saltB64, hashB64, iterations) || lockoutRemainingMs(c, p) > 0)
+                return false;
+            if (ok) clearBackoff(p);
+            else noteFailure(c, p);
+            return ok;
+        }
+    }
+
+    /** Caller holds codeSync. */
+    private static boolean codeMatches(SharedPreferences p, String saltB64, String hashB64,
+            int iterations) {
+        return p.getBoolean(KEY_LOCK_ENABLED, false)
+            && saltB64.equals(p.getString(KEY_LOCK_SALT, null))
+            && hashB64.equals(p.getString(KEY_LOCK_HASH, null))
+            && iterations == p.getInt(KEY_LOCK_ITERATIONS, LOCK_ITERATIONS);
+    }
+
     /** Attempts left before the next cooldown, or 0 while a cooldown is active. */
     static int attemptsRemaining(Context c) {
         SharedPreferences p = prefs(c);
-        if (lockoutRemainingMs(p) > 0) return 0;
-        return Math.max(0, MAX_ATTEMPTS - p.getInt(KEY_LOCK_ATTEMPTS, 0));
+        synchronized (codeSync) {
+            if (lockoutRemainingMs(c, p) > 0) return 0;
+            return Math.max(0, MAX_ATTEMPTS - p.getInt(KEY_LOCK_ATTEMPTS, 0));
+        }
     }
 
     /** Milliseconds still in a failed-attempt cooldown, or 0 when none is active. */
     static long cooldownRemainingMs(Context c) {
-        return lockoutRemainingMs(prefs(c));
+        return lockoutRemainingMs(c, prefs(c));
     }
 
-    /** Milliseconds still in the failed-attempt cooldown, or 0 when none is active. Honors cooldown
-     *  deadlines stored by older builds as epoch-millis as well as the current monotonic-uptime ones. */
-    private static long lockoutRemainingMs(SharedPreferences p) {
-        long until = p.getLong(KEY_LOCK_UNTIL, 0);
-        if (until == 0) return 0;
-        if (until > WALL_CLOCK_EPOCH_MS)
-            return Math.max(0, until - System.currentTimeMillis());
-        return Math.max(0, until - android.os.SystemClock.elapsedRealtime());
+    private static long bootId(Context c) {
+        try {
+            int count = Settings.Global.getInt(c.getContentResolver(), Settings.Global.BOOT_COUNT, -1);
+            if (count >= 0) return count;
+        } catch (Exception ignored) {
+            // Some ROMs restrict access; the process marker still bounds recovery after restart.
+        }
+        return PROCESS_BOOT_ID;
+    }
+
+    private static long lockoutRemainingMs(Context c, SharedPreferences p) {
+        synchronized (codeSync) {
+            return lockoutRemainingMs(p, android.os.SystemClock.elapsedRealtime(),
+                System.currentTimeMillis(), bootId(c));
+        }
+    }
+
+    /** Reanchors a reboot fallback once, so a clock rollback cannot keep renewing the maximum wait.
+     *  Uptime-only deadlines from older builds are likewise bounded and migrated on first read. */
+    private static long lockoutRemainingMs(SharedPreferences p, long elapsed, long wall, long boot) {
+        synchronized (codeSync) {
+            long until = p.getLong(KEY_LOCK_UNTIL, 0);
+            if (until == 0) return 0;
+            if (until > WALL_CLOCK_EPOCH_MS) return Math.max(0, until - wall);
+            if (p.contains(KEY_LOCK_UNTIL_WALL)
+                    && p.getLong(KEY_LOCK_BOOT, Long.MAX_VALUE) == boot)
+                return Math.max(0, until - elapsed);
+            long remaining = Math.max(0, Math.min(LOCKOUT_MAX_MS,
+                p.contains(KEY_LOCK_UNTIL_WALL)
+                    ? p.getLong(KEY_LOCK_UNTIL_WALL, 0) - wall : until - elapsed));
+            p.edit()
+                .putLong(KEY_LOCK_UNTIL, elapsed + remaining)
+                .putLong(KEY_LOCK_UNTIL_WALL, wall + remaining)
+                .putLong(KEY_LOCK_BOOT, boot)
+                .apply();
+            return remaining;
+        }
     }
 
     /** Forgets the failed-attempt accounting, e.g. after a verified fingerprint unlock. */
     static void resetAttempts(Context c) {
-        clearBackoff(prefs(c));
+        synchronized (codeSync) {
+            clearBackoff(prefs(c));
+        }
     }
 
-    private static void noteFailure(SharedPreferences p) {
+    /** Caller holds codeSync. */
+    private static void noteFailure(Context c, SharedPreferences p) {
         int attempts = p.getInt(KEY_LOCK_ATTEMPTS, 0) + 1;
         SharedPreferences.Editor e = p.edit();
         if (attempts >= MAX_ATTEMPTS) {
             int stage = Math.max(p.getInt(KEY_LOCK_STAGE, 0), 0);
             long delay = Math.min(LOCKOUT_BASE_MS << Math.min(stage, 16), LOCKOUT_MAX_MS);
             e.putLong(KEY_LOCK_UNTIL, android.os.SystemClock.elapsedRealtime() + delay);
+            e.putLong(KEY_LOCK_UNTIL_WALL, System.currentTimeMillis() + delay);
+            e.putLong(KEY_LOCK_BOOT, bootId(c));
             e.putInt(KEY_LOCK_STAGE, stage + 1);
             e.remove(KEY_LOCK_ATTEMPTS);
         } else {
@@ -396,41 +466,60 @@ final class LockManager {
         e.apply();
     }
 
+    /** Caller holds codeSync. */
     private static void clearBackoff(SharedPreferences p) {
         p.edit()
             .remove(KEY_LOCK_ATTEMPTS)
             .remove(KEY_LOCK_UNTIL)
+            .remove(KEY_LOCK_UNTIL_WALL)
+            .remove(KEY_LOCK_BOOT)
             .remove(KEY_LOCK_STAGE)
             .apply();
     }
 
-    private static void rehashToCurrentFactor(final Context c, final String code, final byte[] salt) {
+    private static void rehashToCurrentFactor(final SharedPreferences p, final String code,
+            final String saltB64, final String hashB64, final int iterations) {
         new Thread(() -> {
             try {
+                byte[] salt = Base64.decode(saltB64, Base64.NO_WRAP);
                 byte[] hash = hash(code, salt, LOCK_ITERATIONS);
-                prefs(c).edit()
-                    .putInt(KEY_LOCK_ITERATIONS, LOCK_ITERATIONS)
-                    .putString(KEY_LOCK_HASH, Base64.encodeToString(hash, Base64.NO_WRAP))
-                    .apply();
+                replaceHashIfUnchanged(p, saltB64, hashB64, iterations,
+                    Base64.encodeToString(hash, Base64.NO_WRAP));
             } catch (Exception e) {
                 Log.w(TAG, "rehash of the lock code failed", e);
             }
         }).start();
     }
 
+    private static boolean replaceHashIfUnchanged(SharedPreferences p, String saltB64,
+            String hashB64, int iterations, String replacement) {
+        synchronized (codeSync) {
+            if (!codeMatches(p, saltB64, hashB64, iterations)) return false;
+            p.edit()
+                .putInt(KEY_LOCK_ITERATIONS, LOCK_ITERATIONS)
+                .putString(KEY_LOCK_HASH, replacement)
+                .apply();
+            return true;
+        }
+    }
+
     /** Forgets the code, the fingerprint binding and the lock flag entirely. */
     static void disable(Context c) {
         deleteFingerprintBinding(c);
-        prefs(c).edit()
-            .remove(KEY_LOCK_ENABLED)
-            .remove(KEY_LOCK_PIN)
-            .remove(KEY_LOCK_SALT)
-            .remove(KEY_LOCK_ITERATIONS)
-            .remove(KEY_LOCK_HASH)
-            .remove(KEY_LOCK_ATTEMPTS)
-            .remove(KEY_LOCK_UNTIL)
-            .remove(KEY_LOCK_STAGE)
-            .apply();
+        synchronized (codeSync) {
+            prefs(c).edit()
+                .remove(KEY_LOCK_ENABLED)
+                .remove(KEY_LOCK_PIN)
+                .remove(KEY_LOCK_SALT)
+                .remove(KEY_LOCK_ITERATIONS)
+                .remove(KEY_LOCK_HASH)
+                .remove(KEY_LOCK_ATTEMPTS)
+                .remove(KEY_LOCK_UNTIL)
+                .remove(KEY_LOCK_UNTIL_WALL)
+                .remove(KEY_LOCK_BOOT)
+                .remove(KEY_LOCK_STAGE)
+                .apply();
+        }
         unlockSession();
     }
 
@@ -447,17 +536,14 @@ final class LockManager {
     // Fingerprint
     // ====================================================================
 
-    /** True when the device has a usable strong biometric AND at least one enrolled print. Modern
-     *  builds ask {@code BiometricManager}; Android 8–9 (which have no BiometricManager) fall back to
-     *  the legacy FingerprintManager, which is still functional there. */
+    /** Matches the authentication path: strong biometrics on Android 11+, enrolled fingerprints
+     *  through FingerprintManager on Android 8–10 (face alone cannot use that legacy prompt). */
     static boolean fingerprintCapable(Context c) {
-        if (Build.VERSION.SDK_INT >= 29) {
+        if (Build.VERSION.SDK_INT >= 30) {
             try {
                 BiometricManager bm = (BiometricManager) c.getSystemService(Context.BIOMETRIC_SERVICE);
                 if (bm == null) return false;
-                int verdict = Build.VERSION.SDK_INT >= 30
-                    ? bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
-                    : bm.canAuthenticate();
+                int verdict = bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG);
                 return verdict == BiometricManager.BIOMETRIC_SUCCESS;
             } catch (Throwable t) {
                 return false;
