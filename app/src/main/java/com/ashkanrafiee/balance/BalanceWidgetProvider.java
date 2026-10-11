@@ -43,6 +43,12 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     private static boolean refreshAnimation;
     /** Guarded by WIDGET_UPDATE_LOCK; coalesces the delayed mask re-assertions below. */
     private static int maskToggleGen;
+    /** Guarded by WIDGET_UPDATE_LOCK; last processed mask toggle, monotonic ms. */
+    private static long lastMaskToggleMs;
+    /** Bounce window for the mask button: one physical tap must equal one toggle even when the
+     *  launcher delivers the tap twice in rapid succession. Intentional re-taps land well after
+     *  the list rebind (~1s+) and are unaffected. */
+    private static final long MASK_DEBOUNCE_MS = 500L;
     /** Delay before re-asserting a mask toggle, letting the list rebind settle first. */
     private static final long MASK_REASSERT_DELAY_MS = 600L;
 
@@ -445,6 +451,9 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
                 final Context app = appContext(context);
                 final int toggleGen;
                 synchronized (WIDGET_UPDATE_LOCK) {
+                    long now = SystemClock.uptimeMillis();
+                    if (now - lastMaskToggleMs < MASK_DEBOUNCE_MS) return;
+                    lastMaskToggleMs = now;
                     refreshAnimation = false;
                     toggleGen = ++maskToggleGen;
                 }

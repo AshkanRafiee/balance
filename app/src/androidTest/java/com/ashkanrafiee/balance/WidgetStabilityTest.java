@@ -26,12 +26,13 @@ import java.util.LinkedHashMap;
 public class WidgetStabilityTest {
     private Context context;
 
-    @Before public void setUp() {
+    @Before public void setUp() throws Exception {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         LockManager.disable(context);
         LockManager.resetSessionForTest();
         DataGeneration.clearForTests(context);
         BalanceData.reset(context, true);
+        resetMaskDebounce();
     }
 
     @After public void tearDown() {
@@ -87,6 +88,18 @@ public class WidgetStabilityTest {
         assertEquals(true, BalanceData.isWidgetHidden(context));
         assertEquals(false, refreshAnimation());
         assertEquals(genBefore + 1, maskToggleGen());
+    }
+
+    @Test public void maskToggle_rapidDoubleTap_countsAsOneToggle() throws Exception {
+        BalanceData.setWidgetHidden(context, false);
+        BalanceWidgetProvider provider = new BalanceWidgetProvider();
+        android.content.Intent mask =
+            new android.content.Intent(BalanceWidgetProvider.ACTION_MASK);
+        provider.onReceive(context, mask);
+        provider.onReceive(context, mask);
+
+        assertEquals("a bounced tap must toggle exactly once",
+            true, BalanceData.isWidgetHidden(context));
     }
 
     @Test public void corruptEncryptedStore_summaryShowsUnknownAndReadableError() throws Exception {
@@ -159,6 +172,15 @@ public class WidgetStabilityTest {
         field.setAccessible(true);
         synchronized (lockObject()) {
             return field.getInt(null);
+        }
+    }
+
+    private static void resetMaskDebounce() throws Exception {
+        java.lang.reflect.Field field =
+            BalanceWidgetProvider.class.getDeclaredField("lastMaskToggleMs");
+        field.setAccessible(true);
+        synchronized (lockObject()) {
+            field.setLong(null, 0L);
         }
     }
 
