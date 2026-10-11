@@ -76,6 +76,19 @@ public class WidgetStabilityTest {
         }
     }
 
+    @Test public void maskToggle_flipsStateAndStopsRefreshAnimation() throws Exception {
+        setRefreshAnimation(true);
+        int genBefore = maskToggleGen();
+        BalanceData.setWidgetHidden(context, false);
+
+        new BalanceWidgetProvider().onReceive(context,
+            new android.content.Intent(BalanceWidgetProvider.ACTION_MASK));
+
+        assertEquals(true, BalanceData.isWidgetHidden(context));
+        assertEquals(false, refreshAnimation());
+        assertEquals(genBefore + 1, maskToggleGen());
+    }
+
     @Test public void corruptEncryptedStore_summaryShowsUnknownAndReadableError() throws Exception {
         LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
         saved.put("Tejarat", new Bank("Tejarat", 12_345L, 1000L, "5000"));
@@ -119,6 +132,41 @@ public class WidgetStabilityTest {
         assertEquals(1, factory.getCount());
         View row = factory.getViewAt(0).apply(context, null);
         assertTrue(containsText(row, context.getString(R.string.widget_locked_message)));
+    }
+
+    private static void setRefreshAnimation(boolean value) throws Exception {
+        java.lang.reflect.Field field =
+            BalanceWidgetProvider.class.getDeclaredField("refreshAnimation");
+        field.setAccessible(true);
+        Object lock = lockObject();
+        synchronized (lock) {
+            field.setBoolean(null, value);
+        }
+    }
+
+    private static boolean refreshAnimation() throws Exception {
+        java.lang.reflect.Field field =
+            BalanceWidgetProvider.class.getDeclaredField("refreshAnimation");
+        field.setAccessible(true);
+        synchronized (lockObject()) {
+            return field.getBoolean(null);
+        }
+    }
+
+    private static int maskToggleGen() throws Exception {
+        java.lang.reflect.Field field =
+            BalanceWidgetProvider.class.getDeclaredField("maskToggleGen");
+        field.setAccessible(true);
+        synchronized (lockObject()) {
+            return field.getInt(null);
+        }
+    }
+
+    private static Object lockObject() throws Exception {
+        java.lang.reflect.Field field =
+            BalanceWidgetProvider.class.getDeclaredField("WIDGET_UPDATE_LOCK");
+        field.setAccessible(true);
+        return field.get(null);
     }
 
     private static boolean containsText(View view, String expected) {

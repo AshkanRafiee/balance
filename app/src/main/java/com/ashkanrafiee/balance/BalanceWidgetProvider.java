@@ -41,6 +41,10 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     private static final Object WIDGET_UPDATE_LOCK = new Object();
     /** Guarded by WIDGET_UPDATE_LOCK; a lock or launcher failure stops animation for this refresh. */
     private static boolean refreshAnimation;
+    /** Guarded by WIDGET_UPDATE_LOCK; coalesces the delayed mask re-assertions below. */
+    private static int maskToggleGen;
+    /** Delay before re-asserting a mask toggle, letting the list rebind settle first. */
+    private static final long MASK_REASSERT_DELAY_MS = 600L;
 
     private static Context appContext(Context context) {
         Context app = context.getApplicationContext();
@@ -433,8 +437,30 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
                 if (ACTION_ALARM.equals(action)) scheduleAlarm(context);
                 refreshData(context);
             } else if (ACTION_MASK.equals(action)) {
-                BalanceData.setWidgetHidden(context, !BalanceData.isWidgetHidden(context));
-                updateAll(context);
+                // The header and the rows update through two separate mechanisms (a pushed
+                // RemoteViews vs. an adapter rebind), so a mask toggle re-asserts itself: stop
+                // any refresh animation that could interleave icon-only ticks, push the new
+                // state, then push it once more after the rebind settles in case the launcher
+                // dropped either update and left header and rows disagreeing.
+                final Context app = appContext(context);
+                final int toggleGen;
+                synchronized (WIDGET_UPDATE_LOCK) {
+                    refreshAnimation = false;
+                    toggleGen = ++maskToggleGen;
+                }
+                BalanceData.setWidgetHidden(app, !BalanceData.isWidgetHidden(app));
+                updateAll(app);
+                new Thread(() -> {
+                    SystemClock.sleep(MASK_REASSERT_DELAY_MS);
+                    synchronized (WIDGET_UPDATE_LOCK) {
+                        if (toggleGen != maskToggleGen) return;
+                    }
+                    try {
+                        updateAll(app);
+                    } catch (Exception e) {
+                        Log.w(TAG, "widget mask re-assert failed");
+                    }
+                }, "balance-widget-mask").start();
             } else if (ACTION_BOOT_COMPLETED.equals(action) && hasWidgets(context)) {
                 scheduleAlarm(context);
             } else if (Intent.ACTION_CONFIGURATION_CHANGED.equals(action) && hasWidgets(context)) {
