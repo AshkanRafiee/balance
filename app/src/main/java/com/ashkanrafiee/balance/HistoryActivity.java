@@ -41,7 +41,11 @@ import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
@@ -500,6 +504,7 @@ public final class HistoryActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        LargeScreenOrientation.apply(this);
         // The task may have been restored straight into history without the dashboard running.
         BalanceData.migrateExpandAllToDebugMenu(this);
         if (state != null) {
@@ -865,11 +870,11 @@ public final class HistoryActivity extends Activity {
         }
     }
 
-    /** Builds the CSV of the on-screen transactions and writes it to the SAF uri on a worker
-     *  thread. The current filters and the search query shape the snapshot (with none active that
-     *  is the full history). Movements and residuals come from a single store pass, so the file
-     *  cannot mix generations even though no store monitor is held across the whole export —
-     *  holding it is what starved renders and scans behind the dialog and hung the screen. */
+    /** Builds the CSV of the on-screen transactions on a worker and publishes a completed private
+     *  staging file to the SAF uri. The current filters and search query shape the snapshot (with
+     *  none active that is the full history). Movements and residuals come from a single store
+     *  pass, so the file cannot mix transaction generations even though no store monitor is held
+     *  across the whole export — holding it is what starved renders and scans behind the dialog. */
     private void writeExport(Uri uri) {
         if (exportRunning) return;
         final String query = searchQuery == null ? "" : searchQuery.trim();
@@ -917,68 +922,73 @@ public final class HistoryActivity extends Activity {
         showDialog(exportDialog);
         new Thread(() -> {
             final int[] error = {0};
+            File staged = null;
             try {
                 final List<String> tokens = searchTokens(query);
-                // Both handles are caller-owned and are opened in one try-with-resources scope.
-                // In particular, if metadata initialization fails after the destination was
-                // truncated, the destination stream is still closed before failure cleanup runs.
-                try (OutputStream out = resolver.openOutputStream(uri, "w")) {
-                    if (out == null) throw new IOException("no output stream");
-                    try (MetadataStore.LookupSession metadata =
-                            MetadataStore.LookupSession.open(app)) {
-                        final CsvExport.TextLookup lookup = new CsvExport.TextLookup() {
-                            @Override public String note(String key) throws Exception {
-                                return metadata.text(MetadataStore.NOTES, key);
-                            }
-                            @Override public String reason(String key) throws Exception {
-                                return metadata.text(MetadataStore.REASONS, key);
-                            }
-                            @Override public String channel(String key) throws Exception {
-                                return metadata.text(MetadataStore.CHANNELS, key);
-                            }
-                            @Override public List<String> tags(String key) throws Exception {
-                                return metadata.tags(key);
-                            }
-                        };
-                        // One store pass feeds both CSV kinds, exactly like the history render: the
-                        // in-scope rows stage the residual walk while the fully matching rows stage as
-                        // movements. Residual detection needs the whole bank/account scope before the
-                        // direction/date/tag/search narrowing runs, so the scope check precedes it —
-                        // dropping a row here would corrupt the bracketing walk like a page-local
-                        // residual calculation would.
-                        final HistoryCsvExport.CombinedSource both = (movements, residuals) -> {
-                            try (HistoryResidualReader.Staging staging =
-                                    HistoryResidualReader.Staging.open(app)) {
-                                TransactionStore.forEach(app, CsvExport.STREAM_PAGE_SIZE, transaction -> {
-                                    if (inExportScope(transaction, bank, account)) staging.add(transaction);
-                                    if (!exportMovementMatches(app, transaction, bank, account,
-                                            activeFilter, iran, tagSelection, tokens, lookup)) return;
-                                    movements.accept(transaction);
-                                });
-                                staging.emit(residual -> {
-                                    if (!tagSelection.isEmpty() || !exportResidualMatches(app, residual,
-                                            activeFilter, iran, tokens)) return;
-                                    residuals.accept(residual);
-                                }, CsvExport.STREAM_PAGE_SIZE);
-                            }
-                        };
+                // Render into an app-private file first. A source failure, metadata revision
+                // change, cancellation, or activity teardown therefore cannot leave a truncated
+                // picked document looking like a completed export.
+                staged = File.createTempFile("history-export-", ".csv", app.getCacheDir());
+                final String metadataRevision = MetadataStore.revision(app);
+                try (MetadataStore.LookupSession metadata =
+                        MetadataStore.LookupSession.open(app);
+                        OutputStream out = new FileOutputStream(staged);
                         OutputStreamWriter writer = new OutputStreamWriter(out,
-                            StandardCharsets.UTF_8);
-                        HistoryCsvExport.writeCombined(app, CsvExport.STREAM_PAGE_SIZE, both,
-                            writer, lookup, exportProgress);
+                            StandardCharsets.UTF_8)) {
+                    final CsvExport.TextLookup lookup = new CsvExport.TextLookup() {
+                        @Override public String note(String key) throws Exception {
+                            return metadata.text(MetadataStore.NOTES, key);
+                        }
+                        @Override public String reason(String key) throws Exception {
+                            return metadata.text(MetadataStore.REASONS, key);
+                        }
+                        @Override public String channel(String key) throws Exception {
+                            return metadata.text(MetadataStore.CHANNELS, key);
+                        }
+                        @Override public List<String> tags(String key) throws Exception {
+                            return metadata.tags(key);
+                        }
+                    };
+                    // One store pass feeds both CSV kinds, exactly like the history render: the
+                    // in-scope rows stage the residual walk while the fully matching rows stage as
+                    // movements. Residual detection needs the whole bank/account scope before the
+                    // direction/date/tag/search narrowing runs, so the scope check precedes it —
+                    // dropping a row here would corrupt the bracketing walk like a page-local
+                    // residual calculation would.
+                    final HistoryCsvExport.CombinedSource both = (movements, residuals) -> {
+                        try (HistoryResidualReader.Staging staging =
+                                HistoryResidualReader.Staging.open(app)) {
+                            TransactionStore.forEach(app, CsvExport.STREAM_PAGE_SIZE, transaction -> {
+                                if (inExportScope(transaction, bank, account)) staging.add(transaction);
+                                if (!exportMovementMatches(app, transaction, bank, account,
+                                        activeFilter, iran, tagSelection, tokens, lookup)) return;
+                                movements.accept(transaction);
+                            });
+                            staging.emit(residual -> {
+                                if (!tagSelection.isEmpty() || !exportResidualMatches(app, residual,
+                                        activeFilter, iran, tokens)) return;
+                                residuals.accept(residual);
+                            }, CsvExport.STREAM_PAGE_SIZE);
+                        }
+                    };
+                    HistoryCsvExport.writeCombined(app, CsvExport.STREAM_PAGE_SIZE, both,
+                        writer, lookup, exportProgress,
+                        () -> Thread.currentThread().isInterrupted());
+                    // LookupSession deliberately does not hold a global lock or pin a transaction.
+                    // A revision check converts that bounded session into an all-or-nothing
+                    // metadata snapshot: any edit seen during point lookups rejects this staged
+                    // file before it is published.
+                    if (!sameRevision(metadataRevision, MetadataStore.revision(app))) {
+                        throw new IOException("metadata changed during CSV export");
                     }
                 }
+                publishExport(resolver, uri, staged);
             } catch (Throwable e) {
                 error[0] = 1;
                 android.util.Log.w("BalanceHistory", "csv export failed", e);
-                // The destination was already truncated by the "w" open: remove the stub so a
-                // failed export cannot masquerade as a complete one. Best-effort; non-document
-                // destinations simply refuse and keep the stub.
-                try {
-                    android.provider.DocumentsContract.deleteDocument(resolver, uri);
-                } catch (Exception cleanup) {
-                    android.util.Log.w("BalanceHistory", "truncated export cleanup failed",
-                        cleanup);
+            } finally {
+                if (staged != null && staged.exists() && !staged.delete()) {
+                    android.util.Log.w("BalanceHistory", "staged export cleanup failed");
                 }
             }
             runOnUiThread(() -> {
@@ -1008,6 +1018,44 @@ public final class HistoryActivity extends Activity {
                 }
             });
         }).start();
+    }
+
+    private static boolean sameRevision(String first, String second) {
+        return first == null ? second == null : first.equals(second);
+    }
+
+    /** Publishes only a completed private export. The destination is opened after all source and
+     * metadata checks have passed; a provider failure after opening is removed best-effort so a
+     * newly-created document cannot be mistaken for a complete CSV. */
+    private static void publishExport(android.content.ContentResolver resolver, Uri uri, File source)
+            throws Exception {
+        boolean opened = false;
+        try (InputStream in = new FileInputStream(source);
+                OutputStream out = resolver.openOutputStream(uri, "w")) {
+            if (out == null) throw new IOException("no output stream");
+            opened = true;
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = in.read(buffer)) != -1) {
+                if (count == 0) continue;
+                out.write(buffer, 0, count);
+            }
+        } catch (Exception failure) {
+            if (opened) {
+                try {
+                    if ("file".equals(uri.getScheme()) && uri.getPath() != null) {
+                        File target = new File(uri.getPath());
+                        if (target.exists() && !target.delete())
+                            throw new IOException("failed export cleanup");
+                    } else {
+                        android.provider.DocumentsContract.deleteDocument(resolver, uri);
+                    }
+                } catch (Exception cleanup) {
+                    failure.addSuppressed(cleanup);
+                }
+            }
+            throw failure;
+        }
     }
 
     /** Determinate export dialog: a title, a phase line and a horizontal bar. The bar and the
@@ -1931,15 +1979,10 @@ public final class HistoryActivity extends Activity {
             lockOverlay.showLock();
         }
         // Re-scan in the background (a no-op if a scan is already running) so messages that
-        // arrived while the screen was closed are reflected as soon as it opens.
-        final Context app = getApplicationContext();
-        new Thread(() -> {
-            try {
-                BalanceData.scanHistory(app);
-            } catch (Exception e) {
-                android.util.Log.w("BalanceHistory", "resume history scan failed", e);
-            }
-        }, "history-scan").start();
+        // arrived while the screen was closed are reflected as soon as it opens. The generation
+        // check is on the UI thread before the raw worker is launched; once launched, the worker
+        // owns only an application context and may safely finish headlessly after a pause.
+        startHistoryScan(historyListenerGen, getApplicationContext());
     }
 
     @Override
@@ -1975,16 +2018,12 @@ public final class HistoryActivity extends Activity {
             @Override public void onChange(boolean selfChange, Uri uri) {
                 if (scanPending) return;
                 scanPending = true;
+                final int listenerGen = historyListenerGen;
                 smsHandler.postDelayed(() -> {
                     scanPending = false;
-                    final Context app = getApplicationContext();
-                    new Thread(() -> {
-                        try {
-                            BalanceData.scanHistory(app);
-                        } catch (Exception e) {
-                            android.util.Log.w("BalanceHistory", "observer history scan failed", e);
-                        }
-                    }, "history-scan").start();
+                    if (listenerGen != historyListenerGen || !historyResumed
+                            || isDestroyed() || isFinishing()) return;
+                    startHistoryScan(listenerGen, getApplicationContext());
                 }, 400);
             }
         };
@@ -2086,6 +2125,19 @@ public final class HistoryActivity extends Activity {
         }
     }
 
+    /** Starts a history scan only for the currently resumed listener generation. */
+    private void startHistoryScan(int listenerGen, Context app) {
+        if (listenerGen != historyListenerGen || !historyResumed
+                || isDestroyed() || isFinishing()) return;
+        new Thread(() -> {
+            try {
+                BalanceData.scanHistory(app);
+            } catch (Exception e) {
+                android.util.Log.w("BalanceHistory", "history scan failed", e);
+            }
+        }, "history-scan").start();
+    }
+
     /** One movement's searchable text in the current language: what the row shows (bank, time,
      *  account, amount) plus what it carries (note, the bank's reason and channel) and when it is
      *  shown. Reads the wrapped activity context so the names match the language on screen. */
@@ -2122,8 +2174,16 @@ public final class HistoryActivity extends Activity {
      *  from the encrypted snapshot timeline, so expand-all and searches never create a history-sized
      *  view tree or metadata map. */
     private void render() {
+        // onCreate performs the first render before onResume. Thereafter a paused screen must not
+        // start another raw worker from a delayed search callback; onResume will request it again.
         if (isDestroyed() || isFinishing()) return;
+        if (!historyResumed && historyUiGen != 0) {
+            renderAfterResume = true;
+            return;
+        }
         final int gen = ++renderGen;
+        final int uiGen = historyUiGen;
+        final Context app = getApplicationContext();
         final Filter f = filter;
         final String bank = bankFilter;
         final String acct = accountFilter;
@@ -2140,7 +2200,7 @@ public final class HistoryActivity extends Activity {
         final boolean hadRenderedResult = historyResult != null;
         final WorkProgress renderProgress = new WorkProgress() {
             @Override public void stage(int stageResId) {
-                setLoadingStage(gen, stageResId);
+                setLoadingStage(gen, uiGen, stageResId);
             }
 
             @Override public void progress(long done, long total) {
@@ -2170,7 +2230,7 @@ public final class HistoryActivity extends Activity {
                 // Re-warm on a hit so a second open right behind this one usually finds
                 // a ready result too instead of waiting for the next dashboard resume.
                 result = HistoryWarmup.take(bank, acct, f, query, tagSelection, iran,
-                    getApplicationContext(), true);
+                    app, true);
                 if (result != null
                         && !result.requestedDayRows.keySet().containsAll(expandedSnapshot)) {
                     try {
@@ -2193,7 +2253,7 @@ public final class HistoryActivity extends Activity {
                         tagSelection, Collections.emptySet(), 0,
                         HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
                     result = HistoryReader.summaryWithResiduals(
-                        getApplicationContext(), planRequest, renderProgress);
+                        app, planRequest, renderProgress);
                     Set<String> requestedDays = plannedExpandedDays(result, expandedSnapshot,
                         seededSnapshot, expandAll, expansionKey, previousExpansionKey,
                         savedPreSearchDays, iran);
@@ -2209,7 +2269,7 @@ public final class HistoryActivity extends Activity {
                     // One shared metadata session for the whole seed set: opening one per day
                     // would multiply store opens by the day count.
                     try (MetadataStore.LookupSession metadata =
-                            MetadataStore.LookupSession.open(getApplicationContext())) {
+                            MetadataStore.LookupSession.open(app)) {
                         for (String dayKey : requestedDays) {
                             // Nonexistent days simply produce empty pages, as before.
                             pages.put(dayKey, HistoryReader.readPage(metadata, result, dayKey,
@@ -2222,7 +2282,8 @@ public final class HistoryActivity extends Activity {
                 final List<Residual> requestedResiduals = residualsFromPages(initialPages);
                 final HistoryReader.Result completed = result;
                 runOnUiThread(() -> {
-                    if (gen != renderGen || isDestroyed() || isFinishing()) {
+                    if (gen != renderGen || lifecycleStale(uiGen)
+                            || isDestroyed() || isFinishing()) {
                         try { completed.close(); } catch (Exception e) {
                             android.util.Log.w("BalanceHistory", "stale timeline cleanup failed", e);
                         }
@@ -2282,11 +2343,12 @@ public final class HistoryActivity extends Activity {
                 android.util.Log.w("BalanceHistory", "render failed", e);
                 runOnUiThread(() -> {
                     if (isDestroyed() || isFinishing()) return;
-                    // Deliberately not gated on the generation: a superseded render still means this
-                    // screen is done loading, and leaving the sweep running would keep the main
-                    // thread asking for frames that no render is left to answer.
+                    // Stop the sweep even for a superseded render: the failed worker still means
+                    // this screen is done loading, and leaving it running would keep the main
+                    // thread asking for frames that no render is left to answer. The actual error
+                    // view remains generation-gated below.
                     stopShimmer();
-                    if (gen != renderGen) return;
+                    if (gen != renderGen || lifecycleStale(uiGen)) return;
                     body.setContentDescription(null);
                     // Gone while rebuilding, as in the success path above: one measure instead of
                     // one per frame.
@@ -2347,13 +2409,15 @@ public final class HistoryActivity extends Activity {
 
     /** Requests an adjacent page without rescanning the aggregate snapshot. */
     private void loadDayPage(String dayKey, HistoryTimeline.CursorKey cursor, boolean previous) {
+        if (!historyResumed || isDestroyed() || isFinishing()) return;
         final HistoryReader.Result snapshot = historyResult;
         if (snapshot == null) return;
         final int gen = renderGen;
         final int uiGen = historyUiGen;
+        final Context app = getApplicationContext();
         new Thread(() -> {
             try {
-                HistoryReader.DayRows page = HistoryReader.readPage(getApplicationContext(), snapshot,
+                HistoryReader.DayRows page = HistoryReader.readPage(app, snapshot,
                     dayKey, cursor, previous, HistoryReader.DEFAULT_ROW_PAGE_SIZE);
                 runOnUiThread(() -> {
                     if (gen != renderGen || historyResult != snapshot || isDestroyed()
@@ -2665,11 +2729,18 @@ public final class HistoryActivity extends Activity {
     }
 
     /** Names the loading phase under the skeleton; no-ops once a newer render replaced this one. */
-    private void setLoadingStage(int gen, int stageResId) {
+    private void setLoadingStage(int gen, int uiGen, int stageResId) {
         runOnUiThread(() -> {
-            if (gen != renderGen || isDestroyed() || isFinishing()) return;
+            if (gen != renderGen || lifecycleStale(uiGen)
+                    || isDestroyed() || isFinishing()) return;
             if (loadingStage != null) loadingStage.setText(stageResId);
         });
+    }
+
+    /** The first render starts in onCreate before onResume assigns its first UI generation. */
+    private boolean lifecycleStale(int uiGen) {
+        return (!historyResumed && uiGen != 0)
+            || (uiGen != historyUiGen && !(uiGen == 0 && historyResumed));
     }
 
     /** A rounded placeholder bar, in the same neutral the real cards use. Its size comes from
@@ -4665,18 +4736,23 @@ public final class HistoryActivity extends Activity {
                 return;
             }
             refreshing = true;
+            final int uiGen = historyUiGen;
+            final Context app = getApplicationContext();
             new Thread(() -> {
                 try {
-                    final Context app = getContext().getApplicationContext();
                     BalanceData.scanSms(app, BalanceData.read(app));
                     BalanceWidgetProvider.push(app);
-                    BalanceData.scanHistory(HistoryActivity.this);
+                    BalanceData.scanHistory(app);
                 } catch (Exception e) {
                     android.util.Log.w("BalanceHistory", "pull-to-refresh scan failed", e);
                 }
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) return;
                     refreshing = false;
+                    if (uiGen != historyUiGen || !historyResumed) {
+                        refreshAgain = false;
+                        return;
+                    }
                     if (refreshAgain) {
                         refreshAgain = false;
                         refreshAll();

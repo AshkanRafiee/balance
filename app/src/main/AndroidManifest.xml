@@ -10,18 +10,18 @@
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <application android:theme="@style/AppTheme" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="false" android:fullBackupContent="false" android:dataExtractionRules="@xml/data_extraction_rules" android:supportsRtl="true">
-        <activity android:name=".MainActivity" android:screenOrientation="portrait" android:exported="true">
+        <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".AboutActivity" android:screenOrientation="portrait" android:exported="false" />
-        <activity android:name=".OnboardingActivity" android:screenOrientation="portrait" android:exported="false" />
-        <activity android:name=".ScanDiagnosticsActivity" android:screenOrientation="portrait" android:exported="false" />
-        <activity android:name=".SenderShareActivity" android:screenOrientation="portrait" android:exported="false" />
-        <activity android:name=".HistoryActivity" android:screenOrientation="portrait" android:exported="false" />
-        <activity android:name=".CommitmentsActivity" android:screenOrientation="portrait" android:exported="false" />
+        <activity android:name=".AboutActivity" android:exported="false" />
+        <activity android:name=".OnboardingActivity" android:exported="false" />
+        <activity android:name=".ScanDiagnosticsActivity" android:exported="false" />
+        <activity android:name=".SenderShareActivity" android:exported="false" />
+        <activity android:name=".HistoryActivity" android:exported="false" />
+        <activity android:name=".CommitmentsActivity" android:exported="false" />
         <receiver android:name=".BalanceWidgetProvider" android:exported="false">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />

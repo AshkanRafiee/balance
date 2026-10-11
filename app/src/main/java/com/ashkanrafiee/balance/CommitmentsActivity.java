@@ -267,6 +267,7 @@ public final class CommitmentsActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        LargeScreenOrientation.apply(this);
         // A draft snapshotted before rotation or process death comes back with the screen; the
         // next unlocked resume reopens it, exactly like a plain pause round-trip.
         if (state != null) pendingEditorDraft = Draft.readFrom(state);

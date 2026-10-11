@@ -25,6 +25,7 @@ import android.widget.TextView;
  *  be opened anytime from the About screen. */
 public final class OnboardingActivity extends Activity {
     private static final int SMS_REQUEST = 11;
+    private static final String STATE_STEP = "onboarding_step";
     /** Result extra set when the introduction actually asked for SMS access (granted or denied), so
      *  the dashboard does not immediately ask again on top of a just-answered prompt. */
     public static final String EXTRA_ASKED_SMS = "asked_sms";
@@ -81,6 +82,8 @@ public final class OnboardingActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        LargeScreenOrientation.apply(this);
+        if (state != null) step = state.getInt(STATE_STEP, PAGE_WELCOME);
         bg = color(R.color.bg);
         panel = color(R.color.panel);
         fg = color(R.color.fg);
@@ -161,7 +164,13 @@ public final class OnboardingActivity extends Activity {
         primary.setBackground(rounded(accent, 14));
         root.addView(primary);
 
-        showStep(PAGE_WELCOME);
+        showStep(step);
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        outState.putInt(STATE_STEP, step);
+        super.onSaveInstanceState(outState);
     }
 
     private void showStep(int s) {

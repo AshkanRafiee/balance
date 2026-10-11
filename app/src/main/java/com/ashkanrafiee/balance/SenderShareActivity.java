@@ -34,6 +34,9 @@ public final class SenderShareActivity extends Activity {
     static final String EXTRA_BANK = "bank";
     static final String EXTRA_MESSAGES = "messages";
     static final String MAILTO = "balance.plausible268@passmail.net";
+    private static final String STATE_MESSAGES = "sender_share_messages";
+    private static final String STATE_ISSUES = "sender_share_issues";
+    private static final String STATE_ALL_CHECKED = "sender_share_all_checked";
 
     private static final String TAG = "SenderShare";
 
@@ -52,6 +55,9 @@ public final class SenderShareActivity extends Activity {
     private TextView select, copy, send;
     private Runnable clearClipRunnable;
     private boolean allChecked = false;
+    private boolean[] restoredMessages;
+    private boolean[] restoredIssues;
+    private boolean restoredAllChecked;
 
     int color(int res) {
         return getResources().getColor(res, getTheme());
@@ -90,6 +96,12 @@ public final class SenderShareActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        LargeScreenOrientation.apply(this);
+        if (state != null) {
+            restoredMessages = state.getBooleanArray(STATE_MESSAGES);
+            restoredIssues = state.getBooleanArray(STATE_ISSUES);
+            restoredAllChecked = state.getBoolean(STATE_ALL_CHECKED, false);
+        }
         sender = getIntent().getStringExtra(EXTRA_SENDER);
         if (sender == null) sender = "";
         bank = getIntent().getStringExtra(EXTRA_BANK);
@@ -167,6 +179,37 @@ public final class SenderShareActivity extends Activity {
         messagesCard();
         body.addView(privacyNote(), margin(18, 14, 18, 0));
         root.addView(actionBar(), margin(0, 14, 0, 0));
+        restoreSelection();
+    }
+
+    @Override
+    protected void onSaveInstanceState(android.os.Bundle outState) {
+        outState.putBooleanArray(STATE_MESSAGES, checked(checks));
+        outState.putBooleanArray(STATE_ISSUES, checked(issueChecks));
+        outState.putBoolean(STATE_ALL_CHECKED, allChecked);
+        super.onSaveInstanceState(outState);
+    }
+
+    private boolean[] checked(List<CheckBox> boxes) {
+        boolean[] values = new boolean[boxes.size()];
+        for (int i = 0; i < boxes.size(); i++) values[i] = boxes.get(i).isChecked();
+        return values;
+    }
+
+    private void restoreSelection() {
+        if (restoredMessages == null && restoredIssues == null) return;
+        if (restoredMessages != null) {
+            for (int i = 0; i < checks.size() && i < restoredMessages.length; i++)
+                checks.get(i).setChecked(restoredMessages[i]);
+        }
+        if (restoredIssues != null) {
+            for (int i = 0; i < issueChecks.size() && i < restoredIssues.length; i++)
+                issueChecks.get(i).setChecked(restoredIssues[i]);
+        }
+        allChecked = restoredAllChecked;
+        if (select != null) select.setText(getString(allChecked
+            ? R.string.sender_share_select_none : R.string.sender_share_select_all));
+        updateButtons();
     }
 
     /** What the user believes is wrong with this sender, used to point the maintainer at the

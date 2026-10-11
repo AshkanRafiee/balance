@@ -82,6 +82,7 @@ public final class AboutActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        LargeScreenOrientation.apply(this);
         bg = color(R.color.bg);
         card = color(R.color.panel);
         muted = color(R.color.muted);

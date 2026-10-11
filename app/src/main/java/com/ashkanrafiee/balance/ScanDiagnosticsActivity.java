@@ -2,6 +2,7 @@ package com.ashkanrafiee.balance;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AppOpsManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -37,6 +38,7 @@ public final class ScanDiagnosticsActivity extends Activity {
     private LockOverlay lockOverlay;
     private LinearLayout body;
     private boolean permissionCardShown;
+    private boolean restrictedMessagesUnavailable;
 
     int color(int res) {
         return getResources().getColor(res, getTheme());
@@ -87,6 +89,7 @@ public final class ScanDiagnosticsActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        LargeScreenOrientation.apply(this);
         bg = color(R.color.bg);
         card = color(R.color.panel);
         muted = color(R.color.muted);
@@ -155,6 +158,7 @@ public final class ScanDiagnosticsActivity extends Activity {
 
     private void startReading() {
         permissionCardShown = false;
+        restrictedMessagesUnavailable = restrictedMessagesUnavailable();
         body.removeAllViews();
         TextView reading = text(getString(R.string.scan_diag_reading), 14, muted);
         reading.setGravity(Gravity.CENTER);
@@ -189,12 +193,20 @@ public final class ScanDiagnosticsActivity extends Activity {
     }
 
     private void render(ScanDiagnostics.Summary s) {
+        if (restrictedMessagesUnavailable) {
+            restrictedMessagesCard();
+        }
         summaryCard(s);
         recognizedCard(s);
         if (s.unparsedSenders.isEmpty() && s.unknownSenders.isEmpty()) {
-            body.addView(section(s.messages == 0
-                ? getString(R.string.scan_diag_none_skipped)
-                : getString(R.string.scan_diag_all_recognized)), margin(0, 12, 0, 0));
+            int message = s.messages == 0
+                ? (restrictedMessagesUnavailable
+                    ? R.string.scan_diag_none_skipped_restricted
+                    : R.string.scan_diag_none_skipped)
+                : (restrictedMessagesUnavailable
+                    ? R.string.scan_diag_all_recognized_restricted
+                    : R.string.scan_diag_all_recognized);
+            body.addView(section(getString(message)), margin(0, 12, 0, 0));
             return;
         }
         unparsedCard(s);
@@ -239,8 +251,31 @@ public final class ScanDiagnosticsActivity extends Activity {
         TextView v = text(count(s.parsedMessages), 26, fg);
         v.setTypeface(Fonts.text(v.getContext()), Typeface.BOLD);
         box.addView(v);
-        box.addView(text(getString(R.string.scan_diag_summary, s.messages, s.unparsedMessages()), 12, muted));
+        box.addView(text(getString(restrictedMessagesUnavailable
+            ? R.string.scan_diag_summary_restricted : R.string.scan_diag_summary,
+            s.messages, s.unparsedMessages()), 12, muted));
         body.addView(box, margin(0, 0, 0, 14));
+    }
+
+    private void restrictedMessagesCard() {
+        LinearLayout box = cardBox();
+        box.addView(section(getString(R.string.scan_diag_restricted_messages)),
+            margin(2, 0, 2, 0));
+        body.addView(box, margin(0, 0, 0, 12));
+    }
+
+    /** Android 17 filters restricted telephony rows before they reach ordinary SMS readers. */
+    private boolean restrictedMessagesUnavailable() {
+        if (android.os.Build.VERSION.SDK_INT < 37) return false;
+        try {
+            AppOpsManager appOps = (AppOpsManager) getSystemService(Context.APP_OPS_SERVICE);
+            if (appOps == null) return false;
+            return appOps.checkOpNoThrow("android:read_restricted_messages",
+                android.os.Process.myUid(), getPackageName()) != AppOpsManager.MODE_ALLOWED;
+        } catch (RuntimeException e) {
+            Log.w(TAG, "restricted SMS access check failed", e);
+            return false;
+        }
     }
 
     /** Known-bank senders whose message layout did not parse. These are easy to miss — a supported
