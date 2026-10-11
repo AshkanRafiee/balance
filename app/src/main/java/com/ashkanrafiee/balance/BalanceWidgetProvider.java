@@ -9,6 +9,9 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.drawable.Drawable;
 import android.os.SystemClock;
 import android.util.Log;
 import android.view.View;
@@ -30,11 +33,14 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     /** The only releases that minted the repeating alarm at REQ_ALARM + versionCode * 1000. */
     private static final int[] LEGACY_ALARM_VERSION_CODES = {10400, 10401};
     private static final long MIN_SPIN_DURATION = 700L;
+    private static final long REFRESH_FRAME_INTERVAL = 80L;
+    private static final int REFRESH_FRAME_COUNT = 8;
+    private static final int MAX_REFRESH_FRAME_SIZE = 128;
     private static final AtomicBoolean REFRESHING = new AtomicBoolean(false);
-    private static volatile float spin;
-    /** Widget frame cached while a scan is running so a configuration update cannot be overwritten
-     *  by the scan completion's stale frame. */
-    private static volatile RemoteViews spinBase;
+    /** Serializes full renders and icon-only updates, especially when replacing a locked layout. */
+    private static final Object WIDGET_UPDATE_LOCK = new Object();
+    /** Guarded by WIDGET_UPDATE_LOCK; a lock or launcher failure stops animation for this refresh. */
+    private static boolean refreshAnimation;
 
     private static Context appContext(Context context) {
         Context app = context.getApplicationContext();
@@ -53,9 +59,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
 
     /** Re-scans SMS on a worker thread while spinning the refresh icon, then renders the final widget
      *  without allowing a store, worker, or launcher failure to escape its boundary. While the app
-     *  lock is enabled the widget does not rescan and shows the locked state instead. The refresh
-     *  icon deliberately stays static: launcher RemoteViews do not consistently permit reflective
-     *  float rotation across Android versions. */
+     *  lock is enabled the widget does not rescan and shows the locked state instead. */
     private static void refreshData(Context context) {
         boolean refreshing = false;
         try {
@@ -72,9 +76,17 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
             new Thread(() -> {
                 try {
                     long start = SystemClock.uptimeMillis();
-                    // Build before starting the scan: a rendering failure must not leave an
-                    // untracked scan behind when the outer worker releases REFRESHING.
-                    spinBase = buildViews(app);
+                    synchronized (WIDGET_UPDATE_LOCK) {
+                        refreshAnimation = true;
+                        // Partial updates need a full render first; ticks never rebuild balances.
+                        updateAll(app);
+                    }
+                    Bitmap[] frames = null;
+                    try {
+                        frames = refreshFrames(app);
+                    } catch (Exception e) {
+                        Log.w(TAG, "widget refresh frames unavailable");
+                    }
                     AtomicBoolean done = new AtomicBoolean(false);
                     new Thread(() -> {
                         try {
@@ -86,28 +98,37 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
                             done.set(true);
                         }
                     }, "balance-scan").start();
-                    while (!done.get()) SystemClock.sleep(60);
-                    while (SystemClock.uptimeMillis() - start < MIN_SPIN_DURATION)
-                        SystemClock.sleep(40);
+                    int frame = 0;
+                    boolean animating = frames != null;
+                    while (!done.get() || SystemClock.uptimeMillis() - start < MIN_SPIN_DURATION) {
+                        // Animation failures must not release single-flight while the scan runs.
+                        if (animating) {
+                            animating = applyRefreshFrame(app, frames[frame]);
+                            frame = (frame + 1) % frames.length;
+                        }
+                        SystemClock.sleep(REFRESH_FRAME_INTERVAL);
+                    }
                 } catch (Exception e) {
                     Log.w(TAG, "widget refresh failed");
                 } finally {
                     // Do this even when building RemoteViews or talking to AppWidgetManager failed.
-                    spin = 0f;
-                    spinBase = null;
-                    try {
-                        updateAll(app);
-                    } finally {
-                        REFRESHING.set(false);
+                    synchronized (WIDGET_UPDATE_LOCK) {
+                        refreshAnimation = false;
+                        try {
+                            updateAll(app);
+                        } finally {
+                            REFRESHING.set(false);
+                        }
                     }
                 }
             }, "balance-refresh").start();
         } catch (Exception e) {
             Log.w(TAG, "widget refresh could not start");
             if (refreshing) {
-                spin = 0f;
-                spinBase = null;
-                REFRESHING.set(false);
+                synchronized (WIDGET_UPDATE_LOCK) {
+                    refreshAnimation = false;
+                    REFRESHING.set(false);
+                }
             }
             updateAll(context);
         }
@@ -119,23 +140,71 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     }
 
     static void updateAll(Context context) {
-        try {
-            AppWidgetManager manager = AppWidgetManager.getInstance(context);
-            int[] ids = manager.getAppWidgetIds(new ComponentName(context, BalanceWidgetProvider.class));
-            if (ids.length == 0) return;
-            RemoteViews views = buildViews(context);
-            boolean locked = widgetLocked(context);
-            if (locked) views = lockedViews(context);
-            // While a scan is spinning, applySpin re-pushes spinBase every tick, so a frame cached
-            // before a language, theme or currency change would overwrite the one just rendered and
-            // hold the old direction and the old strings until the scan ended. Handing the animation
-            // the fresh frame keeps it spinning and keeps the change.
-            if (spinBase != null) spinBase = views;
-            // Push the safe frame first, even if notifying the launcher fails afterwards.
-            for (int id : ids) manager.updateAppWidget(id, views);
-            if (!locked) manager.notifyAppWidgetViewDataChanged(ids, R.id.widget_list);
-        } catch (Exception e) {
-            Log.w(TAG, "widget update failed");
+        synchronized (WIDGET_UPDATE_LOCK) {
+            try {
+                AppWidgetManager manager = AppWidgetManager.getInstance(context);
+                int[] ids = manager.getAppWidgetIds(new ComponentName(context, BalanceWidgetProvider.class));
+                if (ids.length == 0) return;
+                RemoteViews views = buildViews(context);
+                boolean locked = widgetLocked(context);
+                if (locked) {
+                    views = lockedViews(context);
+                    // Never target the refresh button after a locked layout replaces the normal one.
+                    refreshAnimation = false;
+                }
+                // Push the safe frame first, even if notifying the launcher fails afterwards.
+                for (int id : ids) manager.updateAppWidget(id, views);
+                if (!locked) manager.notifyAppWidgetViewDataChanged(ids, R.id.widget_list);
+            } catch (Exception e) {
+                refreshAnimation = false;
+                Log.w(TAG, "widget update failed");
+            }
+        }
+    }
+
+    /** One bounded, refresh-local cache: at most 512 KiB of pixels, independent of scan duration. */
+    static Bitmap[] refreshFrames(Context context) {
+        Drawable icon = context.getDrawable(R.drawable.ic_refresh);
+        int size = Math.max(1, Math.min(MAX_REFRESH_FRAME_SIZE,
+            Math.max(icon.getIntrinsicWidth(), icon.getIntrinsicHeight())));
+        icon.setBounds(0, 0, size, size);
+        Bitmap[] frames = new Bitmap[REFRESH_FRAME_COUNT];
+        for (int i = 0; i < frames.length; i++) {
+            Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(bitmap);
+            canvas.rotate(i * 360f / frames.length, size / 2f, size / 2f);
+            icon.draw(canvas);
+            frames[i] = bitmap;
+        }
+        return frames;
+    }
+
+    /** A fresh icon-only action list avoids accumulating bitmaps or replaying stale balance data. */
+    static RemoteViews refreshFrame(Context context, Bitmap bitmap) {
+        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_balance);
+        views.setImageViewBitmap(R.id.widget_refresh, bitmap);
+        return views;
+    }
+
+    private static boolean applyRefreshFrame(Context context, Bitmap bitmap) {
+        synchronized (WIDGET_UPDATE_LOCK) {
+            if (!refreshAnimation) return false;
+            try {
+                if (widgetLocked(context)) {
+                    refreshAnimation = false;
+                    updateAll(context);
+                    return false;
+                }
+                AppWidgetManager manager = AppWidgetManager.getInstance(context);
+                int[] ids = manager.getAppWidgetIds(new ComponentName(context, BalanceWidgetProvider.class));
+                if (ids.length == 0) return false;
+                manager.partiallyUpdateAppWidget(ids, refreshFrame(context, bitmap));
+                return true;
+            } catch (Exception e) {
+                refreshAnimation = false;
+                Log.w(TAG, "widget refresh frame failed");
+                return false;
+            }
         }
     }
 
@@ -171,6 +240,8 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         views.setTextViewText(R.id.widget_unit, CurrencyHelper.label(c));
         views.setImageViewResource(R.id.widget_mask,
             hidden ? R.drawable.ic_visibility_off : R.drawable.ic_visibility);
+        // Explicitly restore the drawable when the launcher reapplies the animated layout.
+        views.setImageViewResource(R.id.widget_refresh, R.drawable.ic_refresh);
         views.setContentDescription(R.id.widget_mask, c.getString(R.string.widget_action_mask));
         views.setContentDescription(R.id.widget_refresh, c.getString(R.string.widget_action_refresh));
         views.setOnClickPendingIntent(R.id.widget_root, openApp(c));
@@ -195,6 +266,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         views.setViewVisibility(R.id.widget_hint, View.VISIBLE);
         views.setTextViewText(R.id.widget_hint, c.getString(R.string.status_sms_unreadable));
         views.setImageViewResource(R.id.widget_mask, R.drawable.ic_visibility);
+        views.setImageViewResource(R.id.widget_refresh, R.drawable.ic_refresh);
         views.setContentDescription(R.id.widget_mask, c.getString(R.string.widget_action_mask));
         views.setContentDescription(R.id.widget_refresh, c.getString(R.string.widget_action_refresh));
         views.setOnClickPendingIntent(R.id.widget_root, openApp(c));

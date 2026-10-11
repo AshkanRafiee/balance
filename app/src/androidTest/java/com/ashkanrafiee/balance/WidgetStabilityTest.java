@@ -1,10 +1,12 @@
 package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.view.View;
 import android.widget.RemoteViews;
 import android.widget.TextView;
@@ -37,6 +39,15 @@ public class WidgetStabilityTest {
         LockManager.resetSessionForTest();
         BalanceData.reset(context, true);
         DataGeneration.clearForTests(context);
+    }
+
+    @Test public void refreshFrames_areBoundedAndRotated() {
+        Bitmap[] frames = BalanceWidgetProvider.refreshFrames(context);
+        assertEquals(8, frames.length);
+        assertTrue(frames[0].getWidth() <= 128);
+        assertTrue(frames[0].getHeight() <= 128);
+        assertFalse("successive refresh frames should rotate the icon",
+            frames[0].sameAs(frames[1]));
     }
 
     @Test public void corruptEncryptedStore_summaryShowsUnknownAndReadableError() throws Exception {

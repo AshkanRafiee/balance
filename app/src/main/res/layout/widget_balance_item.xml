@@ -28,6 +28,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:ellipsize="end"
+            android:gravity="center_vertical|start"
             android:maxLines="1"
             android:textColor="@color/bank_name"
             android:textSize="14sp" />
@@ -37,6 +38,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:ellipsize="middle"
+            android:gravity="center_vertical|start"
             android:maxLines="1"
             android:textColor="@color/muted"
             android:textSize="11sp" />
@@ -46,6 +48,7 @@
         android:id="@+id/bank_amount"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:gravity="center_vertical|end"
         android:paddingStart="8dp"
         android:textColor="@color/muted"
         android:textSize="17sp"
