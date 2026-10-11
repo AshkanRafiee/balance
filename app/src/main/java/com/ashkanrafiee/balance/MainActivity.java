@@ -1709,11 +1709,19 @@ public class MainActivity extends Activity {
             invalidate();
         }
 
-        /** Reloads the saved balances (e.g. after a restore) without re-scanning SMS. */
+        /** Reloads the saved balances (e.g. after a restore) without re-scanning SMS.
+         *  A corrupt store must show the unreadable state, never crash the screen. */
         void loadSaved() {
             invalidateCommitmentSummary();
-            applySaved(BalanceData.read(MainActivity.this), MainActivity.this,
-                getString(R.string.status_loaded_from_saved));
+            LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+            String status = getString(R.string.status_loaded_from_saved);
+            try {
+                saved = BalanceData.read(MainActivity.this);
+            } catch (Exception e) {
+                android.util.Log.w("Balance", "saved balances unreadable", e);
+                status = getString(R.string.status_sms_unreadable);
+            }
+            applySaved(saved, MainActivity.this, status);
         }
 
         void invalidateCommitmentSummary() {

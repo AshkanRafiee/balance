@@ -63,7 +63,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         try {
             return LockManager.isEnabled(appContext(context));
         } catch (Exception e) {
-            Log.w(TAG, "widget lock state unreadable");
+            Log.w(TAG, "widget lock state unreadable", e);
             return true;
         }
     }
@@ -96,7 +96,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
                     try {
                         frames = refreshFrames(app);
                     } catch (Exception e) {
-                        Log.w(TAG, "widget refresh frames unavailable");
+                        Log.w(TAG, "widget refresh frames unavailable", e);
                     }
                     AtomicBoolean done = new AtomicBoolean(false);
                     new Thread(() -> {
@@ -104,7 +104,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
                             if (!widgetLocked(app))
                                 BalanceData.scanSms(app, BalanceData.read(app));
                         } catch (Exception e) {
-                            Log.w(TAG, "widget scan failed");
+                            Log.w(TAG, "widget scan failed", e);
                         } finally {
                             done.set(true);
                         }
@@ -120,7 +120,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
                         SystemClock.sleep(REFRESH_FRAME_INTERVAL);
                     }
                 } catch (Exception e) {
-                    Log.w(TAG, "widget refresh failed");
+                    Log.w(TAG, "widget refresh failed", e);
                 } finally {
                     // Do this even when building RemoteViews or talking to AppWidgetManager failed.
                     synchronized (WIDGET_UPDATE_LOCK) {
@@ -134,7 +134,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
                 }
             }, "balance-refresh").start();
         } catch (Exception e) {
-            Log.w(TAG, "widget refresh could not start");
+            Log.w(TAG, "widget refresh could not start", e);
             if (refreshing) {
                 synchronized (WIDGET_UPDATE_LOCK) {
                     refreshAnimation = false;
@@ -168,7 +168,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
                 if (!locked) manager.notifyAppWidgetViewDataChanged(ids, R.id.widget_list);
             } catch (Exception e) {
                 refreshAnimation = false;
-                Log.w(TAG, "widget update failed");
+                Log.w(TAG, "widget update failed", e);
             }
         }
     }
@@ -188,7 +188,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
                 for (int id : ids) manager.updateAppWidget(id, views);
             } catch (Exception e) {
                 refreshAnimation = false;
-                Log.w(TAG, "widget update failed");
+                Log.w(TAG, "widget update failed", e);
             }
         }
     }
@@ -233,7 +233,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
                 return true;
             } catch (Exception e) {
                 refreshAnimation = false;
-                Log.w(TAG, "widget refresh frame failed");
+                Log.w(TAG, "widget refresh frame failed", e);
                 return false;
             }
         }
@@ -256,7 +256,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
             for (java.util.Map.Entry<String, Bank> e : BalanceData.read(c).entrySet())
                 if (!BalanceData.isExcluded(c, e.getKey())) total += e.getValue().amount;
         } catch (Exception e) {
-            Log.w(TAG, "widget balance store unreadable");
+            Log.w(TAG, "widget balance store unreadable", e);
             return unreadableViews(c);
         }
         RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance);
@@ -381,7 +381,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
             am.setRepeating(AlarmManager.RTC, System.currentTimeMillis() + REFRESH_INTERVAL,
                 REFRESH_INTERVAL, alarmPending(context));
         } catch (Exception e) {
-            Log.w(TAG, "widget alarm schedule failed");
+            Log.w(TAG, "widget alarm schedule failed", e);
         }
     }
 
@@ -407,7 +407,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
             if (am == null) return;
             am.cancel(alarmPending(context));
         } catch (Exception e) {
-            Log.w(TAG, "widget alarm cancel failed");
+            Log.w(TAG, "widget alarm cancel failed", e);
         }
     }
 
@@ -417,7 +417,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
             super.onEnabled(context);
             scheduleAlarm(context);
         } catch (Exception e) {
-            Log.w(TAG, "widget enable failed");
+            Log.w(TAG, "widget enable failed", e);
         }
     }
 
@@ -427,7 +427,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
             super.onDisabled(context);
             cancelAlarm(context);
         } catch (Exception e) {
-            Log.w(TAG, "widget disable failed");
+            Log.w(TAG, "widget disable failed", e);
         }
     }
 
@@ -437,7 +437,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
             super.onDeleted(context, appWidgetIds);
             if (!hasWidgets(context)) cancelAlarm(context);
         } catch (Exception e) {
-            Log.w(TAG, "widget delete failed");
+            Log.w(TAG, "widget delete failed", e);
         }
     }
 
@@ -447,7 +447,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
             scheduleAlarm(context);
             refreshData(context);
         } catch (Exception e) {
-            Log.w(TAG, "widget update callback failed");
+            Log.w(TAG, "widget update callback failed", e);
         }
     }
 
@@ -509,7 +509,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
                 updateAll(context);
             }
         } catch (Exception e) {
-            Log.w(TAG, "widget receiver failed");
+            Log.w(TAG, "widget receiver failed", e);
             updateAll(context);
         }
     }

@@ -338,12 +338,14 @@ final class CsvExport {
             guardFormula(reason == null ? "" : reason),
             guardFormula(channel == null ? "" : channel),
             KIND_MOVEMENT,
-            tagJson
+            // Always a "" or "[...]" array today (never a formula trigger), but guard the
+            // invariant so a future serialization change cannot turn this cell into code.
+            guardFormula(tagJson)
         };
     }
 
     /** Same movement layout as {@link #cells(Context, Transaction, Text, boolean, Calendar,
-     * SimpleDateFormat, SimpleDateFormat)}, resolved through one metadata lookup at a time. */
+     *  SimpleDateFormat, SimpleDateFormat)}, resolved through one metadata lookup at a time. */
     private static String[] cellsWithLookup(Context context, Transaction t, TextLookup text,
             boolean iran, Calendar calendar, SimpleDateFormat time, SimpleDateFormat iso)
             throws Exception {
@@ -371,7 +373,7 @@ final class CsvExport {
             guardFormula(reason == null ? "" : reason),
             guardFormula(channel == null ? "" : channel),
             KIND_MOVEMENT,
-            tagJson
+            guardFormula(tagJson)
         };
     }
 

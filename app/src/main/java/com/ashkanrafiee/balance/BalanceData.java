@@ -75,6 +75,14 @@ final class BalanceData {
     static final String KEY_HISTORY_RAW_THROUGH = "history_raw_through";
     static final String KEY_HISTORY_ID = "history_id";
     static final String KEY_HISTORY_RULES_VERSION = "history_rules_version";
+    /** Consecutive source-evidence failures per scanner. While set, the scan watermark is held
+     *  back so the evidence batch is retried; past the retry budget below the core watermark
+     *  advances anyway so a permanently broken evidence store cannot make every refresh redo a
+     *  full-cost scan forever. */
+    static final String KEY_SOURCE_FAILURE_BALANCE = "source_failures";
+    static final String KEY_SOURCE_FAILURE_HISTORY = "source_failures_history";
+    /** Source-evidence retries before the core watermark advances anyway (see above). */
+    static final int MAX_SOURCE_FAILURE_RETRIES = 3;
     /** Which schema generation of the stored history this build writes. Bumped when existing
      *  entries have to be rebuilt from the inbox to acquire a datum older entries lack — today the
      *  balance each movement reported ({@link Transaction#balance}), without which {@link Residual}
@@ -941,15 +949,35 @@ final class BalanceData {
         CommitmentReminders.scheduleAll(context);
     }
 
-    /** Makes every user-visible data projection wait for an interrupted reset to finish. */
+    /** Makes every user-visible data projection wait for an interrupted reset to finish. A
+     *  full reset does seconds of store and file I/O, so it never runs on the UI thread: a
+     *  caller there fails fast with its transient-failure state instead of hanging, and the
+     *  next worker scan performs the recovery and notifies its listeners. */
     static void ensureResetComplete(Context context) {
-        boolean pending;
         synchronized (BalanceData.class) {
             SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
-            pending = prefs.getBoolean(KEY_RESET_IN_PROGRESS, false);
-            if (pending && !recoverReset(context))
+            if (!prefs.getBoolean(KEY_RESET_IN_PROGRESS, false)) return;
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper())
+                throw new IllegalStateException("reset recovery pending");
+            if (!recoverReset(context))
                 throw new IllegalStateException("reset recovery failed");
         }
+    }
+
+    /** Whether a failed source-evidence batch should hold the scan watermark for a retry. The
+     *  first few consecutive failures retry (transient store hiccups must not lose evidence);
+     *  past the budget the core watermark advances anyway so a permanently broken evidence
+     *  store degrades to missing parser evidence instead of redoing full scans forever. A
+     *  success clears the streak. */
+    private static boolean holdForSourceRetry(SharedPreferences prefs, String key,
+            boolean sourceOk) {
+        if (sourceOk) {
+            if (prefs.getInt(key, 0) != 0) prefs.edit().remove(key).apply();
+            return false;
+        }
+        int streak = prefs.getInt(key, 0) + 1;
+        prefs.edit().putInt(key, streak).apply();
+        return streak <= MAX_SOURCE_FAILURE_RETRIES;
     }
 
     /** Retries cleanup before either scan reads its stores. A full history scan alone is not
@@ -1013,6 +1041,8 @@ final class BalanceData {
             .remove(KEY_HISTORY_THROUGH)
             .remove(KEY_HISTORY_RAW_THROUGH)
             .remove(KEY_HISTORY_ID)
+            .remove(KEY_SOURCE_FAILURE_BALANCE)
+            .remove(KEY_SOURCE_FAILURE_HISTORY)
             .remove(KEY_HISTORY_RULES_VERSION)
             .remove(KEY_HISTORY_SCHEMA)
             .remove(KEY_EXCLUDED)
@@ -1449,7 +1479,8 @@ final class BalanceData {
             }
             windows.put(key, pruneWindow(merged));
         }
-        boolean sourceCaptureSucceeded = captureSources(context, sourceRows, BankRules.VERSION);
+        boolean sourceOk = captureSources(context, sourceRows, BankRules.VERSION);
+        boolean holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_BALANCE, sourceOk);
         if (progress != null) progress.stage(R.string.scan_stage_saving);
         if (!write(context, current)) return 0;
         if (!saveRecentMovements(context, windows)) return 0;
@@ -1460,7 +1491,7 @@ final class BalanceData {
         boolean emptyFullScan = full && rowsByKey.isEmpty() && !current.isEmpty();
         if (!emptyFullScan) {
             SharedPreferences.Editor editor = prefs.edit().putInt(KEY_RULES_VERSION, rulesVersion);
-            boolean cursorAdvanced = sourceCaptureSucceeded
+            boolean cursorAdvanced = !holdWatermark
                 && (newestRaw > cursorDate
                     || (newestRaw == cursorDate && newestId > cursorId));
             if (cursorAdvanced) {
@@ -1468,7 +1499,7 @@ final class BalanceData {
                     .putLong(KEY_SCANNED_RAW_THROUGH, newestRaw)
                     .putLong(KEY_SCANNED_ID, newestId);
             }
-            if (!sourceCaptureSucceeded) editor.remove(KEY_RULES_VERSION);
+            if (holdWatermark) editor.remove(KEY_RULES_VERSION);
             editor.apply();
         }
         saved.clear();
@@ -1559,6 +1590,7 @@ final class BalanceData {
         int added = 0;
         boolean failed = false;
         boolean textChanged = false;
+        boolean holdWatermark = false;
         try {
             List<Transaction> stored = null;
             SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
@@ -1601,7 +1633,6 @@ final class BalanceData {
             String[] args = selection != null ? new String[]{Long.toString(cursorDate),
                 Long.toString(cursorDate), Long.toString(cursorId)} : null;
             Map<String, Long> lastBalance = null;
-            boolean sourceCaptureSucceeded = true;
             try (Cursor cursor = context.getContentResolver().query(
                 Telephony.Sms.Inbox.CONTENT_URI,
                 new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE,
@@ -1640,8 +1671,8 @@ final class BalanceData {
                         MessageDate.eventTime(body, arrival, BankRules.calendar(bank)), evidence});
                 }
                 if (rows.isEmpty())
-                    sourceCaptureSucceeded = captureSources(context, sourceRows,
-                        HISTORY_RULES_VERSION);
+                    holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_HISTORY,
+                        captureSources(context, sourceRows, HISTORY_RULES_VERSION));
                 if (rows.isEmpty()) {
                     if (full) {
                         if (!saveRecentMovements(context, new HashMap<>())
@@ -1656,14 +1687,14 @@ final class BalanceData {
                         emptyEditor.putInt(KEY_HISTORY_RULES_VERSION, HISTORY_RULES_VERSION);
                         emptyEditor.putInt(KEY_HISTORY_SCHEMA, HISTORY_SCHEMA);
                     }
-                    if (sourceCaptureSucceeded && newest > 0)
+                    if (!holdWatermark && newest > 0)
                         emptyEditor.putLong(KEY_HISTORY_THROUGH, newest);
-                    if (sourceCaptureSucceeded && (newestRaw > cursorDate
+                    if (!holdWatermark && (newestRaw > cursorDate
                             || (newestRaw == cursorDate && newestId > cursorId))) {
                         emptyEditor.putLong(KEY_HISTORY_RAW_THROUGH, newestRaw)
                             .putLong(KEY_HISTORY_ID, newestId);
                     }
-                    if (!sourceCaptureSucceeded) {
+                    if (holdWatermark) {
                         emptyEditor.remove(KEY_HISTORY_RULES_VERSION)
                             .remove(KEY_HISTORY_SCHEMA);
                     }
@@ -1789,7 +1820,8 @@ final class BalanceData {
                     long bal = extract(body);
                     if (bal >= 0) lastBalance.put(key, bal);
                 }
-                sourceCaptureSucceeded = captureSources(context, sourceRows, HISTORY_RULES_VERSION);
+                holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_HISTORY,
+                    captureSources(context, sourceRows, HISTORY_RULES_VERSION));
                 // Chain banks: keep the balance chain end correct when the true-newest movement was not
                 // among the rows scanned now (a previous scan already committed it), and place fresh
                 // chain members relative to their already-stored siblings when part of the pair was
@@ -1992,13 +2024,13 @@ final class BalanceData {
             // Only commit the rules version and watermark when the scan finished cleanly: marking a
             // full rebuild as done (or advancing past rows that failed) would skip the correction
             // forever until the next manual version bump.
-            if (completed && sourceCaptureSucceeded && full)
+            if (completed && !holdWatermark && full)
                 editor.putInt(KEY_HISTORY_RULES_VERSION, HISTORY_RULES_VERSION);
-            if (completed && sourceCaptureSucceeded && full)
+            if (completed && !holdWatermark && full)
                 editor.putInt(KEY_HISTORY_SCHEMA, HISTORY_SCHEMA);
-            if (completed && sourceCaptureSucceeded && newest > 0)
+            if (completed && !holdWatermark && newest > 0)
                 editor.putLong(KEY_HISTORY_THROUGH, newest);
-            if (completed && sourceCaptureSucceeded && (newestRaw > cursorDate
+            if (completed && !holdWatermark && (newestRaw > cursorDate
                     || (newestRaw == cursorDate && newestId > cursorId))) {
                 editor.putLong(KEY_HISTORY_RAW_THROUGH, newestRaw)
                     .putLong(KEY_HISTORY_ID, newestId);

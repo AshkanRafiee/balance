@@ -756,6 +756,38 @@ public class BalanceScanTest {
         assertEquals(1L, SourceStore.balanceObservationCount(ctx));
     }
 
+    @Test public void persistentSourceFailure_advancesWatermarkAfterRetryBudget() throws Exception {
+        String sender = "5000973189";
+        String body = "\u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000";
+        long arrival = T + 1000;
+        seed(sender, body, arrival);
+        assertNotNull(SourceStore.capture(ctx, sender, body, arrival, BankRules.VERSION));
+
+        android.database.sqlite.SQLiteDatabase db = android.database.sqlite.SQLiteDatabase.openDatabase(
+            DataGeneration.context(ctx).getDatabasePath(SourceStore.DB_NAME).getPath(), null,
+            android.database.sqlite.SQLiteDatabase.OPEN_READWRITE);
+        try {
+            android.content.ContentValues values = new android.content.ContentValues();
+            values.put("payload", "not-an-encrypted-source-row");
+            assertEquals(1, db.update(SourceStore.TABLE, values, "id=?", new String[]{"1"}));
+        } finally {
+            db.close();
+        }
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+        // The first retries hold the watermark so the evidence batch stays eligible.
+        assertEquals(0, BalanceData.scanSms(ctx, saved));
+        assertEquals(0, BalanceData.scanSms(ctx, saved));
+        assertEquals(0, watermark());
+        // Past the budget the core watermark advances anyway: a permanently broken evidence
+        // store must not make every refresh redo a full-cost scan forever.
+        assertEquals(0, BalanceData.scanSms(ctx, saved));
+        assertEquals(arrival, watermark());
+        assertEquals(BankRules.VERSION, storedRulesVersion());
+        assertEquals(1_000_000L, BalanceData.read(ctx).get("Tejarat").amount);
+    }
+
     @Test public void resetWithEmptyInbox_leavesStoreEmptyAndFullScanArmed() throws Exception {
         seed("5000973189", "\u0645\u0648\u062C\u0648\u062F\u06CC: 1,000,000", T + 1000);
         LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();

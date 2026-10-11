@@ -132,7 +132,7 @@ public class BalanceWidgetService extends RemoteViewsService {
             try {
                 banks = widgetBanks(context);
             } catch (Exception e) {
-                Log.w(TAG, "widget dataset load failed");
+                Log.w(TAG, "widget dataset load failed", e);
                 unreadable = true;
             }
         }
@@ -150,8 +150,9 @@ public class BalanceWidgetService extends RemoteViewsService {
                 if (snapshot.isEmpty() || i < 0 || i >= snapshot.size()) return emptyViews(context);
                 return bankViews(context, snapshot.get(i));
             } catch (Exception e) {
-                Log.w(TAG, "widget row build failed");
-                return null;
+                Log.w(TAG, "widget row build failed", e);
+                // A null row is mishandled by some launchers; the error row is always safe.
+                return unreadableViews(context);
             }
         }
 

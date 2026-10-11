@@ -484,6 +484,38 @@ public class HistoryScanTest {
         assertEquals(1L, SourceStore.transactionObservationCount(ctx));
     }
 
+    @Test public void persistentSourceFailure_advancesHistoryWatermarkAfterRetryBudget()
+            throws Exception {
+        String sender = "500095";
+        long arrival = T + 1000;
+        seed(sender, DEPOSIT, arrival);
+        assertNotNull(SourceStore.capture(ctx, sender, DEPOSIT, arrival, BankRules.VERSION));
+
+        android.database.sqlite.SQLiteDatabase db = android.database.sqlite.SQLiteDatabase.openDatabase(
+            DataGeneration.context(ctx).getDatabasePath(SourceStore.DB_NAME).getPath(), null,
+            android.database.sqlite.SQLiteDatabase.OPEN_READWRITE);
+        try {
+            android.content.ContentValues values = new android.content.ContentValues();
+            values.put("payload", "not-an-encrypted-source-row");
+            assertEquals(1, db.update(SourceStore.TABLE, values, "id=?", new String[]{"1"}));
+        } finally {
+            db.close();
+        }
+
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        // The first retries hold the watermark so the evidence batch stays eligible.
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        assertEquals(0, historyWatermark());
+        // Past the budget the core watermark advances anyway instead of redoing full scans
+        // forever; the single stored movement is untouched.
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        assertEquals(arrival, historyWatermark());
+        assertEquals(BalanceData.HISTORY_RULES_VERSION,
+            prefs().getInt(BalanceData.KEY_HISTORY_RULES_VERSION, -1));
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
+    }
+
     // ============================================================
     // Incremental scans
     // ============================================================
