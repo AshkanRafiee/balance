@@ -12,6 +12,7 @@ Features:
 - Automatic updates as bank SMS arrive, plus pull-to-refresh on the bank list or the history screen (all of it, one bank, or one account)
 - A freshness warning: a bank whose last message is older than the window you set is flagged on its card and in the widget
 - Turning SMS access off deletes nothing — everything already read stays on screen, and a strip under the total card offers to grant access again
+- On Android 17, the system may hide restricted SMS from Balance; diagnostics makes clear when its results cover accessible messages only
 - Home-screen widget with the same bank order, totals and masking
 - Transaction history by day, month and year, showing out-of-order messages (a transfer and its fee) in their true order
 - Unaccounted money: when a balance statement changed by more than the messages explain, the difference appears as an amber "Unaccounted" row on the later statement's date and is counted in every total. It is proven by two statements your bank sent
