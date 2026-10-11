@@ -50,6 +50,32 @@ public class WidgetStabilityTest {
             frames[0].sameAs(frames[1]));
     }
 
+    @Test public void widgetMask_masksHeaderTotalAndRows() throws Exception {
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        saved.put("Tejarat", new Bank("Tejarat", 1_000_000L, 1000L, "5000"));
+        assertTrue(BalanceData.write(context, saved));
+
+        BalanceData.setWidgetHidden(context, false);
+        View unmasked = BalanceWidgetProvider.buildViews(context).apply(context, null);
+        assertEquals(CurrencyHelper.amount(context, 1_000_000L),
+            ((TextView) unmasked.findViewById(R.id.widget_total)).getText().toString());
+
+        BalanceData.setWidgetHidden(context, true);
+        try {
+            View masked = BalanceWidgetProvider.buildViews(context).apply(context, null);
+            assertEquals("\u2022\u2022\u2022\u2022\u2022\u2022",
+                ((TextView) masked.findViewById(R.id.widget_total)).getText().toString());
+
+            BalanceWidgetService.Factory factory = new BalanceWidgetService.Factory(context);
+            factory.onDataSetChanged();
+            View row = factory.getViewAt(0).apply(context, null);
+            assertEquals("\u2022\u2022\u2022\u2022\u2022\u2022",
+                ((TextView) row.findViewById(R.id.bank_amount)).getText().toString());
+        } finally {
+            BalanceData.setWidgetHidden(context, false);
+        }
+    }
+
     @Test public void corruptEncryptedStore_summaryShowsUnknownAndReadableError() throws Exception {
         LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
         saved.put("Tejarat", new Bank("Tejarat", 12_345L, 1000L, "5000"));
