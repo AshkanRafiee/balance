@@ -1130,6 +1130,7 @@ public class MainActivity extends Activity {
             }
             int err = error[0];
             runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
                 dismissProgress();
                 if (err != 0) {
                     Toast.makeText(MainActivity.this,
@@ -1195,6 +1196,7 @@ public class MainActivity extends Activity {
             int err = error[0];
             BackupManager.RestoreResult res = result[0];
             runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
                 dismissProgress();
                 if (err != 0) {
                     if (err == R.string.backup_error_password) {
@@ -1231,7 +1233,10 @@ public class MainActivity extends Activity {
     private WorkProgress dialogProgress() {
         return new WorkProgress() {
             @Override public void stage(final int stageResId) {
-                runOnUiThread(() -> updateProgressText(getString(stageResId)));
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    updateProgressText(getString(stageResId));
+                });
             }
 
             @Override public void progress(long done, long total) {
