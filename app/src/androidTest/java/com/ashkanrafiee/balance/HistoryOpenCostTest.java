@@ -63,8 +63,8 @@ public class HistoryOpenCostTest {
         BalanceData.reset(ctx, true);
     }
 
-    /** Movements from the first of this month until today, so they all land in the one month that
-     *  opens by itself. {@code perDay} well past what a single batch used to allow. */
+    /** Movements from the first of this month until today. The first open expands only a bounded
+     * recent-day window; older days remain collapsed until the user opens them. */
     private void seedCurrentMonth(int perDay) {
         Calendar today = Calendar.getInstance();
         Calendar c = (Calendar) today.clone();
@@ -83,7 +83,15 @@ public class HistoryOpenCostTest {
         }
         BalanceData.writeTransactions(ctx, txs);
         seeded = txs.size();
-        expected = txs.size();
+        int firstRecentDay = Math.max(1, today.get(Calendar.DAY_OF_MONTH) - 6);
+        expected = 0;
+        for (Transaction transaction : txs) {
+            Calendar row = Calendar.getInstance();
+            row.setTimeInMillis(transaction.date);
+            if (row.get(Calendar.YEAR) == today.get(Calendar.YEAR)
+                    && row.get(Calendar.MONTH) == today.get(Calendar.MONTH)
+                    && row.get(Calendar.DAY_OF_MONTH) >= firstRecentDay) expected++;
+        }
     }
 
     /** How many movements the seeder wrote. */
@@ -112,14 +120,15 @@ public class HistoryOpenCostTest {
         expected = -1; // only this month is open, so the row count is the test's business
     }
 
-    @Test public void aCrowdedMonthIsBuiltWholeOnOpen() {
-        // The regression: rows were added in batches of a few dozen, so an ordinary open showed part
-        // of this month and the rest arrived only as the user scrolled — which meant every row added
-        // re-measured the whole tree. One open has to build the month, once.
+    @Test public void aCrowdedMonthOpensWithABoundedRecentWindow() {
+        // The regression: a normal open used to request every day of the current month, so a busy
+        // month built a large non-recycled tree before the user could interact with the screen.
         seedCurrentMonth(20);
         long openMs = openAndAwaitRows();
-        assertEquals("a plain open must build every row of the month it opens", expected, clockTimes());
-        assertTrue("a month of " + expected + " movements must open within " + OPEN_BUDGET_MS
+        int initialRows = clockTimes();
+        assertEquals("a plain open must show the bounded recent-day window", expected, initialRows);
+        assertTrue("a plain open must keep older month rows collapsed", initialRows < seeded);
+        assertTrue("a month of " + seeded + " movements must open within " + OPEN_BUDGET_MS
             + "ms, took " + openMs + "ms", openMs < OPEN_BUDGET_MS);
     }
 

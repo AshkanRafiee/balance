@@ -420,6 +420,14 @@ final class TransactionStore {
             if (!allowMissing && !context.getDatabasePath(DB_NAME).exists()
                     && (presence.exists() || prefs.contains(BalanceData.KEY_TRANSACTION_STORE_TOKEN)))
                 throw new IllegalStateException("transaction database is missing");
+            // A read of a genuinely fresh install must stay read-only. Opening SQLite here creates
+            // an empty, uninitialized database; the presence receipt below would then make the next
+            // read report an incomplete store even though there was never any transaction data.
+            if (!write && !context.getDatabasePath(DB_NAME).exists() && !presence.exists()
+                    && !prefs.contains(BalanceData.KEY_TRANSACTION_STORE_TOKEN)) {
+                Legacy fresh = new Legacy(context, prefs);
+                if (!fresh.hasData()) return work.run(null);
+            }
             Legacy legacy = null;
             Legacy cleanupLegacy = write && !migrate ? new Legacy(context, prefs) : null;
             T result;

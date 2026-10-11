@@ -70,6 +70,10 @@ import java.util.concurrent.CountDownLatch;
  * (a ContentObserver, like the main screen), silently re-rendering on completion.
  */
 public final class HistoryActivity extends Activity {
+    /** Keep the first history frame small on older devices; other days remain one tap away. */
+    private static final int INITIAL_EXPANDED_DAY_LIMIT = 7;
+    /** Keep the initial recent pages plus one explicitly opened older day in memory. */
+    private static final int MAX_LOADED_DAY_PAGES = INITIAL_EXPANDED_DAY_LIMIT + 1;
     /** Visible to the instrumented tests so a test can tell an open year from a closed one, and one
      *  year's months from another's, by what is on screen rather than by reading its text. */
     static final String MONTH_TAG = "history_month";
@@ -1668,7 +1672,7 @@ public final class HistoryActivity extends Activity {
     /** The current aggregate snapshot; its encrypted timeline serves lazy day-page requests. */
     private HistoryReader.Result historyResult;
 
-    /** At most one day's row page is kept in the activity heap. The disk timeline retains the rest. */
+    /** A small bounded set of day pages is kept in the activity heap. The disk timeline retains the rest. */
     private final Map<String, HistoryReader.DayRows> loadedDayPages = new java.util.LinkedHashMap<>();
 
     /** The unaccounted money on screen for the current data, newest first. Drives the explainer
@@ -1717,7 +1721,8 @@ public final class HistoryActivity extends Activity {
             for (MonthGroup m : y.months) {
                 if (m.month != now.month) continue;
                 for (DayGroup d : m.days) {
-                    expandedDays.add(d.key());
+                    if (d.date.day >= Math.max(1, now.day - INITIAL_EXPANDED_DAY_LIMIT + 1))
+                        expandedDays.add(d.key());
                 }
             }
         }
@@ -2035,6 +2040,7 @@ public final class HistoryActivity extends Activity {
         final Set<String> savedPreSearchDays = preSearchDays == null ? null
             : new java.util.LinkedHashSet<>(preSearchDays);
                 final boolean expandAll = BalanceData.getExpandAllHistory(this);
+        final boolean hadRenderedResult = historyResult != null;
         final WorkProgress renderProgress = new WorkProgress() {
             @Override public void stage(int stageResId) {
                 setLoadingStage(gen, stageResId);
@@ -2046,7 +2052,10 @@ public final class HistoryActivity extends Activity {
         // Replace stale content with the loading shape up front so a slow search or a large
         // history reads as work in progress (with its current phase underneath) rather than a
         // frozen screen. The install path below swaps the finished tree back in one frame.
-        showSkeleton();
+        // Keep a successful render visible while a refresh is being read. The previous behavior
+        // replaced it with a skeleton before every pass, so a transient database/keystore failure
+        // could turn valid history into the empty state shown below.
+        if (!hadRenderedResult) showSkeleton();
         new Thread(() -> {
             HistoryReader.Result result = null;
             try {
@@ -2177,10 +2186,12 @@ public final class HistoryActivity extends Activity {
                     body.setContentDescription(null);
                     // Gone while rebuilding, as in the success path above: one measure instead of
                     // one per frame.
-                    body.setVisibility(View.GONE);
-                    body.removeAllViews();
-                    emptyState();
-                    body.setVisibility(View.VISIBLE);
+                    if (!hadRenderedResult) {
+                        body.setVisibility(View.GONE);
+                        body.removeAllViews();
+                        loadErrorState();
+                        body.setVisibility(View.VISIBLE);
+                    }
                 });
             }
         }).start();
@@ -2202,13 +2213,15 @@ public final class HistoryActivity extends Activity {
             if (expandAll) {
                 requested.addAll(visible);
             } else {
-                // The normal first-load seed opens every day of the current month, including
-                // days with no movements: their empty pages pre-fill the day cache, so opening
-                // another day later evicts an empty skeleton instead of collapsing a built day.
+                // The normal first-load seed opens only the most recent days. Building every day
+                // of a busy month at once creates a large non-recycled view tree and can make older
+                // devices look hung or run out of memory; collapsed days still show their totals
+                // and are expanded on demand.
                 CalDate current = CalDate.today(iran);
-                for (int day = 1;
-                        day <= CalDate.daysInMonth(current.year, current.month, iran); day++) {
-                    requested.add(CalDate.of(current.year, current.month, day).key());
+                int firstDay = Math.max(1, current.day - INITIAL_EXPANDED_DAY_LIMIT + 1);
+                for (int day = current.day; day >= firstDay; day--) {
+                    String key = CalDate.of(current.year, current.month, day).key();
+                    if (visible.contains(key)) requested.add(key);
                 }
             }
         }
@@ -2241,10 +2254,14 @@ public final class HistoryActivity extends Activity {
                     if (gen != renderGen || historyResult != snapshot || isDestroyed()
                             || isFinishing()) return;
                     // A page request is the explicit act of opening a day. Keep the heap bounded and
-                    // collapse the evicted day rather than leaving an apparently open empty card.
+                    // collapse only the oldest evicted day rather than dropping the current page when
+                    // the initial recent-day window is still resident.
                     String evicted = null;
-                    if (!loadedDayPages.containsKey(dayKey)) {
-                        for (String key : loadedDayPages.keySet()) {
+                    if (!loadedDayPages.containsKey(dayKey)
+                            && loadedDayPages.size() >= MAX_LOADED_DAY_PAGES) {
+                        List<String> keys = new ArrayList<>(loadedDayPages.keySet());
+                        for (int i = keys.size() - 1; i >= 0; i--) {
+                            String key = keys.get(i);
                             if (!key.equals(dayKey)) { evicted = key; break; }
                         }
                     }
@@ -2347,6 +2364,19 @@ public final class HistoryActivity extends Activity {
         msg.setGravity(Gravity.CENTER);
         msg.setPadding(dp(8), dp(18), dp(8), 0);
         wrap.addView(msg, new LinearLayout.LayoutParams(-2, -2));
+        body.addView(wrap, margin(12, 0, 12, 0));
+    }
+
+    /** A failed first read is not an empty history. Keep that distinction visible and actionable. */
+    private void loadErrorState() {
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setGravity(Gravity.CENTER_HORIZONTAL);
+        wrap.setPadding(dp(16), dp(56), dp(16), dp(16));
+        TextView msg = text(getString(R.string.history_load_failed), 14, muted);
+        msg.setGravity(Gravity.CENTER);
+        msg.setPadding(dp(8), dp(18), dp(8), 0);
+        wrap.addView(msg, new LinearLayout.LayoutParams(-1, -2));
         body.addView(wrap, margin(12, 0, 12, 0));
     }
 

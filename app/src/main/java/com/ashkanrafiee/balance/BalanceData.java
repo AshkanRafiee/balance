@@ -888,18 +888,19 @@ final class BalanceData {
         return changed;
     }
 
-    static void write(Context context, LinkedHashMap<String, Bank> map) {
+    static boolean write(Context context, LinkedHashMap<String, Bank> map) {
         try {
             String existing = DataGeneration.dataPrefs(context).getString(KEY_BALANCES, null);
             if (map.isEmpty() && existing != null) {
                 Log.w(TAG, "refusing to persist empty balances over existing data");
-                return;
+                return false;
             }
             String json = serialize(map);
-            DataGeneration.dataPrefs(context).edit()
-                .putString(KEY_BALANCES, encrypt(json)).apply();
+            return DataGeneration.dataPrefs(context).edit()
+                .putString(KEY_BALANCES, encrypt(json)).commit();
         } catch (Exception e) {
             Log.w(TAG, "write failed", e);
+            return false;
         }
     }
 
@@ -1224,29 +1225,37 @@ final class BalanceData {
         // history scan), because with per-account composite keys the newest message of one account
         // never proves another account's balance is current.
         Map<String, List<Object[]>> rowsByKey = new LinkedHashMap<>();
+        List<Object[]> sourceRows = new ArrayList<>();
+        boolean scanSucceeded = true;
         try (Cursor cursor = context.getContentResolver().query(
             Telephony.Sms.Inbox.CONTENT_URI,
             new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
             selection, args, Telephony.Sms.DATE + " DESC")) {
-            if (cursor == null) return 0;
-            while (cursor.moveToNext()) {
-                long arrival = Math.min(cursor.getLong(2), now);
-                if (newest < arrival) newest = arrival;
-                String sender = cursor.getString(0);
-                String bank = BankRules.resolve(sender);
-                if (bank == null) continue;
-                try { SourceStore.capture(context, sender, cursor.getString(1), arrival, BankRules.VERSION); }
-                catch (Exception se) { Log.w(TAG, "source capture failed", se); }
-                long value = extract(cursor.getString(1));
-                if (value < 0) continue;
-                String key = storageKey(bank, BankRules.extractAccount(bank, cursor.getString(1)));
-                rowsByKey.computeIfAbsent(key, k -> new ArrayList<>())
-                    .add(new Object[]{sender, cursor.getString(1),
-                        MessageDate.eventTime(cursor.getString(1), arrival, BankRules.calendar(bank))});
+            if (cursor == null) {
+                scanSucceeded = false;
+            } else {
+                while (cursor.moveToNext()) {
+                    long arrival = Math.min(cursor.getLong(2), now);
+                    if (newest < arrival) newest = arrival;
+                    String sender = cursor.getString(0);
+                    String bank = BankRules.resolve(sender);
+                    if (bank == null) continue;
+                    String body = cursor.getString(1);
+                    sourceRows.add(new Object[]{sender, body, arrival});
+                    long value = extract(body);
+                    if (value < 0) continue;
+                    String key = storageKey(bank, BankRules.extractAccount(bank, body));
+                    rowsByKey.computeIfAbsent(key, k -> new ArrayList<>())
+                        .add(new Object[]{sender, body,
+                            MessageDate.eventTime(body, arrival, BankRules.calendar(bank))});
+                }
             }
         } catch (Exception e) {
+            scanSucceeded = false;
             Log.w(TAG, "scan failed", e);
         }
+        if (!scanSucceeded) return 0;
+        if (!captureSources(context, sourceRows)) return 0;
 
         // A full re-scan that re-keys a bank's messages per account supersedes the legacy plain
         // bank slot (which pre-dates account extraction): drop it so the old merged balance is not
@@ -1306,9 +1315,8 @@ final class BalanceData {
             windows.put(key, pruneWindow(merged));
         }
         if (progress != null) progress.stage(R.string.scan_stage_saving);
-        saveRecentMovements(context, windows);
-
-        write(context, current);
+        if (!write(context, current)) return 0;
+        if (!saveRecentMovements(context, windows)) return 0;
         // A full scan that finds no bank message at all could not have re-derived anything, so it
         // must not confirm the rules version or advance the watermark: the stored balances may be
         // stale (the messages they came from are gone, or the SMS store is not available yet) and
@@ -1322,6 +1330,24 @@ final class BalanceData {
         saved.clear();
         saved.putAll(current);
         return matched;
+    }
+
+    /** Captures all recognized SMS seen by one scan in one source-store transaction. */
+    private static boolean captureSources(Context context, List<Object[]> sources) {
+        if (sources == null || sources.isEmpty()) return true;
+        try {
+            SourceStore.runInTransaction(context, editor -> {
+                for (Object[] source : sources) {
+                    editor.capture((String) source[0], (String) source[1],
+                        (Long) source[2], BankRules.VERSION);
+                }
+                return null;
+            });
+            return true;
+        } catch (Exception e) {
+            Log.w(TAG, "source batch capture failed", e);
+            return false;
+        }
     }
 
     /** Scans the inbox for money-movement messages and appends them to the saved transaction history,
@@ -1361,7 +1387,7 @@ final class BalanceData {
         boolean failed = false;
         boolean textChanged = false;
         try {
-            List<Transaction> stored = readTransactions(context);
+            List<Transaction> stored = null;
             SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
             long hwm = prefs.getLong(KEY_HISTORY_THROUGH, 0);
             // As in scanSms, a history watermark ahead of the current clock means the device clock
@@ -1380,18 +1406,14 @@ final class BalanceData {
             // exists to do.
             Set<String> seenSigs = new HashSet<>();
             Set<String> seenLegacy = new HashSet<>();
-            if (!full) {
-                for (Transaction t : stored) {
-                    if (t.sig != null) seenSigs.add(t.sig);
-                    else seenLegacy.add(legacyEntryKey(t));
-                }
-            }
             long newest = 0;
             // The reasons and channels this scan reads out of the bank messages, folded into their
             // stores once the movements they belong to are written. Declared out here so they survive
             // the cursor block.
             Map<String, String> detectedReasons = new LinkedHashMap<>();
             Map<String, String> detectedChannels = new LinkedHashMap<>();
+            Map<String, List<Reconcile.Entry>> windows = null;
+            boolean transactionsChanged = full;
             String selection = !full ? Telephony.Sms.DATE + " > ?" : null;
             String[] args = selection != null ? new String[]{Long.toString(hwm)} : null;
             Map<String, Long> lastBalance = null;
@@ -1404,6 +1426,7 @@ final class BalanceData {
                     return 0;
                 }
                 List<Object[]> rows = new ArrayList<>();
+                List<Object[]> sourceRows = new ArrayList<>();
                 while (cursor.moveToNext()) {
                     // Two clocks, deliberately. `arrival` is when the phone received the message and
                     // is the only one that can say whether this row is new to us, so it alone feeds
@@ -1418,10 +1441,38 @@ final class BalanceData {
                     String bank = BankRules.resolve(sender);
                     if (bank == null) continue;
                     String body = cursor.getString(1);
-                    try { SourceStore.capture(context, sender, body, arrival, BankRules.VERSION); }
-                    catch (Exception se) { Log.w(TAG, "source capture failed", se); }
+                    sourceRows.add(new Object[]{sender, body, arrival});
                     rows.add(new Object[]{bank, sender, body,
                         MessageDate.eventTime(body, arrival, BankRules.calendar(bank))});
+                }
+                if (!captureSources(context, sourceRows)) {
+                    failed = true;
+                    return 0;
+                }
+                if (rows.isEmpty()) {
+                    if (full) {
+                        if (!saveRecentMovements(context, new HashMap<>())
+                                || !saveLastBalances(context, new HashMap<>())) {
+                            failed = true;
+                            return 0;
+                        }
+                    }
+                    completed = true;
+                    SharedPreferences.Editor emptyEditor = prefs.edit();
+                    if (full) {
+                        emptyEditor.putInt(KEY_HISTORY_RULES_VERSION, HISTORY_RULES_VERSION);
+                        emptyEditor.putInt(KEY_HISTORY_SCHEMA, HISTORY_SCHEMA);
+                    }
+                    if (newest > 0) emptyEditor.putLong(KEY_HISTORY_THROUGH, newest);
+                    emptyEditor.apply();
+                    return 0;
+                }
+                stored = readTransactions(context);
+                if (!full) {
+                    for (Transaction t : stored) {
+                        if (t.sig != null) seenSigs.add(t.sig);
+                        else seenLegacy.add(legacyEntryKey(t));
+                    }
                 }
                 // Oldest first, so the balance-delta fallback chain below follows time. On a full scan
                 // the chain starts from the oldest kept message; on an incremental scan it is seeded
@@ -1436,7 +1487,7 @@ final class BalanceData {
                 for (Object[] row : rows) {
                     rowsByBank.computeIfAbsent(rowCompositeKey(row), k -> new ArrayList<>()).add(row);
                 }
-                Map<String, List<Reconcile.Entry>> windows = loadRecentMovements(context);
+                windows = loadRecentMovements(context);
                 Map<String, Map<String, Integer>> chainPosByBank = new LinkedHashMap<>();
                 Map<String, List<Reconcile.Entry>> chainByBank = new LinkedHashMap<>();
                 for (Map.Entry<String, List<Object[]>> e : rowsByBank.entrySet()) {
@@ -1457,8 +1508,6 @@ final class BalanceData {
                     }
                     windows.put(key, pruneWindow(merged));
                 }
-                saveRecentMovements(context, windows);
-
                 // Reorder the date-sorted rows so that adjacent same-bank movements known to a unique
                 // chain appear in their true order. Everything else keeps its current relative order.
                 rows = reorderByChains(rows, chainPosByBank);
@@ -1689,6 +1738,7 @@ final class BalanceData {
                     }
                     reorderStoredByChains(rebuilt, chainPosByBank);
                     stored = rebuilt;
+                    transactionsChanged = true;
                     if (!replaced.isEmpty() || !twinOf.isEmpty()) {
                         replaced.putAll(twinOf);
                         migrateTransactionText(context, replaced);
@@ -1698,19 +1748,30 @@ final class BalanceData {
                         if (placed.contains(fresh.get(i))) continue;
                         stored.add(fresh.get(i));
                     }
+                    transactionsChanged = !fresh.isEmpty() || !placed.isEmpty();
                 }
                 completed = true;
             } catch (Exception e) {
                 failed = true;
                 Log.w(TAG, "history scan failed", e);
             }
+            if (!completed) return added;
             if (progress != null) progress.stage(R.string.scan_stage_saving);
-            if (!writeTransactions(context, stored)) {
+            if (transactionsChanged && !writeTransactions(context, stored)) {
                 failed = true;
                 completed = false;
                 return added;
             }
-            saveLastBalances(context, lastBalance);
+            if (windows != null && !saveRecentMovements(context, windows)) {
+                failed = true;
+                completed = false;
+                return added;
+            }
+            if (!saveLastBalances(context, lastBalance)) {
+                failed = true;
+                completed = false;
+                return added;
+            }
             // The reasons and channels land after the transactions they belong to, so the stores never
             // hold one for a movement that was not written.
             boolean reasonsChanged = mergeReasons(context, detectedReasons);
@@ -2341,12 +2402,11 @@ final class BalanceData {
     }
 
     /** Persists the recent-movements window, encrypted like the rest of the data store. */
-    private static void saveRecentMovements(Context context, Map<String, List<Reconcile.Entry>> map) {
+    private static boolean saveRecentMovements(Context context, Map<String, List<Reconcile.Entry>> map) {
         try {
             if (map.isEmpty()) {
-                DataGeneration.dataPrefs(context).edit()
-                    .remove(KEY_RECENT_MOVEMENTS).apply();
-                return;
+                return DataGeneration.dataPrefs(context).edit()
+                    .remove(KEY_RECENT_MOVEMENTS).commit();
             }
             JSONObject obj = new JSONObject();
             for (Map.Entry<String, List<Reconcile.Entry>> e : map.entrySet()) {
@@ -2358,10 +2418,11 @@ final class BalanceData {
                 }
                 obj.put(e.getKey(), arr);
             }
-            DataGeneration.dataPrefs(context).edit()
-                .putString(KEY_RECENT_MOVEMENTS, encrypt(obj.toString())).apply();
+            return DataGeneration.dataPrefs(context).edit()
+                .putString(KEY_RECENT_MOVEMENTS, encrypt(obj.toString())).commit();
         } catch (Exception e) {
             Log.w(TAG, "saveRecentMovements failed", e);
+            return false;
         }
     }
 
@@ -2387,19 +2448,19 @@ final class BalanceData {
         return map;
     }
 
-    private static void saveLastBalances(Context context, Map<String, Long> map) {
+    private static boolean saveLastBalances(Context context, Map<String, Long> map) {
         try {
             JSONObject obj = new JSONObject();
             for (Map.Entry<String, Long> e : map.entrySet()) obj.put(e.getKey(), e.getValue().longValue());
             if (map.isEmpty()) {
-                DataGeneration.dataPrefs(context).edit()
-                    .remove(KEY_HISTORY_LAST_BALANCE).apply();
-                return;
+                return DataGeneration.dataPrefs(context).edit()
+                    .remove(KEY_HISTORY_LAST_BALANCE).commit();
             }
-            DataGeneration.dataPrefs(context).edit()
-                .putString(KEY_HISTORY_LAST_BALANCE, encrypt(obj.toString())).apply();
+            return DataGeneration.dataPrefs(context).edit()
+                .putString(KEY_HISTORY_LAST_BALANCE, encrypt(obj.toString())).commit();
         } catch (Exception ex) {
             Log.w(TAG, "saveLastBalances failed", ex);
+            return false;
         }
     }
 

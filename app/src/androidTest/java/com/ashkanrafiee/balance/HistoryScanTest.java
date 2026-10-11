@@ -152,6 +152,15 @@ public class HistoryScanTest {
         awaitSms(sender, body);
     }
 
+    private void seedMany(String sender, String body, int count, long base) throws Exception {
+        String b64 = android.util.Base64.encodeToString(
+                body.getBytes(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP);
+        exec("am broadcast -n com.ashkanrafiee.smsinject/.SeedReceiver -a com.ashkanrafiee.smsinject.SEED"
+                + " -e sender " + sender + " -e body64 " + b64 + " -e count " + count
+                + " -e base " + base + " -e step 1000");
+        awaitRows(sender, body, count);
+    }
+
     /** Polls the real inbox until the exact seeded message is visible, so that the scan that follows
      *  in the same test is deterministic even when the system is slow. */
     private void awaitSms(String sender, String body) throws Exception {
@@ -249,6 +258,31 @@ public class HistoryScanTest {
         assertEquals(-120000L, txs.get(0).amount);  // newest first (T+500)
         assertEquals(200000L, txs.get(1).amount);   // oldest last (T)
         assertEquals(T + 1000, historyWatermark());
+    }
+
+    @Test public void largeInboxFullScanIsBounded_andNoNewScanSkipsHistoryRewrite()
+            throws Exception {
+        String body = DEPOSIT + " bulk";
+        seedMany("500095", body, 400, T);
+
+        long fullStart = System.currentTimeMillis();
+        assertEquals(1, BalanceData.scanSms(ctx, new java.util.LinkedHashMap<>()));
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        long fullMs = System.currentTimeMillis() - fullStart;
+        String revision = TransactionStore.revision(ctx);
+
+        long noNewStart = System.currentTimeMillis();
+        assertEquals(0, BalanceData.scanSms(ctx, new java.util.LinkedHashMap<>()));
+        assertEquals(0, BalanceData.scanHistory(ctx));
+        long noNewMs = System.currentTimeMillis() - noNewStart;
+
+        assertTrue("a 400-message scan must finish without a long-device stall: " + fullMs + "ms",
+            fullMs < 30_000L);
+        assertTrue("a no-new-message refresh must be cheaper than its full scan: full=" + fullMs
+            + "ms no-new=" + noNewMs + "ms", noNewMs < fullMs);
+        assertEquals("a no-new refresh must not rewrite encrypted history", revision,
+            TransactionStore.revision(ctx));
+        android.util.Log.i("BalancePerf", "largeInbox fullMs=" + fullMs + " noNewMs=" + noNewMs);
     }
 
     @Test public void futureDatedMovement_neverFreezesHistoryScan() throws Exception {

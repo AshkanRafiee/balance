@@ -36,6 +36,12 @@ public class TransactionStoreTest {
         BalanceData.reset(context, true);
     }
 
+    @Test public void freshReadDoesNotCreateAnIncompleteStore() throws Exception {
+        assertNull(TransactionStore.read(context));
+        assertNull(TransactionStore.read(context));
+        assertFalse(context.getDatabasePath(TransactionStore.DB_NAME).exists());
+    }
+
     @Test public void pagedRoundTrip_preservesEveryTransactionField() {
         List<Transaction> input = new ArrayList<>();
         for (int i = 0; i < 2_050; i++) {

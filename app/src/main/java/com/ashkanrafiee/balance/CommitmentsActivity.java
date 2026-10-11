@@ -1229,7 +1229,9 @@ public final class CommitmentsActivity extends Activity {
                 : BigInteger.ONE.shiftLeft(63).subtract(BigInteger.ONE);
             if (magnitude.signum() <= 0 || magnitude.compareTo(max) > 0) return null;
             if (pay && magnitude.equals(BigInteger.ONE.shiftLeft(63))) return Long.MIN_VALUE;
-            long value = magnitude.longValueExact();
+            // longValueExact() is only available on newer Android core libraries. The bounds above
+            // already prove that this conversion is exact on every supported API level.
+            long value = magnitude.longValue();
             return pay ? -value : value;
         } catch (Exception e) {
             return null;

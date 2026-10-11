@@ -315,7 +315,10 @@ final class BankRules {
         // from it when the movement is shown, so only which channels are now readable belongs in here.
         for (String channel : new java.util.TreeSet<>(CHANNEL_CAPTION_RES.keySet()))
             v = v * 31 + channel.hashCode() * 31;
-        return v;
+        // Rule fingerprints are persisted as a non-negative revision and are also stored with
+        // source evidence. The rolling hash is intentionally allowed to overflow while it is built,
+        // so normalize its sign before publishing it.
+        return v & Integer.MAX_VALUE;
     }
 
     static String resolve(String sender) {
