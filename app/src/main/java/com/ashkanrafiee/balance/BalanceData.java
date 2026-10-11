@@ -1338,7 +1338,7 @@ final class BalanceData {
         // history scan), because with per-account composite keys the newest message of one account
         // never proves another account's balance is current.
         Map<String, List<Object[]>> rowsByKey = new LinkedHashMap<>();
-        List<Object[]> sourceRows = new ArrayList<>();
+        List<SourceEvidence> sourceRows = new ArrayList<>();
         boolean scanSucceeded = true;
         try (Cursor cursor = context.getContentResolver().query(
             Telephony.Sms.Inbox.CONTENT_URI,
@@ -1368,13 +1368,18 @@ final class BalanceData {
                     // Keep the provider's stable timestamp for evidence identity. The clamped
                     // value above remains the scan watermark/event-time input, so a future-dated
                     // SMS cannot create a new physical source row on every later scan.
-                    sourceRows.add(new Object[]{sender, body, rawArrival});
+                    SourceEvidence evidence = new SourceEvidence(sender, body, rawArrival);
+                    sourceRows.add(evidence);
                     long value = extract(body);
                     if (value < 0) continue;
+                    long eventDate = MessageDate.eventTime(body, arrival, BankRules.calendar(bank));
+                    evidence.balanceBank = bank;
+                    evidence.balanceAccount = BankRules.extractAccount(bank, body);
+                    evidence.balanceDate = eventDate;
+                    evidence.balance = value;
                     String key = storageKey(bank, BankRules.extractAccount(bank, body));
                     rowsByKey.computeIfAbsent(key, k -> new ArrayList<>())
-                        .add(new Object[]{sender, body,
-                            MessageDate.eventTime(body, arrival, BankRules.calendar(bank))});
+                        .add(new Object[]{sender, body, eventDate});
                 }
             }
         } catch (Exception e) {
@@ -1382,8 +1387,6 @@ final class BalanceData {
             Log.w(TAG, "scan failed", e);
         }
         if (!scanSucceeded) return 0;
-        boolean sourceCaptureSucceeded = captureSources(context, sourceRows);
-
         // A full re-scan that re-keys a bank's messages per account supersedes the legacy plain
         // bank slot (which pre-dates account extraction): drop it so the old merged balance is not
         // kept next to — and summed with — the new per-account slots. Banks with no account-bearing
@@ -1446,6 +1449,7 @@ final class BalanceData {
             }
             windows.put(key, pruneWindow(merged));
         }
+        boolean sourceCaptureSucceeded = captureSources(context, sourceRows, BankRules.VERSION);
         if (progress != null) progress.stage(R.string.scan_stage_saving);
         if (!write(context, current)) return 0;
         if (!saveRecentMovements(context, windows)) return 0;
@@ -1472,14 +1476,40 @@ final class BalanceData {
         return matched;
     }
 
+    /** One recognized SMS and the parse result, if this scanner recognized one. */
+    private static final class SourceEvidence {
+        final String sender;
+        final String body;
+        final long arrival;
+        Transaction transaction;
+        String balanceBank;
+        String balanceAccount;
+        long balanceDate;
+        Long balance;
+
+        SourceEvidence(String sender, String body, long arrival) {
+            this.sender = sender;
+            this.body = body;
+            this.arrival = arrival;
+        }
+    }
+
     /** Best-effort evidence capture; source failures must not block the core stores or watermarks. */
-    private static boolean captureSources(Context context, List<Object[]> sources) {
+    private static boolean captureSources(Context context, List<SourceEvidence> sources,
+            int parserRevision) {
         if (sources == null || sources.isEmpty()) return true;
         try {
             SourceStore.runInTransaction(context, editor -> {
-                for (Object[] source : sources) {
-                    editor.capture((String) source[0], (String) source[1],
-                        (Long) source[2], BankRules.VERSION);
+                for (SourceEvidence evidence : sources) {
+                    SourceStore.Source source = editor.capture(evidence.sender, evidence.body,
+                        evidence.arrival, BankRules.VERSION);
+                    if (source == null) continue;
+                    if (evidence.balance != null) {
+                        editor.observeBalance(source, parserRevision, evidence.balanceBank,
+                            evidence.balanceAccount, evidence.balanceDate, evidence.balance);
+                    }
+                    if (evidence.transaction != null)
+                        editor.observeTransaction(source, parserRevision, evidence.transaction);
                 }
                 return null;
             });
@@ -1582,7 +1612,7 @@ final class BalanceData {
                     return 0;
                 }
                 List<Object[]> rows = new ArrayList<>();
-                List<Object[]> sourceRows = new ArrayList<>();
+                List<SourceEvidence> sourceRows = new ArrayList<>();
                 while (cursor.moveToNext()) {
                     // Two clocks, deliberately. `arrival` is when the phone received the message and
                     // is the only one that can say whether this row is new to us, so it alone feeds
@@ -1604,11 +1634,14 @@ final class BalanceData {
                     String bank = BankRules.resolve(sender);
                     if (bank == null) continue;
                     String body = cursor.getString(1);
-                    sourceRows.add(new Object[]{sender, body, rawArrival});
+                    SourceEvidence evidence = new SourceEvidence(sender, body, rawArrival);
+                    sourceRows.add(evidence);
                     rows.add(new Object[]{bank, sender, body,
-                        MessageDate.eventTime(body, arrival, BankRules.calendar(bank))});
+                        MessageDate.eventTime(body, arrival, BankRules.calendar(bank)), evidence});
                 }
-                sourceCaptureSucceeded = captureSources(context, sourceRows);
+                if (rows.isEmpty())
+                    sourceCaptureSucceeded = captureSources(context, sourceRows,
+                        HISTORY_RULES_VERSION);
                 if (rows.isEmpty()) {
                     if (full) {
                         if (!saveRecentMovements(context, new HashMap<>())
@@ -1696,6 +1729,10 @@ final class BalanceData {
                     Transaction t = parseMovement(bank, sender, body, date,
                         last != null, last != null ? last : 0);
                     if (t != null) {
+                        // Keep the parser's result tied to its physical source even when the core
+                        // history deduplicates this movement against an earlier delivery. The source
+                        // store has its own exact observation dedupe for retries.
+                        ((SourceEvidence) row[4]).transaction = t;
                         // The reason the bank stated, read from the very message that proves the
                         // movement — so only a settled movement is ever given one, and a promotion or
                         // an OTP prompt (which parse to no movement at all) can never attach a reason
@@ -1752,6 +1789,7 @@ final class BalanceData {
                     long bal = extract(body);
                     if (bal >= 0) lastBalance.put(key, bal);
                 }
+                sourceCaptureSucceeded = captureSources(context, sourceRows, HISTORY_RULES_VERSION);
                 // Chain banks: keep the balance chain end correct when the true-newest movement was not
                 // among the rows scanned now (a previous scan already committed it), and place fresh
                 // chain members relative to their already-stored siblings when part of the pair was

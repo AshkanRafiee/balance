@@ -260,6 +260,23 @@ public class HistoryScanTest {
         assertEquals(T + 1000, historyWatermark());
     }
 
+    @Test public void liveHistoryScan_persistsTransactionObservations_andRetriesDoNotDuplicate()
+            throws Exception {
+        seed("500095", DEPOSIT + " evidence", T);
+
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        assertEquals(1L, SourceStore.sourceCount(ctx));
+        assertEquals(1L, SourceStore.transactionObservationCount(ctx));
+        SourceStore.TransactionPage page = SourceStore.pageTransactions(ctx, -1, 8);
+        assertEquals(1, page.rows.size());
+        assertEquals("Saman", page.rows.get(0).transaction.bank);
+        assertEquals(200_000L, page.rows.get(0).transaction.amount);
+
+        assertEquals(0, BalanceData.scanHistory(ctx));
+        assertEquals(1L, SourceStore.sourceCount(ctx));
+        assertEquals(1L, SourceStore.transactionObservationCount(ctx));
+    }
+
     @Test public void largeInboxFullScanIsBounded_andNoNewScanSkipsHistoryRewrite()
             throws Exception {
         String body = DEPOSIT + " bulk";
@@ -459,6 +476,12 @@ public class HistoryScanTest {
         // core history at one row while the source evidence gets another chance to recover.
         assertEquals(1, BalanceData.scanHistory(ctx));
         assertEquals(1, BalanceData.readTransactions(ctx).size());
+
+        SourceStore.clear(ctx);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
+        assertEquals(1L, SourceStore.sourceCount(ctx));
+        assertEquals(1L, SourceStore.transactionObservationCount(ctx));
     }
 
     // ============================================================

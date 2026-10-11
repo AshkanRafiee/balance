@@ -219,6 +219,25 @@ public class BalanceScanTest {
         assertEquals(5000000L, amount(find(reread, "Saman")));
     }
 
+    @Test public void liveBalanceScan_persistsBalanceObservations_andRetriesDoNotDuplicate()
+            throws Exception {
+        String body = "available balance 5,000,000";
+        seed("500095", body, T + 1000);
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+        assertEquals(1L, SourceStore.sourceCount(ctx));
+        assertEquals(1L, SourceStore.balanceObservationCount(ctx));
+        SourceStore.BalancePage page = SourceStore.pageBalances(ctx, -1, 8);
+        assertEquals(1, page.rows.size());
+        assertEquals("Saman", page.rows.get(0).bank);
+        assertEquals(5_000_000L, page.rows.get(0).balance);
+
+        assertEquals(0, BalanceData.scanSms(ctx, saved));
+        assertEquals(1L, SourceStore.sourceCount(ctx));
+        assertEquals(1L, SourceStore.balanceObservationCount(ctx));
+    }
+
     @Test public void fullScan_supersedesLegacyPlainSlot_whenMessagesAreReKeyedPerAccount() throws Exception {
         // Upgrade path from before account keys: the stored map holds a plain "Melli" slot carrying the
         // balance merged across accounts. A full re-scan that re-keys Melli messages per account must
@@ -728,6 +747,13 @@ public class BalanceScanTest {
         assertEquals("source failure must leave the watermark retryable", 0, watermark());
         assertEquals(-1, storedRulesVersion());
         assertEquals(0, BalanceData.scanSms(ctx, saved));
+
+        // Once the failed evidence store is repaired, the unchanged watermark makes the source
+        // eligible again and the retry records the observation exactly once.
+        SourceStore.clear(ctx);
+        assertEquals(0, BalanceData.scanSms(ctx, saved));
+        assertEquals(1L, SourceStore.sourceCount(ctx));
+        assertEquals(1L, SourceStore.balanceObservationCount(ctx));
     }
 
     @Test public void resetWithEmptyInbox_leavesStoreEmptyAndFullScanArmed() throws Exception {
