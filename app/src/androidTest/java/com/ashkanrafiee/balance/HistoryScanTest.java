@@ -453,9 +453,12 @@ public class HistoryScanTest {
         assertEquals(1, BalanceData.readTransactions(ctx).size());
         assertEquals(200000L, BalanceData.readTransactions(ctx).get(0).amount);
         assertEquals("source failure must leave the watermark retryable", 0, historyWatermark());
-        assertEquals(BalanceData.HISTORY_RULES_VERSION,
+        assertEquals(-1,
             prefs().getInt(BalanceData.KEY_HISTORY_RULES_VERSION, -1));
-        assertEquals(0, BalanceData.scanHistory(ctx));
+        // The retryable watermark deliberately causes another full pass; deduplication keeps the
+        // core history at one row while the source evidence gets another chance to recover.
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
     }
 
     // ============================================================

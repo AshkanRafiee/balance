@@ -3,7 +3,6 @@ package com.ashkanrafiee.balance;
 import android.content.Context;
 import android.content.Intent;
 import android.util.Log;
-import android.view.Gravity;
 import android.view.View;
 import android.widget.RemoteViews;
 import android.widget.RemoteViewsService;
@@ -68,8 +67,6 @@ public class BalanceWidgetService extends RemoteViewsService {
         views.setTextColor(R.id.bank_amount, c.getColor(R.color.muted));
         if (BalanceData.isStale(c, b.date) && !hidden)
             views.setTextColor(R.id.bank_amount, c.getColor(R.color.warn));
-        views.setInt(R.id.bank_name, "setGravity", Gravity.CENTER_VERTICAL | Gravity.START);
-        views.setInt(R.id.bank_amount, "setGravity", Gravity.CENTER_VERTICAL | Gravity.END);
         if (b.account != null) {
             views.setTextViewText(R.id.bank_account, hidden
                 ? "\u2022\u2022\u2022\u2022\u2022\u2022" : accountLabel(c, b.account));

@@ -32,8 +32,8 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
     private static final long MIN_SPIN_DURATION = 700L;
     private static final AtomicBoolean REFRESHING = new AtomicBoolean(false);
     private static volatile float spin;
-    /** Widget frame cached for the spin loop so each frame only re-applies the rotation instead of
-     *  rebuilding (and re-decrypting) the whole widget on every tick. */
+    /** Widget frame cached while a scan is running so a configuration update cannot be overwritten
+     *  by the scan completion's stale frame. */
     private static volatile RemoteViews spinBase;
 
     private static Context appContext(Context context) {
@@ -53,7 +53,9 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
 
     /** Re-scans SMS on a worker thread while spinning the refresh icon, then renders the final widget
      *  without allowing a store, worker, or launcher failure to escape its boundary. While the app
-     *  lock is enabled the widget does not rescan and shows the locked state instead. */
+     *  lock is enabled the widget does not rescan and shows the locked state instead. The refresh
+     *  icon deliberately stays static: launcher RemoteViews do not consistently permit reflective
+     *  float rotation across Android versions. */
     private static void refreshData(Context context) {
         boolean refreshing = false;
         try {
@@ -84,13 +86,7 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
                             done.set(true);
                         }
                     }, "balance-scan").start();
-                    int step = 0;
-                    while (!done.get()) {
-                        step++;
-                        spin = (float) ((step * 45) % 360);
-                        applySpin(app);
-                        SystemClock.sleep(60);
-                    }
+                    while (!done.get()) SystemClock.sleep(60);
                     while (SystemClock.uptimeMillis() - start < MIN_SPIN_DURATION)
                         SystemClock.sleep(40);
                 } catch (Exception e) {
@@ -143,25 +139,6 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         }
     }
 
-    /** Rotates the refresh icon on the fully rendered widget, so no other element is ever dropped. */
-    private static void applySpin(Context context) {
-        try {
-            AppWidgetManager manager = AppWidgetManager.getInstance(context);
-            int[] ids = manager.getAppWidgetIds(new ComponentName(context, BalanceWidgetProvider.class));
-            if (ids.length == 0) return;
-            RemoteViews views = spinBase;
-            if (views == null) return;
-            if (widgetLocked(context)) {
-                // Do not replay a cached balance frame when lock state is uncertain.
-                views = lockedViews(context);
-                spinBase = views;
-            } else views.setFloat(R.id.widget_refresh, "setRotation", spin);
-            for (int id : ids) manager.updateAppWidget(id, views);
-        } catch (Exception e) {
-            Log.w(TAG, "widget spin update failed");
-        }
-    }
-
     static RemoteViews buildViews(Context context) {
         Context c = WidgetTheme.context(context);
         if (widgetLocked(c)) return lockedViews(c);
@@ -196,7 +173,6 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
             hidden ? R.drawable.ic_visibility_off : R.drawable.ic_visibility);
         views.setContentDescription(R.id.widget_mask, c.getString(R.string.widget_action_mask));
         views.setContentDescription(R.id.widget_refresh, c.getString(R.string.widget_action_refresh));
-        views.setFloat(R.id.widget_refresh, "setRotation", spin);
         views.setOnClickPendingIntent(R.id.widget_root, openApp(c));
         views.setOnClickPendingIntent(R.id.widget_mask, pending(c, ACTION_MASK, REQ_MASK));
         views.setOnClickPendingIntent(R.id.widget_refresh, pending(c, ACTION_REFRESH, REQ_REFRESH));

@@ -726,7 +726,7 @@ public class BalanceScanTest {
         assertEquals(1_000_000L, amount(find(saved, "Tejarat")));
         assertEquals(1_000_000L, BalanceData.read(ctx).get("Tejarat").amount);
         assertEquals("source failure must leave the watermark retryable", 0, watermark());
-        assertEquals(BankRules.VERSION, storedRulesVersion());
+        assertEquals(-1, storedRulesVersion());
         assertEquals(0, BalanceData.scanSms(ctx, saved));
     }
 
