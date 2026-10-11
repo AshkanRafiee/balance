@@ -241,14 +241,46 @@ public class CommitmentsInteractionTest {
                 Field field = MainActivity.class.getDeclaredField("view");
                 field.setAccessible(true);
                 Object view = field.get(activity);
-                Field hidden = view.getClass().getDeclaredField("hidden");
-                hidden.setAccessible(true);
-                boolean previousHidden = hidden.getBoolean(view);
-                hidden.setBoolean(view, masked);
                 Method invalidateSummary = view.getClass().getDeclaredMethod(
                     "invalidateCommitmentSummary");
                 invalidateSummary.setAccessible(true);
                 invalidateSummary.invoke(view);
+            } catch (Exception e) {
+                throw new AssertionError("could not invalidate the dashboard commitments summary", e);
+            }
+        });
+        long deadline = System.currentTimeMillis() + 5_000L;
+        boolean loaded = false;
+        while (System.currentTimeMillis() < deadline) {
+            final boolean[] state = {false};
+            mainScenario.onActivity(activity -> {
+                try {
+                    Field field = MainActivity.class.getDeclaredField("view");
+                    field.setAccessible(true);
+                    Object view = field.get(activity);
+                    Field loadedField = view.getClass().getDeclaredField("commitmentSummaryLoaded");
+                    loadedField.setAccessible(true);
+                    state[0] = loadedField.getBoolean(view);
+                } catch (Exception e) {
+                    throw new AssertionError("could not read the dashboard summary state", e);
+                }
+            });
+            if (state[0]) {
+                loaded = true;
+                break;
+            }
+            android.os.SystemClock.sleep(20L);
+        }
+        assertTrue("the dashboard commitment summary did not finish loading", loaded);
+        mainScenario.onActivity(activity -> {
+            try {
+                Field field = MainActivity.class.getDeclaredField("view");
+                field.setAccessible(true);
+                Object view = field.get(activity);
+                Field hidden = view.getClass().getDeclaredField("hidden");
+                hidden.setAccessible(true);
+                boolean previousHidden = hidden.getBoolean(view);
+                hidden.setBoolean(view, masked);
                 Method draw = view.getClass().getDeclaredMethod("drawCommitmentsCard",
                     Canvas.class, int.class, boolean.class);
                 draw.setAccessible(true);
