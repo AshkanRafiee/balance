@@ -370,6 +370,7 @@ final class BankRules {
         {"Middle East", "slash-line",   "",   ""},
         {"Sepah",  "credit-line",    "6",  "24"},
         {"Maskan",   "label-colon",     "6",  "24"},
+        {"Gardeshgari", "dotted-labeled", "", ""},
     };
 
     /** Builds the matcher for one {@link #ACCOUNT_RULES} row. Each shape carries the guards — the
@@ -394,6 +395,12 @@ final class BankRules {
                 return Pattern.compile("(?<![0-9])[0-9]{1,2}\\.[0-9]{4,12}\\.[0-9]{1,2}(?![0-9])");
             case "dotted-line":   // Pasargad: four-part dotted id alone on its own line
                 return Pattern.compile("(?m)^[0-9]{1,4}\\.[0-9]{1,6}\\.[0-9]{6,12}\\.[0-9]{1,3}(?![0-9.])\\s*\\r?$");
+            case "dotted-labeled":   // Gardeshgari: four-part dotted id behind "واریز به:".
+                // The label is required and line-anchored, so a bare dotted date elsewhere never
+                // reads as the account, and the part bounds with the no-digit-or-dot lookahead
+                // keep short codes and grouped figures out. The body is letter-folded before it
+                // is matched, so the Arabic yeh the bank spells "واريز" with still reads.
+                return Pattern.compile("(?m)^[ \\t]*\u0648\u0627\u0631\u06CC\u0632[ \\t]+\u0628\u0647[ \\t]*:[ \\t]*([0-9]{1,4}\\.[0-9]{1,6}\\.[0-9]{6,12}\\.[0-9]{1,3})(?![0-9.])");
             case "slash-line":    // Middle East: branch/account identifier, e.g. 020/002863516
                 return Pattern.compile("(?m)^([0-9]{3}/[0-9]{9})[ \\t]*\\r?$");
             case "credit-line":   // Sepah: the credited account, either on the profit-credit
