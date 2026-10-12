@@ -2175,9 +2175,13 @@ final class BalanceData {
         return t.account == null ? base : base + "|" + t.account;
     }
 
+    /** The resulting balance a message states, or -1 when it states none. Matching runs over one
+     *  letter form (the Arabic yeh and kaf folded onto their Persian counterparts, mirroring the
+     *  movement matchers) so a bank that spells "موجودي" either way still reads — and over the
+     *  same form for the OTP guard, so a code spelled either way is still refused. */
     static long extract(String raw) {
         if (raw == null) return -1;
-        String s = digits(raw.replace("\u066C", ",").replace("\u060C", ","));
+        String s = normalizeLetters(digits(raw.replace("\u066C", ",").replace("\u060C", ",")));
         if (otp.matcher(s).find()) return -1;
         Matcher m = balance.matcher(s);
         String n = null;

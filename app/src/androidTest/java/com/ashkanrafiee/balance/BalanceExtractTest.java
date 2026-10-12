@@ -49,6 +49,14 @@ public class BalanceExtractTest {
         assertEquals(5000L, BalanceData.extract("\u0645\u0648\u062C\u0648\u062F\u06CC: \u0665\u0660\u0660\u0660"));
     }
 
+    @Test public void extract_arabicLetterForms_readTheSameBalance() {
+        // A bank that spells its labels with the Arabic yeh and kaf states the same balance.
+        assertEquals(234567890L, BalanceData.extract(
+            "\u0645\u0648\u062c\u0648\u062f\u064a: 234,567,890 \u0631\u064a\u0627\u0644"));
+        assertEquals(1250000L, BalanceData.extract(
+            "\u0645\u0648\u062c\u0648\u062f\u06cc \u062d\u0633\u0627\u0628 \u0634\u0645\u0627: 1,250,000 \u0631\u06cc\u0627\u0644"));
+    }
+
     // ---- OTP must never be parsed as a balance -----------------------------------------
     @Test public void extract_otpPersianRamz_rejected() {
         assertEquals(-1L, BalanceData.extract("\u0631\u0645\u0632 \u0648\u0631\u0648\u062F \u0634\u0645\u0627: 123456"));
@@ -66,6 +74,13 @@ public class BalanceExtractTest {
     @Test public void extract_otpEnglishCodeAndOtp_rejected() {
         assertEquals(-1L, BalanceData.extract("Verification code: 44221"));
         assertEquals(-1L, BalanceData.extract("Your OTP is 1234"));
+    }
+
+    @Test public void extract_otpArabicLetterForms_rejected() {
+        // The OTP guard folds letter forms too: a code spelled with the Arabic kaf next to a
+        // Persian balance keyword was previously read as that balance, and is now refused.
+        assertEquals(-1L, BalanceData.extract(
+            "\u0643\u062f \u062a\u0627\u06cc\u06cc\u062f: 123456 \u0645\u0648\u062c\u0648\u062f\u06cc: 5000"));
     }
 
     // ---- candidate selection -----------------------------------------------------------
