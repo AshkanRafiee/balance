@@ -429,6 +429,28 @@ public class BankRulesTest {
         assertNull(BankRules.extractAccount("Eghtesad Novin", "مانده:1,234,567,890ريال"));
     }
 
+    @Test public void extractAccount_shahrWithdrawalLine_returnsAccount() {
+        // Driven with the synthetic messages in {@link ShahrMessages}, written in the shape the
+        // bank sends them, so the rule test and the scan test see the same bytes.
+        assertEquals(ShahrMessages.ACCOUNT,
+            BankRules.extractAccount("Shahr", ShahrMessages.PURCHASE));
+        assertEquals(ShahrMessages.ACCOUNT, BankRules.extractAccount("Shahr",
+            ShahrMessages.PURCHASE.replace("برداشت از:", "برداشت از: ")));
+    }
+
+    @Test public void extractAccount_shahrGuards_rejectNonAccounts() {
+        // Too short for an account, too long for one, a destination without the withdrawal
+        // event and a bare balance: none of them is the debited account.
+        assertNull(BankRules.extractAccount("Shahr",
+            ShahrMessages.PURCHASE.replace(ShahrMessages.ACCOUNT, "12345")));
+        assertNull(BankRules.extractAccount("Shahr",
+            ShahrMessages.PURCHASE.replace(ShahrMessages.ACCOUNT,
+                "123456789012345678901234567890")));
+        assertNull(BankRules.extractAccount("Shahr",
+            "انتقال به حساب: 1234567890123\nمبلغ: 87,450ريال\nموجودي: 9,876,543 ريال"));
+        assertNull(BankRules.extractAccount("Shahr", "موجودي:12,345,678 ريال"));
+    }
+
     @Test public void extractAccount_nullArguments_notCaptured() {
         assertNull(BankRules.extractAccount(null, "10.1234567.2"));
         assertNull(BankRules.extractAccount("Mellat", null));
@@ -439,7 +461,8 @@ public class BankRulesTest {
         java.util.Set<String> known = BankRules.supportedNames();
         java.util.Set<String> shapes = new java.util.HashSet<>(java.util.Arrays.asList(
             "label-glued", "label-colon", "label-colon-line", "bare-mablagh", "bare-bidi",
-            "dotted", "dotted-line", "dotted-labeled", "dash-labeled", "slash-line", "credit-line"));
+            "dotted", "dotted-line", "dotted-labeled", "dash-labeled", "withdrawal-line",
+            "slash-line", "credit-line"));
         java.util.Set<String> banksSeen = new java.util.HashSet<>();
         for (String[] row : BankRules.accountRulesTestOnly()) {
             assertEquals(4, row.length);
@@ -491,7 +514,7 @@ public class BankRulesTest {
             assertTrue("duplicate bank row: " + row[0], banksSeen.add(row[0]));
             assertTrue("unknown shape: " + row[1], row[1].equals("title-line")
                 || row[1].equals("final-line") || row[1].equals("profit-line")
-                || row[1].equals("labeled-prefix"));
+                || row[1].equals("labeled-prefix") || row[1].equals("card-line"));
         }
     }
 
@@ -576,6 +599,24 @@ public class BankRulesTest {
         assertNull(BankRules.extractReason("Maskan", BluMessages.TOPUP));
         assertNull(BankRules.extractReason("Maskan", "خريد:1,234,567\nمانده:12,345,678"));
         assertNull(BankRules.extractReason("Maskan", "سرویس تازه:+1,000\nمانده:12,345,678"));
+    }
+
+    @Test public void extractReason_shahrCardLine_returnsTheStatedReason() {
+        // Driven with the synthetic messages in {@link ShahrMessages}: the literal event line,
+        // spelled with the Arabic yeh the bank sends, and stored in its normalized form.
+        assertEquals(ShahrMessages.CARD_PURCHASE_REASON,
+            BankRules.extractReason("Shahr", ShahrMessages.PURCHASE));
+        assertEquals(ShahrMessages.CARD_PURCHASE_REASON, BankRules.extractReason("Shahr",
+            ShahrMessages.PURCHASE.replace("\n", "\r\n")));
+    }
+
+    @Test public void extractReason_shahrWithoutTheCardLine_statesNoReason() {
+        // A bare balance, the event mentioned inside a longer sentence, and another bank's
+        // titled message: none of them states this bank's event.
+        assertNull(BankRules.extractReason("Shahr", "موجودي:12,345,678 ريال"));
+        assertNull(BankRules.extractReason("Shahr",
+            "متن خريد با کارت اضافه\nموجودي:12,345,678 ريال"));
+        assertNull(BankRules.extractReason("Shahr", BluMessages.TOPUP));
     }
 
     @Test public void extractReason_plainDirectionTitle_statesNoReason() {
