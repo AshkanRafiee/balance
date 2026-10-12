@@ -1,0 +1,2 @@
+• Messages from Gardeshgari, Eghtesad Novin and Shahr banks are now recognized, with per-account balances and history including the reason the bank stated.
+• Balance messages spelling their labels with Arabic letters are now read the same as Persian ones, while one-time codes in that spelling are still never counted as money.
