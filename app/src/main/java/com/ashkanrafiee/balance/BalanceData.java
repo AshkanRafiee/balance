@@ -189,6 +189,14 @@ final class BalanceData {
      *  account or balance lines from being read as an amount. */
     private static final Pattern gluedLabeledSignedAmount = Pattern.compile(
         "(?m)^[ \\t]*(?:خرید|کارت)[ \\t]*([0-9][0-9,]*)[ \\t]*([+-])[ \\t]*$");
+    /** A line of "<label>:<sign><amount>" where the sign leads the number, as Maskan writes it
+     *  ("خريد:-1,500,000", "انتقال اينترنت:+50,000,000"). The bank wraps the figure in
+     *  direction marks, so the separators tolerate the invisible bidi run the same way the bare
+     *  signed shapes do. The explicit sign decides the direction — so "انتقال اينترنت:+…" is a
+     *  deposit even though "انتقال" is a withdrawal keyword — and the required sign keeps the
+     *  unsigned balance, account and date lines out. */
+    private static final Pattern leadingLabeledSignedAmount = Pattern.compile(
+        "(?m)^([^\\r\\n:0-9][^\\r\\n:]{0,39}):[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*([+-])[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*([0-9][0-9,]*)[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*$");
     private static final String[] DEPOSIT_KEYWORDS = {
         "\u0648\u0627\u0631\u06cc\u0632", "\u062f\u0631\u06cc\u0627\u0641\u062a",
         "\u0628\u0633\u062a\u0627\u0646\u06a9\u0627\u0631", "\u0627\u0641\u0632\u0627\u06cc\u0634",
@@ -2184,7 +2192,8 @@ final class BalanceData {
      *  (amount) label — where an explicit "+"/"-" sign is authoritative (e.g. Parsian's
      *  "مبلغ:500,000-"), after a deposit/withdrawal label ("واریز:"/"برداشت:", Tejarat), as a
      *  "<label>:<amount><sign>" line with a trailing sign (Melli's "انتقالي:1,000,000-" /
-     *  "حواله پل:7,700,000+" layout), as a bare
+     *  "حواله پل:7,700,000+" layout), as a "<label>:<sign><amount>" line with a leading sign
+     *  (Maskan's "خريد:-1,500,000" layout), as a bare
      *  number standing next to "ریال" that is not the stated resulting balance (Blu), as a bare
      *  signed amount opening the message (Resalat's "-200,000,000" first line), or as a bare
      *  signed amount alone on its own line with the sign trailing the number (Mehr Iran's
@@ -2255,6 +2264,18 @@ final class BalanceData {
             if (mg.find()) {
                 amount = toLong(mg.group(1));
                 sign = mg.group(2).equals("-") ? -1 : 1;
+            }
+        }
+
+        // 3c) A "<label>:<sign><amount>" line where the sign leads the number (Maskan), e.g.
+        //    "خريد:-1,500,000" or "انتقال اينترنت:+50,000,000". The explicit sign decides the
+        //    direction for the same reason as the trailing-sign shape above, and the required
+        //    sign keeps the unsigned balance, account and date lines out.
+        if (amount <= 0) {
+            Matcher mll = leadingLabeledSignedAmount.matcher(n);
+            if (mll.find()) {
+                amount = toLong(mll.group(3));
+                sign = mll.group(2).equals("-") ? -1 : 1;
             }
         }
 
