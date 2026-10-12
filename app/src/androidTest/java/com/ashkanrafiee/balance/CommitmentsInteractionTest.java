@@ -249,29 +249,54 @@ public class CommitmentsInteractionTest {
                 throw new AssertionError("could not invalidate the dashboard commitments summary", e);
             }
         });
-        long deadline = System.currentTimeMillis() + 5_000L;
-        boolean loaded = false;
+        // Waiting for a bare loaded flag is not enough: invalidate() keeps the previous
+        // summary (and its loaded flag) up while the fresh load runs, so a fast poll would draw
+        // the stale card. Every successful load installs a new Summary object, so wait for the
+        // reference itself to turn over with no load in flight.
+        final Object[] before = {null};
+        mainScenario.onActivity(activity -> {
+            try {
+                Field field = MainActivity.class.getDeclaredField("view");
+                field.setAccessible(true);
+                Object view = field.get(activity);
+                Field summaryField = view.getClass().getDeclaredField("commitmentSummary");
+                summaryField.setAccessible(true);
+                before[0] = summaryField.get(view);
+            } catch (Exception e) {
+                throw new AssertionError("could not read the dashboard summary state", e);
+            }
+        });
+        long deadline = System.currentTimeMillis() + 15_000L;
+        boolean fresh = false;
         while (System.currentTimeMillis() < deadline) {
-            final boolean[] state = {false};
+            final Object[] state = {null, null, null};
             mainScenario.onActivity(activity -> {
                 try {
                     Field field = MainActivity.class.getDeclaredField("view");
                     field.setAccessible(true);
                     Object view = field.get(activity);
+                    Field summaryField = view.getClass().getDeclaredField("commitmentSummary");
+                    summaryField.setAccessible(true);
+                    state[0] = summaryField.get(view);
+                    Field loadingField =
+                        view.getClass().getDeclaredField("commitmentSummaryLoading");
+                    loadingField.setAccessible(true);
+                    state[1] = loadingField.getBoolean(view);
                     Field loadedField = view.getClass().getDeclaredField("commitmentSummaryLoaded");
                     loadedField.setAccessible(true);
-                    state[0] = loadedField.getBoolean(view);
+                    state[2] = loadedField.getBoolean(view);
                 } catch (Exception e) {
                     throw new AssertionError("could not read the dashboard summary state", e);
                 }
             });
-            if (state[0]) {
-                loaded = true;
+            if (state[0] != before[0] && Boolean.FALSE.equals(state[1])
+                    && Boolean.TRUE.equals(state[2])) {
+                fresh = true;
                 break;
             }
             android.os.SystemClock.sleep(20L);
         }
-        assertTrue("the dashboard commitment summary did not finish loading", loaded);
+        assertTrue("the dashboard commitment summary did not finish reloading", fresh);
         mainScenario.onActivity(activity -> {
             try {
                 Field field = MainActivity.class.getDeclaredField("view");
