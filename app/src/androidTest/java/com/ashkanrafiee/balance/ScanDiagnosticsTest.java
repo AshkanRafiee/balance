@@ -600,6 +600,7 @@ public class ScanDiagnosticsTest {
             assertTrue(all.contains(ctx.getString(R.string.sender_share_copy, 0)));
             assertTrue(all.contains(ctx.getString(R.string.sender_share_send, 0)));
             assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_title)));
+            assertTrue(all.contains(ctx.getString(R.string.sender_share_unknown_sender)));
             assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_account)));
             assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_balance)));
             assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_number)));

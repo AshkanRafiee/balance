@@ -283,6 +283,7 @@
 
     <string name="sender_share_note">%1$d SMS from this sender — tick the samples to include.</string>
     <string name="sender_share_known_bank">Known bank: %1$s</string>
+    <string name="sender_share_unknown_sender">Sender number not recognized by Balance\'s bank-sender rules.</string>
     <string name="sender_share_select_all">Select all</string>
     <string name="sender_share_select_none">Select none</string>
     <string name="sender_share_copy">Copy selected (%1$d)</string>

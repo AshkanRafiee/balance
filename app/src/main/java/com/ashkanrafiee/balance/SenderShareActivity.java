@@ -173,6 +173,8 @@ public final class SenderShareActivity extends Activity {
             TextView known = text(getString(R.string.sender_share_known_bank, bank), 13, accent);
             known.setTypeface(Fonts.text(known.getContext()), Typeface.BOLD);
             body.addView(known, margin(2, 0, 2, 6));
+        } else {
+            body.addView(section(getString(R.string.sender_share_unknown_sender)), margin(2, 0, 2, 6));
         }
         body.addView(section(getString(R.string.sender_share_note, bodies.size())), margin(2, 2, 2, 10));
         issueCard();

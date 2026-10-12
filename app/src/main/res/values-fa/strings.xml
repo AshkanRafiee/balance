@@ -266,6 +266,7 @@
 
     <string name="sender_share_note">%1$d پیامک از این فرستنده — نمونه‌هایی را که می‌خواهید در گزارش باشند علامت بزنید.</string>
     <string name="sender_share_known_bank">بانک شناخته‌شده: %1$s</string>
+    <string name="sender_share_unknown_sender">شمارهٔ فرستنده با قوانین فرستنده‌های Balance شناخته نشد.</string>
     <string name="sender_share_select_all">انتخاب همه</string>
     <string name="sender_share_select_none">عدم انتخاب همه</string>
     <string name="sender_share_copy">کپی انتخاب‌شده (%1$d)</string>
