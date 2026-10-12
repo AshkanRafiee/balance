@@ -1,5 +1,7 @@
 package com.ashkanrafiee.balance;
 
+import android.content.Context;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -146,6 +148,13 @@ final class ScanDiagnostics {
      *  each, so the user sees beforehand what leaves the device). Each entry names the bank when
      *  one is known. Null-safe: an empty selection composes a header with no entries. */
     static String reportText(List<SenderHit> selected) {
+        return reportText(selected, (Context) null);
+    }
+
+    /** Like {@link #reportText(List)} with the Balance app version from {@code context} embedded
+     *  in the footer, so the maintainer knows which release produced the report. A null context
+     *  reports the version as unknown. */
+    static String reportText(List<SenderHit> selected, Context context) {
         StringBuilder out = new StringBuilder();
         out.append("## Bank SMS formats Balance could not parse\n\n")
             .append("Please add these formats. Each entry names the sender and a sample message exactly\n")
@@ -159,14 +168,42 @@ final class ScanDiagnostics {
             if (!h.stored.isEmpty()) out.append(h.stored.get(0).body);
             out.append("\n```\n\n");
         }
-        out.append("---\n").append(deviceLine()).append("\n");
+        out.append("---\n").append(deviceLine(context)).append("\n");
         return out.toString();
     }
 
-    /** Device, Android-version, build and ROM facts embedded in every report footer, so the
-     *  maintainer can reproduce the message layout without asking. Everything is read from the
-     *  platform at report time; a field the system does not expose is simply omitted. */
+    /** Balance's own version name (as shown in About), or {@code "unknown"} when the package
+     *  manager cannot tell (null context included). Mirrors {@link BackupManager} and
+     *  {@link AboutActivity}, which read the same field. */
+    static String appVersion(Context context) {
+        if (context == null) return "unknown";
+        try {
+            String v = context.getPackageManager().getPackageInfo(context.getPackageName(), 0).versionName;
+            return v == null ? "unknown" : v;
+        } catch (Exception e) {
+            return "unknown";
+        }
+    }
+
+    /** Balance's numeric version code, or 0 when it cannot be told. */
+    static int appVersionCode(Context context) {
+        if (context == null) return 0;
+        try {
+            return context.getPackageManager().getPackageInfo(context.getPackageName(), 0).versionCode;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /** Device, Android-version, build, Balance-version and ROM facts embedded in every report
+     *  footer, so the maintainer can reproduce the message layout without asking. Everything is
+     *  read from the platform at report time; a field the system does not expose is simply
+     *  omitted, and the Balance version reads {@code unknown} without a context. */
     private static String deviceLine() {
+        return deviceLine(null);
+    }
+
+    private static String deviceLine(Context context) {
         StringBuilder out = new StringBuilder();
         String make = android.os.Build.MANUFACTURER == null ? "" : android.os.Build.MANUFACTURER.trim();
         String model = android.os.Build.MODEL == null ? "" : android.os.Build.MODEL.trim();
@@ -177,6 +214,9 @@ final class ScanDiagnostics {
             .append(android.os.Build.VERSION.SDK_INT).append(")");
         String display = android.os.Build.DISPLAY == null ? "" : android.os.Build.DISPLAY.trim();
         if (!display.isEmpty()) out.append(" \u00b7 build ").append(display);
+        out.append('\n').append("Balance: ").append(appVersion(context));
+        int code = appVersionCode(context);
+        if (code > 0) out.append(" (").append(code).append(")");
         String rom = romLine();
         if (rom != null) out.append('\n').append("ROM: ").append(rom);
         return out.toString();
@@ -245,6 +285,13 @@ final class ScanDiagnostics {
      *  the {@code ISSUE_*} constants; unselected categories stay out of the report. */
     static String senderReport(String sender, int total, List<Message> selected,
             List<String> issues) {
+        return senderReport(sender, total, selected, issues, null);
+    }
+
+    /** Like {@link #senderReport(String, int, List, List)} with the Balance app version from
+     *  {@code context} embedded in the footer. A null context reports the version as unknown. */
+    static String senderReport(String sender, int total, List<Message> selected,
+            List<String> issues, Context context) {
         StringBuilder out = new StringBuilder();
         out.append("## Bank SMS format Balance could not parse\n\n");
         if (!issues.isEmpty()) {
@@ -256,7 +303,7 @@ final class ScanDiagnostics {
         for (Message m : selected) {
             out.append("```\n").append(m.body).append("\n```\n\n");
         }
-        out.append("---\n").append(deviceLine()).append("\n");
+        out.append("---\n").append(deviceLine(context)).append("\n");
         return out.toString();
     }
 

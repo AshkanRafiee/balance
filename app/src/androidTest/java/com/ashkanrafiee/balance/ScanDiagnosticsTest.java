@@ -355,6 +355,17 @@ public class ScanDiagnosticsTest {
         assertTrue(txt.contains("Android " + android.os.Build.VERSION.RELEASE));
     }
 
+    @Test public void senderReport_embedsBalanceVersion() {
+        List<ScanDiagnostics.Message> sel = new ArrayList<>();
+        sel.add(new ScanDiagnostics.Message("lay out 1,000 Toman", 0L));
+        android.content.Context context = InstrumentationRegistry.getInstrumentation()
+            .getTargetContext();
+        String txt = ScanDiagnostics.senderReport("+98Saman", 1, sel,
+            java.util.Collections.emptyList(), context);
+        assertTrue(txt.contains("Balance: " + ScanDiagnostics.appVersion(context)));
+        assertTrue(txt.contains("(" + ScanDiagnostics.appVersionCode(context) + ")"));
+    }
+
     @Test public void senderSubject_namesTheSender() {
         assertTrue(ScanDiagnostics.senderSubject("+98x").contains("+98x"));
     }

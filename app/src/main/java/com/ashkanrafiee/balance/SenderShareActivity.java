@@ -376,7 +376,7 @@ public final class SenderShareActivity extends Activity {
     private String selectedText() {
         List<ScanDiagnostics.Message> sel = selected();
         if (sel.isEmpty()) return null;
-        return ScanDiagnostics.senderReport(sender, bodies.size(), sel, issueTags());
+        return ScanDiagnostics.senderReport(sender, bodies.size(), sel, issueTags(), this);
     }
 
     private int copySelected() {
