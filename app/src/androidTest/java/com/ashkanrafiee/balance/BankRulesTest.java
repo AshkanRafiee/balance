@@ -406,6 +406,29 @@ public class BankRulesTest {
             "05/05/09_21:36\nموجودي: 123,456,789 ريال"));
     }
 
+    @Test public void extractAccount_eghtesadNovinDashLabeled_returnsAccount() {
+        // Driven with the synthetic messages in {@link EghtesadNovinMessages}, written in the
+        // shape the bank sends them, so the rule test and the scan test see the same bytes.
+        assertEquals(EghtesadNovinMessages.ACCOUNT,
+            BankRules.extractAccount("Eghtesad Novin", EghtesadNovinMessages.WITHDRAWAL));
+        assertEquals(EghtesadNovinMessages.ACCOUNT, BankRules.extractAccount("Eghtesad Novin",
+            EghtesadNovinMessages.WITHDRAWAL.replace("برداشت: ", "برداشت:")));
+    }
+
+    @Test public void extractAccount_eghtesadNovinGuards_rejectNonAccounts() {
+        // Wrong group widths, a trailing extra digit, the support phone line and a bare
+        // balance: none of them is the labeled account.
+        assertNull(BankRules.extractAccount("Eghtesad Novin",
+            EghtesadNovinMessages.WITHDRAWAL.replace(EghtesadNovinMessages.ACCOUNT,
+                "31-206-7091854-6")));
+        assertNull(BankRules.extractAccount("Eghtesad Novin",
+            EghtesadNovinMessages.WITHDRAWAL.replace(EghtesadNovinMessages.ACCOUNT,
+                "314-206-7091854-66")));
+        assertNull(BankRules.extractAccount("Eghtesad Novin",
+            "مرکزآواي نوين:" + EghtesadNovinMessages.PHONE));
+        assertNull(BankRules.extractAccount("Eghtesad Novin", "مانده:1,234,567,890ريال"));
+    }
+
     @Test public void extractAccount_nullArguments_notCaptured() {
         assertNull(BankRules.extractAccount(null, "10.1234567.2"));
         assertNull(BankRules.extractAccount("Mellat", null));
@@ -416,7 +439,7 @@ public class BankRulesTest {
         java.util.Set<String> known = BankRules.supportedNames();
         java.util.Set<String> shapes = new java.util.HashSet<>(java.util.Arrays.asList(
             "label-glued", "label-colon", "label-colon-line", "bare-mablagh", "bare-bidi",
-            "dotted", "dotted-line", "dotted-labeled", "slash-line", "credit-line"));
+            "dotted", "dotted-line", "dotted-labeled", "dash-labeled", "slash-line", "credit-line"));
         java.util.Set<String> banksSeen = new java.util.HashSet<>();
         for (String[] row : BankRules.accountRulesTestOnly()) {
             assertEquals(4, row.length);
@@ -430,7 +453,8 @@ public class BankRulesTest {
         for (String[] row : BankRules.accountRulesTestOnly()) {
             String shape = row[1];
             if (shape.equals("dotted") || shape.equals("dotted-line")
-                    || shape.equals("dotted-labeled") || shape.equals("slash-line")) {
+                    || shape.equals("dotted-labeled") || shape.equals("dash-labeled")
+                    || shape.equals("slash-line")) {
                 assertEquals("", row[2]);
                 assertEquals("", row[3]);
                 continue;
