@@ -356,6 +356,31 @@ public class BankRulesTest {
         assertNull(BankRules.extractAccount("Sepah", "مانده: 9,876,543ريال"));
     }
 
+    @Test public void extractAccount_maskanColonLine_returnsAccount() {
+        // Driven with the synthetic messages in {@link MaskanMessages}, written in the shape the
+        // bank sends them, so the rule test and the scan test see the same bytes.
+        assertEquals(MaskanMessages.ACCOUNT_A,
+            BankRules.extractAccount("Maskan", MaskanMessages.PURCHASE));
+        assertEquals(MaskanMessages.ACCOUNT_B,
+            BankRules.extractAccount("Maskan", MaskanMessages.INTERNET_TRANSFER));
+        assertEquals(MaskanMessages.ACCOUNT_C,
+            BankRules.extractAccount("Maskan", MaskanMessages.SMS_FEE));
+        assertEquals(MaskanMessages.ACCOUNT_A, BankRules.extractAccount("Maskan",
+            MaskanMessages.PURCHASE.replace("حساب:", "حساب: ")));
+    }
+
+    @Test public void extractAccount_maskanGuards_rejectNonAccounts() {
+        // Too short for an account, too long for one, and a bare balance: none of them is the
+        // stated account. The comma-grouped balance is rejected by the no-thousand-separator
+        // guard even though it sits behind no label at all.
+        assertNull(BankRules.extractAccount("Maskan",
+            MaskanMessages.PURCHASE.replace(MaskanMessages.ACCOUNT_A, "12345")));
+        assertNull(BankRules.extractAccount("Maskan",
+            MaskanMessages.PURCHASE.replace(MaskanMessages.ACCOUNT_A,
+                "123456789012345678901234567890")));
+        assertNull(BankRules.extractAccount("Maskan", "مانده:12,345,678\n0706-11:48"));
+    }
+
     @Test public void extractAccount_nullArguments_notCaptured() {
         assertNull(BankRules.extractAccount(null, "10.1234567.2"));
         assertNull(BankRules.extractAccount("Mellat", null));
@@ -415,7 +440,8 @@ public class BankRulesTest {
             assertTrue("row bank not known: " + row[0], known.contains(row[0]));
             assertTrue("duplicate bank row: " + row[0], banksSeen.add(row[0]));
             assertTrue("unknown shape: " + row[1], row[1].equals("title-line")
-                || row[1].equals("final-line") || row[1].equals("profit-line"));
+                || row[1].equals("final-line") || row[1].equals("profit-line")
+                || row[1].equals("labeled-prefix"));
         }
     }
 
@@ -431,9 +457,13 @@ public class BankRulesTest {
         // A row that can read a title but captions none of them can only ever store noise.
         for (String[] row : BankRules.reasonRulesTestOnly()) {
             boolean captioned = false;
-            for (String title : BankRules.reasonCaptionKeys())
-                if (BankRules.extractReason(row[0], row[1].equals("final-line")
-                    ? "\n" + title : "x\n" + title + "\ny\n") != null) captioned = true;
+            for (String title : BankRules.reasonCaptionKeys()) {
+                String probe;
+                if (row[1].equals("final-line")) probe = "\n" + title;
+                else if (row[1].equals("labeled-prefix")) probe = title + ":+1,000\n";
+                else probe = "x\n" + title + "\ny\n";
+                if (BankRules.extractReason(row[0], probe) != null) captioned = true;
+            }
             assertTrue("no captioned title for " + row[0], captioned);
         }
     }
@@ -470,6 +500,32 @@ public class BankRulesTest {
             "متن واریز سود به: 12345678\nمانده: 9,876,543ريال"));
         assertNull(BankRules.extractReason("Sepah", BluMessages.TOPUP));
         assertNull(BankRules.extractReason("Sepah", SepahMessages.DEPOSIT));
+    }
+
+    @Test public void extractReason_maskanLabeledPrefix_returnsTheStatedReason() {
+        // Driven with the synthetic messages in {@link MaskanMessages}: the label before the
+        // colon on the signed-amount line is the event, spelled with the Arabic yeh the bank
+        // sends, and stored in its normalized form.
+        assertEquals(MaskanMessages.PURCHASE_REASON,
+            BankRules.extractReason("Maskan", MaskanMessages.PURCHASE));
+        assertEquals(MaskanMessages.INTERNET_REASON,
+            BankRules.extractReason("Maskan", MaskanMessages.INTERNET_TRANSFER));
+        assertEquals(MaskanMessages.SMS_FEE_REASON,
+            BankRules.extractReason("Maskan", MaskanMessages.SMS_FEE));
+        assertEquals(MaskanMessages.PURCHASE_REASON, BankRules.extractReason("Maskan",
+            MaskanMessages.PURCHASE.replace("\n", "\r\n")));
+    }
+
+    @Test public void extractReason_maskanWithoutTheSignedLine_statesNoReason() {
+        // The unsigned balance, account and date lines name no event: only the signed movement
+        // line carries one, and an uncaptioned label stores nothing rather than an untranslated
+        // fragment of the bank message.
+        assertNull(BankRules.extractReason("Maskan", "مانده:12,345,678\n0706-11:48"));
+        assertNull(BankRules.extractReason("Maskan",
+            "حساب:" + MaskanMessages.ACCOUNT_A + "\nمانده:12,345,678\n0706-11:48"));
+        assertNull(BankRules.extractReason("Maskan", BluMessages.TOPUP));
+        assertNull(BankRules.extractReason("Maskan", "خريد:1,234,567\nمانده:12,345,678"));
+        assertNull(BankRules.extractReason("Maskan", "سرویس تازه:+1,000\nمانده:12,345,678"));
     }
 
     @Test public void extractReason_plainDirectionTitle_statesNoReason() {
