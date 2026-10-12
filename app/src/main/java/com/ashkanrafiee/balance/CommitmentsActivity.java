@@ -431,6 +431,13 @@ public final class CommitmentsActivity extends Activity {
         }
     }
 
+    /** How a recurring commitment ends: a fixed number of payments, an explicit end date,
+     *  or open-ended. Stored models keep only the explicit end date — a count names that date —
+     *  so these modes live in the editor alone. */
+    static final int END_MODE_COUNT = 0;
+    static final int END_MODE_END = 1;
+    static final int END_MODE_OPEN = 2;
+
     /** Typed-but-unsaved editor input: every field as raw text, so half-typed values round-trip
      *  without parsing. Small enough for the saved-state bundle (rotation/process death); never
      *  written to disk. */
@@ -441,21 +448,24 @@ public final class CommitmentsActivity extends Activity {
         final boolean pay;
         final int frequency;
         final String[] start; // raw year/month/day text
-        final boolean openEnded;
+        final int endMode;
+        final String count; // raw payment-count text
         final String[] end;
         final boolean remind;
         final String leadNumber;
         final int unit;
 
         Draft(String id, String name, String amount, boolean pay, int frequency, String[] start,
-                boolean openEnded, String[] end, boolean remind, String leadNumber, int unit) {
+                int endMode, String count, String[] end, boolean remind, String leadNumber,
+                int unit) {
             this.id = id;
             this.name = name;
             this.amount = amount;
             this.pay = pay;
             this.frequency = frequency;
             this.start = start;
-            this.openEnded = openEnded;
+            this.endMode = endMode;
+            this.count = count;
             this.end = end;
             this.remind = remind;
             this.leadNumber = leadNumber;
@@ -470,7 +480,9 @@ public final class CommitmentsActivity extends Activity {
             out.putBoolean("editor_pay", pay);
             out.putInt("editor_frequency", frequency);
             out.putStringArray("editor_start", start);
-            out.putBoolean("editor_open_ended", openEnded);
+            out.putInt("editor_end_mode", endMode);
+            out.putString("editor_count", count);
+            out.putBoolean("editor_open_ended", endMode == END_MODE_OPEN);
             out.putStringArray("editor_end", end);
             out.putBoolean("editor_remind", remind);
             out.putString("editor_lead", leadNumber);
@@ -479,10 +491,19 @@ public final class CommitmentsActivity extends Activity {
 
         static Draft readFrom(Bundle in) {
             if (in == null || !in.getBoolean("editor_draft", false)) return null;
+            int endMode;
+            if (in.containsKey("editor_end_mode")) {
+                endMode = in.getInt("editor_end_mode", END_MODE_END);
+                if (endMode < END_MODE_COUNT || endMode > END_MODE_OPEN) endMode = END_MODE_END;
+            } else {
+                endMode = in.getBoolean("editor_open_ended", false) ? END_MODE_OPEN
+                    : END_MODE_END;
+            }
+            String count = in.getString("editor_count");
             return new Draft(in.getString("editor_id"), string(in, "editor_name"),
                 string(in, "editor_amount"), in.getBoolean("editor_pay", true),
                 in.getInt("editor_frequency", Commitment.MONTHLY),
-                strings(in, "editor_start"), in.getBoolean("editor_open_ended", false),
+                strings(in, "editor_start"), endMode, count == null ? "" : count,
                 strings(in, "editor_end"), in.getBoolean("editor_remind", false),
                 string(in, "editor_lead"), in.getInt("editor_unit", 2));
         }
@@ -990,21 +1011,91 @@ public final class CommitmentsActivity extends Activity {
         EditText[] startFields = dateFields(startCivil);
         form.addView(dateRow(startFields), margin(0, 0, 0, 0));
 
-        endControls.addView(text(getString(R.string.commitments_end), 13, muted, medium()),
+        // How a recurring schedule ends: a payment count, an explicit end date, or open-ended.
+        // One horizontal row on the same line the open-ended checkbox used to own; a count names
+        // its end date, so the stored model stays an explicit end with no migration.
+        final int[] endMode = {existing != null && existing.end == null
+            ? END_MODE_OPEN : END_MODE_END};
+        TextView[] endModeChips = {
+            text(getString(R.string.commitments_end_count), 13, fg, medium()),
+            text(getString(R.string.commitments_end), 13, fg, medium()),
+            text(getString(R.string.commitments_open_ended), 13, fg, medium())};
+        final int[] endModeSelected = {endMode[0]};
+
+        LinearLayout countControls = new LinearLayout(this);
+        countControls.setOrientation(LinearLayout.VERTICAL);
+        countControls.addView(text(getString(R.string.commitments_count_label), 13, muted,
+            medium()), margin(0, 12, 0, 2));
+        EditText countField = new EditText(this);
+        countField.setHint(getString(R.string.commitments_count_hint));
+        countField.setInputType(InputType.TYPE_CLASS_NUMBER);
+        countField.setTypeface(Fonts.text(this), Typeface.NORMAL);
+        countField.setGravity(Gravity.CENTER);
+        countControls.addView(countField, new LinearLayout.LayoutParams(-1, -2));
+        TextView countPreview = text("", 12, muted);
+        countControls.addView(countPreview, margin(0, 4, 0, 0));
+
+        LinearLayout endDateControls = new LinearLayout(this);
+        endDateControls.setOrientation(LinearLayout.VERTICAL);
+        endDateControls.addView(text(getString(R.string.commitments_end), 13, muted, medium()),
             margin(0, 12, 0, 2));
-        CheckBox openEnded = new CheckBox(this);
-        openEnded.setText(getString(R.string.commitments_open_ended));
-        openEnded.setTypeface(Fonts.text(this), Typeface.NORMAL);
-        openEnded.setChecked(existing != null && existing.end == null);
-        endControls.addView(openEnded, new LinearLayout.LayoutParams(-2, -2));
         int[] endCivil = existing != null && existing.end != null
             ? Commitment.civilDay(existing.end, cal) : today;
         EditText[] endFields = dateFields(endCivil);
         LinearLayout endRow = dateRow(endFields);
-        endRow.setVisibility(openEnded.isChecked() ? View.GONE : View.VISIBLE);
-        openEnded.setOnCheckedChangeListener((v, checked) ->
-            endRow.setVisibility(checked ? View.GONE : View.VISIBLE));
-        endControls.addView(endRow, margin(0, 0, 0, 0));
+        endDateControls.addView(endRow, margin(0, 0, 0, 0));
+
+        Runnable updateEndVisibility = () -> {
+            countControls.setVisibility(
+                endMode[0] == END_MODE_COUNT ? View.VISIBLE : View.GONE);
+            endDateControls.setVisibility(
+                endMode[0] == END_MODE_END ? View.VISIBLE : View.GONE);
+        };
+        Runnable updateCountPreview = () -> {
+            Long start = parseDate(startFields, cal);
+            Long count = parseCount(countField.getText().toString());
+            Long end = start == null || count == null ? null
+                : Commitment.endForCount(start, count, freqSelected[0], cal);
+            countPreview.setText(end == null ? ""
+                : getString(R.string.commitments_count_ends, dateText(end)));
+        };
+        Runnable[] endModeActions = new Runnable[3];
+        for (int i = 0; i < 3; i++) {
+            final int index = i;
+            endModeActions[i] = () -> {
+                endMode[0] = index;
+                endModeSelected[0] = index;
+                refreshChips(endModeChips, index);
+                updateEndVisibility.run();
+                updateCountPreview.run();
+            };
+        }
+        endControls.addView(chipRow(endModeChips, endModeSelected[0], endModeActions),
+            margin(0, 12, 0, 0));
+        endControls.addView(countControls, new LinearLayout.LayoutParams(-1, -2));
+        endControls.addView(endDateControls, new LinearLayout.LayoutParams(-1, -2));
+        // Frequency steps change what a count lands on, so the preview follows it too. The chip
+        // row reads the action array at click time, so replacing these entries still takes effect.
+        for (int i = 0; i < 5; i++) {
+            final int index = i;
+            final Runnable previous = freqActions[index];
+            freqActions[index] = () -> {
+                previous.run();
+                updateEndVisibility.run();
+                updateCountPreview.run();
+            };
+        }
+        TextWatcher previewGate = new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void afterTextChanged(Editable s) {
+                updateCountPreview.run();
+            }
+        };
+        for (EditText field : startFields) field.addTextChangedListener(previewGate);
+        countField.addTextChangedListener(previewGate);
+        updateEndVisibility.run();
+        updateCountPreview.run();
         endControls.setVisibility(endDateControlsVisible(freqSelected[0]) ? View.VISIBLE : View.GONE);
         form.addView(endControls, new LinearLayout.LayoutParams(-1, -2));
 
@@ -1108,7 +1199,32 @@ public final class CommitmentsActivity extends Activity {
                     showCommitmentError(null);
                     return;
                 }
-                boolean saveEnd = endDateControlsVisible(freqSelected[0]) && !openEnded.isChecked();
+                int mode = endDateControlsVisible(freqSelected[0]) ? endMode[0] : END_MODE_OPEN;
+                if (mode == END_MODE_COUNT) {
+                    Long start = parseDate(startFields, cal);
+                    if (start == null) {
+                        Toast.makeText(this, getString(R.string.commitments_bad_date),
+                            Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    Long count = parseCount(countField.getText().toString());
+                    Long end = count == null ? null
+                        : Commitment.endForCount(start, count, freqSelected[0], cal);
+                    if (end == null) {
+                        Toast.makeText(this, getString(R.string.commitments_bad_count),
+                            Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    String title = name.getText().toString().trim();
+                    Long signedAmount = parseAmount(amount.getText().toString(), pay[0]);
+                    if (title.isEmpty() || signedAmount == null || leadMs < 0) return;
+                    if (saveParsed(existing, title, signedAmount, freqSelected[0], start, end,
+                            remindBox.isChecked(), leadMs)) {
+                        dlg.dismiss();
+                    }
+                    return;
+                }
+                boolean saveEnd = mode == END_MODE_END;
                 if (saveFromForm(existing, name, amount, pay[0], freqSelected[0], startFields,
                         saveEnd ? endFields : null, cal, remindBox.isChecked(),
                         leadMs)) {
@@ -1119,7 +1235,7 @@ public final class CommitmentsActivity extends Activity {
         dlg.show();
         activeDialog = dlg;
         editorSnapshotter = () -> snapshotForm(commitmentId, name, amount, pay, frequency,
-            startFields, openEnded, endFields, remindBox, leadNumber, unitSelected);
+            startFields, endMode, countField, endFields, remindBox, leadNumber, unitSelected);
         dlg.setOnDismissListener(d -> {
             if (activeDialog == dlg) activeDialog = null;
             editorSnapshotter = null;
@@ -1129,8 +1245,8 @@ public final class CommitmentsActivity extends Activity {
         });
         if (seed != null) {
             seeding[0] = true;
-            applyDraft(seed, name, amount, directionActions, freqActions, startFields, openEnded,
-                endFields, remindBox, leadNumber, unitActions);
+            applyDraft(seed, name, amount, directionActions, freqActions, startFields, endModeActions,
+                countField, endFields, remindBox, leadNumber, unitActions);
             seeding[0] = false;
         }
         if (existing != null) {
@@ -1150,11 +1266,11 @@ public final class CommitmentsActivity extends Activity {
     /** Inventories the live form as raw text, so a pause round-trip never parses (and never
      *  rejects) half-typed input. */
     private static Draft snapshotForm(String id, EditText name, EditText amount, boolean[] pay,
-            int[] frequency, EditText[] start, CheckBox openEnded, EditText[] end,
+            int[] frequency, EditText[] start, int[] endMode, EditText count, EditText[] end,
             CheckBox remind, EditText lead, int[] unit) {
         return new Draft(id, name.getText().toString(), amount.getText().toString(), pay[0],
-            frequency[0], texts(start), openEnded.isChecked(), texts(end), remind.isChecked(),
-            lead.getText().toString(), unit[0]);
+            frequency[0], texts(start), endMode[0], count.getText().toString(), texts(end),
+            remind.isChecked(), lead.getText().toString(), unit[0]);
     }
 
     private static String[] texts(EditText[] fields) {
@@ -1171,15 +1287,17 @@ public final class CommitmentsActivity extends Activity {
      *  seeding guard, so restoring a checked box never re-fires the permission prompt. */
     private static void applyDraft(Draft seed, EditText name, EditText amount,
             Runnable[] directionActions, Runnable[] freqActions, EditText[] startFields,
-            CheckBox openEnded, EditText[] endFields, CheckBox remind, EditText lead,
-            Runnable[] unitActions) {
+            Runnable[] endModeActions, EditText countField, EditText[] endFields, CheckBox remind,
+            EditText lead, Runnable[] unitActions) {
         name.setText(seed.name);
         amount.setText(seed.amount);
         directionActions[seed.pay ? 0 : 1].run();
         if (seed.frequency >= 0 && seed.frequency < freqActions.length)
             freqActions[seed.frequency].run();
         setTexts(startFields, seed.start);
-        openEnded.setChecked(seed.openEnded);
+        if (seed.endMode >= 0 && seed.endMode < endModeActions.length)
+            endModeActions[seed.endMode].run();
+        countField.setText(seed.count);
         setTexts(endFields, seed.end);
         remind.setChecked(seed.remind);
         lead.setText(seed.leadNumber);
@@ -1299,6 +1417,22 @@ public final class CommitmentsActivity extends Activity {
         }
     }
 
+    /** A payment count as the user types it: a whole number naming that many dues, starting
+     *  with the start date. Null when blank, non-numeric or outside 1..MAX_PAYMENT_COUNT. */
+    static Long parseCount(String raw) {
+        try {
+            if (raw == null) return null;
+            String digits = BalanceData.digits(raw.replace(",", "")
+                .replace("\u066C", "").trim());
+            if (!digits.matches("[0-9]+")) return null;
+            long value = Long.parseLong(digits);
+            if (value < 1 || value > Commitment.MAX_PAYMENT_COUNT) return null;
+            return value;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private boolean saveFromForm(Commitment existing, EditText name, EditText amount, boolean pay,
             int frequency, EditText[] startFields, EditText[] endFields, CalendarSystem cal,
             boolean remind, long remindBeforeMs) {
@@ -1325,6 +1459,16 @@ public final class CommitmentsActivity extends Activity {
                 return false;
             }
         }
+        return saveParsed(existing, title, signedAmount, frequency, start, end, remind,
+            remindBeforeMs);
+    }
+
+    /** Stores an already-parsed definition: a count-derived end arrives here as the explicit
+     *  date it names, so the store never learns the mode. */
+    private boolean saveParsed(Commitment existing, String title, Long signedAmount, int frequency,
+            Long start, Long end, boolean remind, long remindBeforeMs) {
+        if (title == null || title.isEmpty() || signedAmount == null || start == null
+                || remindBeforeMs < 0) return false;
         try {
             Commitment updated;
             if (existing == null) {
@@ -1343,6 +1487,10 @@ public final class CommitmentsActivity extends Activity {
                 updated = new Commitment(current.id, title, signedAmount, frequency, start, end,
                     current.done, current.paid, current.legacyPaidThrough, current.unpaid,
                     remind, remindBeforeMs);
+            }
+            if (updated == null) {
+                showCommitmentError(null);
+                return false;
             }
             CommitmentStore.upsert(this, updated);
         } catch (Exception error) {

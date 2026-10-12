@@ -147,8 +147,8 @@ public class CommitmentsEditorDraftTest {
 
     @Test public void editor_seededDraft_savesEveryField() throws Exception {
         CommitmentsActivity.Draft seed = new CommitmentsActivity.Draft(null, "Gym", "200000",
-            false, Commitment.WEEKLY, new String[]{"2026", "3", "2"}, false,
-            new String[]{"2026", "9", "1"}, true, "2", 1);
+            false, Commitment.WEEKLY, new String[]{"2026", "3", "2"},
+            CommitmentsActivity.END_MODE_END, "", new String[]{"2026", "9", "1"}, true, "2", 1);
         scenario = ActivityScenario.launch(CommitmentsActivity.class);
         scenario.onActivity(activity -> {
             openEditor(activity, seed);
@@ -184,6 +184,65 @@ public class CommitmentsEditorDraftTest {
         scenario.moveToState(Lifecycle.State.RESUMED);
         scenario.onActivity(activity -> assertNull("a saved form must not reopen",
             dialogField(activity, "activeDialog")));
+    }
+
+    @Test public void editor_countMode_savesThirtyMonthlyPaymentsAsEndDate() throws Exception {
+        CommitmentsActivity.Draft seed = new CommitmentsActivity.Draft(null, "Loan", "50000",
+            true, Commitment.MONTHLY, new String[]{"2026", "1", "15"},
+            CommitmentsActivity.END_MODE_COUNT, "30", new String[]{"2026", "1", "15"},
+            false, "1", 2);
+        scenario = ActivityScenario.launch(CommitmentsActivity.class);
+        scenario.onActivity(activity -> {
+            openEditor(activity, seed);
+            AlertDialog editor = dialogField(activity, "activeDialog");
+            assertNotNull("the count-mode editor must open", editor);
+            assertTrue("a seeded count form must be savable",
+                editor.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled());
+        });
+        postClick(AlertDialog.BUTTON_POSITIVE);
+        awaitNoDialog();
+
+        List<Commitment> saved = BalanceData.readCommitments(ctx);
+        assertEquals(1, saved.size());
+        Commitment c = saved.get(0);
+        assertEquals("Loan", c.name);
+        assertEquals(Commitment.MONTHLY, c.frequency);
+        assertEquals("[2026, 1, 15]",
+            java.util.Arrays.toString(Commitment.civilDay(c.start, CalendarSystem.GREGORIAN)));
+        // Thirty monthly dues from 2026-01-15 end on 2028-06-15; the count only names the date.
+        assertEquals("[2028, 6, 15]",
+            java.util.Arrays.toString(Commitment.civilDay(c.end, CalendarSystem.GREGORIAN)));
+        assertEquals(30, Commitment.occurrences(c, CalendarSystem.GREGORIAN, c.start,
+            c.end).size());
+    }
+
+    @Test public void editor_pausedAway_preservesCountMode() throws Exception {
+        scenario = ActivityScenario.launch(CommitmentsActivity.class);
+        scenario.onActivity(activity -> {
+            openEditor(activity, null);
+            AlertDialog editor = dialogField(activity, "activeDialog");
+            assertNotNull("the editor must open", editor);
+            textByValue(editor, activity.getString(R.string.commitments_end_count))
+                .performClick();
+            editTextByHint(editor, activity.getString(R.string.commitments_count_hint))
+                .setText("12");
+        });
+
+        scenario.moveToState(Lifecycle.State.STARTED);
+        scenario.onActivity(activity -> {
+            CommitmentsActivity.Draft draft = draftField(activity);
+            assertNotNull("the pause must snapshot the form", draft);
+            assertEquals(CommitmentsActivity.END_MODE_COUNT, draft.endMode);
+            assertEquals("12", draft.count);
+        });
+
+        scenario.moveToState(Lifecycle.State.RESUMED);
+        scenario.onActivity(activity -> {
+            AlertDialog editor = dialogField(activity, "activeDialog");
+            assertNotNull("the editor must reopen after the pause", editor);
+            assertEquals("12", editTextByHint(editor,
+                activity.getString(R.string.commitments_count_hint)).getText().toString());
+        });
     }
 
     private void openEditor(CommitmentsActivity activity, CommitmentsActivity.Draft seed) {

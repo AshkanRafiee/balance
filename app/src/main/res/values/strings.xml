@@ -244,6 +244,11 @@
     <string name="commitments_start">Start date</string>
     <string name="commitments_end">End date</string>
     <string name="commitments_open_ended">Open-ended</string>
+    <string name="commitments_end_count">Count</string>
+    <string name="commitments_count_label">Number of payments</string>
+    <string name="commitments_count_hint">e.g. 30</string>
+    <string name="commitments_count_ends">Last payment: %1$s</string>
+    <string name="commitments_bad_count">Enter a count from 1 to 10000</string>
     <string name="commitments_series">%1$d of %2$d remaining · %3$s total</string>
     <string name="commitments_delete">Delete</string>
     <string name="commitments_delete_title">Delete commitment?</string>

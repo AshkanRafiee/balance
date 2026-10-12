@@ -217,4 +217,53 @@ public class CommitmentsViewTest {
         assertEquals(3, CommitmentsActivity.leadChipSelection(3));
     }
 
+    @Test public void parseCount_acceptsWholeCountsOnly() {
+        assertEquals(Long.valueOf(30L), CommitmentsActivity.parseCount("30"));
+        assertEquals(Long.valueOf(1L), CommitmentsActivity.parseCount("1"));
+        assertEquals(Long.valueOf(Commitment.MAX_PAYMENT_COUNT),
+            CommitmentsActivity.parseCount(String.valueOf(Commitment.MAX_PAYMENT_COUNT)));
+        assertEquals(null, CommitmentsActivity.parseCount("0"));
+        assertEquals(null, CommitmentsActivity.parseCount(""));
+        assertEquals(null, CommitmentsActivity.parseCount("  "));
+        assertEquals(null, CommitmentsActivity.parseCount("3.5"));
+        assertEquals(null, CommitmentsActivity.parseCount("-4"));
+        assertEquals(null,
+            CommitmentsActivity.parseCount(String.valueOf(Commitment.MAX_PAYMENT_COUNT + 1)));
+        assertEquals(null, CommitmentsActivity.parseCount(null));
+    }
+
+    @Test public void editorDraft_roundTripsCountModeThroughABundle() {
+        CommitmentsActivity.Draft seed = new CommitmentsActivity.Draft(null, "Loan", "50000",
+            true, Commitment.MONTHLY, new String[]{"2026", "1", "15"},
+            CommitmentsActivity.END_MODE_COUNT, "30", new String[]{"2026", "1", "15"},
+            false, "1", 2);
+        android.os.Bundle bundle = new android.os.Bundle();
+        seed.writeTo(bundle);
+        CommitmentsActivity.Draft back = CommitmentsActivity.Draft.readFrom(bundle);
+        assertTrue(back != null);
+        assertEquals(CommitmentsActivity.END_MODE_COUNT, back.endMode);
+        assertEquals("30", back.count);
+        assertEquals(Commitment.MONTHLY, back.frequency);
+    }
+
+    @Test public void editorDraft_legacyOpenEndedBundleReadsAsOpenMode() {
+        android.os.Bundle bundle = new android.os.Bundle();
+        bundle.putBoolean("editor_draft", true);
+        bundle.putString("editor_id", null);
+        bundle.putString("editor_name", "Rent");
+        bundle.putString("editor_amount", "1000");
+        bundle.putBoolean("editor_pay", true);
+        bundle.putInt("editor_frequency", Commitment.MONTHLY);
+        bundle.putStringArray("editor_start", new String[]{"2026", "1", "1"});
+        bundle.putBoolean("editor_open_ended", true);
+        bundle.putStringArray("editor_end", new String[]{"2026", "1", "1"});
+        bundle.putBoolean("editor_remind", false);
+        bundle.putString("editor_lead", "1");
+        bundle.putInt("editor_unit", 2);
+        CommitmentsActivity.Draft back = CommitmentsActivity.Draft.readFrom(bundle);
+        assertTrue(back != null);
+        assertEquals(CommitmentsActivity.END_MODE_OPEN, back.endMode);
+        assertEquals("", back.count);
+    }
+
 }
