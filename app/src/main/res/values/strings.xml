@@ -75,6 +75,7 @@
     <string name="reason_purchase">Purchase</string>
     <string name="reason_internet_transfer">Internet transfer</string>
     <string name="reason_sms_fee">SMS service fee</string>
+    <string name="reason_card_purchase">Card purchase</string>
     <string name="row_fact_reason">Reason the bank gave: %1$s.</string>
     <string name="channel_shetab">Shetab</string>
     <string name="channel_sep">Instant payment service</string>

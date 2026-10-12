@@ -372,6 +372,7 @@ final class BankRules {
         {"Maskan",   "label-colon",     "6",  "24"},
         {"Gardeshgari", "dotted-labeled", "", ""},
         {"Eghtesad Novin", "dash-labeled", "", ""},
+        {"Shahr",  "withdrawal-line", "6",  "24"},
     };
 
     /** Builds the matcher for one {@link #ACCOUNT_RULES} row. Each shape carries the guards — the
@@ -411,6 +412,12 @@ final class BankRules {
                 return Pattern.compile("(?m)^[ \\t]*(?:\u0628\u0631\u062f\u0627\u0634\u062A|\u0648\u0627\u0631\u06CC\u0632)[ \\t]*:[ \\t]*([0-9]{3}-[0-9]{3}-[0-9]{7}-[0-9])(?![0-9-])");
             case "slash-line":    // Middle East: branch/account identifier, e.g. 020/002863516
                 return Pattern.compile("(?m)^([0-9]{3}/[0-9]{9})[ \\t]*\\r?$");
+            case "withdrawal-line":   // Shahr: the debited account behind "برداشت از:".
+                // Line-anchored, so a destination mention mid-line never reads as the account,
+                // and the bounds with the no-thousand-separator lookahead keep dates, times and
+                // grouped figures out. The body is letter-folded before it is matched, so either
+                // spelling of the label still reads.
+                return Pattern.compile("(?m)^[ \\t]*\u0628\u0631\u062f\u0627\u0634\u062a[ \\t]+\u0627\u0632[ \\t]*:[ \\t]*(" + d + ")(?![0-9,.])");
             case "credit-line":   // Sepah: the credited account, either on the profit-credit
                 // line ("واریز سود به: …") or behind "حساب:". Both alternatives are line-anchored,
                 // so a destination mention mid-line can never read as the account, and the bounds
@@ -466,6 +473,7 @@ final class BankRules {
         {"Middle East", "final-line"},
         {"Sepah", "profit-line"},
         {"Maskan", "labeled-prefix"},
+        {"Shahr", "card-line"},
     };
 
     /** Longest title line {@link #compileReason} will read as a reason. A bank names the event in a few
@@ -494,6 +502,7 @@ final class BankRules {
         REASON_CAPTION_RES.put("خرید", R.string.reason_purchase);
         REASON_CAPTION_RES.put("انتقال اینترنت", R.string.reason_internet_transfer);
         REASON_CAPTION_RES.put("برداشت بابت خدمات پیامکی سال 1404", R.string.reason_sms_fee);
+        REASON_CAPTION_RES.put("خرید با کارت", R.string.reason_card_purchase);
     }
 
     /** Builds the matcher for one {@link #REASON_RULES} row. Each shape carries the guards that keep a
@@ -532,6 +541,13 @@ final class BankRules {
                 // ("برداشت بابت خدمات پيامکي سال 1404") still reads; the allowlist decides which
                 // labels state a reason the app can caption.
                 return Pattern.compile("(?m)^[ \\t]*([^\\r\\n:0-9][^\\r\\n:]{0,39})[ \\t]*:[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*[+-]");
+            case "card-line":   // Shahr: the card-purchase event on its own line ("خريد با کارت").
+                // The phrase is literal — it names one event, so only it can ever be read here
+                // (a shared title shape would also read other banks' titles, which the allowlist
+                // is global to) — and line-anchored, so a mention inside a longer sentence is
+                // not one. The body is letter-folded before it is matched, so the Arabic yeh
+                // the bank spells "خريد" with still reads.
+                return Pattern.compile("(?m)^[ \\t]*(\u062E\u0631\u06CC\u062F[ \\t]+\u0628\u0627[ \\t]+\u06A9\u0627\u0631\u062A)[ \\t]*\\r?$");
             default:
                 throw new IllegalArgumentException("unknown reason shape '" + row[1] + "' for " + row[0]);
         }
