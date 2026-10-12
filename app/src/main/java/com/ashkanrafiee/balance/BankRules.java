@@ -369,6 +369,7 @@ final class BankRules {
         {"Pasargad", "dotted-line",     "",   ""},
         {"Middle East", "slash-line",   "",   ""},
         {"Sepah",  "credit-line",    "6",  "24"},
+        {"Maskan",   "label-colon",     "6",  "24"},
     };
 
     /** Builds the matcher for one {@link #ACCOUNT_RULES} row. Each shape carries the guards — the
@@ -449,6 +450,7 @@ final class BankRules {
         {"Blu", "title-line"},
         {"Middle East", "final-line"},
         {"Sepah", "profit-line"},
+        {"Maskan", "labeled-prefix"},
     };
 
     /** Longest title line {@link #compileReason} will read as a reason. A bank names the event in a few
@@ -474,6 +476,9 @@ final class BankRules {
         REASON_CAPTION_RES.put("انتقال پل", R.string.reason_transfer_out);
         REASON_CAPTION_RES.put("واریز مبلغ افزایش موجودی حساب", R.string.reason_balance_increase);
         REASON_CAPTION_RES.put("واریز سود", R.string.reason_profit);
+        REASON_CAPTION_RES.put("خرید", R.string.reason_purchase);
+        REASON_CAPTION_RES.put("انتقال اینترنت", R.string.reason_internet_transfer);
+        REASON_CAPTION_RES.put("برداشت بابت خدمات پیامکی سال 1404", R.string.reason_sms_fee);
     }
 
     /** Builds the matcher for one {@link #REASON_RULES} row. Each shape carries the guards that keep a
@@ -504,6 +509,14 @@ final class BankRules {
                 // either by the "به:" account it credits or by nothing, which is also the shape the
                 // rules test probes the row with.
                 return Pattern.compile("(?m)^[ \\t]*(\u0648\u0627\u0631\u06CC\u0632[ \\t]+\u0633\u0648\u062F)(?=[ \\t]*\u0628\u0647[ \\t]*:[ \\t]*[0-9]|[ \\t]*\\r?$)");
+            case "labeled-prefix":   // Maskan: the event label before the colon on the
+                // "<label>:±amount" movement line ("خريد:-1,500,000"). The label mirrors the amount
+                // matcher's own label class, so the two agree on which line carries the event, and
+                // the required sign after the colon keeps the unsigned balance, account and date
+                // lines out. Digits stay allowed inside the label so a fee naming its service year
+                // ("برداشت بابت خدمات پيامکي سال 1404") still reads; the allowlist decides which
+                // labels state a reason the app can caption.
+                return Pattern.compile("(?m)^[ \\t]*([^\\r\\n:0-9][^\\r\\n:]{0,39})[ \\t]*:[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*[+-]");
             default:
                 throw new IllegalArgumentException("unknown reason shape '" + row[1] + "' for " + row[0]);
         }
