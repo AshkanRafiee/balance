@@ -177,6 +177,14 @@ final class BalanceData {
      *  balances, account lines and date lines from matching; the explicit sign gives the direction. */
     private static final Pattern bareSignedAmount = Pattern.compile(
         "(?m)^[ \\t\\u202A-\\u202E]*([0-9][0-9,]*)[ \\t\\u202A-\\u202E]*([+-])[ \\t\\u202A-\\u202E]*$");
+    /** A bare, signed amount followed by "ریال" on its own line, as Eghtesad Novin writes it
+     *  ("-3,100,000ريال" under its "برداشت:" account line). Resolved with the whole-line signed
+     *  shapes before the deposit/withdrawal label scan, so that scan never mistakes the account's
+     *  own digits ("برداشت: 126-…") for the movement amount. The whole-line anchors keep the
+     *  labeled balance, account, phone and date lines out, and the explicit sign gives the
+     *  direction with no keyword needed. */
+    private static final Pattern signedRialAmount = Pattern.compile(
+        "(?m)^[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*([+-])[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*([0-9][0-9,]*)[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*\u0631\u06CC\u0627\u0644[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*$");
     /** A line of "<label>:<amount><sign>" where the sign trails the number, as Melli writes it
      *  ("انتقالي:1,000,000-", "خريداينترنتي:7,600,000-", "حواله پل:7,700,000+"). The line ending in
      *  an explicit sign distinguishes the moved amount from balances and account numbers (which are
@@ -2197,7 +2205,8 @@ final class BalanceData {
      *  "مبلغ:500,000-"), after a deposit/withdrawal label ("واریز:"/"برداشت:", Tejarat), as a
      *  "<label>:<amount><sign>" line with a trailing sign (Melli's "انتقالي:1,000,000-" /
      *  "حواله پل:7,700,000+" layout), as a "<label>:<sign><amount>" line with a leading sign
-     *  (Maskan's "خريد:-1,500,000" layout), as a bare
+     *  (Maskan's "خريد:-1,500,000" layout), as a bare signed amount followed by "ریال" on its
+     *  own line (Eghtesad Novin's "-3,100,000ريال" layout), as a bare
      *  number standing next to "ریال" that is not the stated resulting balance (Blu), as a bare
      *  signed amount opening the message (Resalat's "-200,000,000" first line), or as a bare
      *  signed amount alone on its own line with the sign trailing the number (Mehr Iran's
@@ -2223,6 +2232,17 @@ final class BalanceData {
         if (leadingSigned.find()) {
             sign = leadingSigned.group(1).equals("-") ? -1 : 1;
             amount = toLong(leadingSigned.group(2));
+        }
+
+        // A signed "ریال" amount on its own line is equally unambiguous, and is resolved here for
+        // the same reason: Eghtesad Novin states its account behind the "برداشت:" label, so the
+        // label scan below would otherwise read the account's own leading digits as the amount.
+        if (amount <= 0) {
+            Matcher leadingSignedRial = signedRialAmount.matcher(n);
+            if (leadingSignedRial.find()) {
+                sign = leadingSignedRial.group(1).equals("-") ? -1 : 1;
+                amount = toLong(leadingSignedRial.group(2));
+            }
         }
 
         // 1) Amount following the "مبلغ" label, with an optional explicit sign.
