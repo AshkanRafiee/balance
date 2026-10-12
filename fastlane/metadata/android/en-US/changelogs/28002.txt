@@ -2,4 +2,5 @@
 • Fixed the home-screen widget privacy mask so the total stays masked, and made large-screen tablets and foldables rotate instead of staying portrait.
 • Backups now refuse to restore on an older app version, failed exports no longer leave truncated files, and diagnostics explains clearly when Android 17 hides restricted messages.
 • Large backups now finish with a live progress bar instead of appearing stuck.
+• Maskan Bank messages are now read — purchases, transfers and service fees show in history with their account and stated reason.
 • Hardened the in-app lock, commitment reminders, and history loading against crashes on slow or older devices.
