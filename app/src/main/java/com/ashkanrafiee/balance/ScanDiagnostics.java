@@ -164,7 +164,8 @@ final class ScanDiagnostics {
             out.append("### ");
             if (h.bank != null) out.append("Bank: ").append(h.bank).append(" — ");
             out.append("Sender `").append(h.sender).append("` — ").append(h.messages).append(
-                h.messages == 1 ? " message" : " messages").append("\n\n```\n");
+                h.messages == 1 ? " message" : " messages").append("\n")
+                .append(senderDetectionLine(h.sender, h.bank)).append("\n\n```\n");
             if (!h.stored.isEmpty()) out.append(h.stored.get(0).body);
             out.append("\n```\n\n");
         }
@@ -220,6 +221,17 @@ final class ScanDiagnostics {
         String rom = romLine();
         if (rom != null) out.append('\n').append("ROM: ").append(rom);
         return out.toString();
+    }
+
+    /** Explains the sender-number result in maintainer-facing language, including the rule
+     *  outcome for unknown numbers instead of leaving the reader to infer it from the sample. */
+    private static String senderDetectionLine(String sender, String bank) {
+        if (bank != null) {
+            return "Sender number detection: `" + sender + "` was recognized as a " + bank
+                + " sender.";
+        }
+        return "Sender number detection: `" + sender
+            + "` was not recognized by Balance's bank-sender rules.";
     }
 
     private static final String[][] ROM_PROPS = {
@@ -285,13 +297,13 @@ final class ScanDiagnostics {
      *  the {@code ISSUE_*} constants; unselected categories stay out of the report. */
     static String senderReport(String sender, int total, List<Message> selected,
             List<String> issues) {
-        return senderReport(sender, total, selected, issues, null);
+        return senderReport(sender, total, selected, null, issues, null);
     }
 
-    /** Like {@link #senderReport(String, int, List, List)} with the Balance app version from
-     *  {@code context} embedded in the footer. A null context reports the version as unknown. */
+    /** Like {@link #senderReport(String, int, List, List)} with the resolved bank and Balance app
+     *  version from {@code context}. A null bank means the sender number was not recognized. */
     static String senderReport(String sender, int total, List<Message> selected,
-            List<String> issues, Context context) {
+            String bank, List<String> issues, Context context) {
         StringBuilder out = new StringBuilder();
         out.append("## Bank SMS format Balance could not parse\n\n");
         if (!issues.isEmpty()) {
@@ -299,6 +311,7 @@ final class ScanDiagnostics {
         }
         out.append("Sender `").append(sender).append("` — ").append(total).append(
             total == 1 ? " message in total" : " messages in total").append(".\n")
+            .append(senderDetectionLine(sender, bank)).append("\n")
             .append("Sample message(s) exactly as the bank sent them:\n\n");
         for (Message m : selected) {
             out.append("```\n").append(m.body).append("\n```\n\n");

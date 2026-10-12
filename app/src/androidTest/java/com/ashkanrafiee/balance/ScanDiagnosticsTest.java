@@ -361,9 +361,25 @@ public class ScanDiagnosticsTest {
         android.content.Context context = InstrumentationRegistry.getInstrumentation()
             .getTargetContext();
         String txt = ScanDiagnostics.senderReport("+98Saman", 1, sel,
-            java.util.Collections.emptyList(), context);
+            "Saman", java.util.Collections.emptyList(), context);
         assertTrue(txt.contains("Balance: " + ScanDiagnostics.appVersion(context)));
         assertTrue(txt.contains("(" + ScanDiagnostics.appVersionCode(context) + ")"));
+    }
+
+    @Test public void senderReport_explainsRecognizedSenderNumber() {
+        List<ScanDiagnostics.Message> sel = new ArrayList<>();
+        sel.add(new ScanDiagnostics.Message("sample", 0L));
+        String txt = ScanDiagnostics.senderReport("500095", 1, sel, "Saman",
+            java.util.Collections.emptyList(), null);
+        assertTrue(txt.contains("Sender number detection: `500095` was recognized as a Saman sender."));
+    }
+
+    @Test public void senderReport_explainsUnrecognizedSenderNumber() {
+        List<ScanDiagnostics.Message> sel = new ArrayList<>();
+        sel.add(new ScanDiagnostics.Message("sample", 0L));
+        String txt = ScanDiagnostics.senderReport("+98unknown", 1, sel, null,
+            java.util.Collections.emptyList(), null);
+        assertTrue(txt.contains("Sender number detection: `+98unknown` was not recognized by Balance's bank-sender rules."));
     }
 
     @Test public void senderSubject_namesTheSender() {
