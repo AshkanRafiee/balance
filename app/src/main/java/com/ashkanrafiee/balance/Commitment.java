@@ -198,6 +198,40 @@ final class Commitment {
         return steps + (compare(cursor, last) <= 0 ? 1 : 0);
     }
 
+    /** Upper bound for the editor's payment-count mode: 10,000 dues cover a century of
+     *  weekly payments, so anything larger is a typo rather than a schedule. */
+    static final long MAX_PAYMENT_COUNT = 10_000L;
+
+    /** The last due day of a schedule paying {@code count} times from {@code start}, in the
+     *  viewing calendar. The stored model stays an explicit end date — a count is only how the
+     *  editor names that date — so every screen below keeps working unchanged. Returns null for
+     *  a non-positive count, an over-large count, a one-time frequency (which has no end) or a
+     *  date that cannot be represented. */
+    static Long endForCount(long start, long count, int frequency, CalendarSystem cal) {
+        if (cal == null || start <= 0 || count <= 0 || count > MAX_PAYMENT_COUNT) return null;
+        if (frequency < DAILY || frequency > YEARLY) return null;
+        try {
+            int[] anchor = civilDay(start, cal);
+            if (count == 1) return millisOf(anchor[0], anchor[1], anchor[2], cal);
+            if (frequency == DAILY || frequency == WEEKLY) {
+                return dailyStepAt(anchor, cal, count - 1, frequency == WEEKLY ? 7 : 1);
+            }
+            int[] last;
+            if (frequency == MONTHLY) {
+                last = monthCursor(anchor, count - 1, cal);
+            } else {
+                long year = (long) anchor[0] + count - 1;
+                if (year > Integer.MAX_VALUE || year < Integer.MIN_VALUE) return null;
+                int y = (int) year;
+                last = new int[]{y, anchor[1],
+                    Math.min(anchor[2], cal.daysInMonth(y, anchor[1]))};
+            }
+            return millisOf(last[0], last[1], last[2], cal);
+        } catch (ArithmeticException | IllegalArgumentException e) {
+            return null;
+        }
+    }
+
     private static LocalDate gregorianDay(long millis) {
         int[] civil = civilDay(millis, CalendarSystem.GREGORIAN);
         return LocalDate.of(civil[0], civil[1], civil[2]);

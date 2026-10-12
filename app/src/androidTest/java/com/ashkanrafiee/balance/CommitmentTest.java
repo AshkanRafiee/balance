@@ -354,4 +354,69 @@ public class CommitmentTest {
         assertNotNull(at);
         assertTrue(at >= now);
     }
+
+    // ---- payment count ------------------------------------------------------------
+
+    @Test public void endForCount_namesTheLastDueDay() {
+        long start = Commitment.millisOf(2026, 1, 15, CalendarSystem.GREGORIAN);
+        // Thirty monthly payments from 2026-01-15 end on 2028-06-15.
+        Long end = Commitment.endForCount(start, 30, Commitment.MONTHLY,
+            CalendarSystem.GREGORIAN);
+        assertNotNull(end);
+        assertEquals("[2028, 6, 15]",
+            java.util.Arrays.toString(Commitment.civilDay(end, CalendarSystem.GREGORIAN)));
+        Commitment c = Commitment.create("loan", -1000, Commitment.MONTHLY, start, end,
+            false, 0);
+        assertNotNull(c);
+        assertEquals(30,
+            Commitment.occurrences(c, CalendarSystem.GREGORIAN, start, end).size());
+    }
+
+    @Test public void endForCount_clampsIntoShortMonths() {
+        // A monthly schedule starting on the 31st lands on the last day of short months.
+        long start = Commitment.millisOf(2026, 1, 31, CalendarSystem.GREGORIAN);
+        Long end = Commitment.endForCount(start, 3, Commitment.MONTHLY,
+            CalendarSystem.GREGORIAN);
+        assertNotNull(end);
+        assertEquals(Commitment.millisOf(2026, 3, 31, CalendarSystem.GREGORIAN),
+            (long) end);
+        Commitment c = Commitment.create("monthly", -100, Commitment.MONTHLY, start, end,
+            false, 0);
+        List<Long> dues = Commitment.occurrences(c, CalendarSystem.GREGORIAN, start, end);
+        assertEquals(3, dues.size());
+        assertEquals(Commitment.millisOf(2026, 2, 28, CalendarSystem.GREGORIAN),
+            (long) dues.get(1));
+    }
+
+    @Test public void endForCount_stepsDailyWeeklyAndYearly() {
+        long start = Commitment.millisOf(2026, 10, 5, CalendarSystem.GREGORIAN);
+        assertEquals(Commitment.millisOf(2026, 10, 7, CalendarSystem.GREGORIAN),
+            (long) Commitment.endForCount(start, 3, Commitment.DAILY,
+                CalendarSystem.GREGORIAN));
+        assertEquals(Commitment.millisOf(2026, 10, 19, CalendarSystem.GREGORIAN),
+            (long) Commitment.endForCount(start, 3, Commitment.WEEKLY,
+                CalendarSystem.GREGORIAN));
+        long leap = Commitment.millisOf(2024, 2, 29, CalendarSystem.GREGORIAN);
+        assertEquals(Commitment.millisOf(2026, 2, 28, CalendarSystem.GREGORIAN),
+            (long) Commitment.endForCount(leap, 3, Commitment.YEARLY,
+                CalendarSystem.GREGORIAN));
+        // One payment ends on the start day itself.
+        assertEquals(start, (long) Commitment.endForCount(start, 1, Commitment.MONTHLY,
+            CalendarSystem.GREGORIAN));
+    }
+
+    @Test public void endForCount_rejectsInvalidCounts() {
+        long start = Commitment.millisOf(2026, 10, 7, CalendarSystem.GREGORIAN);
+        assertNull(Commitment.endForCount(start, 0, Commitment.MONTHLY,
+            CalendarSystem.GREGORIAN));
+        assertNull(Commitment.endForCount(start, -3, Commitment.MONTHLY,
+            CalendarSystem.GREGORIAN));
+        assertNull(Commitment.endForCount(start, Commitment.MAX_PAYMENT_COUNT + 1,
+            Commitment.MONTHLY, CalendarSystem.GREGORIAN));
+        assertNull(Commitment.endForCount(start, 12, Commitment.ONCE,
+            CalendarSystem.GREGORIAN));
+        assertNull(Commitment.endForCount(0, 12, Commitment.MONTHLY,
+            CalendarSystem.GREGORIAN));
+        assertNull(Commitment.endForCount(start, 12, Commitment.MONTHLY, null));
+    }
 }
