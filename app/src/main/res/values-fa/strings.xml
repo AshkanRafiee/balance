@@ -146,6 +146,7 @@
     <string name="backup_restore_info">رمز عبوری را که هنگام ایجاد این پشتیبان وارد کرده بودید بنویسید. بانک‌های بازیابی‌شده با داده‌های فعلی ادغام می‌شوند و جدیدترین موجودی هر بانک حفظ می‌شود.</string>
     <string name="backup_progress_creating">در حال ساخت پشتیبان رمزگذاری‌شده…</string>
     <string name="backup_progress_restoring">در حال رمزگشایی پشتیبان…</string>
+    <string name="backup_stage_writing">در حال نوشتن پشتیبان…</string>
     <string name="backup_created">پشتیبان ذخیره شد</string>
     <string name="backup_create_failed">پشتیبان‌گیری ناموفق بود</string>
     <string name="backup_restored">بازیابی انجام شد</string>

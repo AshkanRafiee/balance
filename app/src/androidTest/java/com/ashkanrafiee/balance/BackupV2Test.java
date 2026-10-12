@@ -461,6 +461,54 @@ public class BackupV2Test {
         assertTrue(BalanceData.read(context).isEmpty());
     }
 
+    @Test public void largeSourceStore_backupCompletesWithDeterminateProgressAndRoundTrips()
+            throws Exception {
+        // A real inbox holds thousands of recognized SMS; the sources section must stream them
+        // in linear time with live progress instead of stalling the backup dialog.
+        int sources = 1200;
+        for (int i = 0; i < sources; i++) {
+            SourceStore.Source source = SourceStore.capture(context, "Refah",
+                "perf body " + i + " balance 1,000,000", T + i, BankRules.VERSION);
+            assertNotNull(source);
+            assertTrue(SourceStore.observeTransaction(context, source, 1,
+                new Transaction("Refah", null, T + i, -100L - i, 900L,
+                    "sig-" + i, "content-" + i)));
+            assertTrue(SourceStore.observeBalance(context, source, 1, "Refah", null,
+                T + i, 900L));
+        }
+        assertEquals((long) sources, SourceStore.sourceCount(context));
+
+        final List<Integer> stages = new ArrayList<>();
+        final long[] last = {0, 0};
+        final long[] calls = {0};
+        WorkProgress progress = new WorkProgress() {
+            @Override public void stage(int stageResId) { stages.add(stageResId); }
+            @Override public void progress(long done, long total) {
+                calls[0]++;
+                last[0] = done;
+                last[1] = total;
+            }
+        };
+        File backup = file("v2-large-sources.bin");
+        long start = System.currentTimeMillis();
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD, progress);
+        android.util.Log.i("BackupV2Test",
+            "large backup: " + sources + " sources in "
+                + (System.currentTimeMillis() - start) + "ms");
+        assertTrue(backup.length() > 0);
+        assertTrue("backup must announce its sources section",
+            stages.contains(R.string.backup_stage_writing));
+        assertEquals((long) sources, calls[0]);
+        assertEquals((long) sources, last[0]);
+        assertEquals((long) sources, last[1]);
+
+        BalanceData.reset(context, true);
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD);
+        assertEquals((long) sources, SourceStore.sourceCount(context));
+        assertEquals((long) sources, SourceStore.transactionObservationCount(context));
+        assertEquals((long) sources, SourceStore.balanceObservationCount(context));
+    }
+
     private void expectRestoreFailure(File file, String description, String password)
             throws Exception {
         try {

@@ -150,6 +150,7 @@
     <string name="backup_progress_restoring">Decrypting backup…</string>
     <string name="backup_stage_reading">Reading saved data…</string>
     <string name="backup_stage_merging">Merging backup…</string>
+    <string name="backup_stage_writing">Writing backup…</string>
     <string name="scan_stage_reading">Reading bank SMS…</string>
     <string name="scan_stage_saving">Saving…</string>
     <string name="reset_progress">Clearing saved data…</string>

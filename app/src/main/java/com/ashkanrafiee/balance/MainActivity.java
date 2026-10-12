@@ -1235,9 +1235,15 @@ public class MainActivity extends Activity {
 
     private android.app.AlertDialog progressDialog;
     private TextView progressMessage;
+    private android.widget.ProgressBar progressBar;
 
-    /** Progress callbacks for the backup/restore worker: stage labels replace the dialog text. */
+    /** Progress callbacks for the backup/restore worker: stage labels replace the dialog text,
+     *  and row counts drive the bar. The bar starts indeterminate (key derivation and small
+     *  sections report no counts) and turns determinate on the first counted batch, so a long
+     *  sources section reads as movement instead of a stuck screen. Posts are throttled: the
+     *  worker can emit thousands per second. */
     private WorkProgress dialogProgress() {
+        final long[] lastPost = {0};
         return new WorkProgress() {
             @Override public void stage(final int stageResId) {
                 runOnUiThread(() -> {
@@ -1246,12 +1252,29 @@ public class MainActivity extends Activity {
                 });
             }
 
-            @Override public void progress(long done, long total) {
+            @Override public void progress(final long done, final long total) {
+                if (total <= 0) return;
+                long now = android.os.SystemClock.uptimeMillis();
+                if (done < total && now - lastPost[0] < 150) return;
+                lastPost[0] = now;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    android.widget.ProgressBar bar = progressBar;
+                    android.app.AlertDialog dialog = progressDialog;
+                    if (bar == null || dialog == null || !dialog.isShowing()) return;
+                    bar.setIndeterminate(false);
+                    bar.setMax((int) Math.min(total, Integer.MAX_VALUE));
+                    bar.setProgress((int) Math.min(done, Integer.MAX_VALUE));
+                });
             }
         };
     }
 
     private void showProgress(String message) {
+        // A finishing activity has no valid window token: showing here would crash with
+        // BadTokenException on some ROMs, so the worker below runs headless instead (its
+        // progress callbacks and completion both tolerate a missing dialog).
+        if (isFinishing() || isDestroyed()) return;
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -1276,9 +1299,20 @@ public class MainActivity extends Activity {
         barLp.topMargin = dp(14);
         bar.setLayoutParams(barLp);
         wrap.addView(bar);
+        progressBar = bar;
         progressDialog = new android.app.AlertDialog.Builder(this)
             .setView(wrap).setCancelable(false).create();
-        progressDialog.show();
+        try {
+            progressDialog.show();
+        } catch (Exception e) {
+            // The window token went away between the check above and the show (e.g. the
+            // activity finished while the picker result was landing): drop the dialog and
+            // let the worker finish headless rather than crashing.
+            android.util.Log.w("BalanceBackup", "progress show failed", e);
+            progressDialog = null;
+            progressBar = null;
+            progressMessage = null;
+        }
         // The old password dialog was just dismissed with its soft keyboard still
         // animating away. Pin this dialog to the exact middle of the screen:
         // the window manager centers dialogs inside the area that excludes the
@@ -1304,9 +1338,12 @@ public class MainActivity extends Activity {
 
     private void dismissProgress() {
         if (progressDialog != null) {
-            progressDialog.dismiss();
+            try { progressDialog.dismiss(); } catch (Exception e) {
+                android.util.Log.w("BalanceBackup", "progress dismiss failed", e);
+            }
             progressDialog = null;
         }
+        progressBar = null;
         progressMessage = null;
     }
 

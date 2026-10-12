@@ -215,7 +215,7 @@ final class BackupManager {
                     try {
                         JsonWriter json = new JsonWriter(new OutputStreamWriter(encrypted,
                             StandardCharsets.UTF_8));
-                        writeFramedPayload(context, json);
+                        writeFramedPayload(context, json, progress);
                         json.flush();
                         encrypted.finish();
                     } finally {
@@ -230,7 +230,8 @@ final class BackupManager {
         }
     }
 
-    private static void writeFramedPayload(Context context, JsonWriter json) throws Exception {
+    private static void writeFramedPayload(Context context, JsonWriter json,
+            WorkProgress progress) throws Exception {
         json.beginObject();
         json.name("schema").value(2);
         // This is part of the authenticated JSON envelope. Older framed backups omit it and are
@@ -265,8 +266,15 @@ final class BackupManager {
         json.name("commitmentDeletions");
         CommitmentStore.writeJsonDeletions(context, json);
 
+        // The sources section dominates backup time on a real inbox (every recognized SMS
+        // plus its parser observations), so it reports determinate progress against a cheap
+        // row count taken up front instead of leaving the dialog on its opening stage.
+        if (progress != null) progress.stage(R.string.backup_stage_writing);
+        final long sourceTotal = SourceStore.countSourceRows(context);
+        final long[] sourceDone = {0};
         json.name("sources").beginArray();
         SourceStore.forEachSourceWithObservations(context, 256, (source, transactions, balances) -> {
+            if (progress != null) progress.progress(++sourceDone[0], sourceTotal);
             json.beginObject();
             json.name("sender").value(source.sender);
             json.name("body").value(source.rawBody);

@@ -329,10 +329,23 @@ final class SourceStore {
         requirePageSize(pageSize);
         if (visitor == null) throw new NullPointerException("visitor");
         read(context, session -> {
+            // The observations are resolved against the already-decoded parent: reloading the
+            // parent row per observation (a query plus a decrypt each) turns a large source
+            // store into minutes of backup work on a real inbox.
             visitSources(session, pageSize, source -> visitor.accept(source,
-                transactionObservations(session, source.id),
-                balanceObservations(session, source.id)));
+                transactionObservations(session, source),
+                balanceObservations(session, source)));
             return null;
+        });
+    }
+
+    /** Cheap row count without decoding anything; used to size determinate backup progress. */
+    static long countSourceRows(Context context) throws Exception {
+        return read(context, session -> {
+            try (Cursor cursor = session.db.rawQuery("SELECT COUNT(*) FROM " + TABLE, null)) {
+                cursor.moveToFirst();
+                return cursor.getLong(0);
+            }
         });
     }
 
@@ -692,6 +705,30 @@ final class SourceStore {
         return out;
     }
 
+    /** Same as above but verified against the already-decoded parent instead of reloading it
+     *  from the database once per observation row. */
+    private static List<TransactionObservation> transactionObservations(Session session,
+            Source parent) throws Exception {
+        List<TransactionObservation> out = new ArrayList<>();
+        try (Cursor cursor = session.db.query(TRANSACTION_TABLE, OBSERVATION_COLUMNS,
+                "source_id=?", new String[]{Long.toString(parent.id)}, null, null, "id ASC")) {
+            while (cursor.moveToNext()) out.add(session.decodeTransaction(cursor, parent));
+        }
+        return out;
+    }
+
+    /** Same as above but verified against the already-decoded parent instead of reloading it
+     *  from the database once per observation row. */
+    private static List<BalanceObservation> balanceObservations(Session session, Source parent)
+            throws Exception {
+        List<BalanceObservation> out = new ArrayList<>();
+        try (Cursor cursor = session.db.query(BALANCE_TABLE, OBSERVATION_COLUMNS,
+                "source_id=?", new String[]{Long.toString(parent.id)}, null, null, "id ASC")) {
+            while (cursor.moveToNext()) out.add(session.decodeBalance(cursor, parent));
+        }
+        return out;
+    }
+
     private static void visitSources(Session session, int pageSize, SourceVisitor visitor)
             throws Exception {
         try (Cursor cursor = session.db.query(TABLE, SOURCE_COLUMNS, null, null, null, null,
@@ -921,6 +958,22 @@ final class SourceStore {
             String sourceDigest = requiredString(cursor.getString(2), "transaction source digest");
             String dedupe = requiredString(cursor.getString(3), "transaction dedupe digest");
             Source source = sourceForObservation(sourceId, sourceDigest);
+            return decodeTransaction(cursor, id, sourceId, sourceDigest, dedupe, source);
+        }
+
+        TransactionObservation decodeTransaction(Cursor cursor, Source parent) throws Exception {
+            long id = cursor.getLong(0);
+            long sourceId = cursor.getLong(1);
+            String sourceDigest = requiredString(cursor.getString(2), "transaction source digest");
+            String dedupe = requiredString(cursor.getString(3), "transaction dedupe digest");
+            if (parent == null || parent.id != sourceId
+                    || !parent.physicalIdentity.equals(sourceDigest))
+                throw new Exception("transaction observation parent mismatch");
+            return decodeTransaction(cursor, id, sourceId, sourceDigest, dedupe, parent);
+        }
+
+        private TransactionObservation decodeTransaction(Cursor cursor, long id, long sourceId,
+                String sourceDigest, String dedupe, Source source) throws Exception {
             JSONObject json = new JSONObject(rows.decrypt(cursor.getString(4),
                 transactionIdentity(dedupe)));
             checkFields(json, "parser", "bank", "account", "date", "amount", "balance", "sig",
@@ -943,6 +996,22 @@ final class SourceStore {
             String sourceDigest = requiredString(cursor.getString(2), "balance source digest");
             String dedupe = requiredString(cursor.getString(3), "balance dedupe digest");
             Source source = sourceForObservation(sourceId, sourceDigest);
+            return decodeBalance(cursor, id, sourceId, sourceDigest, dedupe, source);
+        }
+
+        BalanceObservation decodeBalance(Cursor cursor, Source parent) throws Exception {
+            long id = cursor.getLong(0);
+            long sourceId = cursor.getLong(1);
+            String sourceDigest = requiredString(cursor.getString(2), "balance source digest");
+            String dedupe = requiredString(cursor.getString(3), "balance dedupe digest");
+            if (parent == null || parent.id != sourceId
+                    || !parent.physicalIdentity.equals(sourceDigest))
+                throw new Exception("balance observation parent mismatch");
+            return decodeBalance(cursor, id, sourceId, sourceDigest, dedupe, parent);
+        }
+
+        private BalanceObservation decodeBalance(Cursor cursor, long id, long sourceId,
+                String sourceDigest, String dedupe, Source source) throws Exception {
             JSONObject json = new JSONObject(rows.decrypt(cursor.getString(4),
                 balanceIdentity(dedupe)));
             checkFields(json, "parser", "bank", "account", "date", "balance");
