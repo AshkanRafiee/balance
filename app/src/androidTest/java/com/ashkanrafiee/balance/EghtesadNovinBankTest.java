@@ -99,6 +99,11 @@ public class EghtesadNovinBankTest {
         assertEquals(EghtesadNovinMessages.ACCOUNT, BankRules.extractAccount(BANK, crlf));
         assertEquals(MOVEMENT, (long) BalanceData.extractTransaction(crlf));
         assertEquals(BALANCE, BalanceData.extract(crlf));
+
+        // The bank may wrap the amount line in direction marks, like Maskan does.
+        String marked = EghtesadNovinMessages.WITHDRAWAL
+            .replace("-5,270,000ريال", "‎-5,270,000ريال‎");
+        assertEquals(MOVEMENT, (long) BalanceData.extractTransaction(marked));
     }
 
     @Test public void movementRule_requiresTheBalanceLine() {

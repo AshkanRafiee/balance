@@ -2200,15 +2200,14 @@ final class BalanceData {
     }
 
     /** Parses a signed transaction amount (in rials) from a bank message, or null if the message does
-     *  not describe a completed money movement. The amount is recognized, in order: after the "مبلغ"
-     *  (amount) label — where an explicit "+"/"-" sign is authoritative (e.g. Parsian's
-     *  "مبلغ:500,000-"), after a deposit/withdrawal label ("واریز:"/"برداشت:", Tejarat), as a
-     *  "<label>:<amount><sign>" line with a trailing sign (Melli's "انتقالي:1,000,000-" /
-     *  "حواله پل:7,700,000+" layout), as a "<label>:<sign><amount>" line with a leading sign
-     *  (Maskan's "خريد:-1,500,000" layout), as a bare signed amount followed by "ریال" on its
-     *  own line (Eghtesad Novin's "-3,100,000ريال" layout), as a bare
-     *  number standing next to "ریال" that is not the stated resulting balance (Blu), as a bare
-     *  signed amount opening the message (Resalat's "-200,000,000" first line), or as a bare
+     *  not describe a completed money movement. The amount is recognized, in order: as a bare
+     *  signed amount on its own line (Resalat's "-200,000,000" first line) or followed by "ریال"
+     *  (Eghtesad Novin's "-3,100,000ريال" layout) — where an explicit "+"/"-" sign is authoritative
+     *  — after the "مبلغ" (amount) label (e.g. Parsian's "مبلغ:500,000-"), after a deposit/withdrawal
+     *  label ("واریز:"/"برداشت:", Tejarat), as a "<label>:<amount><sign>" line with a trailing sign
+     *  (Melli's "انتقالي:1,000,000-" / "حواله پل:7,700,000+" layout), as a "<label>:<sign><amount>"
+     *  line with a leading sign (Maskan's "خريد:-1,500,000" layout), as a bare
+     *  number standing next to "ریال" that is not the stated resulting balance (Blu), or as a bare
      *  signed amount alone on its own line with the sign trailing the number (Mehr Iran's
      *  "400,000-" layout). The direction is
      *  taken from the explicit sign, the direction label, or exactly one of the deposit/withdrawal
