@@ -4,7 +4,10 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import android.content.Context;
+
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.platform.app.InstrumentationRegistry;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -91,6 +94,23 @@ public class BankRulesTest {
 
     @Test public void resolve_middleEastPersianSender_returnsBank() {
         assertEquals("Middle East", BankRules.resolve("بانک خاورمیانه"));
+    }
+
+    @Test public void displayName_fa_usesShortNames() {
+        // Card names stay short: no قرض‌الحسنه prefix on Mehr/Resalat, no ایران suffix
+        // on Melli/Saderat.
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        String original = LocaleHelper.currentTag(ctx);
+        LocaleHelper.setLanguage(ctx, "fa");
+        try {
+            Context fa = LocaleHelper.wrap(ctx);
+            assertEquals("مهر ایران", BankRules.displayName(fa, "Mehr"));
+            assertEquals("رسالت", BankRules.displayName(fa, "Resalat"));
+            assertEquals("ملی", BankRules.displayName(fa, "Melli"));
+            assertEquals("صادرات", BankRules.displayName(fa, "Saderat"));
+        } finally {
+            LocaleHelper.setLanguage(ctx, original);
+        }
     }
 
     // ---- rejections --------------------------------------------------------------------
