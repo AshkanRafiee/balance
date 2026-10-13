@@ -63,12 +63,13 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 
 /**
- * Shows the transaction history parsed from supported bank SMS: the net sum of transactions for
- * today, this month and this year, an all-time hero summary, plus a year-by-year breakdown that
- * drills down into months and expandable days, each carrying its own deposit/withdrawal
- * subtotals. Sums always reflect money <em>movements</em> (deposits minus withdrawals), never
- * remaining balances. All date boundaries follow the calendar system of the active region: the
- * Persian (Jalali) calendar for Iran, the Gregorian calendar for International.
+ * Shows the transaction history parsed from supported bank SMS: gross deposits and withdrawals
+ * for today, this month and this year, an all-time hero summary with the net underneath, plus
+ * a year-by-year breakdown that drills down into months and expandable days, each carrying
+ * its own deposit/withdrawal subtotals. Sums always reflect money <em>movements</em> (deposits
+ * and withdrawals), never remaining balances. All date boundaries follow the calendar system
+ * of the active region: the Persian (Jalali) calendar for Iran, the Gregorian calendar for
+ * International.
  *
  * <p>The screen re-scans the SMS inbox whenever it opens and whenever a new bank message arrives
  * (a ContentObserver, like the main screen), silently re-rendering on completion.
@@ -2553,10 +2554,14 @@ public final class HistoryActivity extends Activity {
         body.addView(wrap, margin(12, 0, 12, 0));
     }
 
-    /** The hero: an accent rail, the net movement for the active scope, then — at All-time
-     *  scope only — today / this month / this year as three equal columns separated by hairline
-     *  dividers. The sub-period columns are hidden under a range filter, where they would merely
-     *  repeat the scoped figure (a Today range would show the same number four times). */
+    /** The hero: an accent rail, the gross deposits and withdrawals for the active scope with
+     *  the net underneath, then — at All-time scope only — today / this month / this year as
+     *  three equal columns separated by hairline dividers. The net alone hid the volume (a small
+     *  net can be large in/out flows), so gross leads and the net stays as the secondary line
+     *  with the same proportion track the year cards use. The sub-period columns are hidden
+     *  under a range filter, where they would merely repeat the scoped figure (a Today range
+     *  would show the same number four times). Under a deposits/withdrawals direction filter
+     *  the hero collapses to that side only, where the second column would always read zero. */
     private LinearLayout heroCard(Lists lists) {
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
@@ -2578,11 +2583,46 @@ public final class HistoryActivity extends Activity {
         top.addView(label, labelParams);
         hero.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
-        // The net movement for the active scope.
-        TextView total = bold(signedAmount(lists.total), 32, valueColor(lists.total));
-        total.setGravity(Gravity.START);
-        fitToWidth(total, 32, 12, 0);
-        hero.addView(total, margin(0, 2, 0, 0));
+        long dep = lists.totalDep;
+        long wit = lists.totalWit;
+        long net = lists.total;
+        if (filter.direction == DIR_DEPOSIT) {
+            hero.addView(heroGrossCell(getString(R.string.history_filter_deposits), dep, depFg,
+                28), margin(0, 10, 0, 0));
+        } else if (filter.direction == DIR_WITHDRAWAL) {
+            hero.addView(heroGrossCell(getString(R.string.history_filter_withdrawals), -wit,
+                witFg, 28), margin(0, 10, 0, 0));
+        } else {
+            // Gross in/out side by side; the net stays as the secondary line below.
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.addView(heroGrossCell(getString(R.string.history_filter_deposits), dep, depFg,
+                24), new LinearLayout.LayoutParams(0, -2, 1));
+            row.addView(hairDivider(), new LinearLayout.LayoutParams(dp(1), dp(56)));
+            row.addView(heroGrossCell(getString(R.string.history_filter_withdrawals), -wit,
+                witFg, 24), new LinearLayout.LayoutParams(0, -2, 1));
+            hero.addView(row, margin(0, 10, 0, 0));
+
+            LinearLayout netRow = new LinearLayout(this);
+            netRow.setOrientation(LinearLayout.HORIZONTAL);
+            netRow.setGravity(Gravity.CENTER_VERTICAL);
+            netRow.addView(text(getString(R.string.history_net), 12, muted, medium()),
+                new LinearLayout.LayoutParams(-2, -2));
+            TextView netValue = bold(signedAmount(net), 13, valueColor(net));
+            fitToWidth(netValue, 13, 10, 0);
+            LinearLayout.LayoutParams netValueParams = new LinearLayout.LayoutParams(-2, -2);
+            netValueParams.setMarginStart(dp(6));
+            netRow.addView(netValue, netValueParams);
+            hero.addView(netRow, margin(0, 8, 0, 0));
+
+            View track = depWitTrack(dep, wit);
+            if (track != null) {
+                LinearLayout.LayoutParams trackParams = new LinearLayout.LayoutParams(-1, dp(6));
+                trackParams.topMargin = dp(8);
+                hero.addView(track, trackParams);
+            }
+        }
 
         // Period stats row, at All-time scope only (see the method javadoc).
         if (filter.rangePreset == RANGE_ALL) {
@@ -2597,14 +2637,15 @@ public final class HistoryActivity extends Activity {
             // Period stats row.
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
-            row.addView(statsCell(getString(R.string.history_today), lists.today, todayColor),
-                new LinearLayout.LayoutParams(0, -2, 1));
-            row.addView(hairDivider(), new LinearLayout.LayoutParams(dp(1), dp(44)));
-            row.addView(statsCell(getString(R.string.history_this_month), lists.month, monthColor),
-                new LinearLayout.LayoutParams(0, -2, 1));
-            row.addView(hairDivider(), new LinearLayout.LayoutParams(dp(1), dp(44)));
-            row.addView(statsCell(getString(R.string.history_this_year), lists.year, yearColor),
-                new LinearLayout.LayoutParams(0, -2, 1));
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.addView(periodCell(getString(R.string.history_today), lists.todayDep,
+                lists.todayWit, todayColor), new LinearLayout.LayoutParams(0, -2, 1));
+            row.addView(hairDivider(), new LinearLayout.LayoutParams(dp(1), dp(62)));
+            row.addView(periodCell(getString(R.string.history_this_month), lists.monthDep,
+                lists.monthWit, monthColor), new LinearLayout.LayoutParams(0, -2, 1));
+            row.addView(hairDivider(), new LinearLayout.LayoutParams(dp(1), dp(62)));
+            row.addView(periodCell(getString(R.string.history_this_year), lists.yearDep,
+                lists.yearWit, yearColor), new LinearLayout.LayoutParams(0, -2, 1));
             hero.addView(row, new LinearLayout.LayoutParams(-1, -2));
         }
         return hero;
@@ -2633,10 +2674,32 @@ public final class HistoryActivity extends Activity {
         return v;
     }
 
-    /** One period stat: colored label over the signed net value, auto-sized to its column. The
-     *  label and value shrink to the available column width (also covering system font scale),
-     *  and grow up to their maximum only where room allows, so sums stay legible on every screen. */
-    private LinearLayout statsCell(String label, long value, int color) {
+    /** One gross hero figure: plain label over the absolute amount in its side's color.
+     *  The label carries the direction in words so color is never the only signal. */
+    private LinearLayout heroGrossCell(String labelText, long absAmount, int color, int maxSp) {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setGravity(Gravity.START);
+        String amountText = CurrencyHelper.amount(this, Math.max(absAmount, 0));
+        cell.setContentDescription(labelText + " " + amountText);
+        TextView l = text(labelText, 12, color, medium());
+        l.setGravity(Gravity.START);
+        fitToWidth(l, 12, 9, 0);
+        cell.addView(l, new LinearLayout.LayoutParams(-1, -2));
+        TextView v = bold(amountText, maxSp, color);
+        v.setGravity(Gravity.START);
+        fitToWidth(v, maxSp, 12, 0);
+        LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(-1, -2);
+        vp.topMargin = dp(4);
+        cell.addView(v, vp);
+        return cell;
+    }
+
+    /** One period stat: the period label in its category color over the gross in/out pair.
+     *  Narrow columns get arrows instead of repeated words; the content description keeps the
+     *  full words for screen readers. Under a direction filter only that side is shown, where
+     *  the second line would always read zero. */
+    private LinearLayout periodCell(String label, long deposits, long withdrawals, int color) {
         LinearLayout cell = new LinearLayout(this);
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -2644,12 +2707,48 @@ public final class HistoryActivity extends Activity {
         l.setGravity(Gravity.CENTER_HORIZONTAL);
         fitToWidth(l, 12, 9, 0);
         cell.addView(l, new LinearLayout.LayoutParams(-1, -2));
-        TextView v = bold(signedAmount(value), 20, color);
-        v.setGravity(Gravity.CENTER_HORIZONTAL);
-        fitToWidth(v, 20, 8, 0);
-        LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(-1, -2);
-        vp.topMargin = dp(5);
-        cell.addView(v, vp);
+        if (filter.direction == DIR_DEPOSIT) {
+            String amountText = CurrencyHelper.amount(this, Math.max(deposits, 0));
+            TextView v = bold(amountText, 16, depFg);
+            v.setGravity(Gravity.CENTER_HORIZONTAL);
+            v.setContentDescription(getString(R.string.history_deposit) + " " + amountText);
+            fitToWidth(v, 16, 8, 0);
+            LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(-1, -2);
+            vp.topMargin = dp(5);
+            cell.addView(v, vp);
+            return cell;
+        }
+        if (filter.direction == DIR_WITHDRAWAL) {
+            long abs = Math.max(-withdrawals, 0);
+            String amountText = CurrencyHelper.amount(this, abs);
+            TextView v = bold(amountText, 16, witFg);
+            v.setGravity(Gravity.CENTER_HORIZONTAL);
+            v.setContentDescription(getString(R.string.history_withdrawal) + " " + amountText);
+            fitToWidth(v, 16, 8, 0);
+            LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(-1, -2);
+            vp.topMargin = dp(5);
+            cell.addView(v, vp);
+            return cell;
+        }
+        String depText = "\u2191 " + CurrencyHelper.amount(this, Math.max(deposits, 0));
+        TextView depView = bold(depText, 14, depFg);
+        depView.setGravity(Gravity.CENTER_HORIZONTAL);
+        depView.setContentDescription(getString(R.string.history_deposit) + " "
+            + CurrencyHelper.amount(this, Math.max(deposits, 0)));
+        fitToWidth(depView, 14, 8, 0);
+        LinearLayout.LayoutParams depParams = new LinearLayout.LayoutParams(-1, -2);
+        depParams.topMargin = dp(5);
+        cell.addView(depView, depParams);
+        long absWit = Math.max(-withdrawals, 0);
+        String witText = "\u2193 " + CurrencyHelper.amount(this, absWit);
+        TextView witView = bold(witText, 14, witFg);
+        witView.setGravity(Gravity.CENTER_HORIZONTAL);
+        witView.setContentDescription(getString(R.string.history_withdrawal) + " "
+            + CurrencyHelper.amount(this, absWit));
+        fitToWidth(witView, 14, 8, 0);
+        LinearLayout.LayoutParams witParams = new LinearLayout.LayoutParams(-1, -2);
+        witParams.topMargin = dp(2);
+        cell.addView(witView, witParams);
         return cell;
     }
 
@@ -3850,11 +3949,13 @@ public final class HistoryActivity extends Activity {
     // ====================================================================
 
     /** Aggregated history data: today/month/year net sums plus deposit/withdrawal subtotals
-     *  and the year-by-year breakdown (each year holds its months, each month its days). */
+     *  and the year-by-year breakdown (each year holds its months, each month its days). The
+     *  total scope keeps its own deposit/withdrawal subtotals so the hero can lead with gross
+     *  in/out figures instead of the net alone. */
     static final class Lists {
         long today, month, year, total;
-        long todayDep, monthDep, yearDep;
-        long todayWit, monthWit, yearWit;
+        long todayDep, monthDep, yearDep, totalDep;
+        long todayWit, monthWit, yearWit, totalWit;
         final List<YearGroup> years = new ArrayList<>();
     }
 
@@ -4210,9 +4311,11 @@ public final class HistoryActivity extends Activity {
         lists.todayDep = result.todayDeposits;
         lists.monthDep = result.monthDeposits;
         lists.yearDep = result.yearDeposits;
+        lists.totalDep = result.totalDeposits;
         lists.todayWit = result.todayWithdrawals;
         lists.monthWit = result.monthWithdrawals;
         lists.yearWit = result.yearWithdrawals;
+        lists.totalWit = result.totalWithdrawals;
 
         for (HistoryReader.YearSummary summaryYear : result.years) {
             YearGroup year = new YearGroup(summaryYear.year);
@@ -4342,6 +4445,7 @@ public final class HistoryActivity extends Activity {
     private static DayGroup accumulate(Lists lists, Map<String, YearGroup> yearIndex,
             Map<String, MonthGroup> monthIndex, CalDate jc, long amount, boolean count, CalDate today) {
         lists.total += amount;
+        if (amount > 0) lists.totalDep += amount; else lists.totalWit += amount;
         boolean todayMatch = jc.sameDay(today);
         boolean monthMatch = jc.year == today.year && jc.month == today.month;
         boolean yearMatch = jc.year == today.year;
