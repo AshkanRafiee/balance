@@ -2058,9 +2058,9 @@ public class MainActivity extends Activity {
                 x = nameX - measure(nameShown, 17) - 8 - pw;
                 if (x < guardX) return;
             }
-            float y = yy + 25;
+            float y = yy + 21;
             roundStroke(c, x, y, x + pw, y + h, h / 2, 1f, muted);
-            text(c, txt, x + 6, y + 13, tx, muted, Paint.Align.LEFT);
+            text(c, txt, x + 6, y + 12, tx, muted, Paint.Align.LEFT);
         }
 
         String fit(String value, float size, float max) {
