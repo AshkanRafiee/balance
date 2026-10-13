@@ -201,6 +201,11 @@ public class HistoryReaderTest {
         assertEquals(result.movementCount, lists.years.get(0).n);
         HistoryActivity.DayGroup selected = lists.years.get(0).months.get(0).days.get(0);
         HistoryActivity.DayGroup collapsed = lists.years.get(0).months.get(0).days.get(1);
+        // Day headers keep their own gross pair through the summary conversion.
+        assertEquals(0L, selected.dep);
+        assertEquals(-10L, selected.wit);
+        assertEquals(30L, collapsed.dep);
+        assertEquals(0L, collapsed.wit);
         assertEquals(1, selected.txs.size());
         assertEquals(1, selected.lines.size());
         assertTrue(collapsed.txs.isEmpty());

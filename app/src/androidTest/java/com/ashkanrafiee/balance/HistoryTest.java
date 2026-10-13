@@ -374,6 +374,12 @@ public class HistoryTest {
         assertEquals(-1000000L, month.wit);
         assertEquals(2000000L, month.days.get(0).sum);
         assertEquals(3000000L, month.days.get(1).sum);
+        // Day headers carry their own gross pair: the mixed day shows both sides, the
+        // single-sided day only its own.
+        assertEquals(2000000L, month.days.get(0).dep);
+        assertEquals(0L, month.days.get(0).wit);
+        assertEquals(4000000L, month.days.get(1).dep);
+        assertEquals(-1000000L, month.days.get(1).wit);
     }
 
     @Test public void yearsAndMonths_splitAcrossYearBoundary() {
