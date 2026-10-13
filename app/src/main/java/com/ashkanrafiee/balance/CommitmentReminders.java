@@ -101,11 +101,7 @@ final class CommitmentReminders {
         if (alarms == null) return;
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         if (!notificationsAvailable(context)) {
-            synchronized (STATE_LOCK) {
-                for (String id : copySet(prefs, KEY_SCHEDULED))
-                    cancelScheduled(context, alarms, id);
-                prefs.edit().putStringSet(KEY_SCHEDULED, new HashSet<String>()).apply();
-            }
+            cancelAllLocked(context, alarms, prefs);
             return;
         }
         boolean iran = RegionHelper.isIran(context);
@@ -145,6 +141,30 @@ final class CommitmentReminders {
                 if (!wanted.contains(id)) cancelScheduled(context, alarms, id);
             }
             prefs.edit().putStringSet(KEY_SCHEDULED, wanted).apply();
+        }
+    }
+
+    /** Cancels every armed alarm and clears the armed-id snapshot. */
+    private static void cancelAllLocked(Context context, AlarmManager alarms,
+            SharedPreferences prefs) {
+        synchronized (STATE_LOCK) {
+            for (String id : copySet(prefs, KEY_SCHEDULED))
+                cancelScheduled(context, alarms, id);
+            prefs.edit().putStringSet(KEY_SCHEDULED, new HashSet<String>()).apply();
+        }
+    }
+
+    /** Test-only: runs exactly what the notifications-unavailable branch of
+     *  {@link #scheduleAll} does. Simulating unavailable notifications directly is not an
+     *  option: revoking the permission kills the app process by design, taking the
+     *  in-process test runner with it, and a disabled channel keeps its importance across
+     *  delete/recreate, so it cannot be restored afterwards. */
+    static void cancelAllForTest(Context context) {
+        AlarmManager alarms = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (alarms == null) return;
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        synchronized (SCHEDULE_LOCK) {
+            cancelAllLocked(context, alarms, prefs);
         }
     }
 
