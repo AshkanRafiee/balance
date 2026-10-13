@@ -2553,8 +2553,10 @@ public final class HistoryActivity extends Activity {
         body.addView(wrap, margin(12, 0, 12, 0));
     }
 
-    /** The all-time hero: an accent rail, the lifetime net movement, then today / this month /
-     *  this year as three equal columns separated by hairline dividers. */
+    /** The hero: an accent rail, the net movement for the active scope, then — at All-time
+     *  scope only — today / this month / this year as three equal columns separated by hairline
+     *  dividers. The sub-period columns are hidden under a range filter, where they would merely
+     *  repeat the scoped figure (a Today range would show the same number four times). */
     private LinearLayout heroCard(Lists lists) {
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
@@ -2570,39 +2572,58 @@ public final class HistoryActivity extends Activity {
         top.addView(railView, railLp);
         LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-2, -2);
         labelParams.setMarginStart(dp(9));
-        TextView label = text(getString(R.string.history_total), 12, muted, medium());
+        TextView label = text(scopeLabel(), 12, muted, medium());
         label.setLetterSpacing(label.getResources().getConfiguration().getLayoutDirection()
             == View.LAYOUT_DIRECTION_LTR ? 0.08f : 0f);
         top.addView(label, labelParams);
         hero.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
-        // The lifetime total.
+        // The net movement for the active scope.
         TextView total = bold(signedAmount(lists.total), 32, valueColor(lists.total));
         total.setGravity(Gravity.START);
         fitToWidth(total, 32, 12, 0);
         hero.addView(total, margin(0, 2, 0, 0));
 
-        // Hairline divider.
-        View hair = new View(this);
-        hair.setBackgroundColor(divider);
-        LinearLayout.LayoutParams hairParams = new LinearLayout.LayoutParams(-1, dp(1));
-        hairParams.topMargin = dp(12);
-        hairParams.bottomMargin = dp(12);
-        hero.addView(hair, hairParams);
+        // Period stats row, at All-time scope only (see the method javadoc).
+        if (filter.rangePreset == RANGE_ALL) {
+            // Hairline divider.
+            View hair = new View(this);
+            hair.setBackgroundColor(divider);
+            LinearLayout.LayoutParams hairParams = new LinearLayout.LayoutParams(-1, dp(1));
+            hairParams.topMargin = dp(12);
+            hairParams.bottomMargin = dp(12);
+            hero.addView(hair, hairParams);
 
-        // Period stats row.
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.addView(statsCell(getString(R.string.history_today), lists.today, todayColor),
-            new LinearLayout.LayoutParams(0, -2, 1));
-        row.addView(hairDivider(), new LinearLayout.LayoutParams(dp(1), dp(44)));
-        row.addView(statsCell(getString(R.string.history_this_month), lists.month, monthColor),
-            new LinearLayout.LayoutParams(0, -2, 1));
-        row.addView(hairDivider(), new LinearLayout.LayoutParams(dp(1), dp(44)));
-        row.addView(statsCell(getString(R.string.history_this_year), lists.year, yearColor),
-            new LinearLayout.LayoutParams(0, -2, 1));
-        hero.addView(row, new LinearLayout.LayoutParams(-1, -2));
+            // Period stats row.
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.addView(statsCell(getString(R.string.history_today), lists.today, todayColor),
+                new LinearLayout.LayoutParams(0, -2, 1));
+            row.addView(hairDivider(), new LinearLayout.LayoutParams(dp(1), dp(44)));
+            row.addView(statsCell(getString(R.string.history_this_month), lists.month, monthColor),
+                new LinearLayout.LayoutParams(0, -2, 1));
+            row.addView(hairDivider(), new LinearLayout.LayoutParams(dp(1), dp(44)));
+            row.addView(statsCell(getString(R.string.history_this_year), lists.year, yearColor),
+                new LinearLayout.LayoutParams(0, -2, 1));
+            hero.addView(row, new LinearLayout.LayoutParams(-1, -2));
+        }
         return hero;
+    }
+
+    /** The hero's scope label follows the active range, so the big figure is never misread as a
+     *  lifetime total while a filter narrows it. Mirrors the range chips in
+     *  {@link #rebuildFilterBar}. */
+    private String scopeLabel() {
+        switch (filter.rangePreset) {
+            case RANGE_TODAY: return getString(R.string.history_today);
+            case RANGE_MONTH: return getString(R.string.history_this_month);
+            case RANGE_YEAR: return getString(R.string.history_this_year);
+            case RANGE_CUSTOM:
+                if (filter.from != null || filter.to != null) return customRangeSummary();
+                break;
+            default: break;
+        }
+        return getString(R.string.history_total);
     }
 
     private View hairDivider() {
@@ -3092,7 +3113,9 @@ public final class HistoryActivity extends Activity {
 
         LinearLayout.LayoutParams spacer = new LinearLayout.LayoutParams(0, 0, 1);
         head.addView(new View(this), spacer);
-        if (g.n > 1) head.addView(countChip(g.n));
+        TextView count = text(getResources().getQuantityString(
+            R.plurals.history_n_tx, quantity(g.n), g.n), 11, muted);
+        head.addView(count);
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
         TextView sum = bold(signedAmount(g.sum), 13, valueColor(g.sum));
@@ -3541,7 +3564,9 @@ public final class HistoryActivity extends Activity {
     }
 
     /** The note and tag editor for one transaction. Changes are staged in the dialog and only saved
-     *  together when Save is pressed; Clear note remains deliberately separate from Clear tags. */
+     *  together when Save is pressed; Clear note remains deliberately separate from Clear tags.
+     *  Either clear affordance is hidden while there is nothing for it to clear, so the dialog
+     *  never offers a dead action. */
     private void noteDialog(final Transaction t) {
         final EditText input = new EditText(this);
         input.setSingleLine(false);
@@ -3583,12 +3608,20 @@ public final class HistoryActivity extends Activity {
         addTag.setBackground(ripple(rounded(chipBg, 10)));
         addTag.setClickable(true);
         addTag.setFocusable(true);
+        TextView clearTags = text(getString(R.string.tag_clear), 12, muted, medium());
+        clearTags.setPadding(0, dp(7), 0, dp(7));
+        clearTags.setClickable(true);
+        clearTags.setFocusable(true);
+        clearTags.setOnClickListener(v -> {
+            editedTags.clear();
+            renderTagEditor(selectedTagHost, editedTags, clearTags);
+        });
         Runnable addTypedTag = () -> {
             String value = tagInput.getText().toString().trim();
             if (value.isEmpty()) return;
             if (!containsTag(editedTags, value)) editedTags.add(value);
             tagInput.setText("");
-            renderTagEditor(selectedTagHost, editedTags);
+            renderTagEditor(selectedTagHost, editedTags, clearTags);
         };
         addTag.setOnClickListener(v -> addTypedTag.run());
         tagInput.setOnEditorActionListener((v, actionId, event) -> {
@@ -3624,21 +3657,12 @@ public final class HistoryActivity extends Activity {
             chip.setContentDescription(getString(R.string.tag_add_existing, suggestion));
             chip.setOnClickListener(v -> {
                 if (!containsTag(editedTags, suggestion)) editedTags.add(suggestion);
-                renderTagEditor(selectedTagHost, editedTags);
+                renderTagEditor(selectedTagHost, editedTags, clearTags);
             });
             LinearLayout.LayoutParams chipLp = new LinearLayout.LayoutParams(-2, -2);
             chipLp.setMarginEnd(dp(6));
             suggestions.addView(chip, chipLp);
         }
-
-        TextView clearTags = text(getString(R.string.tag_clear), 12, muted, medium());
-        clearTags.setPadding(0, dp(7), 0, dp(7));
-        clearTags.setClickable(true);
-        clearTags.setFocusable(true);
-        clearTags.setOnClickListener(v -> {
-            editedTags.clear();
-            renderTagEditor(selectedTagHost, editedTags);
-        });
 
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
@@ -3652,15 +3676,16 @@ public final class HistoryActivity extends Activity {
             wrap.addView(suggestionsScroll, new LinearLayout.LayoutParams(-1, dp(34)));
         }
         wrap.addView(clearTags, margin(0, 2, 0, 0));
-        renderTagEditor(selectedTagHost, editedTags);
+        renderTagEditor(selectedTagHost, editedTags, clearTags);
 
-        android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+        boolean hasNote = existing != null && !existing.isEmpty();
+        android.app.AlertDialog.Builder dialogBuilder = new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.note_edit_title))
             .setView(wrap)
             .setPositiveButton(getString(R.string.note_save), null)
-            .setNegativeButton(getString(R.string.lock_cancel), null)
-            .setNeutralButton(getString(R.string.note_clear), null)
-            .create();
+            .setNegativeButton(getString(R.string.lock_cancel), null);
+        if (hasNote) dialogBuilder.setNeutralButton(getString(R.string.note_clear), null);
+        android.app.AlertDialog dlg = dialogBuilder.create();
         dlg.setOnShowListener(d -> {
                 dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
                 .setOnClickListener(v -> {
@@ -3669,18 +3694,25 @@ public final class HistoryActivity extends Activity {
                     dlg.dismiss();
                     render();
                 });
-            dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL)
-                .setOnClickListener(v -> {
+            android.widget.Button clearNote =
+                dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL);
+            if (clearNote != null) {
+                clearNote.setOnClickListener(v -> {
                     BalanceData.setNote(this, t, null);
                     dlg.dismiss();
                     render();
                 });
+            }
         });
         showDialog(dlg);
     }
 
-    /** Rebuilds the compact, horizontally scrollable selected-tag row in the editor. */
-    private void renderTagEditor(LinearLayout host, List<String> values) {
+    /** Rebuilds the compact, horizontally scrollable selected-tag row in the editor, hiding the
+     *  Clear-tags action while there is nothing for it to clear. */
+    private void renderTagEditor(LinearLayout host, List<String> values, TextView clearTags) {
+        if (clearTags != null) {
+            clearTags.setVisibility(values == null || values.isEmpty() ? View.GONE : View.VISIBLE);
+        }
         host.removeAllViews();
         if (values == null || values.isEmpty()) {
             host.addView(text(getString(R.string.tag_none), 12, muted),
@@ -3697,7 +3729,7 @@ public final class HistoryActivity extends Activity {
             chip.setContentDescription(getString(R.string.tag_remove, values.get(i)));
             chip.setOnClickListener(v -> {
                 if (index < values.size()) values.remove(index);
-                renderTagEditor(host, values);
+                renderTagEditor(host, values, clearTags);
             });
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
             lp.setMarginEnd(dp(6));
