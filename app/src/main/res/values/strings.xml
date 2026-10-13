@@ -126,6 +126,10 @@
         <item quantity="one">%1$d day</item>
         <item quantity="other">%1$d days</item>
     </plurals>
+    <plurals name="stale_days_old">
+        <item quantity="one">%1$d day old</item>
+        <item quantity="other">%1$d days old</item>
+    </plurals>
     <plurals name="accessibility_stale_note">
         <item quantity="one">Note: %1$d balance is out of date.</item>
         <item quantity="other">Note: %1$d balances are out of date.</item>

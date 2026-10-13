@@ -2000,7 +2000,7 @@ public class MainActivity extends Activity {
         }
 
         /** Same as {@link #value(Canvas, long, float, float, float, float, Paint.Align)} but with the
-         *  amount in a chosen color (used to flag stale balances in the warning amber). */
+         *  amount in a chosen color (used to dim stale balances in muted). */
         void value(Canvas c, long n, float x, float baseline, float width,
                    float size, Paint.Align align, int color) {
             if (hidden) {
@@ -2042,12 +2042,13 @@ public class MainActivity extends Activity {
             return a.measureText(value);
         }
 
-        /** A small amber pill right after the bank name showing how many days old the balance is.
-         *  Skipped when it would crowd the amount column; the amber amount and the card ring still
-         *  carry the warning on their own. */
+        /** A small muted pill right after the bank name showing how many days old the balance is.
+         *  Skipped when it would crowd the amount column; the muted amount still carries the
+         *  freshness on its own. Muted, not amber: staleness is metadata, while amber stays
+         *  reserved for things needing action. */
         void drawStaleBadge(Canvas c, String nameShown, float nameX, float yy,
                             Paint.Align nameAlign, int staleDays, float guardX) {
-            String txt = getResources().getQuantityString(R.plurals.stale_days, staleDays, staleDays);
+            String txt = getResources().getQuantityString(R.plurals.stale_days_old, staleDays, staleDays);
             float tx = 11, h = 18, pw = measure(txt, tx) + 12;
             float x;
             if (nameAlign == Paint.Align.LEFT) {
@@ -2058,9 +2059,8 @@ public class MainActivity extends Activity {
                 if (x < guardX) return;
             }
             float y = yy + 25;
-            round(c, x, y, x + pw, y + h, h / 2, warn_bg);
-            roundStroke(c, x, y, x + pw, y + h, h / 2, 1f, warn);
-            text(c, txt, x + 6, y + 13, tx, warn, Paint.Align.LEFT);
+            roundStroke(c, x, y, x + pw, y + h, h / 2, 1f, muted);
+            text(c, txt, x + 6, y + 13, tx, muted, Paint.Align.LEFT);
         }
 
         String fit(String value, float size, float max) {
@@ -2191,7 +2191,6 @@ public class MainActivity extends Activity {
                     boolean stale = !row.excluded
                         && BalanceData.isStale(MainActivity.this, row.bank.date);
                     round(c, 24, yy, w - 24, yy + 82, 20, row.excluded ? bg : panel);
-                    if (stale) roundStroke(c, 24, yy, w - 24, yy + 82, 20, 1.8f, warn);
                     bankBadge(c, row.bankName, badgeX, yy + 41);
                     p.setColor(muted);
                     for (int dot = -1; dot <= 1; dot++)
@@ -2207,7 +2206,7 @@ public class MainActivity extends Activity {
                         text(c, exLabel, nameX, yy + 68, 11, muted, nameAlign);
                     } else {
                         value(c, row.amount, valueX, yy + 35, valueWidth, 17, valueAlign,
-                            stale ? warn : accent);
+                            stale ? muted : accent);
                         if (row.bank.account != null) {
                             // The mask hides the account number too: it is as identifiable as the
                             // balance itself, so a shoulder-surf must not see either.

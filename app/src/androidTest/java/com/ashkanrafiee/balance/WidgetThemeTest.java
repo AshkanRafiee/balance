@@ -215,8 +215,9 @@ public class WidgetThemeTest {
         }
     }
 
-    /** A stale amount is amber in whichever theme is showing, not the device's amber. */
-    @Test public void listRow_staleAmountUsesTheAppWarnColor() {
+    /** A stale amount stays muted like a fresh one: freshness is metadata carried by the age
+     *  on the account line, while amber stays reserved for things needing action. */
+    @Test public void listRow_staleAmountStaysMuted() {
         ThemeHelper.setTheme(ctx, ThemeHelper.THEME_SYSTEM);
         long now = System.currentTimeMillis();
         for (boolean stale : new boolean[]{true, false}) {
@@ -224,10 +225,35 @@ public class WidgetThemeTest {
             long date = stale ? now - 30L * 86400000L : now;
             View row = inflate(BalanceWidgetService.bankViews(ctx,
                 new Bank("Tejarat", 1_000_000, date, "5000")));
-            int expected = stale ? appColor(R.color.warn) : appColor(R.color.muted);
-            assertEquals("stale=" + stale, expected,
+            assertEquals("stale=" + stale, appColor(R.color.muted),
                 ((TextView) row.findViewById(R.id.bank_amount)).getCurrentTextColor());
         }
+    }
+
+    /** A stale row carries its age on the account line, with or without an account number. */
+    @Test public void listRow_staleRowShowsAgeOnAccountLine() {
+        ThemeHelper.setTheme(ctx, ThemeHelper.THEME_SYSTEM);
+        long now = System.currentTimeMillis();
+        long date = now - 30L * 86400000L;
+        int days = BalanceData.staleDays(ctx, date);
+        String age = ctx.getResources().getQuantityString(R.plurals.stale_days_old, days, days);
+
+        View withAccount = inflate(BalanceWidgetService.bankViews(ctx,
+            new Bank("Tejarat", 1_000_000, date, "5000", "1110000222")));
+        TextView accountLine = withAccount.findViewById(R.id.bank_account);
+        assertEquals(View.VISIBLE, accountLine.getVisibility());
+        assertEquals(true, accountLine.getText().toString().endsWith(age));
+
+        View withoutAccount = inflate(BalanceWidgetService.bankViews(ctx,
+            new Bank("Tejarat", 1_000_000, date, "5000")));
+        TextView ageLine = withoutAccount.findViewById(R.id.bank_account);
+        assertEquals(View.VISIBLE, ageLine.getVisibility());
+        assertEquals(age, ageLine.getText().toString());
+
+        View fresh = inflate(BalanceWidgetService.bankViews(ctx,
+            new Bank("Tejarat", 1_000_000, now, "5000", "1110000222")));
+        assertEquals(false, ((TextView) fresh.findViewById(R.id.bank_account))
+            .getText().toString().endsWith(age));
     }
 
     /** The "no balances yet" row. */

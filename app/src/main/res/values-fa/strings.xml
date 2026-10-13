@@ -124,6 +124,10 @@
         <item quantity="one">%1$d روز</item>
         <item quantity="other">%1$d روز</item>
     </plurals>
+    <plurals name="stale_days_old">
+        <item quantity="one">%1$d روز پیش</item>
+        <item quantity="other">%1$d روز پیش</item>
+    </plurals>
     <plurals name="accessibility_stale_note">
         <item quantity="one">توجه: ماندهٔ %1$d بانک قدیمی است.</item>
         <item quantity="other">توجه: ماندهٔ %1$d بانک قدیمی است.</item>

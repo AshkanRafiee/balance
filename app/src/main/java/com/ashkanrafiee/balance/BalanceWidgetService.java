@@ -65,11 +65,27 @@ public class BalanceWidgetService extends RemoteViewsService {
         views.setTextColor(R.id.bank_name, c.getColor(R.color.bank_name));
         views.setTextColor(R.id.bank_account, c.getColor(R.color.muted));
         views.setTextColor(R.id.bank_amount, c.getColor(R.color.muted));
-        if (BalanceData.isStale(c, b.date) && !hidden)
-            views.setTextColor(R.id.bank_amount, c.getColor(R.color.warn));
-        if (b.account != null) {
-            views.setTextViewText(R.id.bank_account, hidden
-                ? "\u2022\u2022\u2022\u2022\u2022\u2022" : accountLabel(c, b.account));
+        // Stale stays muted like a fresh amount: freshness is metadata carried by the age
+        // below, while amber stays reserved for things needing action.
+        boolean stale = !hidden && BalanceData.isStale(c, b.date);
+        if (hidden) {
+            if (b.account != null) {
+                views.setTextViewText(R.id.bank_account, "\u2022\u2022\u2022\u2022\u2022\u2022");
+                views.setViewVisibility(R.id.bank_account, View.VISIBLE);
+            } else {
+                views.setViewVisibility(R.id.bank_account, View.GONE);
+            }
+        } else if (stale) {
+            int days = BalanceData.staleDays(c, b.date);
+            String age = c.getResources().getQuantityString(R.plurals.stale_days_old, days, days);
+            if (b.account != null) {
+                views.setTextViewText(R.id.bank_account, accountLabel(c, b.account) + " \u00b7 " + age);
+            } else {
+                views.setTextViewText(R.id.bank_account, age);
+            }
+            views.setViewVisibility(R.id.bank_account, View.VISIBLE);
+        } else if (b.account != null) {
+            views.setTextViewText(R.id.bank_account, accountLabel(c, b.account));
             views.setViewVisibility(R.id.bank_account, View.VISIBLE);
         } else {
             views.setViewVisibility(R.id.bank_account, View.GONE);
