@@ -194,6 +194,10 @@ public class HistoryReaderTest {
         HistoryActivity.Lists lists = HistoryActivity.listsFromSummary(result);
 
         assertEquals(result.total, lists.total);
+        assertEquals(result.totalDeposits, lists.totalDep);
+        assertEquals(result.totalWithdrawals, lists.totalWit);
+        assertEquals(30L, lists.totalDep);
+        assertEquals(-10L, lists.totalWit);
         assertEquals(result.movementCount, lists.years.get(0).n);
         HistoryActivity.DayGroup selected = lists.years.get(0).months.get(0).days.get(0);
         HistoryActivity.DayGroup collapsed = lists.years.get(0).months.get(0).days.get(1);

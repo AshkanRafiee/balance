@@ -449,6 +449,27 @@ public class HistoryTest {
         assertEquals(-500000L, lists.year);
     }
 
+    @Test public void sums_totalDepWitCoverAllYears() {
+        // The hero leads with gross in/out, so the total scope needs its own subtotals:
+        // same fixture as sums_totalCoversAllYears, split by side.
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Saman", epoch(2026, 3, 20), 1000000L));
+        txs.add(new Transaction("Saman", epoch(2026, 3, 21), -500000L));
+        HistoryActivity.Lists lists = HistoryActivity.buildLists(txs);
+        assertEquals(1000000L, lists.totalDep);
+        assertEquals(-500000L, lists.totalWit);
+        assertEquals(lists.totalDep + lists.totalWit, lists.total);
+    }
+
+    @Test public void sums_totalDepWit_singleSided() {
+        List<Transaction> txs = new ArrayList<>();
+        txs.add(new Transaction("Saman", epoch(2026, 9, 10), -300000L));
+        HistoryActivity.Lists lists = HistoryActivity.buildLists(txs);
+        assertEquals(0L, lists.totalDep);
+        assertEquals(-300000L, lists.totalWit);
+        assertEquals(-300000L, lists.total);
+    }
+
     // ---- message fingerprints (exact-duplicate detection) -------------------------
     @Test public void messageSig_sameMessage_sameFingerprint() {
         String a = BalanceData.messageSig("500095",
