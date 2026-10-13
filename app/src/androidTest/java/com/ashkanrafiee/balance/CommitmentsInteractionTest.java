@@ -236,6 +236,24 @@ public class CommitmentsInteractionTest {
 
     private List<String> drawCommitmentsCard(boolean masked) {
         final TextCanvas recording = new TextCanvas();
+        // Capture the reference BEFORE invalidating: anything installed afterwards is a fresh
+        // object by construction. Capturing after the invalidate risks the opposite order — a
+        // live frame can kick, finish and install a worker between the two calls, leaving
+        // `before` already equal to the fresh object so the wait below can never observe a
+        // turnover, and the helper times out on a healthy screen.
+        final Object[] before = {null};
+        mainScenario.onActivity(activity -> {
+            try {
+                Field field = MainActivity.class.getDeclaredField("view");
+                field.setAccessible(true);
+                Object view = field.get(activity);
+                Field summaryField = view.getClass().getDeclaredField("commitmentSummary");
+                summaryField.setAccessible(true);
+                before[0] = summaryField.get(view);
+            } catch (Exception e) {
+                throw new AssertionError("could not read the dashboard summary state", e);
+            }
+        });
         mainScenario.onActivity(activity -> {
             try {
                 Field field = MainActivity.class.getDeclaredField("view");
@@ -253,23 +271,10 @@ public class CommitmentsInteractionTest {
         // summary (and its loaded flag) up while the fresh load runs, so a fast poll would draw
         // the stale card. Every successful load installs a new Summary object, so wait for the
         // reference itself to turn over with no load in flight.
-        final Object[] before = {null};
-        mainScenario.onActivity(activity -> {
-            try {
-                Field field = MainActivity.class.getDeclaredField("view");
-                field.setAccessible(true);
-                Object view = field.get(activity);
-                Field summaryField = view.getClass().getDeclaredField("commitmentSummary");
-                summaryField.setAccessible(true);
-                before[0] = summaryField.get(view);
-            } catch (Exception e) {
-                throw new AssertionError("could not read the dashboard summary state", e);
-            }
-        });
         long deadline = System.currentTimeMillis() + 15_000L;
         boolean fresh = false;
         while (System.currentTimeMillis() < deadline) {
-            final Object[] state = {null, null, null};
+            final Object[] state = {null, null, null, null};
             mainScenario.onActivity(activity -> {
                 try {
                     Field field = MainActivity.class.getDeclaredField("view");
@@ -285,6 +290,21 @@ public class CommitmentsInteractionTest {
                     Field loadedField = view.getClass().getDeclaredField("commitmentSummaryLoaded");
                     loadedField.setAccessible(true);
                     state[2] = loadedField.getBoolean(view);
+                    Field staleField = view.getClass().getDeclaredField("commitmentSummaryStale");
+                    staleField.setAccessible(true);
+                    state[3] = staleField.getBoolean(view);
+                    // A load overtaken by this invalidate discards its result without
+                    // re-kicking: production heals on the next drawn frame, but this
+                    // helper draws exactly once, so re-kick here instead of waiting out
+                    // the deadline for a worker that will never come. Never invalidate
+                    // in this loop: that would bump the generation under a slow worker
+                    // and discard every result as fast as it arrives.
+                    if (Boolean.TRUE.equals(state[3]) && Boolean.FALSE.equals(state[1])) {
+                        Method ensure = view.getClass().getDeclaredMethod(
+                            "ensureCommitmentSummary");
+                        ensure.setAccessible(true);
+                        ensure.invoke(view);
+                    }
                 } catch (Exception e) {
                     throw new AssertionError("could not read the dashboard summary state", e);
                 }
@@ -296,7 +316,31 @@ public class CommitmentsInteractionTest {
             }
             android.os.SystemClock.sleep(20L);
         }
-        assertTrue("the dashboard commitment summary did not finish reloading", fresh);
+        // Post-mortem for the wait above: reported inside the assertion when the reload
+        // never lands, so one failing run tells whether a worker was stuck mid-load or the
+        // reference simply never turned over.
+        final Object[] last = {null, null, null};
+        mainScenario.onActivity(activity -> {
+            try {
+                Field field = MainActivity.class.getDeclaredField("view");
+                field.setAccessible(true);
+                Object view = field.get(activity);
+                Field loadingField =
+                    view.getClass().getDeclaredField("commitmentSummaryLoading");
+                loadingField.setAccessible(true);
+                last[0] = loadingField.getBoolean(view);
+                Field loadedField = view.getClass().getDeclaredField("commitmentSummaryLoaded");
+                loadedField.setAccessible(true);
+                last[1] = loadedField.getBoolean(view);
+                Field staleField = view.getClass().getDeclaredField("commitmentSummaryStale");
+                staleField.setAccessible(true);
+                last[2] = staleField.getBoolean(view);
+            } catch (Exception e) {
+                throw new AssertionError("could not read the dashboard summary state", e);
+            }
+        });
+        assertTrue("the dashboard commitment summary did not finish reloading [loading="
+            + last[0] + " loaded=" + last[1] + " stale=" + last[2] + "]", fresh);
         mainScenario.onActivity(activity -> {
             try {
                 Field field = MainActivity.class.getDeclaredField("view");
