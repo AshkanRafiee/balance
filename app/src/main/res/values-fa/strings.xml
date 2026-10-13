@@ -368,9 +368,9 @@
     <string name="bank_saman">سامان</string>
     <string name="bank_sarmayeh">سرمایه</string>
     <string name="bank_sina">سینا</string>
-    <string name="bank_saderat">صادرات ایران</string>
+    <string name="bank_saderat">صادرات</string>
     <string name="bank_mellat">ملت</string>
-    <string name="bank_melli">ملی ایران</string>
+    <string name="bank_melli">ملی</string>
     <string name="bank_maskan">مسکن</string>
     <string name="bank_keshavarzi">کشاورزی</string>
     <string name="bank_parsian">پارسیان</string>
@@ -381,7 +381,7 @@
     <string name="bank_noor">مؤسسه اعتباری نور</string>
     <string name="bank_blu">بلو</string>
     <string name="bank_kosar">مؤسسه اعتباری کوثر</string>
-    <string name="bank_mehr">قرض‌الحسنه مهر ایران</string>
+    <string name="bank_mehr">مهر ایران</string>
     <string name="bank_mehr_eghtesad">مهر اقتصاد</string>
     <string name="bank_ghavamin">قوامین</string>
     <string name="bank_zamin">ایران زمین</string>
@@ -389,7 +389,7 @@
     <string name="bank_middle_east">خاورمیانه</string>
     <string name="bank_tosee">توسعه</string>
     <string name="bank_karafarin">کارآفرین</string>
-    <string name="bank_resalat">قرض‌الحسنه رسالت</string>
+    <string name="bank_resalat">رسالت</string>
     <string name="bank_venezuela">مشترک ایران و ونزوئلا</string>
     <string name="bank_melal">مؤسسه اعتباری ملل</string>
     <string name="bank_sanat_madan">صنعت و معدن</string>
