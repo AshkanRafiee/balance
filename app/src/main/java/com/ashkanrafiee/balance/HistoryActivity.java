@@ -2681,13 +2681,15 @@ public final class HistoryActivity extends Activity {
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setGravity(Gravity.START);
         String amountText = CurrencyHelper.amount(this, Math.max(absAmount, 0));
-        cell.setContentDescription(labelText + " " + amountText);
         TextView l = text(labelText, 12, color, medium());
         l.setGravity(Gravity.START);
         fitToWidth(l, 12, 9, 0);
         cell.addView(l, new LinearLayout.LayoutParams(-1, -2));
         TextView v = bold(amountText, maxSp, color);
         v.setGravity(Gravity.START);
+        // Announce "label amount" as one item; the container itself is not focusable so a
+        // description set on it would never be read.
+        v.setContentDescription(labelText + " " + amountText);
         fitToWidth(v, maxSp, 12, 0);
         LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(-1, -2);
         vp.topMargin = dp(4);
@@ -3889,12 +3891,14 @@ public final class HistoryActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         if (deposits > 0) {
-            row.addView(chip("\u2191 " + CurrencyHelper.amount(this, deposits), depBg, depFg,
-                getString(R.string.history_deposit)));
+            String amountText = CurrencyHelper.amount(this, deposits);
+            row.addView(chip("\u2191 " + amountText, depBg, depFg,
+                getString(R.string.history_deposit) + " " + amountText));
         }
         if (withdrawals < 0) {
-            row.addView(chip("\u2193 " + CurrencyHelper.amount(this, -withdrawals), witBg, witFg,
-                getString(R.string.history_withdrawal)));
+            String amountText = CurrencyHelper.amount(this, -withdrawals);
+            row.addView(chip("\u2193 " + amountText, witBg, witFg,
+                getString(R.string.history_withdrawal) + " " + amountText));
         }
         return row;
     }

@@ -611,8 +611,8 @@ public final class CommitmentsActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         // Manage/Add stay in this order in every language, so Add is always the right-hand
-        // button, instead of mirroring in RTL layouts. The text inside each button still
-        // renders in its own direction.
+        // button, instead of mirroring in RTL layouts. The labels are single-direction
+        // strings, so they render the same centered inside either button.
         row.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
         TextView manage = text(getString(R.string.commitments_manage), 15, fg, medium());
         manage.setGravity(Gravity.CENTER);
