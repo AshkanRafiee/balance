@@ -3162,7 +3162,9 @@ public final class HistoryActivity extends Activity {
     }
 
     /** A collapsible day row: headers are always complete, while its rows are an explicit disk-backed
-     *  page. Opening a day never implies that every row for that day is in memory. */
+     *  page. Opening a day never implies that every row for that day is in memory. Mixed days carry
+     *  the same deposit/withdrawal chips as the month rows; single-sided days show no chips because
+     *  their net already is the gross. */
     private LinearLayout dayCard(DayGroup g, LinearLayout daysHost, List<DayGroup> days) {
         boolean open = expandedDays.contains(g.key());
         HistoryReader.DayRows page = loadedDayPages.get(g.key());
@@ -3222,6 +3224,17 @@ public final class HistoryActivity extends Activity {
         head.addView(sum, sumParams);
         head.setContentDescription(state(dateText(g.date), g.sum, open));
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
+
+        // Gross in/out below the header, but only where the net hides something: on a mixed
+        // day the net alone reads as quiet while real volume moved. A single-sided day shows
+        // no chips because its net already is that side's gross.
+        if (g.dep > 0 && g.wit < 0) {
+            LinearLayout chips = chipsRow(g.dep, g.wit);
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1, -2);
+            cp.setMarginStart(dp(26));
+            cp.topMargin = dp(2);
+            box.addView(chips, cp);
+        }
 
         if (open && page != null) {
             LinearLayout rows = new LinearLayout(this);
@@ -3962,6 +3975,7 @@ public final class HistoryActivity extends Activity {
     static final class DayGroup {
         final CalDate date;
         long sum;
+        long dep, wit;
         long n;
         final List<Transaction> txs = new ArrayList<>();
         /** Unaccounted money detected on this day, shown beside the movements rather than among
@@ -4332,6 +4346,8 @@ public final class HistoryActivity extends Activity {
                 for (HistoryReader.DaySummary summaryDay : summaryMonth.days) {
                     DayGroup day = new DayGroup(summaryDay.date);
                     day.sum = summaryDay.stats.sum;
+                    day.dep = summaryDay.stats.deposits;
+                    day.wit = summaryDay.stats.withdrawals;
                     day.n = summaryDay.stats.movementCount;
                     HistoryReader.DayRows rows = loadedPages == null ? null : loadedPages.get(day.key());
                     if (rows != null) {
@@ -4489,6 +4505,7 @@ public final class HistoryActivity extends Activity {
             month.days.add(day);
         }
         day.sum += amount;
+        if (amount > 0) day.dep += amount; else day.wit += amount;
         if (count) day.n++;
         return day;
     }
