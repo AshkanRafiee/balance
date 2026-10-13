@@ -2048,7 +2048,7 @@ public class MainActivity extends Activity {
          *  reserved for things needing action. */
         void drawStaleBadge(Canvas c, String nameShown, float nameX, float yy,
                             Paint.Align nameAlign, int staleDays, float guardX) {
-            String txt = getResources().getQuantityString(R.plurals.stale_days_old, staleDays, staleDays);
+            String txt = getResources().getQuantityString(R.plurals.stale_days, staleDays, staleDays);
             float tx = 11, h = 18, pw = measure(txt, tx) + 12;
             float x;
             if (nameAlign == Paint.Align.LEFT) {

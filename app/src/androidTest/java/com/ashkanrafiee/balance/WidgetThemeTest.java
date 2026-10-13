@@ -236,7 +236,7 @@ public class WidgetThemeTest {
         long now = System.currentTimeMillis();
         long date = now - 30L * 86400000L;
         int days = BalanceData.staleDays(ctx, date);
-        String age = ctx.getResources().getQuantityString(R.plurals.stale_days_old, days, days);
+        String age = ctx.getResources().getQuantityString(R.plurals.stale_days, days, days);
 
         View withAccount = inflate(BalanceWidgetService.bankViews(ctx,
             new Bank("Tejarat", 1_000_000, date, "5000", "1110000222")));

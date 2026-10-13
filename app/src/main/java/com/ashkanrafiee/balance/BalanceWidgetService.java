@@ -77,7 +77,7 @@ public class BalanceWidgetService extends RemoteViewsService {
             }
         } else if (stale) {
             int days = BalanceData.staleDays(c, b.date);
-            String age = c.getResources().getQuantityString(R.plurals.stale_days_old, days, days);
+            String age = c.getResources().getQuantityString(R.plurals.stale_days, days, days);
             if (b.account != null) {
                 views.setTextViewText(R.id.bank_account, accountLabel(c, b.account) + " \u00b7 " + age);
             } else {
