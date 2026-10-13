@@ -1,0 +1,4 @@
+• History now shows total deposits and withdrawals separately at the top and on mixed days, instead of only the net movement.
+• Commitments can now end after a set number of payments.
+• Stale balances now show a muted amount with a short "N days" badge.
+• Persian bank names are shorter, and diagnostics shows whether each sender is recognized.
