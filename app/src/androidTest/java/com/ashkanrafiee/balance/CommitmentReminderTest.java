@@ -5,7 +5,6 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
-import android.os.Build;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -88,44 +87,24 @@ public class CommitmentReminderTest {
         CommitmentReminders.ensureChannel(ctx);
     }
 
-    @Test public void scheduleAll_whenNotificationsDenied_cancelsAndRearmsAfterGrant() {
-        if (Build.VERSION.SDK_INT < 33) return;
-        boolean originallyGranted = ctx.checkSelfPermission(
-            android.Manifest.permission.POST_NOTIFICATIONS)
-            == android.content.pm.PackageManager.PERMISSION_GRANTED;
-        android.app.UiAutomation automation = InstrumentationRegistry.getInstrumentation()
-            .getUiAutomation();
-        try {
-            automation.grantRuntimePermission(ctx.getPackageName(),
-                android.Manifest.permission.POST_NOTIFICATIONS);
-            long due = inDays(5);
-            Commitment c = Commitment.create("rent", -5000, Commitment.ONCE, due, null,
-                true, 0);
-            BalanceData.writeCommitments(ctx, java.util.Collections.singletonList(c));
-            CommitmentReminders.scheduleAll(ctx);
-            assertTrue("granted notifications must arm the reminder",
-                CommitmentReminders.scheduledIds(ctx).contains(c.id));
-
-            automation.revokeRuntimePermission(ctx.getPackageName(),
-                android.Manifest.permission.POST_NOTIFICATIONS);
-            CommitmentReminders.scheduleAll(ctx);
-            assertTrue("denied notifications must leave no armed reminders",
-                CommitmentReminders.scheduledIds(ctx).isEmpty());
-
-            automation.grantRuntimePermission(ctx.getPackageName(),
-                android.Manifest.permission.POST_NOTIFICATIONS);
-            CommitmentReminders.scheduleAll(ctx);
-            assertTrue("granting notifications must rearm the reminder",
-                CommitmentReminders.scheduledIds(ctx).contains(c.id));
-        } finally {
-            if (originallyGranted) {
-                automation.grantRuntimePermission(ctx.getPackageName(),
-                    android.Manifest.permission.POST_NOTIFICATIONS);
-            } else {
-                automation.revokeRuntimePermission(ctx.getPackageName(),
-                    android.Manifest.permission.POST_NOTIFICATIONS);
-            }
-        }
+    @Test public void cancelAllForTest_clearsArmedRemindersAndRearmsOnNextSchedule() {
+        // Covers the notifications-unavailable branch of scheduleAll (cancel everything,
+        // then re-arm on the next pass) without simulating unavailable notifications:
+        // revoking the permission kills the app process by design, taking the in-process
+        // test runner with it, and a disabled channel keeps its importance across
+        // delete/recreate, so neither can be used and restored inside one run.
+        Commitment c = Commitment.create("rent", -5000, Commitment.ONCE, inDays(5), null,
+            true, 0);
+        BalanceData.writeCommitments(ctx, java.util.Collections.singletonList(c));
+        CommitmentReminders.scheduleAll(ctx);
+        assertTrue("a reminder must arm while notifications are available",
+            CommitmentReminders.scheduledIds(ctx).contains(c.id));
+        CommitmentReminders.cancelAllForTest(ctx);
+        assertTrue("cancelling must leave no armed reminders",
+            CommitmentReminders.scheduledIds(ctx).isEmpty());
+        CommitmentReminders.scheduleAll(ctx);
+        assertTrue("the next schedule must rearm the reminder",
+            CommitmentReminders.scheduledIds(ctx).contains(c.id));
     }
 
     @Test public void notificationContent_namesEachSameTimeDue() {
