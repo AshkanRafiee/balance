@@ -133,6 +133,29 @@ public class HistoryResidualUiTest {
         assertNotNull(findByDescription(ctx.getString(R.string.residual_explainer_cd)));
     }
 
+    @Test public void englishHistory_showsLatinQuestionMark() {
+        // English keeps the Latin mark: both amber badges (the heading button and the row) are
+        // exactly "?", and no Persian mark reaches the screen.
+        storeAGap();
+        launch();
+        assertNotNull(findByText("?"));
+        assertTrue(findByText("؟") == null);
+    }
+
+    @Test public void persianHistory_showsPersianQuestionMark() {
+        // Persian uses U+061F ARABIC QUESTION MARK, which mirrors correctly in the RTL layout;
+        // the Latin mark must not appear anywhere on the screen.
+        LocaleHelper.setLanguage(ctx, "fa");
+        storeAGap();
+        Intent i = new Intent(ctx, HistoryActivity.class)
+            .putExtra(HistoryActivity.EXTRA_BANK, MELLAT)
+            .putExtra(HistoryActivity.EXTRA_ACCOUNT, ACCOUNT)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        scenario = androidx.test.core.app.ActivityScenario.launch(i);
+        await(() -> findByText("؟") != null, 20_000);
+        assertTrue(findByText("?") == null);
+    }
+
     @Test public void aDetectedGap_tappingTheRow_survivesBuildingTheArithmetic() {
         // The dialog is the one place the app does the subtraction in front of the user, so a wrong
         // format argument would fail exactly there. Clicking for real is the only way to cover it.
