@@ -86,6 +86,35 @@ public class HistoryScopeTest {
 
     // ---- scope predicate --------------------------------------------------------
 
+    @Test public void bankForSingleAccount_prefersSelectedBanks() {
+        java.util.LinkedHashMap<String, java.util.Set<String>> membership =
+            new java.util.LinkedHashMap<>();
+        membership.put("Mellat", new HashSet<>(Arrays.asList("111", "222")));
+        membership.put("Saman", new HashSet<>(Arrays.asList("111", "333")));
+        // Shared number resolves to the preferred bank first.
+        assertEquals("Saman", HistoryActivity.bankForSingleAccount(
+            new HashSet<>(Collections.singletonList("111")),
+            Arrays.asList("Saman", "Mellat"), membership));
+        assertEquals("Mellat", HistoryActivity.bankForSingleAccount(
+            new HashSet<>(Collections.singletonList("222")),
+            Collections.singletonList("Mellat"), membership));
+        // Not among the preferred banks: unknown.
+        assertTrue(HistoryActivity.bankForSingleAccount(
+            new HashSet<>(Collections.singletonList("333")),
+            Collections.singletonList("Mellat"), membership) == null);
+        // No preference: first bank holding it.
+        assertEquals("Mellat", HistoryActivity.bankForSingleAccount(
+            new HashSet<>(Collections.singletonList("111")),
+            Collections.emptySet(), membership));
+        // Anything but exactly one known account: unknown.
+        assertTrue(HistoryActivity.bankForSingleAccount(
+            new HashSet<>(Arrays.asList("111", "222")),
+            Collections.emptySet(), membership) == null);
+        assertTrue(HistoryActivity.bankForSingleAccount(
+            Collections.emptySet(), Collections.emptySet(), membership) == null);
+        assertTrue(HistoryActivity.bankForSingleAccount(null, null, null) == null);
+    }
+
     @Test public void accountsOfBanks_collectsSelectedBanksAccounts() {
         List<Transaction> txs = Arrays.asList(
             tx("Mellat", "111", 1L),

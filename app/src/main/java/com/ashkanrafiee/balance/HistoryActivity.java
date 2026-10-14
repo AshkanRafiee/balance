@@ -157,6 +157,21 @@ public final class HistoryActivity extends Activity {
         return selectedAccounts.size() == 1 ? selectedAccounts.iterator().next() : null;
     }
 
+    /** The bank associated with the single selected account, for the header presentation when
+     *  no banks are picked. Set whenever the scope changes through the pickers or intents;
+     *  null unless exactly one account is selected with a known bank. */
+    private String accountBank;
+
+    /** The bank whose compact single-bank presentation applies, or null for the combined view:
+     *  exactly one selected bank, or one selected account with a known bank and no banks
+     *  picked. The dashboard's per-account view is the same single-bank presentation. */
+    private String headerBank() {
+        String oneBank = singleBank();
+        if (oneBank != null) return oneBank;
+        if (selectedBanks.isEmpty() && singleAccount() != null) return accountBank;
+        return null;
+    }
+
     /** The active direction and date bounds, applied before the transactions are grouped so the hero
      *  and the breakdown always match what is on screen. Starts from {@link Filter#ALL} on every open
      *  and survives rotation through the saved state; never persisted across sessions. */
@@ -572,6 +587,7 @@ public final class HistoryActivity extends Activity {
                 state.getStringArrayList(KEY_ACCOUNT_FILTERS);
             if (savedBanks != null) selectedBanks.addAll(savedBanks);
             if (savedAccounts != null) selectedAccounts.addAll(savedAccounts);
+            accountBank = state.getString(KEY_ACCOUNT_BANK, null);
         } else {
             String intentBank =
                 getIntent() == null ? null : getIntent().getStringExtra(EXTRA_BANK);
@@ -579,6 +595,7 @@ public final class HistoryActivity extends Activity {
             String intentAccount = intentBank == null || getIntent() == null ? null
                 : getIntent().getStringExtra(EXTRA_ACCOUNT);
             if (intentAccount != null) selectedAccounts.add(intentAccount);
+            accountBank = intentAccount == null ? null : intentBank;
         }
         bg = color(R.color.bg);
         card = color(R.color.panel);
@@ -754,12 +771,12 @@ public final class HistoryActivity extends Activity {
 
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-2, -2);
         titleParams.setMarginStart(dp(10));
-        String oneBank = singleBank();
+        String oneBank = headerBank();
         String oneAccount = oneBank == null ? null : singleAccount();
         if (oneBank != null) {
             // A bank or account view: the badge plus the bank's name identifies whose filtered
-            // history this is; the chip flags a single account (else the whole bank), so an
-            // account's history reads as a first-class scope, exactly like another bank's.
+            // history this is, with a copyable chip for a single account and a quiet count for
+            // several. A whole-bank view needs nothing more.
             View badge = bankBadge(oneBank);
             LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(dp(32), dp(32));
             badgeLp.setMarginStart(dp(4));
@@ -803,9 +820,13 @@ public final class HistoryActivity extends Activity {
                 chip.setPadding(dp(6), dp(5), dp(6), dp(5));
                 chip.setBackground(rounded(badgeBg, 9));
                 bar.addView(chip, chipParams);
+            } else {
+                // A whole-bank view gets no chip: the badge and the name fully identify it, and
+                // a label without an account number wastes the header's narrow width. The flex
+                // spacer keeps the export action at the far end, exactly like the unscoped
+                // header below.
+                bar.addView(new View(this), new LinearLayout.LayoutParams(0, 0, 1));
             }
-            // A whole-bank view gets no chip: the badge and the name fully identify it, and a
-            // label without an account number wastes the header's narrow width.
         } else if (!selectedBanks.isEmpty() || !selectedAccounts.isEmpty()) {
             // A multi-bank or cross-bank account selection: the plain title plus a quiet scope
             // summary, since no single badge can identify whose history this is.
@@ -1299,6 +1320,26 @@ public final class HistoryActivity extends Activity {
         return out;
     }
 
+    /** The bank holding the single selected account, preferring the given banks in order and
+     *  falling back to every known bank when none is preferred. Null unless exactly one
+     *  account is selected and found in the membership map. */
+    static String bankForSingleAccount(Set<String> accounts, Collection<String> preferredBanks,
+            Map<String, Set<String>> accountsByBank) {
+        if (accounts == null || accounts.size() != 1 || accountsByBank == null) return null;
+        String account = accounts.iterator().next();
+        if (preferredBanks != null) {
+            for (String bank : preferredBanks) {
+                Set<String> mine = accountsByBank.get(bank);
+                if (mine != null && mine.contains(account)) return bank;
+            }
+            if (!preferredBanks.isEmpty()) return null;
+        }
+        for (Map.Entry<String, Set<String>> e : accountsByBank.entrySet()) {
+            if (e.getValue() != null && e.getValue().contains(account)) return e.getKey();
+        }
+        return null;
+    }
+
     /** The header chip for a multi-bank or cross-bank account selection. */
     private String scopeSummary() {
         String banks = selectedBanks.isEmpty() ? null : getResources().getQuantityString(
@@ -1413,6 +1454,18 @@ public final class HistoryActivity extends Activity {
         host.addView(chip, lp);
     }
 
+    /** Keeps a tall picker list inside its dialog: once laid out beyond the cap the list
+     *  scrolls instead of pushing the dialog off the screen. Short lists keep wrap height. */
+    private void capListHeight(final ScrollView scroll) {
+        scroll.post(() -> {
+            int cap = dp(300);
+            if (scroll.getHeight() > cap && scroll.getLayoutParams() != null) {
+                scroll.getLayoutParams().height = cap;
+                scroll.requestLayout();
+            }
+        });
+    }
+
     /** Lets the user narrow history to several banks at once. The choices derive from the whole
      *  stored history (before the direction/date filters), so they stay stable while narrowing.
      *  A selection the store no longer contains is dropped on open, so the scope self-heals
@@ -1430,7 +1483,12 @@ public final class HistoryActivity extends Activity {
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setPadding(dp(20), dp(8), dp(20), 0);
-        wrap.addView(text(getString(R.string.history_stage_loading), 14, muted),
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(list, new FrameLayout.LayoutParams(-1, -2));
+        wrap.addView(scroll, new LinearLayout.LayoutParams(-1, -2));
+        list.addView(text(getString(R.string.history_stage_loading), 14, muted),
             new LinearLayout.LayoutParams(-1, -2));
 
         android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
@@ -1455,6 +1513,7 @@ public final class HistoryActivity extends Activity {
                     }
                     selectedAccounts.retainAll(keep);
                 }
+                accountBank = bankForSingleAccount(selectedAccounts, selectedBanks, accountsByBank);
                 dlg.dismiss();
                 rebuildHeader();
                 render();
@@ -1463,6 +1522,7 @@ public final class HistoryActivity extends Activity {
                 if (!loaded[0]) return;
                 selectedBanks.clear();
                 selectedAccounts.clear();
+                accountBank = null;
                 dlg.dismiss();
                 rebuildHeader();
                 render();
@@ -1479,7 +1539,7 @@ public final class HistoryActivity extends Activity {
             final List<Transaction> loadedStore = stored;
             runOnUiThread(() -> {
                 if (!dlg.isShowing() || isDestroyed() || isFinishing()) return;
-                wrap.removeAllViews();
+                list.removeAllViews();
                 final List<String> choices =
                     loadedStore == null ? new ArrayList<>() : sortedBankNames(loadedStore);
                 for (String selected : selectedBanks) {
@@ -1498,7 +1558,7 @@ public final class HistoryActivity extends Activity {
                     }
                 }
                 if (choices.isEmpty()) {
-                    wrap.addView(text(getString(R.string.history_filter_banks_empty), 14, muted),
+                    list.addView(text(getString(R.string.history_filter_banks_empty), 14, muted),
                         new LinearLayout.LayoutParams(-1, -2));
                 } else {
                     for (String choice : choices) {
@@ -1511,9 +1571,10 @@ public final class HistoryActivity extends Activity {
                             if (checked) staged.add(choice);
                             else staged.remove(choice);
                         });
-                        wrap.addView(check, new LinearLayout.LayoutParams(-1, -2));
+                        list.addView(check, new LinearLayout.LayoutParams(-1, -2));
                     }
                 }
+                capListHeight(scroll);
                 loaded[0] = true;
             });
         }).start();
@@ -1524,12 +1585,18 @@ public final class HistoryActivity extends Activity {
      *  Like the bank picker, the choices load off the main thread so the dialog opens at once. */
     private void accountFilterDialog() {
         final LinkedHashSet<String> staged = new LinkedHashSet<>();
+        final List<BankAccount> loadedChoices = new ArrayList<>();
         final boolean[] loaded = {false};
 
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setPadding(dp(20), dp(8), dp(20), 0);
-        wrap.addView(text(getString(R.string.history_stage_loading), 14, muted),
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(list, new FrameLayout.LayoutParams(-1, -2));
+        wrap.addView(scroll, new LinearLayout.LayoutParams(-1, -2));
+        list.addView(text(getString(R.string.history_stage_loading), 14, muted),
             new LinearLayout.LayoutParams(-1, -2));
 
         android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
@@ -1544,6 +1611,16 @@ public final class HistoryActivity extends Activity {
                 if (!loaded[0]) return;
                 selectedAccounts.clear();
                 selectedAccounts.addAll(staged);
+                accountBank = null;
+                if (staged.size() == 1) {
+                    String only = staged.iterator().next();
+                    for (BankAccount pair : loadedChoices) {
+                        if (pair.account.equals(only)) {
+                            accountBank = pair.bank;
+                            break;
+                        }
+                    }
+                }
                 dlg.dismiss();
                 rebuildHeader();
                 render();
@@ -1551,6 +1628,7 @@ public final class HistoryActivity extends Activity {
             dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(button -> {
                 if (!loaded[0]) return;
                 selectedAccounts.clear();
+                accountBank = null;
                 dlg.dismiss();
                 rebuildHeader();
                 render();
@@ -1567,9 +1645,10 @@ public final class HistoryActivity extends Activity {
             final List<Transaction> loadedStore = stored;
             runOnUiThread(() -> {
                 if (!dlg.isShowing() || isDestroyed() || isFinishing()) return;
-                wrap.removeAllViews();
+                list.removeAllViews();
                 // With banks selected only their accounts are offered; otherwise every account.
-                final List<BankAccount> choices = new ArrayList<>();
+                final List<BankAccount> choices = loadedChoices;
+                choices.clear();
                 if (loadedStore != null) {
                     for (BankAccount pair : sortedBankAccounts(loadedStore)) {
                         if (selectedBanks.isEmpty() || selectedBanks.contains(pair.bank)) {
@@ -1586,7 +1665,7 @@ public final class HistoryActivity extends Activity {
                     }
                 }
                 if (choices.isEmpty()) {
-                    wrap.addView(text(getString(selectedBanks.isEmpty()
+                    list.addView(text(getString(selectedBanks.isEmpty()
                         ? R.string.history_filter_accounts_empty
                         : R.string.history_filter_accounts_empty_banks), 14, muted),
                         new LinearLayout.LayoutParams(-1, -2));
@@ -1602,9 +1681,10 @@ public final class HistoryActivity extends Activity {
                             if (checked) staged.add(choice.account);
                             else staged.remove(choice.account);
                         });
-                        wrap.addView(check, new LinearLayout.LayoutParams(-1, -2));
+                        list.addView(check, new LinearLayout.LayoutParams(-1, -2));
                     }
                 }
+                capListHeight(scroll);
                 loaded[0] = true;
             });
         }).start();
@@ -2179,6 +2259,7 @@ public final class HistoryActivity extends Activity {
     private static final String KEY_FILTER_TAGS = "filter_tags";
     private static final String KEY_BANK_FILTERS = "bank_filters";
     private static final String KEY_ACCOUNT_FILTERS = "account_filters";
+    private static final String KEY_ACCOUNT_BANK = "account_bank";
     private static final String KEY_SEARCH_QUERY = "search_query";
     private static final String KEY_SEARCH_EXPANDED_FOR = "search_expanded_for";
     private static final String KEY_PRE_SEARCH_YEARS = "pre_search_years";
@@ -2325,6 +2406,7 @@ public final class HistoryActivity extends Activity {
         outState.putStringArrayList(KEY_BANK_FILTERS, new java.util.ArrayList<>(selectedBanks));
         outState.putStringArrayList(KEY_ACCOUNT_FILTERS,
             new java.util.ArrayList<>(selectedAccounts));
+        outState.putString(KEY_ACCOUNT_BANK, accountBank);
         outState.putString(KEY_SEARCH_QUERY, searchQuery == null ? "" : searchQuery);
         outState.putString(KEY_SEARCH_EXPANDED_FOR, searchExpandedFor);
         putStringSet(outState, KEY_PRE_SEARCH_YEARS, preSearchYears);
@@ -3805,7 +3887,7 @@ public final class HistoryActivity extends Activity {
 
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
-        boolean perBank = singleBank() != null;
+        boolean perBank = headerBank() != null;
         if (!perBank) {
             col.addView(text(BankRules.displayName(this, r.bank), 13, warnFg),
                 new LinearLayout.LayoutParams(-2, -2));
@@ -3909,7 +3991,7 @@ public final class HistoryActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPaddingRelative(dp(4), dp(3), dp(4), dp(3));
 
-        boolean perBank = singleBank() != null;
+        boolean perBank = headerBank() != null;
         if (!perBank) {
             View badge = bankBadge(t.bank);
             row.addView(badge, new LinearLayout.LayoutParams(dp(30), dp(30)));

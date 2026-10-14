@@ -155,8 +155,10 @@ public class HistoryBankFilterUiTest {
         assertNotNull(findByTextContaining("30,000,000"));
         assertTrue(findByTextContaining("5,000,000") == null);
         assertTrue(findByTextContaining("900,000") == null);
-        assertNotNull("the header summarizes the cross-bank account scope",
-            findByText(ctx.getResources().getQuantityString(R.plurals.history_n_accounts, 1, 1)));
+        assertNotNull("the header names the single account's bank",
+            findByText(BankRules.displayName(ctx, MELLAT)));
+        assertNotNull("the header carries the account chip",
+            findByText(ctx.getString(R.string.account_label) + " 111"));
 
         // A second account from another bank joins the scope.
         click(findByText(ctx.getString(R.string.history_filter_accounts_count, 1)));
