@@ -2110,15 +2110,49 @@ final class BalanceData {
             Map<String, String> out, Set<String> ambiguous) {
         if (stored == null || stored.isEmpty() || out == null) return;
         Map<String, Set<String>> candidates = new LinkedHashMap<>();
+        List<AuthorizationEvidence> authorizations = new ArrayList<>();
+        List<SettlementEvidence> settlements = new ArrayList<>();
         try {
-            SourceStore.forEachSource(context, 256, source -> addAuthorizationCandidate(
-                source.bank, source.rawBody, source.arrivalTime, stored, candidates));
+            SourceStore.forEachSourceWithObservations(context, 256, (source, transactions, balances) -> {
+                BankRules.Authorization authorization = BankRules.extractAuthorization(
+                    source.bank, source.rawBody);
+                if (authorization != null)
+                    authorizations.add(new AuthorizationEvidence(authorization, source.arrivalTime));
+                for (SourceStore.TransactionObservation observation : transactions) {
+                    Transaction transaction = observation.transaction;
+                    if (transaction != null && transaction.balance != null)
+                        settlements.add(new SettlementEvidence(source.bank, source.arrivalTime,
+                            transaction));
+                }
+            });
         } catch (Exception e) {
             // A source-store failure must not crash or block the core history scan. It does mean the
             // complete evidence set is unavailable, so defer merchant attachment rather than risk a
             // false singleton match from only the current batch.
             Log.w(TAG, "authorization source scan failed; deferring merchants", e);
             return;
+        }
+        for (AuthorizationEvidence authorization : authorizations) {
+            Set<Transaction> matches = new HashSet<>();
+            for (SettlementEvidence settlement : settlements) {
+                if (!authorization.authorization.bank.equals(settlement.bank)
+                        || settlement.transaction.amount != -authorization.authorization.amount)
+                    continue;
+                Transaction storedTransaction = storedTransactionForObservation(stored,
+                    settlement.transaction);
+                if (storedTransaction == null) continue;
+                boolean matched = authorization.authorization.hour < 0
+                    ? Math.abs(authorization.arrival - settlement.arrival)
+                        <= CLOCKLESS_AUTHORIZATION_WINDOW_MS
+                    : authorizationMatches(authorization.authorization, authorization.arrival,
+                        storedTransaction);
+                if (matched) matches.add(storedTransaction);
+            }
+            if (matches.size() == 1) {
+                Transaction transaction = matches.iterator().next();
+                candidates.computeIfAbsent(noteKey(transaction), ignored -> new HashSet<>())
+                    .add(authorization.authorization.merchant);
+            }
         }
         for (Map.Entry<String, Set<String>> entry : candidates.entrySet()) {
             if (entry.getValue().size() == 1)
@@ -2128,21 +2162,40 @@ final class BalanceData {
         }
     }
 
-    private static void addAuthorizationCandidate(String bank, String body, long arrival,
-            List<Transaction> stored, Map<String, Set<String>> candidates) {
-        BankRules.Authorization authorization = BankRules.extractAuthorization(bank, body);
-        if (authorization == null) return;
+    private static Transaction storedTransactionForObservation(List<Transaction> stored,
+            Transaction observation) {
         Transaction match = null;
-        int matches = 0;
         for (Transaction transaction : stored) {
-            if (!authorizationMatches(authorization, arrival, transaction)) continue;
+            boolean sameContent = observation.content != null && transaction.content != null
+                && observation.content.equals(transaction.content);
+            boolean sameSignature = observation.sig != null && transaction.sig != null
+                && observation.sig.equals(transaction.sig);
+            if ((!sameContent && !sameSignature) || !observation.bank.equals(transaction.bank)
+                    || observation.amount != transaction.amount) continue;
+            if (match != null) return null;
             match = transaction;
-            matches++;
-            if (matches > 1) return;
         }
-        if (matches != 1 || match == null) return;
-        String key = noteKey(match);
-        candidates.computeIfAbsent(key, ignored -> new HashSet<>()).add(authorization.merchant);
+        return match;
+    }
+
+    private static final class AuthorizationEvidence {
+        final BankRules.Authorization authorization;
+        final long arrival;
+        AuthorizationEvidence(BankRules.Authorization authorization, long arrival) {
+            this.authorization = authorization;
+            this.arrival = arrival;
+        }
+    }
+
+    private static final class SettlementEvidence {
+        final String bank;
+        final long arrival;
+        final Transaction transaction;
+        SettlementEvidence(String bank, long arrival, Transaction transaction) {
+            this.bank = bank;
+            this.arrival = arrival;
+            this.transaction = transaction;
+        }
     }
 
     private static boolean authorizationMatches(BankRules.Authorization authorization, long arrival,
@@ -2157,8 +2210,7 @@ final class BalanceData {
         if (event.get(Calendar.YEAR) != received.get(Calendar.YEAR)
                 || event.get(Calendar.DAY_OF_YEAR) != received.get(Calendar.DAY_OF_YEAR))
             return false;
-        if (authorization.hour < 0)
-            return Math.abs(transaction.date - arrival) <= CLOCKLESS_AUTHORIZATION_WINDOW_MS;
+        if (authorization.hour < 0) return false;
         return event.get(Calendar.HOUR_OF_DAY) == authorization.hour
             && event.get(Calendar.MINUTE) == authorization.minute;
     }
