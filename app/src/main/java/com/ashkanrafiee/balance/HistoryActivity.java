@@ -2784,7 +2784,7 @@ public final class HistoryActivity extends Activity {
 
         if (residualCount == 0) return row;
 
-        TextView ask = text("?", 12, warnFg, medium());
+        TextView ask = text(LocaleHelper.isPersian(this) ? "؟" : "?", 12, warnFg, medium());
         ask.setGravity(Gravity.CENTER);
         ask.setContentDescription(getString(R.string.residual_explainer_cd));
         ask.setBackground(ripple(rounded(warnBg, 11)));
@@ -3373,7 +3373,7 @@ public final class HistoryActivity extends Activity {
 
         // A question mark, not a bank badge: there is no sender to attribute this to, and showing a
         // bank icon there would imply a message we never received.
-        TextView ask = text("?", 13, warnFg, medium());
+        TextView ask = text(LocaleHelper.isPersian(this) ? "؟" : "?", 13, warnFg, medium());
         ask.setGravity(Gravity.CENTER);
         ask.setBackground(roundedStroke(Color.TRANSPARENT, 12, warnFg));
         row.addView(ask, new LinearLayout.LayoutParams(dp(24), dp(24)));
