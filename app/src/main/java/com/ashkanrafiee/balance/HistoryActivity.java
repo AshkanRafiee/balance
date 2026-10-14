@@ -80,8 +80,8 @@ public final class HistoryActivity extends Activity {
     /** Keep the initial recent pages plus one explicitly opened older day in memory. */
     private static final int MAX_LOADED_DAY_PAGES = INITIAL_EXPANDED_DAY_LIMIT + 1;
     /** A narrowing can match rows across an unbounded number of days; the other matching days keep
-     *  their complete summaries and a load control, while only this bounded first window gets rows
-     *  materialized immediately. */
+     *  their complete summaries and open with their rows on tap, while only this bounded first
+     *  window gets rows materialized immediately. */
     private static final int MAX_INITIAL_NARROWED_DAY_PAGES = MAX_LOADED_DAY_PAGES;
     /** Visible to the instrumented tests so a test can tell an open year from a closed one, and one
      *  year's months from another's, by what is on screen rather than by reading its text. */
@@ -186,9 +186,9 @@ public final class HistoryActivity extends Activity {
 
     /** The narrowing the breakdown was last expanded for. While any narrowing is active
      *  (text search, tags, banks, accounts, or the direction/date filter) every matching
-     *  year, month and day starts open so a match never hides inside a collapsed group;
-     *  the sets below keep the user's own collapses from then on, until the narrowing
-     *  itself changes. */
+     *  year and month starts open, with the materialized days open under them, so a match
+     *  never hides inside a collapsed group; the sets below keep the user's own collapses
+     *  from then on, until the narrowing itself changes. */
     private String narrowingExpandedFor;
 
     /** The expansion the screen had before the current narrowing began, restored verbatim
@@ -2486,11 +2486,13 @@ public final class HistoryActivity extends Activity {
         return f != null && f.isActive();
     }
 
-    /** Opens every matching year, month and day for a fresh narrowing, so a match never
-     *  hides inside a collapsed group the narrowing itself did not open. The expansion
-     *  the narrowing started from is remembered and restored when every narrowing is
-     *  cleared, so filtering never leaves the whole history open behind it; collapses
-     *  made mid-narrowing are respected until the narrowing changes. */
+    /** Opens every matching year and month for a fresh narrowing, plus the matching days
+     *  whose rows are already materialized, so a match never hides inside a collapsed
+     *  group the narrowing itself did not open. Days beyond the eager page window stay
+     *  collapsed with their summaries, and tapping one opens it with its rows. The
+     *  expansion the narrowing started from is remembered and restored when every
+     *  narrowing is cleared, so filtering never leaves the whole history open behind
+     *  it; collapses made mid-narrowing are respected until the narrowing changes. */
     private void expandForNarrowing(String key, boolean active, List<YearGroup> years) {
         if (!active) {
             if (preNarrowingYears != null) {
@@ -2500,7 +2502,9 @@ public final class HistoryActivity extends Activity {
                 expandedMonths.clear();
                 expandedMonths.addAll(preNarrowingMonths);
                 expandedDays.clear();
-                expandedDays.addAll(preNarrowingDays);
+                for (String dayKey : preNarrowingDays) {
+                    if (loadedDayPages.containsKey(dayKey)) expandedDays.add(dayKey);
+                }
                 preNarrowingYears = preNarrowingMonths = preNarrowingDays = null;
             }
             return;
@@ -2517,7 +2521,8 @@ public final class HistoryActivity extends Activity {
             for (MonthGroup m : y.months) {
                 expandedMonths.add(m.key());
                 for (DayGroup d : m.days) {
-                    expandedDays.add(d.key());
+                    if (loadedDayPages.containsKey(d.key())) expandedDays.add(d.key());
+                    else expandedDays.remove(d.key());
                 }
             }
         }
@@ -2910,9 +2915,9 @@ public final class HistoryActivity extends Activity {
                     if (expansionActive
                             && requestedDays.size() > MAX_INITIAL_NARROWED_DAY_PAGES) {
                         // Narrowed summaries already contain every matching day and every
-                        // matching-row count. Limit only the eager row pages, leaving the rest
-                        // expanded with an explicit load control so no match disappears or
-                        // becomes unsearchable.
+                        // matching-row count. Materialize rows eagerly only for the first
+                        // window; the remaining matching days keep their summaries and
+                        // open with their rows on tap.
                         requestedDays = new java.util.LinkedHashSet<>(
                             new ArrayList<>(requestedDays).subList(0,
                                 MAX_INITIAL_NARROWED_DAY_PAGES));
@@ -3055,8 +3060,9 @@ public final class HistoryActivity extends Activity {
                 }
             }
         } else if (!expansionKey.equals(previousExpansionKey)) {
-            // expandForNarrowing opens every group in a fresh narrowing so no match is
-            // hidden inside a collapsed day.
+            // expandForNarrowing opens the matching years and months (and the days whose
+            // rows are materialized) in a fresh narrowing so no match is hidden inside
+            // a collapsed group.
             requested.addAll(visible);
         }
         return requested;
@@ -3094,6 +3100,10 @@ public final class HistoryActivity extends Activity {
                         expandedDays.remove(evicted);
                     }
                     loadedDayPages.put(dayKey, page);
+                    // The page arriving is what opens the day: tapping a collapsed day
+                    // requests its rows first and expands on arrival, so an open day
+                    // always has rows.
+                    expandedDays.add(dayKey);
                     pageMetadata = collectPageMetadata(loadedDayPages);
                     allResiduals = residualsFromPages(loadedDayPages);
                     rebuildLoadedBreakdown();
@@ -3820,9 +3830,9 @@ public final class HistoryActivity extends Activity {
     }
 
     /** A collapsible day row: headers are always complete, while its rows are an explicit disk-backed
-     *  page. Opening a day never implies that every row for that day is in memory. Mixed days carry
-     *  the same deposit/withdrawal chips as the month rows; single-sided days show no chips because
-     *  their net already is the gross. */
+     *  page. Tapping a collapsed day loads its page and opens it on arrival, so an open day
+     *  always has rows. Mixed days carry the same deposit/withdrawal chips as the month rows;
+     *  single-sided days show no chips because their net already is the gross. */
     private LinearLayout dayCard(DayGroup g, LinearLayout daysHost, List<DayGroup> days) {
         boolean open = expandedDays.contains(g.key());
         HistoryReader.DayRows page = loadedDayPages.get(g.key());
@@ -3840,10 +3850,13 @@ public final class HistoryActivity extends Activity {
             if (open) {
                 expandedDays.remove(g.key());
                 renderDays(daysHost, days);
-            } else {
+            } else if (loadedDayPages.containsKey(g.key())) {
                 expandedDays.add(g.key());
                 renderDays(daysHost, days);
-                if (!loadedDayPages.containsKey(g.key())) loadDayPage(g.key(), null, false);
+            } else {
+                // Opening a day loads it: the arrival marks it expanded, so a day is
+                // never left open with no rows and no way to load them.
+                loadDayPage(g.key(), null, false);
             }
         });
         head.addView(caret(open, 13), new LinearLayout.LayoutParams(dp(22), -2));
@@ -3914,17 +3927,8 @@ public final class HistoryActivity extends Activity {
             }
             box.addView(rows, new LinearLayout.LayoutParams(-1, -2));
             box.addView(pageControls(g, page), margin(0, 4, 0, 2));
-        } else if (open) {
-            box.addView(pageLoadControl(g.key()), margin(8, 4, 4, 2));
         }
         return box;
-    }
-
-    /** A visible control for loading a day that is expanded but not in the one-day page cache. */
-    private TextView pageLoadControl(String dayKey) {
-        TextView load = pageButton(pageLoadLabel(), pageLoadLabel());
-        load.setOnClickListener(v -> loadDayPage(dayKey, null, false));
-        return load;
     }
 
     /** Previous/More controls use keyset cursors, so neither control relies on an in-memory offset. */
@@ -3955,10 +3959,6 @@ public final class HistoryActivity extends Activity {
         button.setFocusable(true);
         button.setContentDescription(description);
         return button;
-    }
-
-    private String pageLoadLabel() {
-        return LocaleHelper.isPersian(this) ? "بارگذاری ردیف‌ها" : "Load rows";
     }
 
     private String pagePreviousLabel() {
