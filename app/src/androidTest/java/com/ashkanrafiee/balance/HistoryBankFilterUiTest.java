@@ -37,6 +37,7 @@ public class HistoryBankFilterUiTest {
 
     private static final String MELLAT = "Mellat";
     private static final String SAMAN = "Saman";
+    private static final String BLU = "Blu";
 
     private static long now() {
         return System.currentTimeMillis();
@@ -185,6 +186,27 @@ public class HistoryBankFilterUiTest {
             10_000);
         click(findInDialog(ctx.getString(R.string.history_filter_accounts_clear)));
         await(() -> findByTextContaining("5,000,000") != null, 20_000);
+    }
+
+    @Test public void bankPicker_showsAccountLessBanks() {
+        // Blu states no account number: it must still be offered as a bank choice and
+        // narrow the history on its own.
+        BalanceData.writeTransactions(ctx, new ArrayList<>(Arrays.asList(
+            new Transaction(MELLAT, "111", now() - 3_000L, -30_000_000L, 290_000_000L, "a", null),
+            new Transaction(BLU, now() - 1_000L, -7_000_000L))));
+        launch();
+        await(() -> findByTextContaining("30,000,000") != null, 20_000);
+        await(() -> findByTextContaining("7,000,000") != null, 20_000);
+
+        click(findByText(ctx.getString(R.string.history_filter_banks)));
+        await(() -> findInDialog(ctx.getString(R.string.history_filter_banks_title)) != null,
+            10_000);
+        await(() -> findCheckInDialog(BankRules.displayName(ctx, BLU)) != null, 30_000);
+        checkInDialog(BankRules.displayName(ctx, BLU));
+        click(findInDialog(ctx.getString(R.string.history_filter_apply)));
+        await(() -> findByText(counted(1)) != null, 20_000);
+        assertNotNull(findByTextContaining("7,000,000"));
+        assertTrue(findByTextContaining("30,000,000") == null);
     }
 
     // -----------------------------------------------------------------------

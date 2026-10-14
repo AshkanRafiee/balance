@@ -259,17 +259,31 @@ public final class HistoryActivity extends Activity {
     /** Exact tag selection applied in addition to the direction/date filter and text search. */
     private final List<String> selectedTags = new ArrayList<>();
 
-    /** Distinct (bank, account) pairs backing both pickers, sorted for display. Loaded once
-     *  per screen in the background after the first render and refreshed whenever the history
-     *  may have changed; null means the next dialog open loads it instead. A stale cache only
-     *  ever hides a brand-new bank until the next change — the scope itself always reads the
-     *  live selection. */
-    private List<BankAccount> scopePairsCache;
+    /** Picker choices backing both dialogs: every distinct bank (including account-less
+     *  ones like Blu, whose messages state no account number) plus the (bank, account)
+     *  pairs. Loaded once per screen in the background after the first render and
+     *  refreshed whenever the history may have changed; null means the next dialog open
+     *  loads it instead. A stale cache only ever hides a brand-new bank until the next
+     *  change — the scope itself always reads the live selection. */
+    private ScopeChoices scopeChoicesCache;
+
+    /** Every distinct bank plus every (bank, account) pair of the stored history, each
+     *  sorted for display. Kept static so the instrumented tests can cover the
+     *  account-less-bank inclusion directly. */
+    static final class ScopeChoices {
+        final List<String> banks;
+        final List<BankAccount> pairs;
+
+        ScopeChoices(List<String> banks, List<BankAccount> pairs) {
+            this.banks = banks;
+            this.pairs = pairs;
+        }
+    }
 
     /** Loads the picker choices in the background unless already loaded. Runs after a render
      *  completes so it never contends with the visible pass for the store. */
     private void preloadScopeChoices() {
-        if (scopePairsCache != null || isDestroyed() || isFinishing()) return;
+        if (scopeChoicesCache != null || isDestroyed() || isFinishing()) return;
         final Context app = getApplicationContext();
         new Thread(() -> {
             List<Transaction> stored;
@@ -282,7 +296,7 @@ public final class HistoryActivity extends Activity {
             final List<Transaction> loaded = stored;
             runOnUiThread(() -> {
                 if (isDestroyed() || isFinishing()) return;
-                if (scopePairsCache == null) scopePairsCache = sortedBankAccounts(loaded);
+                if (scopeChoicesCache == null) scopeChoicesCache = scopeChoices(loaded);
             });
         }).start();
     }
@@ -1563,18 +1577,18 @@ public final class HistoryActivity extends Activity {
                 render();
             });
         });
-        List<BankAccount> cached = scopePairsCache;
-        if (cached != null) {
+        ScopeChoices cachedChoices = scopeChoicesCache;
+        if (cachedChoices != null) {
             // Warm: full content before the window shows, so the dialog measures once and never
             // jumps.
-            ingestBankPairs(cached, staged, accountsByBank, list);
+            ingestBankPairs(cachedChoices, staged, accountsByBank, list);
             loaded[0] = true;
         } else {
             list.addView(text(getString(R.string.history_stage_loading), 14, muted),
                 new LinearLayout.LayoutParams(-1, -2));
         }
         showDialog(dlg);
-        if (cached == null) {
+        if (cachedChoices == null) {
             new Thread(() -> {
                 List<Transaction> stored = null;
                 try {
@@ -1582,28 +1596,28 @@ public final class HistoryActivity extends Activity {
                 } catch (Exception e) {
                     android.util.Log.w("BalanceHistory", "bank choices read failed", e);
                 }
-                final List<BankAccount> pairs = stored == null
-                    ? new ArrayList<>() : sortedBankAccounts(stored);
-                if (stored != null) scopePairsCache = pairs;
+                final ScopeChoices fresh = scopeChoices(stored);
+                if (stored != null) scopeChoicesCache = fresh;
                 runOnUiThread(() -> {
                     if (!dlg.isShowing() || isDestroyed() || isFinishing()) return;
-                    ingestBankPairs(pairs, staged, accountsByBank, list);
+                    ingestBankPairs(fresh, staged, accountsByBank, list);
                     loaded[0] = true;
                 });
             }).start();
         }
     }
 
-    /** Fills the bank dialog from (bank, account) pairs in display order: the bank checkboxes
-     *  plus the membership map the Apply step prunes against. */
-    private void ingestBankPairs(List<BankAccount> pairs, Set<String> staged,
+    /** Fills the bank dialog from every distinct bank in display order — including
+     *  account-less banks like Blu — plus the membership map the Apply step prunes
+     *  against. */
+    private void ingestBankPairs(ScopeChoices choices, Set<String> staged,
             java.util.Map<String, Set<String>> accountsByBank, LinearLayout list) {
         list.removeAllViews();
-        final LinkedHashSet<String> bankOrder = new LinkedHashSet<>();
         accountsByBank.clear();
+        List<BankAccount> pairs = choices == null || choices.pairs == null
+            ? new ArrayList<>() : choices.pairs;
         for (BankAccount pair : pairs) {
             if (pair == null || pair.bank == null || pair.account == null) continue;
-            bankOrder.add(pair.bank);
             Set<String> mine = accountsByBank.get(pair.bank);
             if (mine == null) {
                 mine = new LinkedHashSet<>();
@@ -1611,15 +1625,16 @@ public final class HistoryActivity extends Activity {
             }
             mine.add(pair.account);
         }
-        final List<String> choices = new ArrayList<>(bankOrder);
+        final List<String> banks = choices == null || choices.banks == null
+            ? new ArrayList<>() : choices.banks;
         for (String selected : selectedBanks) {
-            if (choices.contains(selected)) staged.add(selected);
+            if (banks.contains(selected)) staged.add(selected);
         }
-        if (choices.isEmpty()) {
+        if (banks.isEmpty()) {
             list.addView(text(getString(R.string.history_filter_banks_empty), 14, muted),
                 new LinearLayout.LayoutParams(-1, -2));
         } else {
-            for (String choice : choices) {
+            for (String choice : banks) {
                 android.widget.CheckBox check = new android.widget.CheckBox(this);
                 check.setText(BankRules.displayName(this, choice));
                 check.setTextColor(fg);
@@ -1688,16 +1703,16 @@ public final class HistoryActivity extends Activity {
                 render();
             });
         });
-        List<BankAccount> cached = scopePairsCache;
-        if (cached != null) {
-            ingestAccountPairs(cached, staged, loadedChoices, list);
+        ScopeChoices cachedChoices = scopeChoicesCache;
+        if (cachedChoices != null) {
+            ingestAccountPairs(cachedChoices.pairs, staged, loadedChoices, list);
             loaded[0] = true;
         } else {
             list.addView(text(getString(R.string.history_stage_loading), 14, muted),
                 new LinearLayout.LayoutParams(-1, -2));
         }
         showDialog(dlg);
-        if (cached == null) {
+        if (cachedChoices == null) {
             new Thread(() -> {
                 List<Transaction> stored = null;
                 try {
@@ -1705,12 +1720,11 @@ public final class HistoryActivity extends Activity {
                 } catch (Exception e) {
                     android.util.Log.w("BalanceHistory", "account choices read failed", e);
                 }
-                final List<BankAccount> pairs = stored == null
-                    ? new ArrayList<>() : sortedBankAccounts(stored);
-                if (stored != null) scopePairsCache = pairs;
+                final ScopeChoices fresh = scopeChoices(stored);
+                if (stored != null) scopeChoicesCache = fresh;
                 runOnUiThread(() -> {
                     if (!dlg.isShowing() || isDestroyed() || isFinishing()) return;
-                    ingestAccountPairs(pairs, staged, loadedChoices, list);
+                    ingestAccountPairs(fresh.pairs, staged, loadedChoices, list);
                     loaded[0] = true;
                 });
             }).start();
@@ -1768,6 +1782,22 @@ public final class HistoryActivity extends Activity {
             return byBank != 0 ? byBank : x.account.compareTo(y.account);
         });
         return pairs;
+    }
+
+    /** Stored transactions' distinct banks — including account-less ones like Blu, whose
+     *  messages state no account number — sorted by bank display name. */
+    private List<String> sortedBanks(List<Transaction> stored) {
+        List<String> banks = distinctBanks(stored);
+        Collections.sort(banks, (a, b) -> BankRules.displayName(this, a)
+            .compareToIgnoreCase(BankRules.displayName(this, b)));
+        return banks;
+    }
+
+    /** Both picker choice lists from one store read. A null read (decrypt failure) yields
+     *  empty choices, mirroring the old per-dialog fallback. */
+    private ScopeChoices scopeChoices(List<Transaction> stored) {
+        List<Transaction> txs = stored == null ? new ArrayList<>() : stored;
+        return new ScopeChoices(sortedBanks(txs), sortedBankAccounts(txs));
     }
 
     /** Rebuilds the per-bank account chips: "All accounts" plus one chip per account the bank has
@@ -2535,14 +2565,14 @@ public final class HistoryActivity extends Activity {
             if (listenerGen != historyListenerGen || !historyResumed
                     || isDestroyed() || isFinishing()) return;
             // The store changed, so the cached picker choices may miss a brand-new bank.
-            scopePairsCache = null;
+            scopeChoicesCache = null;
             render();
         });
         BalanceData.addHistoryListener(onHistoryChanged);
         registerSmsObserver();
         // Same for anything that happened while the screen was closed (e.g. a dashboard
         // restore replacing the whole store): the render below reloads the choices after it.
-        scopePairsCache = null;
+        scopeChoicesCache = null;
         if (renderAfterResume) {
             renderAfterResume = false;
             render();

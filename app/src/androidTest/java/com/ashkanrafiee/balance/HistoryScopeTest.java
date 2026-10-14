@@ -252,4 +252,15 @@ public class HistoryScopeTest {
             result.close();
         }
     }
+
+    @Test public void accountLessBank_isABankChoiceWithNoPairs() {
+        // Blu states no account number: it must still be offered as a bank choice, while
+        // contributing no account pairs.
+        List<Transaction> txs = Arrays.asList(
+            new Transaction("Blu", epoch(2026, 9, 10), 1L),
+            tx("Mellat", "111", 2L));
+        assertEquals(Arrays.asList("Blu", "Mellat"), HistoryActivity.distinctBanks(txs));
+        assertEquals(Collections.singletonList(new HistoryActivity.BankAccount("Mellat", "111")),
+            HistoryActivity.distinctBankAccounts(txs));
+    }
 }
