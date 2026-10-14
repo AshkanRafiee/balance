@@ -3373,7 +3373,7 @@ public final class HistoryActivity extends Activity {
 
         // A question mark, not a bank badge: there is no sender to attribute this to, and showing a
         // bank icon there would imply a message we never received.
-        TextView ask = text(LocaleHelper.isPersian(this) ? "؟" : "?", 13, warnFg, medium());
+        TextView ask = text("?", 13, warnFg, medium());
         ask.setGravity(Gravity.CENTER);
         ask.setBackground(roundedStroke(Color.TRANSPARENT, 12, warnFg));
         row.addView(ask, new LinearLayout.LayoutParams(dp(24), dp(24)));

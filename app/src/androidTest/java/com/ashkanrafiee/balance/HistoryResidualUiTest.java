@@ -135,16 +135,18 @@ public class HistoryResidualUiTest {
 
     @Test public void englishHistory_showsLatinQuestionMark() {
         // English keeps the Latin mark: both amber badges (the heading button and the row) are
-        // exactly "?", and no Persian mark reaches the screen.
+        // exactly "?", and no Persian mark reaches the screen. The rows render after the header,
+        // so wait for the mark instead of asserting on a half-built list.
         storeAGap();
         launch();
+        await(() -> findByText("?") != null, 20_000);
         assertNotNull(findByText("?"));
         assertTrue(findByText("؟") == null);
     }
 
     @Test public void persianHistory_showsPersianQuestionMark() {
-        // Persian uses U+061F ARABIC QUESTION MARK, which mirrors correctly in the RTL layout;
-        // the Latin mark must not appear anywhere on the screen.
+        // Only the breakdown heading button uses U+061F ARABIC QUESTION MARK, which mirrors
+        // correctly in the RTL layout; the unaccounted row badges keep the Latin mark as before.
         LocaleHelper.setLanguage(ctx, "fa");
         storeAGap();
         Intent i = new Intent(ctx, HistoryActivity.class)
@@ -153,7 +155,12 @@ public class HistoryResidualUiTest {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         scenario = androidx.test.core.app.ActivityScenario.launch(i);
         await(() -> findByText("؟") != null, 20_000);
-        assertTrue(findByText("?") == null);
+        await(() -> findByText("?") != null, 20_000);
+        TextView headingAsk = findByText("؟");
+        assertNotNull(headingAsk);
+        assertTrue("the Persian mark must be the heading button",
+            headingAsk.isClickable() && headingAsk.getContentDescription() != null);
+        assertNotNull("the row badges keep the Latin mark", findByText("?"));
     }
 
     @Test public void aDetectedGap_tappingTheRow_survivesBuildingTheArithmetic() {
