@@ -123,6 +123,10 @@ final class BalanceData {
     /** Persisted recent-movement window for balance-chain reconciliation across split scans. */
     static final String KEY_RECENT_MOVEMENTS = "recent_movements";
     private static final long RECENT_WINDOW_MS = 5 * 60 * 1000;
+    /** Maximum gap accepted when a verified bank authorization layout omits its own clock. A narrow
+     * window is intentional: amount-only matching must fail closed rather than attach to a later
+     * same-value payment. */
+    private static final long CLOCKLESS_AUTHORIZATION_WINDOW_MS = 5 * 60 * 1000L;
     private static final int MAX_RECENT_ENTRIES = 16;
 
     /** True while a history re-scan is running, so a second trigger (app open + history open) is a
@@ -822,6 +826,11 @@ final class BalanceData {
     static boolean mergeMerchants(Context context, Map<String, String> detected) {
         try { return MetadataStore.mergeMerchants(context, detected); }
         catch (Exception e) { throw new IllegalStateException("metadata merchants merge failed", e); }
+    }
+
+    static boolean removeMerchants(Context context, Set<String> keys) {
+        try { return MetadataStore.removeMerchants(context, keys); }
+        catch (Exception e) { throw new IllegalStateException("metadata merchants removal failed", e); }
     }
 
     private static boolean mergeDetectedTextStore(Context context, String key,
@@ -1666,6 +1675,7 @@ final class BalanceData {
             Map<String, String> detectedReasons = new LinkedHashMap<>();
             Map<String, String> detectedChannels = new LinkedHashMap<>();
             Map<String, String> detectedMerchants = new LinkedHashMap<>();
+            Set<String> ambiguousMerchants = new HashSet<>();
             Map<String, List<Reconcile.Entry>> windows = null;
             boolean transactionsChanged = full;
             String selection = !full
@@ -2034,7 +2044,9 @@ final class BalanceData {
                 // Authorization messages are not movements. Once the final stored transaction list
                 // is known, attach only uniquely matched merchant evidence from the encrypted source
                 // store. This also handles an OTP and its confirmation arriving in separate scans.
-                detectAuthorizationMerchants(context, stored, sourceRows, detectedMerchants);
+                detectAuthorizationMerchants(context, stored, detectedMerchants, ambiguousMerchants);
+                if (!ambiguousMerchants.isEmpty())
+                    detectedMerchants.keySet().removeAll(ambiguousMerchants);
                 completed = true;
             } catch (Exception e) {
                 failed = true;
@@ -2057,11 +2069,13 @@ final class BalanceData {
                 completed = false;
                 return added;
             }
+            boolean merchantsCleared = removeMerchants(context, ambiguousMerchants);
             // The reasons and channels land after the transactions they belong to, so the stores never
             // hold one for a movement that was not written.
             boolean reasonsChanged = mergeReasons(context, detectedReasons);
             boolean channelsChanged = mergeChannels(context, detectedChannels);
-            boolean merchantsChanged = mergeMerchants(context, detectedMerchants);
+            boolean mergedMerchants = mergeMerchants(context, detectedMerchants);
+            boolean merchantsChanged = merchantsCleared || mergedMerchants;
             // Reasons and channels are only ever recorded beside a movement the scan kept, so when
             // nothing was placed both merges are no-ops; the flags below still guard the gate
             // against that coupling ever changing.
@@ -2093,29 +2107,24 @@ final class BalanceData {
      * withdrawals already present in history. Ambiguous transactions or conflicting merchants are
      * intentionally discarded rather than guessed. */
     private static void detectAuthorizationMerchants(Context context, List<Transaction> stored,
-            List<SourceEvidence> currentSources, Map<String, String> out) {
+            Map<String, String> out, Set<String> ambiguous) {
         if (stored == null || stored.isEmpty() || out == null) return;
         Map<String, Set<String>> candidates = new LinkedHashMap<>();
-        boolean sourceStoreRead = true;
         try {
             SourceStore.forEachSource(context, 256, source -> addAuthorizationCandidate(
                 source.bank, source.rawBody, source.arrivalTime, stored, candidates));
         } catch (Exception e) {
-            sourceStoreRead = false;
-            Log.w(TAG, "authorization source scan failed; using current messages", e);
-        }
-        // A source-store failure must not crash or block history. The current batch still contains
-        // the raw recognized messages, so use it as a best-effort fallback without duplicating a
-        // successful source-store pass.
-        if (!sourceStoreRead && currentSources != null) {
-            for (SourceEvidence source : currentSources) {
-                String bank = BankRules.resolve(source.sender);
-                addAuthorizationCandidate(bank, source.body, source.arrival, stored, candidates);
-            }
+            // A source-store failure must not crash or block the core history scan. It does mean the
+            // complete evidence set is unavailable, so defer merchant attachment rather than risk a
+            // false singleton match from only the current batch.
+            Log.w(TAG, "authorization source scan failed; deferring merchants", e);
+            return;
         }
         for (Map.Entry<String, Set<String>> entry : candidates.entrySet()) {
             if (entry.getValue().size() == 1)
                 out.put(entry.getKey(), entry.getValue().iterator().next());
+            else if (entry.getValue().size() > 1 && ambiguous != null)
+                ambiguous.add(entry.getKey());
         }
     }
 
@@ -2145,9 +2154,12 @@ final class BalanceData {
         event.setTimeInMillis(transaction.date);
         Calendar received = Calendar.getInstance();
         received.setTimeInMillis(arrival);
-        return event.get(Calendar.YEAR) == received.get(Calendar.YEAR)
-            && event.get(Calendar.DAY_OF_YEAR) == received.get(Calendar.DAY_OF_YEAR)
-            && event.get(Calendar.HOUR_OF_DAY) == authorization.hour
+        if (event.get(Calendar.YEAR) != received.get(Calendar.YEAR)
+                || event.get(Calendar.DAY_OF_YEAR) != received.get(Calendar.DAY_OF_YEAR))
+            return false;
+        if (authorization.hour < 0)
+            return Math.abs(transaction.date - arrival) <= CLOCKLESS_AUTHORIZATION_WINDOW_MS;
+        return event.get(Calendar.HOUR_OF_DAY) == authorization.hour
             && event.get(Calendar.MINUTE) == authorization.minute;
     }
 

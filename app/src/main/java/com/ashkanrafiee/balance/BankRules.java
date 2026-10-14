@@ -76,7 +76,7 @@ final class BankRules {
         {"Saman", "+9820000|Saman Bank|Saman|500095|SamanBank|9999920000|2000084080|99999984080|099999984080|9899999984080|+989999984080|+9899999984080|989999920000|+989999920000", "J"},
         {"Sarmayeh", "+98300058|98300058|7007058|987007058|+987007058", "J"},
         {"Sina", "Sina Bank|+9850003700798704|9850003700798704|50003700798704|09850004756|+9850004756|9850004756|50004756|50004751|+98300028|500048|500019|98500048|sina bank|SinaBank|sinabank", "J"},
-        {"Saderat", "BankSaderat|Bank Saderat|Saderat| صادرات", "J"},
+        {"Saderat", "BankSaderat|Bank Saderat|Saderat| صادرات|983000940", "J"},
         {"Mellat", "Bank Mellat|BankMellat|Mellat", "J"},
         {"Melli", "Bank Melli|BankMelli|Melli Iran", "J"},
         {"Maskan", "Bank Maskan|BankMaskan|Maskan", "J"},
@@ -138,11 +138,14 @@ final class BankRules {
 
     /** A bank authorization message is evidence about a possible payment, not a movement. The
      * parser is deliberately shape-based: a known sender, an action, a separately stated amount,
-     * an explicit one-time-code marker and a clock are all required before any merchant text is
-     * exposed to history. This covers the common Iranian layouts used by Pasargad, Blu and Tejarat
-     * while leaving login/password-only messages out. */
+     * an explicit one-time-code marker are all required before any merchant text is exposed to
+     * history. Most layouts also state a clock; the verified Parsian, Melli, Mehr, Mellat and Saderat
+     * purchase layouts do not, so those use SMS arrival time during the later conservative match.
+     * Login/password-only messages remain out. */
     private static final Pattern AUTH_AMOUNT = Pattern.compile(
         "(?:مبلغ)\\s*[:：]?\\s*([0-9][0-9,]*)");
+    private static final Pattern AUTH_RIAL_AMOUNT = Pattern.compile(
+        "(?<![0-9])([0-9][0-9,]*)\\s*ریال(?![0-9])");
     private static final Pattern AUTH_CODE = Pattern.compile(
         "(?<![0-9])([0-9]{4,8})(?![0-9])");
     private static final Pattern AUTH_CLOCK = Pattern.compile(
@@ -150,7 +153,7 @@ final class BankRules {
     private static final Pattern AUTH_ACTION = Pattern.compile(
         "(?:^|\\s)(?:خرید|پرداخت)(?:\\s|$)");
     private static final Pattern AUTH_MARKER = Pattern.compile(
-        "(?:رمز|پویا|otp|one[- ]?time|کد\\s*(?:تایید|تأیید))",
+        "(?:رمز|پویا|otp|code|one[- ]?time|کد\\s*(?:تایید|تأیید))",
         Pattern.CASE_INSENSITIVE);
 
     /** Structured authorization evidence. It intentionally contains no OTP value and no account;
@@ -325,10 +328,13 @@ final class BankRules {
     private static int rulesVersion() {
         int v = 0;
         v = v * 31 + AUTH_AMOUNT.pattern().hashCode();
+        v = v * 31 + AUTH_RIAL_AMOUNT.pattern().hashCode();
         v = v * 31 + AUTH_CODE.pattern().hashCode();
         v = v * 31 + AUTH_CLOCK.pattern().hashCode();
         v = v * 31 + AUTH_ACTION.pattern().hashCode();
         v = v * 31 + AUTH_MARKER.pattern().hashCode();
+        v = v * 31 + "Mellat|Saderat".hashCode();
+        v = v * 31 + "Parsian|Melli|Mehr".hashCode();
         for (String[] rule : RULES) for (String alias : rule[1].split("\\|")) v = v * 31 + alias.hashCode();
         for (String[] rule : OFFICIAL_EXTRA_RULES) for (String alias : rule[1].split("\\|")) v = v * 31 + alias.hashCode();
         List<String> accounts = new ArrayList<>();
@@ -384,7 +390,8 @@ final class BankRules {
      * the code itself is checked and then discarded. */
     static Authorization extractAuthorization(String bank, String body) {
         if (bank == null || body == null || body.isEmpty()) return null;
-        String normalized = Digits.ascii(body).replace("\r\n", "\n").replace('\r', '\n');
+        String normalized = Digits.ascii(body).replace("\u066C", ",").replace("\u060C", ",")
+            .replace("\r\n", "\n").replace('\r', '\n');
         String folded = BalanceData.normalizeLetters(normalized);
         String[] rawLines = normalized.split("\n", -1);
         String[] lines = folded.split("\n", -1);
@@ -401,6 +408,20 @@ final class BankRules {
             if (amount <= 0) return null;
             amountIndex = i;
             break;
+        }
+        if (amountIndex < 0 && "Mehr".equals(bank)) {
+            for (int i = 0; i < lines.length; i++) {
+                Matcher amountMatcher = AUTH_RIAL_AMOUNT.matcher(cleanAuthorizationLine(lines[i]));
+                if (!amountMatcher.find()) continue;
+                try {
+                    amount = Long.parseLong(amountMatcher.group(1).replace(",", ""));
+                } catch (NumberFormatException ignored) {
+                    return null;
+                }
+                if (amount <= 0) return null;
+                amountIndex = i;
+                break;
+            }
         }
         if (amountIndex < 1) return null;
 
@@ -432,6 +453,11 @@ final class BankRules {
         }
         if (codeIndex < 0) return null;
 
+        // Mehr's observed clock is the code-expiry time, not the payment event time. The other
+        // newly verified clockless layouts likewise do not print an event clock.
+        if (clocklessAuthorizationBank(bank))
+            return new Authorization(bank, merchant, amount, -1, -1);
+
         int hour = -1;
         int minute = -1;
         for (int i = codeIndex + 1; i < lines.length; i++) {
@@ -447,8 +473,15 @@ final class BankRules {
             }
             if (hour >= 0) break;
         }
-        if (hour < 0) return null;
+        if (hour < 0 && !clocklessAuthorizationBank(bank)) return null;
         return new Authorization(bank, merchant, amount, hour, minute);
+    }
+
+    /** The observed Parsian, Melli, Mehr, Mellat and Saderat purchase authorization layouts omit an
+     * event clock. Their match is therefore bounded by the SMS arrival timestamp. */
+    private static boolean clocklessAuthorizationBank(String bank) {
+        return "Parsian".equals(bank) || "Melli".equals(bank) || "Mehr".equals(bank)
+            || "Mellat".equals(bank) || "Saderat".equals(bank);
     }
 
     private static String cleanAuthorizationLine(String line) {

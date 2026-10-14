@@ -863,6 +863,42 @@ public class BankRulesTest {
         assertEquals(46, authorization.minute);
     }
 
+    @Test public void extractAuthorization_verifiedClocklessMellatAndSaderatShapes_areAccepted() {
+        BankRules.Authorization mellat = BankRules.extractAuthorization("Mellat",
+            "بانک ملت\nخرید\nفروشگاه نمونه\nمبلغ:45,500\nرمز:12345");
+        assertEquals("فروشگاه نمونه", mellat.merchant);
+        assertEquals(45_500L, mellat.amount);
+        assertEquals(-1, mellat.hour);
+        assertEquals(-1, mellat.minute);
+
+        BankRules.Authorization saderat = BankRules.extractAuthorization("Saderat",
+            "بانک صادرات\nخرید\nفروشگاه نمونه\nمبلغ:45,500\nرمز:1234567");
+        assertEquals("فروشگاه نمونه", saderat.merchant);
+        assertEquals(45_500L, saderat.amount);
+        assertEquals(-1, saderat.hour);
+        assertEquals(-1, saderat.minute);
+    }
+
+    @Test public void extractAuthorization_verifiedParsianMelliAndMehrShapes_areAccepted() {
+        BankRules.Authorization parsian = BankRules.extractAuthorization("Parsian",
+            "خرید\nفروشگاه نمونه\nمبلغ 120,000\nCode:12345678");
+        assertEquals("فروشگاه نمونه", parsian.merchant);
+        assertEquals(120_000L, parsian.amount);
+        assertEquals(-1, parsian.hour);
+
+        BankRules.Authorization melli = BankRules.extractAuthorization("Melli",
+            "بانك ملي\nخريد\nفروشگاه نمونه\nمبلغ 120,000\nرمز 1234567");
+        assertEquals("فروشگاه نمونه", melli.merchant);
+        assertEquals(120_000L, melli.amount);
+        assertEquals(-1, melli.hour);
+
+        BankRules.Authorization mehr = BankRules.extractAuthorization("Mehr",
+            "خريد\nفروشگاه نمونه\n120,000 ريال\nرمز 123456\n@sample.domain #123456\nاعتبار 20:00:00");
+        assertEquals("فروشگاه نمونه", mehr.merchant);
+        assertEquals(120_000L, mehr.amount);
+        assertEquals(-1, mehr.hour);
+    }
+
     @Test public void extractAuthorization_loginOtpOrMissingClock_isIgnored() {
         assertNull(BankRules.extractAuthorization("Parsian",
             "رمز ورود به اینترنت بانک یا همراه بانک:\n79466\nمهلت استفاده دو دقیقه"));

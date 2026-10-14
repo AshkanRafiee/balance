@@ -446,6 +446,22 @@ final class MetadataStore {
         return mergeText(context, MERCHANTS, values);
     }
 
+    static boolean removeMerchants(Context context, Collection<String> keys) throws Exception {
+        if (keys == null || keys.isEmpty()) return false;
+        return access(context, MERCHANTS, true, true, s -> {
+            boolean changed = false;
+            for (String key : keys) {
+                requireKey(key);
+                Row row = s.find(MERCHANTS, key);
+                if (row != null) {
+                    s.remove(row);
+                    changed = true;
+                }
+            }
+            return changed;
+        });
+    }
+
     static boolean mergeTextEntry(Context context, int kind, String key, String value)
             throws Exception {
         requireTextKind(kind);

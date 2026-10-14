@@ -252,6 +252,21 @@ public class HistoryScanTest {
             BalanceData.readMerchants(ctx).get(BalanceData.noteKey(transactions.get(0))));
     }
 
+    @Test public void clocklessMellatAuthorization_usesArrivalWindowOnly() throws Exception {
+        long base = System.currentTimeMillis() - 60_000L;
+        String confirmation = "برداشت45,500 مانده 900,000";
+        String otp = "بانک ملت\nخرید\nفروشگاه نمونه\nمبلغ:45,500\nرمز:12345";
+
+        seed("Mellat", confirmation, base);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        seed("Mellat", otp, base + 2_000L);
+        assertEquals(0, BalanceData.scanHistory(ctx));
+        List<Transaction> transactions = BalanceData.readTransactions(ctx);
+        assertEquals(1, transactions.size());
+        assertEquals("فروشگاه نمونه",
+            BalanceData.readMerchants(ctx).get(BalanceData.noteKey(transactions.get(0))));
+    }
+
     private SharedPreferences prefs() {
         return ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE);
     }
