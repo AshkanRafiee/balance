@@ -30,7 +30,7 @@ import java.util.List;
  *  tappable row that opens its message chooser, where the user ticks the exact messages to share
  *  (nothing is preselected) and copies or sends them from there — the checkmarks live inside the
  *  messages, not on this screen. Recognized senders stay reportable too, for parsed messages whose
- *  amount, date, account, reason or channel is wrong. The inbox is read on demand for this screen
+ *  amount, date, account, reason, channel or merchant is wrong. The inbox is read on demand for this screen
  *  only — nothing is stored, so the feature adds no new persisted data to a device. */
 public final class ScanDiagnosticsActivity extends Activity {
     private static final String TAG = "ScanDiag";
@@ -216,7 +216,7 @@ public final class ScanDiagnosticsActivity extends Activity {
 
     /** The banks Balance parsed successfully with how many of their messages, followed by every
      *  recognized sender as a tappable entry — a parsed message can still carry a wrong amount,
-     *  date, account, reason or channel, and tapping its sender reports exactly that. */
+     *  date, account, reason, channel or merchant, and tapping its sender reports exactly that. */
     private void recognizedCard(ScanDiagnostics.Summary s) {
         if (s.banks.isEmpty()) return;
         LinearLayout box = cardBox();

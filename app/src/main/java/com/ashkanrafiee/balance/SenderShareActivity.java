@@ -216,7 +216,7 @@ public final class SenderShareActivity extends Activity {
 
     /** What the user believes is wrong with this sender, used to point the maintainer at the
      *  failing stage of detection: the account, the balance, the sender number, the amount, the
-     *  date, the reason, the channel, or any mix. The checks mirror the
+     *  date, the reason, the channel, the merchant, or any mix. The checks mirror the
      *  {@link ScanDiagnostics#ISSUE_*} constants one-to-one in order. */
     private void issueCard() {
         LinearLayout box = new LinearLayout(this);
@@ -231,7 +231,8 @@ public final class SenderShareActivity extends Activity {
             getString(R.string.sender_share_issue_amount),
             getString(R.string.sender_share_issue_date),
             getString(R.string.sender_share_issue_reason),
-            getString(R.string.sender_share_issue_channel)
+            getString(R.string.sender_share_issue_channel),
+            getString(R.string.sender_share_issue_merchant)
         };
         for (String label : labels) box.addView(issueRow(label));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
@@ -257,7 +258,8 @@ public final class SenderShareActivity extends Activity {
     private List<String> issueTags() {
         String[] all = {ScanDiagnostics.ISSUE_ACCOUNT, ScanDiagnostics.ISSUE_BALANCE,
             ScanDiagnostics.ISSUE_NUMBER, ScanDiagnostics.ISSUE_AMOUNT, ScanDiagnostics.ISSUE_DATE,
-            ScanDiagnostics.ISSUE_REASON, ScanDiagnostics.ISSUE_CHANNEL};
+            ScanDiagnostics.ISSUE_REASON, ScanDiagnostics.ISSUE_CHANNEL,
+            ScanDiagnostics.ISSUE_MERCHANT};
         List<String> tags = new ArrayList<>();
         for (int i = 0; i < issueChecks.size() && i < all.length; i++)
             if (issueChecks.get(i).isChecked()) tags.add(all[i]);

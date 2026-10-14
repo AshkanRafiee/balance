@@ -273,11 +273,25 @@ public class ScanDiagnosticsTest {
         sel.add(new ScanDiagnostics.Message("lay out 1,000 Toman", 1000L));
         String txt = ScanDiagnostics.senderReport("+98Saman", 3, sel,
             java.util.Arrays.asList(ScanDiagnostics.ISSUE_AMOUNT, ScanDiagnostics.ISSUE_DATE,
-                ScanDiagnostics.ISSUE_REASON, ScanDiagnostics.ISSUE_CHANNEL));
+                ScanDiagnostics.ISSUE_REASON, ScanDiagnostics.ISSUE_CHANNEL,
+                ScanDiagnostics.ISSUE_MERCHANT));
         assertTrue(txt.contains("Amount detection"));
         assertTrue(txt.contains("Date detection"));
         assertTrue(txt.contains("Reason detection"));
         assertTrue(txt.contains("Channel detection"));
+        assertTrue(txt.contains("Merchant detection"));
+    }
+
+    @Test public void senderReport_merchantIssueRedactsOtpButKeepsPaymentLayout() {
+        String body = "پاسارگاد\nخرید\nفروشگاه نمونه\nمبلغ:45,500,000\nرمز: 72552\n20:37:32";
+        String txt = ScanDiagnostics.senderReport("B.Pasargad", 1,
+            java.util.Collections.singletonList(new ScanDiagnostics.Message(body, 0L)),
+            "Pasargad", java.util.Collections.singletonList(ScanDiagnostics.ISSUE_MERCHANT), null);
+        assertTrue(txt.contains("Merchant detection"));
+        assertTrue(txt.contains("فروشگاه نمونه"));
+        assertTrue(txt.contains("مبلغ:45,500,000"));
+        assertTrue(txt.contains("[redacted]"));
+        assertTrue(!txt.contains("72552"));
     }
 
     @Test public void senderReport_noIssues_omitsTheLine() {
@@ -608,6 +622,7 @@ public class ScanDiagnosticsTest {
             assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_date)));
             assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_reason)));
             assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_channel)));
+            assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_merchant)));
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
                 List<android.widget.CheckBox> checks = new ArrayList<>();
                 findChecks(act.getWindow().getDecorView(), checks);

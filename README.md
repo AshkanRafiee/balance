@@ -30,7 +30,7 @@ The current release is designed for users in Iran. It recognizes Iranian banks a
 - Optional in-app lock with a PIN, password or fingerprint, covering the app, the home-screen widget and screenshots/recents, with progressive cooldown delays against wrong-entry guessing
 - About screen with direct links to the website, issue tracker, and a link to show the first-run introduction again
 - First-run introduction on a fresh install: three short pages explain what Balance reads, how it stays offline and private, and ask for SMS access in context during the introduction rather than with a bare dialog over an empty dashboard — skippable at any point, never shown again afterwards, and re-openable anytime from the About screen
-- Report (the Scan diagnostics screen): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout, and senders not recognized yet. Tap any sender — including a recognized one, when a parsed message gets an amount, date, account, reason or channel wrong — to open its messages and pick exactly which ones to send or copy — and mark what is wrong (account, balance, sender-number, amount, date, reason or channel detection) so the prefilled email tells the maintainer which stage failed. The email is only sent after you approve — feeding straight into the contribution flow »Contributing« below
+- Report (the Scan diagnostics screen): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout, and senders not recognized yet. Tap any sender — including a recognized one, when a parsed message gets an amount, date, account, reason, channel or merchant wrong — to open its messages and pick exactly which ones to send or copy — and mark what is wrong (account, balance, sender-number, amount, date, reason, channel or merchant detection) so the prefilled email tells the maintainer which stage failed. OTP values are removed from shared samples. The email is only sent after you approve — feeding straight into the contribution flow »Contributing« below
 
 ## Download
 
@@ -81,9 +81,9 @@ length and format for privacy. The fastest way to hand us every unparsed
 message is the **Report** item in the footer:
 known banks with an unreadable message layout are highlighted first, then
 unknown senders — and any recognized sender is tappable too, when a parsed
-message gets an amount, date, account, reason or channel wrong. Tap a sender
+message gets an amount, date, account, reason, channel or merchant wrong. Tap a sender
 to open its messages, tick the ones to share, mark what seems wrong (account,
-balance, sender-number, amount, date, reason or channel detection), and send
+balance, sender-number, amount, date, reason, channel or merchant detection), and send
 or copy exactly those. Nothing is sent until you confirm in your mail app.
 Otherwise, open an [issue](https://github.com/AshkanRafiee/balance/issues)
 or email us; see [CONTRIBUTING.md](CONTRIBUTING.md) for the full checklist.

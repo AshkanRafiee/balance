@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /** Classifies an SMS-inbox snapshot into what Balance could fully parse and what it could not, for
  *  the Scan diagnostics screen. A message has three fates, decided exactly the way {@link
@@ -14,7 +15,7 @@ import java.util.Map;
  *  <ul>
  *    <li><b>parsed</b> — a recognized bank-sender whose message text yielded a balance; these feed
  *        the per-bank "recognized" counts, and each sender stays tappable so a parsed message
- *        whose details (amount, date, account, reason, channel) are wrong can still be
+     *        whose details (amount, date, account, reason, channel or merchant) are wrong can still be
  *        reported.</li>
  *    <li><b>known sender, unparsed content</b> — the sender matches a supported bank but the message
  *        layout did not parse. These are undetected structures from a bank we already know, and they
@@ -22,7 +23,7 @@ import java.util.Map;
  *    <li><b>unknown sender</b> — the sender resolves to no bank at all.</li>
  *  </ul>
  *  The last two groups are the contribution funnel: the user picks which senders to include and
- *  copies or emails a report of the exact texts. Nothing is persisted — a summary is assembled on
+     *  copies or emails a report of the selected texts, with OTP values redacted. Nothing is persisted — a summary is assembled on
  *  demand and leaves the device only through the user's own copy/send actions. */
 final class ScanDiagnostics {
     private ScanDiagnostics() { }
@@ -40,6 +41,14 @@ final class ScanDiagnostics {
     static final String ISSUE_DATE = "Date detection";
     static final String ISSUE_REASON = "Reason detection";
     static final String ISSUE_CHANNEL = "Channel detection";
+    static final String ISSUE_MERCHANT = "Merchant detection";
+
+    /** OTP values must never leave the device through a diagnostics report. The surrounding
+     * authorization layout remains shareable so merchant parsing can still be fixed. */
+    private static final Pattern OTP_MARKER = Pattern.compile(
+        "(?:رمز|پویا|otp|one[- ]?time|کد\\s*(?:تایید|تأیید))", Pattern.CASE_INSENSITIVE);
+    private static final Pattern OTP_CODE = Pattern.compile(
+        "(?<![0-9۰-۹٠-٩])[0-9۰-۹٠-٩]{4,8}(?![0-9۰-۹٠-٩])");
 
     /** One recognized bank and how many of its SMS messages the scan parsed. */
     static final class BankHit {
@@ -78,7 +87,7 @@ final class ScanDiagnostics {
         final List<SenderHit> unknownSenders = new ArrayList<>();
         final List<SenderHit> unparsedSenders = new ArrayList<>();
         /** Every recognized sender with its newest parsed samples, so a message that parsed can
-         *  still be reported when one of its details (amount, date, account, reason, channel)
+         *  still be reported when one of its details (amount, date, account, reason, channel or merchant)
          *  is wrong. Sorted by message count, highest first. */
         final List<SenderHit> parsedSenders = new ArrayList<>();
     }
@@ -159,14 +168,14 @@ final class ScanDiagnostics {
         out.append("## Bank SMS formats Balance could not parse\n\n")
             .append("Please add these formats. Each entry names the sender and a sample message exactly\n")
             .append("as the bank sent it; numbers can be scrambled as long as the digit count and\n")
-            .append("layout stay the same.\n\n");
+            .append("layout stay the same. OTP values are removed from shared samples.\n\n");
         for (SenderHit h : selected) {
             out.append("### ");
             if (h.bank != null) out.append("Bank: ").append(h.bank).append(" — ");
             out.append("Sender `").append(h.sender).append("` — ").append(h.messages).append(
                 h.messages == 1 ? " message" : " messages").append("\n")
                 .append(senderDetectionLine(h.sender, h.bank)).append("\n\n```\n");
-            if (!h.stored.isEmpty()) out.append(h.stored.get(0).body);
+            if (!h.stored.isEmpty()) out.append(sanitizeForReport(h.stored.get(0).body));
             out.append("\n```\n\n");
         }
         out.append("---\n").append(deviceLine(context)).append("\n");
@@ -312,11 +321,32 @@ final class ScanDiagnostics {
         out.append("Sender `").append(sender).append("` — ").append(total).append(
             total == 1 ? " message in total" : " messages in total").append(".\n")
             .append(senderDetectionLine(sender, bank)).append("\n")
-            .append("Sample message(s) exactly as the bank sent them:\n\n");
+            .append("Sample message(s) as the bank sent them (OTP values removed):\n\n");
         for (Message m : selected) {
-            out.append("```\n").append(m.body).append("\n```\n\n");
+            out.append("```\n").append(sanitizeForReport(m.body)).append("\n```\n\n");
         }
         out.append("---\n").append(deviceLine(context)).append("\n");
+        return out.toString();
+    }
+
+    /** Redacts explicit one-time-code values while preserving the rest of the bank layout. */
+    static String sanitizeForReport(String body) {
+        if (body == null || body.isEmpty()) return body == null ? "" : body;
+        String[] lines = body.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
+        StringBuilder out = new StringBuilder(body.length());
+        boolean redactNextNumericLine = false;
+        for (int i = 0; i < lines.length; i++) {
+            String original = lines[i];
+            boolean marker = OTP_MARKER.matcher(original).find();
+            String line = marker ? OTP_CODE.matcher(original).replaceAll("[redacted]") : original;
+            if (!marker && redactNextNumericLine && original.trim()
+                    .matches("[0-9۰-۹٠-٩]{4,8}")) {
+                line = original.replaceAll("[0-9۰-۹٠-٩]", "[redacted]");
+            }
+            if (i > 0) out.append('\n');
+            out.append(line);
+            redactNextNumericLine = marker && !OTP_CODE.matcher(original).find();
+        }
         return out.toString();
     }
 

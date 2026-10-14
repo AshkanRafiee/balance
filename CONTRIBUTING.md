@@ -27,7 +27,7 @@ Before writing a report manually, try **Scan diagnostics** — it is the
 **Report** item in the footer of the main screen.
 It reads the messages on your device and shows, per recognized bank, how many
 SMS it parsed — each recognized sender below the counts is tappable, so a
-message that parsed but gets an amount, date, account, reason or channel wrong
+message that parsed but gets an amount, date, account, reason, channel or merchant wrong
 can be reported too — and below that every **message it could not parse**:
 
 - **Known senders, unrecognized messages** — a supported bank's sender, but a
@@ -37,11 +37,14 @@ can be reported too — and below that every **message it could not parse**:
 Each sender is a compact, tappable entry (a chevron marks it): tapping it opens
 its message chooser, where the checkmarks live — tick exactly which of its
 messages to share, nothing is preselected, mark what is wrong (account,
-balance, sender-number, amount, date, reason or channel detection), and then:
+balance, sender-number, amount, date, reason, channel or merchant detection), and then:
 
 - **Send (n)** — a prefilled email to us opens; nothing is sent until you
   choose your mail app and confirm there.
 - **Copy selected (n)** — copies exactly the ticked messages.
+
+One-time password values are removed from shared samples while the surrounding bank message layout is
+kept for diagnosis.
 
 That screen is the fastest contribution funnel there is: every unparsed message
 is a bank SMS layout we haven't got on file (the bank is named when we know
