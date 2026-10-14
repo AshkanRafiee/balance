@@ -259,6 +259,34 @@ public final class HistoryActivity extends Activity {
     /** Exact tag selection applied in addition to the direction/date filter and text search. */
     private final List<String> selectedTags = new ArrayList<>();
 
+    /** Distinct (bank, account) pairs backing both pickers, sorted for display. Loaded once
+     *  per screen in the background after the first render and refreshed whenever the history
+     *  may have changed; null means the next dialog open loads it instead. A stale cache only
+     *  ever hides a brand-new bank until the next change — the scope itself always reads the
+     *  live selection. */
+    private List<BankAccount> scopePairsCache;
+
+    /** Loads the picker choices in the background unless already loaded. Runs after a render
+     *  completes so it never contends with the visible pass for the store. */
+    private void preloadScopeChoices() {
+        if (scopePairsCache != null || isDestroyed() || isFinishing()) return;
+        final Context app = getApplicationContext();
+        new Thread(() -> {
+            List<Transaction> stored;
+            try {
+                stored = BalanceData.readTransactions(app);
+            } catch (Exception e) {
+                android.util.Log.w("BalanceHistory", "scope choices preload failed", e);
+                return;
+            }
+            final List<Transaction> loaded = stored;
+            runOnUiThread(() -> {
+                if (isDestroyed() || isFinishing()) return;
+                if (scopePairsCache == null) scopePairsCache = sortedBankAccounts(loaded);
+            });
+        }).start();
+    }
+
     /** An account number is sensitive: it is copied to the clipboard only for the paste window,
      *  then cleared again unless the user copied something else in the meantime; the clear is keyed
      *  to the exact clip we placed, so the user's own later copy is never destroyed. Runs on its
@@ -1488,8 +1516,6 @@ public final class HistoryActivity extends Activity {
         list.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(list, new FrameLayout.LayoutParams(-1, -2));
         wrap.addView(scroll, new LinearLayout.LayoutParams(-1, -2));
-        list.addView(text(getString(R.string.history_stage_loading), 14, muted),
-            new LinearLayout.LayoutParams(-1, -2));
 
         android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
             .setTitle(R.string.history_filter_banks_title)
@@ -1516,6 +1542,7 @@ public final class HistoryActivity extends Activity {
                 accountBank = bankForSingleAccount(selectedAccounts, selectedBanks, accountsByBank);
                 dlg.dismiss();
                 rebuildHeader();
+                rebuildFilterBar();
                 render();
             });
             dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(button -> {
@@ -1525,59 +1552,81 @@ public final class HistoryActivity extends Activity {
                 accountBank = null;
                 dlg.dismiss();
                 rebuildHeader();
+                rebuildFilterBar();
                 render();
             });
         });
+        List<BankAccount> cached = scopePairsCache;
+        if (cached != null) {
+            // Warm: full content before the window shows, so the dialog measures once and never
+            // jumps.
+            ingestBankPairs(cached, staged, accountsByBank, list, scroll);
+            loaded[0] = true;
+        } else {
+            list.addView(text(getString(R.string.history_stage_loading), 14, muted),
+                new LinearLayout.LayoutParams(-1, -2));
+        }
         showDialog(dlg);
-        new Thread(() -> {
-            List<Transaction> stored = null;
-            try {
-                stored = BalanceData.readTransactions(this);
-            } catch (Exception e) {
-                android.util.Log.w("BalanceHistory", "bank choices read failed", e);
+        if (cached == null) {
+            new Thread(() -> {
+                List<Transaction> stored = null;
+                try {
+                    stored = BalanceData.readTransactions(this);
+                } catch (Exception e) {
+                    android.util.Log.w("BalanceHistory", "bank choices read failed", e);
+                }
+                final List<BankAccount> pairs = stored == null
+                    ? new ArrayList<>() : sortedBankAccounts(stored);
+                if (stored != null) scopePairsCache = pairs;
+                runOnUiThread(() -> {
+                    if (!dlg.isShowing() || isDestroyed() || isFinishing()) return;
+                    ingestBankPairs(pairs, staged, accountsByBank, list, scroll);
+                    loaded[0] = true;
+                });
+            }).start();
+        }
+    }
+
+    /** Fills the bank dialog from (bank, account) pairs in display order: the bank checkboxes
+     *  plus the membership map the Apply step prunes against. */
+    private void ingestBankPairs(List<BankAccount> pairs, Set<String> staged,
+            java.util.Map<String, Set<String>> accountsByBank, LinearLayout list,
+            ScrollView scroll) {
+        list.removeAllViews();
+        final LinkedHashSet<String> bankOrder = new LinkedHashSet<>();
+        accountsByBank.clear();
+        for (BankAccount pair : pairs) {
+            if (pair == null || pair.bank == null || pair.account == null) continue;
+            bankOrder.add(pair.bank);
+            Set<String> mine = accountsByBank.get(pair.bank);
+            if (mine == null) {
+                mine = new LinkedHashSet<>();
+                accountsByBank.put(pair.bank, mine);
             }
-            final List<Transaction> loadedStore = stored;
-            runOnUiThread(() -> {
-                if (!dlg.isShowing() || isDestroyed() || isFinishing()) return;
-                list.removeAllViews();
-                final List<String> choices =
-                    loadedStore == null ? new ArrayList<>() : sortedBankNames(loadedStore);
-                for (String selected : selectedBanks) {
-                    if (choices.contains(selected)) staged.add(selected);
-                }
-                accountsByBank.clear();
-                if (loadedStore != null) {
-                    for (Transaction t : loadedStore) {
-                        if (t == null || t.bank == null || t.account == null) continue;
-                        Set<String> mine = accountsByBank.get(t.bank);
-                        if (mine == null) {
-                            mine = new LinkedHashSet<>();
-                            accountsByBank.put(t.bank, mine);
-                        }
-                        mine.add(t.account);
-                    }
-                }
-                if (choices.isEmpty()) {
-                    list.addView(text(getString(R.string.history_filter_banks_empty), 14, muted),
-                        new LinearLayout.LayoutParams(-1, -2));
-                } else {
-                    for (String choice : choices) {
-                        android.widget.CheckBox check = new android.widget.CheckBox(this);
-                        check.setText(BankRules.displayName(this, choice));
-                        check.setTextColor(fg);
-                        check.setTextSize(14);
-                        check.setChecked(staged.contains(choice));
-                        check.setOnCheckedChangeListener((button, checked) -> {
-                            if (checked) staged.add(choice);
-                            else staged.remove(choice);
-                        });
-                        list.addView(check, new LinearLayout.LayoutParams(-1, -2));
-                    }
-                }
-                capListHeight(scroll);
-                loaded[0] = true;
-            });
-        }).start();
+            mine.add(pair.account);
+        }
+        final List<String> choices = new ArrayList<>(bankOrder);
+        for (String selected : selectedBanks) {
+            if (choices.contains(selected)) staged.add(selected);
+        }
+        if (choices.isEmpty()) {
+            list.addView(text(getString(R.string.history_filter_banks_empty), 14, muted),
+                new LinearLayout.LayoutParams(-1, -2));
+        } else {
+            for (String choice : choices) {
+                android.widget.CheckBox check = new android.widget.CheckBox(this);
+                check.setText(BankRules.displayName(this, choice));
+                check.setTextColor(fg);
+                check.setTextSize(14);
+                check.setChecked(staged.contains(choice));
+                check.setOnCheckedChangeListener((button, checked) -> {
+                    if (checked) staged.add(choice);
+                    else staged.remove(choice);
+                });
+                list.addView(check, new LinearLayout.LayoutParams(-1, -2));
+            }
+        }
+        capListHeight(scroll);
     }
 
     /** Lets the user narrow history to several accounts across any banks at once. An account
@@ -1596,8 +1645,6 @@ public final class HistoryActivity extends Activity {
         list.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(list, new FrameLayout.LayoutParams(-1, -2));
         wrap.addView(scroll, new LinearLayout.LayoutParams(-1, -2));
-        list.addView(text(getString(R.string.history_stage_loading), 14, muted),
-            new LinearLayout.LayoutParams(-1, -2));
 
         android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
             .setTitle(R.string.history_filter_accounts_title)
@@ -1623,6 +1670,7 @@ public final class HistoryActivity extends Activity {
                 }
                 dlg.dismiss();
                 rebuildHeader();
+                rebuildFilterBar();
                 render();
             });
             dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(button -> {
@@ -1631,71 +1679,80 @@ public final class HistoryActivity extends Activity {
                 accountBank = null;
                 dlg.dismiss();
                 rebuildHeader();
+                rebuildFilterBar();
                 render();
             });
         });
+        List<BankAccount> cached = scopePairsCache;
+        if (cached != null) {
+            ingestAccountPairs(cached, staged, loadedChoices, list, scroll);
+            loaded[0] = true;
+        } else {
+            list.addView(text(getString(R.string.history_stage_loading), 14, muted),
+                new LinearLayout.LayoutParams(-1, -2));
+        }
         showDialog(dlg);
-        new Thread(() -> {
-            List<Transaction> stored = null;
-            try {
-                stored = BalanceData.readTransactions(this);
-            } catch (Exception e) {
-                android.util.Log.w("BalanceHistory", "account choices read failed", e);
-            }
-            final List<Transaction> loadedStore = stored;
-            runOnUiThread(() -> {
-                if (!dlg.isShowing() || isDestroyed() || isFinishing()) return;
-                list.removeAllViews();
-                // With banks selected only their accounts are offered; otherwise every account.
-                final List<BankAccount> choices = loadedChoices;
-                choices.clear();
-                if (loadedStore != null) {
-                    for (BankAccount pair : sortedBankAccounts(loadedStore)) {
-                        if (selectedBanks.isEmpty() || selectedBanks.contains(pair.bank)) {
-                            choices.add(pair);
-                        }
-                    }
+        if (cached == null) {
+            new Thread(() -> {
+                List<Transaction> stored = null;
+                try {
+                    stored = BalanceData.readTransactions(this);
+                } catch (Exception e) {
+                    android.util.Log.w("BalanceHistory", "account choices read failed", e);
                 }
-                for (String selected : selectedAccounts) {
-                    for (BankAccount choice : choices) {
-                        if (choice.account.equals(selected)) {
-                            staged.add(choice.account);
-                            break;
-                        }
-                    }
-                }
-                if (choices.isEmpty()) {
-                    list.addView(text(getString(selectedBanks.isEmpty()
-                        ? R.string.history_filter_accounts_empty
-                        : R.string.history_filter_accounts_empty_banks), 14, muted),
-                        new LinearLayout.LayoutParams(-1, -2));
-                } else {
-                    for (BankAccount choice : choices) {
-                        android.widget.CheckBox check = new android.widget.CheckBox(this);
-                        check.setText(BankRules.displayName(this, choice.bank) + " — "
-                            + digits(choice.account));
-                        check.setTextColor(fg);
-                        check.setTextSize(14);
-                        check.setChecked(staged.contains(choice.account));
-                        check.setOnCheckedChangeListener((button, checked) -> {
-                            if (checked) staged.add(choice.account);
-                            else staged.remove(choice.account);
-                        });
-                        list.addView(check, new LinearLayout.LayoutParams(-1, -2));
-                    }
-                }
-                capListHeight(scroll);
-                loaded[0] = true;
-            });
-        }).start();
+                final List<BankAccount> pairs = stored == null
+                    ? new ArrayList<>() : sortedBankAccounts(stored);
+                if (stored != null) scopePairsCache = pairs;
+                runOnUiThread(() -> {
+                    if (!dlg.isShowing() || isDestroyed() || isFinishing()) return;
+                    ingestAccountPairs(pairs, staged, loadedChoices, list, scroll);
+                    loaded[0] = true;
+                });
+            }).start();
+        }
     }
 
-    /** Stored transactions' distinct canonical banks, sorted by localized display name. */
-    private List<String> sortedBankNames(List<Transaction> stored) {
-        List<String> banks = distinctBanks(stored);
-        Collections.sort(banks, (a, b) -> BankRules.displayName(this, a)
-            .compareToIgnoreCase(BankRules.displayName(this, b)));
-        return banks;
+    /** Fills the account dialog from (bank, account) pairs: only the selected banks' accounts,
+     *  or every account when no bank is picked. */
+    private void ingestAccountPairs(List<BankAccount> pairs, Set<String> staged,
+            List<BankAccount> loadedChoices, LinearLayout list, ScrollView scroll) {
+        list.removeAllViews();
+        loadedChoices.clear();
+        for (BankAccount pair : pairs) {
+            if (pair == null || pair.bank == null || pair.account == null) continue;
+            if (selectedBanks.isEmpty() || selectedBanks.contains(pair.bank)) {
+                loadedChoices.add(pair);
+            }
+        }
+        for (String selected : selectedAccounts) {
+            for (BankAccount choice : loadedChoices) {
+                if (choice.account.equals(selected)) {
+                    staged.add(choice.account);
+                    break;
+                }
+            }
+        }
+        if (loadedChoices.isEmpty()) {
+            list.addView(text(getString(selectedBanks.isEmpty()
+                ? R.string.history_filter_accounts_empty
+                : R.string.history_filter_accounts_empty_banks), 14, muted),
+                new LinearLayout.LayoutParams(-1, -2));
+        } else {
+            for (BankAccount choice : loadedChoices) {
+                android.widget.CheckBox check = new android.widget.CheckBox(this);
+                check.setText(BankRules.displayName(this, choice.bank) + " — "
+                    + digits(choice.account));
+                check.setTextColor(fg);
+                check.setTextSize(14);
+                check.setChecked(staged.contains(choice.account));
+                check.setOnCheckedChangeListener((button, checked) -> {
+                    if (checked) staged.add(choice.account);
+                    else staged.remove(choice.account);
+                });
+                list.addView(check, new LinearLayout.LayoutParams(-1, -2));
+            }
+        }
+        capListHeight(scroll);
     }
 
     /** Stored transactions' distinct (bank, account) pairs, sorted by bank display name. */
@@ -1813,11 +1870,13 @@ public final class HistoryActivity extends Activity {
                     selectedTags.clear();
                     selectedTags.addAll(staged);
                     dlg.dismiss();
+                    rebuildFilterBar();
                     render();
                 });
                 dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(button -> {
                     selectedTags.clear();
                     dlg.dismiss();
+                    rebuildFilterBar();
                     render();
                 });
             });
@@ -1835,6 +1894,7 @@ public final class HistoryActivity extends Activity {
             .setOnClickListener(button -> {
                 selectedTags.clear();
                 dlg.dismiss();
+                rebuildFilterBar();
                 render();
             }));
         showDialog(dlg);
@@ -2470,10 +2530,15 @@ public final class HistoryActivity extends Activity {
         onHistoryChanged = () -> runOnUiThread(() -> {
             if (listenerGen != historyListenerGen || !historyResumed
                     || isDestroyed() || isFinishing()) return;
+            // The store changed, so the cached picker choices may miss a brand-new bank.
+            scopePairsCache = null;
             render();
         });
         BalanceData.addHistoryListener(onHistoryChanged);
         registerSmsObserver();
+        // Same for anything that happened while the screen was closed (e.g. a dashboard
+        // restore replacing the whole store): the render below reloads the choices after it.
+        scopePairsCache = null;
         if (renderAfterResume) {
             renderAfterResume = false;
             render();
@@ -2809,6 +2874,7 @@ public final class HistoryActivity extends Activity {
                     residualCount = completed.residualCount;
                     refreshDates();
                     rebuildFilterBar();
+                    preloadScopeChoices();
                     stopShimmer();
                     body.setContentDescription(null);
                     // Build the new tree while the container is gone: every addView on an

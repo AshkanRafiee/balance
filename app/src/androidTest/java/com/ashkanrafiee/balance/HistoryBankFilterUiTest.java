@@ -79,6 +79,11 @@ public class HistoryBankFilterUiTest {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(v::performClick);
     }
 
+    /** The breakdown count wording, as the platform pluralises it for this locale. */
+    private String counted(int n) {
+        return ctx.getResources().getQuantityString(R.plurals.history_n_tx, n, n);
+    }
+
     @Test public void bankAndAccountPickers_narrowAndClear() {
         storeThree();
         launch();
@@ -94,10 +99,10 @@ public class HistoryBankFilterUiTest {
             10_000);
         checkInDialog(BankRules.displayName(ctx, SAMAN));
         click(findInDialog(ctx.getString(R.string.history_filter_apply)));
-        // The filter bar's own count proves the narrowed render landed; only then is asserting
-        // an absence meaningful rather than a race with the previous render.
-        await(() -> findByText(ctx.getString(R.string.history_filter_banks_count, 1)) != null,
-            20_000);
+        // The chips refresh synchronously now, so only the rendered count proves the narrowed
+        // render landed; asserting absences on the stale list would race it.
+        await(() -> findByText(counted(1)) != null, 20_000);
+        assertNotNull(findByText(ctx.getString(R.string.history_filter_banks_count, 1)));
         assertNotNull(findByTextContaining("900,000"));
         assertTrue(findByTextContaining("30,000,000") == null);
         assertTrue(findByTextContaining("5,000,000") == null);
@@ -150,8 +155,8 @@ public class HistoryBankFilterUiTest {
             BankRules.displayName(ctx, MELLAT) + " — 111") != null, 30_000);
         checkInDialog(BankRules.displayName(ctx, MELLAT) + " — 111");
         click(findInDialog(ctx.getString(R.string.history_filter_apply)));
-        await(() -> findByText(ctx.getString(R.string.history_filter_accounts_count, 1)) != null,
-            20_000);
+        await(() -> findByText(counted(1)) != null, 20_000);
+        assertNotNull(findByText(ctx.getString(R.string.history_filter_accounts_count, 1)));
         assertNotNull(findByTextContaining("30,000,000"));
         assertTrue(findByTextContaining("5,000,000") == null);
         assertTrue(findByTextContaining("900,000") == null);
@@ -168,8 +173,8 @@ public class HistoryBankFilterUiTest {
             BankRules.displayName(ctx, SAMAN) + " — 333") != null, 30_000);
         checkInDialog(BankRules.displayName(ctx, SAMAN) + " — 333");
         click(findInDialog(ctx.getString(R.string.history_filter_apply)));
-        await(() -> findByText(ctx.getString(R.string.history_filter_accounts_count, 2)) != null,
-            20_000);
+        await(() -> findByText(counted(2)) != null, 20_000);
+        assertNotNull(findByText(ctx.getString(R.string.history_filter_accounts_count, 2)));
         assertNotNull(findByTextContaining("30,000,000"));
         assertNotNull(findByTextContaining("900,000"));
         assertTrue(findByTextContaining("5,000,000") == null);

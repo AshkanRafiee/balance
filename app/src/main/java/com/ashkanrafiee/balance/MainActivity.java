@@ -1356,7 +1356,8 @@ public class MainActivity extends Activity {
         return getResources().getColor(res, getTheme());
     }
 
-    private final class BalanceView extends View {
+    /** Package-visible for the stale-badge geometry tests. */
+    final class BalanceView extends View {
         static final int ICON_NONE = 0, ICON_LOCK = 1, ICON_EYE = 2;
         final Paint p = new Paint(3);
         /** The amount-figure paint: the same look as {@link #p} in English, Vazirmatn Bold in
@@ -2042,23 +2043,41 @@ public class MainActivity extends Activity {
             return a.measureText(value);
         }
 
-        /** A small muted pill right after the bank name showing how many days old the balance is.
-         *  Skipped when it would crowd the amount column; the muted amount still carries the
-         *  freshness on its own. Muted, not amber: staleness is metadata, while amber stays
-         *  reserved for things needing action. */
+        /** Which card line the stale pill goes on: 1 after the name, 2 below it, 0 when even
+         *  the second line would crowd the amount column. Pure geometry, so tests pin it. */
+        static int staleBadgeLine(boolean ltr, float nameEdge, float nameWidth, float pillWidth,
+                                  float guardX, boolean secondLineFree) {
+            if (ltr) {
+                if (nameEdge + nameWidth + 8 + pillWidth <= guardX) return 1;
+                if (secondLineFree && nameEdge + pillWidth <= guardX) return 2;
+            } else {
+                if (nameEdge - nameWidth - 8 - pillWidth >= guardX) return 1;
+                if (secondLineFree && nameEdge - pillWidth >= guardX) return 2;
+            }
+            return 0;
+        }
+
+        /** A small muted pill showing how many days old the balance is: after the bank name
+         *  when it fits, otherwise on the free second line below it. Skipped only when even
+         *  that would crowd the amount column; the muted amount still carries the freshness
+         *  on its own. Muted, not amber: staleness is metadata, while amber stays reserved
+         *  for things needing action. */
         void drawStaleBadge(Canvas c, String nameShown, float nameX, float yy,
-                            Paint.Align nameAlign, int staleDays, float guardX) {
+                            Paint.Align nameAlign, int staleDays, float guardX,
+                            boolean secondLineFree) {
             String txt = getResources().getQuantityString(R.plurals.stale_days, staleDays, staleDays);
             float tx = 11, h = 18, pw = measure(txt, tx) + 12;
+            float nameWidth = measure(nameShown, 17);
+            int line = staleBadgeLine(nameAlign == Paint.Align.LEFT, nameX, nameWidth, pw, guardX,
+                secondLineFree);
+            if (line == 0) return;
             float x;
             if (nameAlign == Paint.Align.LEFT) {
-                x = nameX + measure(nameShown, 17) + 8;
-                if (x + pw > guardX) return;
+                x = line == 1 ? nameX + nameWidth + 8 : nameX;
             } else {
-                x = nameX - measure(nameShown, 17) - 8 - pw;
-                if (x < guardX) return;
+                x = line == 1 ? nameX - nameWidth - 8 - pw : nameX - pw;
             }
-            float y = yy + 21;
+            float y = yy + (line == 1 ? 21 : 45);
             roundStroke(c, x, y, x + pw, y + h, h / 2, 1f, muted);
             text(c, txt, x + 6, y + 12, tx, muted, Paint.Align.LEFT);
         }
@@ -2199,7 +2218,10 @@ public class MainActivity extends Activity {
                     if (stale)
                         drawStaleBadge(c, nameShown, nameX, yy, nameAlign,
                             BalanceData.staleDays(MainActivity.this, row.bank.date),
-                            rtl ? w - valueLeft + 4 : valueLeft - 4);
+                            rtl ? w - valueLeft + 4 : valueLeft - 4,
+                            // The second card line carries the account number when there is one;
+                            // without it the badge drops down there instead of disappearing.
+                            row.bank.account == null);
                     if (row.excluded) {
                         value(c, row.amount, valueX, yy + 35, valueWidth, 17, valueAlign, true);
                         String exLabel = getString(R.string.excluded_label);

@@ -116,4 +116,37 @@ public class StaleTest {
         long now = System.currentTimeMillis();
         assertFalse(BalanceData.isStale(ctx, now + DAY));
     }
+
+    // ---- staleBadgeLine: which card line the stale pill goes on ----
+
+    @Test public void staleBadgeLine_fitsAfterName_staysOnFirstLine() {
+        assertEquals(1, MainActivity.BalanceView.staleBadgeLine(
+            true, 88f, 100f, 60f, 300f, true));
+        assertEquals(1, MainActivity.BalanceView.staleBadgeLine(
+            false, 300f, 100f, 60f, 88f, true));
+    }
+
+    @Test public void staleBadgeLine_overflowsToFreeSecondLine_dropsDown() {
+        // Plenty of room below the name: the pill moves there instead of disappearing.
+        assertEquals(2, MainActivity.BalanceView.staleBadgeLine(
+            true, 88f, 200f, 60f, 300f, true));
+        assertEquals(2, MainActivity.BalanceView.staleBadgeLine(
+            false, 300f, 200f, 60f, 88f, true));
+    }
+
+    @Test public void staleBadgeLine_secondLineOccupied_skips() {
+        // An account number already lives on the second line: nothing to drop onto.
+        assertEquals(0, MainActivity.BalanceView.staleBadgeLine(
+            true, 88f, 200f, 60f, 300f, false));
+        assertEquals(0, MainActivity.BalanceView.staleBadgeLine(
+            false, 300f, 200f, 60f, 88f, false));
+    }
+
+    @Test public void staleBadgeLine_nowhereFits_skips() {
+        // Even the bare second line would crowd the amount column.
+        assertEquals(0, MainActivity.BalanceView.staleBadgeLine(
+            true, 280f, 0f, 60f, 300f, true));
+        assertEquals(0, MainActivity.BalanceView.staleBadgeLine(
+            false, 100f, 0f, 60f, 120f, true));
+    }
 }
