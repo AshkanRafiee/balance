@@ -768,34 +768,44 @@ public final class HistoryActivity extends Activity {
             title.setMaxLines(1);
             title.setEllipsize(android.text.TextUtils.TruncateAt.END);
             bar.addView(title, titleParams);
-            String chipText = oneAccount != null
-                ? getString(R.string.account_label) + " " + digits(oneAccount)
-                : getString(R.string.history_bank_chip);
-            TextView chip = text(chipText, 11, badgeFg, medium());
-            chip.setMaxLines(1);
-            // Keep ordinary account numbers fully readable. Only unusually long values need the
-            // ellipsis; applying it to every chip can truncate a short account while the header is
-            // still settling its weighted width on older devices.
-            boolean longAccount = oneAccount != null && oneAccount.length() > 12;
-            chip.setEllipsize(longAccount ? android.text.TextUtils.TruncateAt.END : null);
-            chip.setMinWidth(0);
-            // Tighter sides than the plain chips: the copy glyph eats this chip's width too, and a
-            // ten-digit number plus a long label has to fit beside it before the bar starts
-            // ellipsizing the number itself.
-            chip.setPadding(dp(6), dp(5), dp(6), dp(5));
+            LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(0, -2, 1);
+            chipParams.setMarginStart(dp(8));
             // The chip is the bar's flexible element: a very long account number makes the chip
             // shrink and ellipsize instead of pushing the export button out past the screen edge,
             // so the action stays visible no matter how long the account number is.
             if (oneAccount != null) {
+                TextView chip = text(
+                    getString(R.string.account_label) + " " + digits(oneAccount), 11, badgeFg,
+                    medium());
+                chip.setMaxLines(1);
+                // Keep ordinary account numbers fully readable. Only unusually long values need
+                // the ellipsis; applying it to every chip can truncate a short account while
+                // the header is still settling its weighted width on older devices.
+                boolean longAccount = oneAccount.length() > 12;
+                chip.setEllipsize(longAccount ? android.text.TextUtils.TruncateAt.END : null);
+                chip.setMinWidth(0);
+                // Tighter sides than the plain chips: the copy glyph eats this chip's width too,
+                // and a ten-digit number plus a long label has to fit beside it before the bar
+                // starts ellipsizing the number itself.
+                chip.setPadding(dp(6), dp(5), dp(6), dp(5));
                 // An account chip carries the account number itself, so tapping it copies that
                 // number — the one value here its user cannot easily type by hand.
                 makeAccountChipCopyable(chip, digits(oneAccount));
-            } else {
+                bar.addView(chip, chipParams);
+            } else if (!selectedAccounts.isEmpty()) {
+                // Several accounts of this bank: a quiet count chip. The badge and name already
+                // say which bank this is, so nothing else is needed.
+                TextView chip = text(getResources().getQuantityString(
+                    R.plurals.history_n_accounts, selectedAccounts.size(),
+                    selectedAccounts.size()), 11, badgeFg, medium());
+                chip.setMaxLines(1);
+                chip.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                chip.setPadding(dp(6), dp(5), dp(6), dp(5));
                 chip.setBackground(rounded(badgeBg, 9));
+                bar.addView(chip, chipParams);
             }
-            LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(0, -2, 1);
-            chipParams.setMarginStart(dp(8));
-            bar.addView(chip, chipParams);
+            // A whole-bank view gets no chip: the badge and the name fully identify it, and a
+            // label without an account number wastes the header's narrow width.
         } else if (!selectedBanks.isEmpty() || !selectedAccounts.isEmpty()) {
             // A multi-bank or cross-bank account selection: the plain title plus a quiet scope
             // summary, since no single badge can identify whose history this is.
@@ -1277,6 +1287,18 @@ public final class HistoryActivity extends Activity {
         return accounts == null || accounts.isEmpty() || accounts.contains(t.account);
     }
 
+    /** Account numbers appearing for any of the given banks (every account when banks is empty). */
+    static Set<String> accountsOfBanks(List<Transaction> txs, Set<String> banks) {
+        Set<String> out = new java.util.LinkedHashSet<>();
+        if (txs == null) return out;
+        boolean all = banks == null || banks.isEmpty();
+        for (Transaction t : txs) {
+            if (t == null || t.account == null) continue;
+            if (all || banks.contains(t.bank)) out.add(t.account);
+        }
+        return out;
+    }
+
     /** The header chip for a multi-bank or cross-bank account selection. */
     private String scopeSummary() {
         String banks = selectedBanks.isEmpty() ? null : getResources().getQuantityString(
@@ -1398,7 +1420,11 @@ public final class HistoryActivity extends Activity {
      *  and the dialog must open instantly even for large histories. */
     private void bankFilterDialog() {
         final LinkedHashSet<String> staged = new LinkedHashSet<>();
-        final String before = singleBank();
+        // Bank-to-accounts membership resolved when the store read lands. Apply is the only
+        // writer of the scope, so resolving at load and consuming at Apply is equivalent — and
+        // Cancel leaves everything untouched either way.
+        final java.util.LinkedHashMap<String, Set<String>> accountsByBank =
+            new java.util.LinkedHashMap<>();
         final boolean[] loaded = {false};
 
         LinearLayout wrap = new LinearLayout(this);
@@ -1419,9 +1445,16 @@ public final class HistoryActivity extends Activity {
                 if (!loaded[0]) return;
                 selectedBanks.clear();
                 selectedBanks.addAll(staged);
-                // An account selection only survives staying on its own single bank.
-                String after = singleBank();
-                if (after == null || !after.equals(before)) selectedAccounts.clear();
+                // Accounts of deselected banks stop matching: prune them so no invisible
+                // selection lingers. With no banks selected every account matches anyway.
+                if (!selectedBanks.isEmpty()) {
+                    Set<String> keep = new LinkedHashSet<>();
+                    for (String bank : selectedBanks) {
+                        Set<String> mine = accountsByBank.get(bank);
+                        if (mine != null) keep.addAll(mine);
+                    }
+                    selectedAccounts.retainAll(keep);
+                }
                 dlg.dismiss();
                 rebuildHeader();
                 render();
@@ -1437,12 +1470,32 @@ public final class HistoryActivity extends Activity {
         });
         showDialog(dlg);
         new Thread(() -> {
-            final List<String> choices = readHistoryBanks();
+            List<Transaction> stored = null;
+            try {
+                stored = BalanceData.readTransactions(this);
+            } catch (Exception e) {
+                android.util.Log.w("BalanceHistory", "bank choices read failed", e);
+            }
+            final List<Transaction> loadedStore = stored;
             runOnUiThread(() -> {
                 if (!dlg.isShowing() || isDestroyed() || isFinishing()) return;
                 wrap.removeAllViews();
+                final List<String> choices =
+                    loadedStore == null ? new ArrayList<>() : sortedBankNames(loadedStore);
                 for (String selected : selectedBanks) {
                     if (choices.contains(selected)) staged.add(selected);
+                }
+                accountsByBank.clear();
+                if (loadedStore != null) {
+                    for (Transaction t : loadedStore) {
+                        if (t == null || t.bank == null || t.account == null) continue;
+                        Set<String> mine = accountsByBank.get(t.bank);
+                        if (mine == null) {
+                            mine = new LinkedHashSet<>();
+                            accountsByBank.put(t.bank, mine);
+                        }
+                        mine.add(t.account);
+                    }
                 }
                 if (choices.isEmpty()) {
                     wrap.addView(text(getString(R.string.history_filter_banks_empty), 14, muted),
@@ -1505,10 +1558,25 @@ public final class HistoryActivity extends Activity {
         });
         showDialog(dlg);
         new Thread(() -> {
-            final List<BankAccount> choices = readHistoryBankAccounts();
+            List<Transaction> stored = null;
+            try {
+                stored = BalanceData.readTransactions(this);
+            } catch (Exception e) {
+                android.util.Log.w("BalanceHistory", "account choices read failed", e);
+            }
+            final List<Transaction> loadedStore = stored;
             runOnUiThread(() -> {
                 if (!dlg.isShowing() || isDestroyed() || isFinishing()) return;
                 wrap.removeAllViews();
+                // With banks selected only their accounts are offered; otherwise every account.
+                final List<BankAccount> choices = new ArrayList<>();
+                if (loadedStore != null) {
+                    for (BankAccount pair : sortedBankAccounts(loadedStore)) {
+                        if (selectedBanks.isEmpty() || selectedBanks.contains(pair.bank)) {
+                            choices.add(pair);
+                        }
+                    }
+                }
                 for (String selected : selectedAccounts) {
                     for (BankAccount choice : choices) {
                         if (choice.account.equals(selected)) {
@@ -1518,7 +1586,9 @@ public final class HistoryActivity extends Activity {
                     }
                 }
                 if (choices.isEmpty()) {
-                    wrap.addView(text(getString(R.string.history_filter_accounts_empty), 14, muted),
+                    wrap.addView(text(getString(selectedBanks.isEmpty()
+                        ? R.string.history_filter_accounts_empty
+                        : R.string.history_filter_accounts_empty_banks), 14, muted),
                         new LinearLayout.LayoutParams(-1, -2));
                 } else {
                     for (BankAccount choice : choices) {
@@ -1540,17 +1610,17 @@ public final class HistoryActivity extends Activity {
         }).start();
     }
 
-    /** Distinct canonical banks in stored history, sorted by localized display name. */
-    private List<String> readHistoryBanks() {
-        List<String> banks = distinctBanks(BalanceData.readTransactions(this));
+    /** Stored transactions' distinct canonical banks, sorted by localized display name. */
+    private List<String> sortedBankNames(List<Transaction> stored) {
+        List<String> banks = distinctBanks(stored);
         Collections.sort(banks, (a, b) -> BankRules.displayName(this, a)
             .compareToIgnoreCase(BankRules.displayName(this, b)));
         return banks;
     }
 
-    /** Distinct (bank, account) pairs in stored history, sorted by bank display name then account. */
-    private List<BankAccount> readHistoryBankAccounts() {
-        List<BankAccount> pairs = distinctBankAccounts(BalanceData.readTransactions(this));
+    /** Stored transactions' distinct (bank, account) pairs, sorted by bank display name. */
+    private List<BankAccount> sortedBankAccounts(List<Transaction> stored) {
+        List<BankAccount> pairs = distinctBankAccounts(stored);
         Collections.sort(pairs, (x, y) -> {
             int byBank = BankRules.displayName(this, x.bank)
                 .compareToIgnoreCase(BankRules.displayName(this, y.bank));

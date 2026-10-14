@@ -86,6 +86,22 @@ public class HistoryScopeTest {
 
     // ---- scope predicate --------------------------------------------------------
 
+    @Test public void accountsOfBanks_collectsSelectedBanksAccounts() {
+        List<Transaction> txs = Arrays.asList(
+            tx("Mellat", "111", 1L),
+            tx("Saman", "333", 2L),
+            tx("Mellat", "222", 3L),
+            tx("Mellat", "111", 4L),
+            new Transaction("Mellat", epoch(2026, 9, 10), 5L));
+        assertEquals(new HashSet<>(Arrays.asList("111", "222")),
+            HistoryActivity.accountsOfBanks(txs, new HashSet<>(Arrays.asList("Mellat", "X"))));
+        assertEquals(new HashSet<>(Arrays.asList("111", "222", "333")),
+            HistoryActivity.accountsOfBanks(txs, Collections.emptySet()));
+        assertEquals(new HashSet<>(Arrays.asList("111", "222", "333")),
+            HistoryActivity.accountsOfBanks(txs, null));
+        assertTrue(HistoryActivity.accountsOfBanks(null, null).isEmpty());
+    }
+
     @Test public void inBankAccountScope_emptyMeansAll() {
         Transaction t = tx("Mellat", "111", 1L);
         assertTrue(HistoryActivity.inBankAccountScope(t,

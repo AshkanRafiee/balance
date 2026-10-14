@@ -87,12 +87,11 @@ public class HistoryBankFilterUiTest {
         await(() -> findByTextContaining("5,000,000") != null, 20_000);
         await(() -> findByTextContaining("900,000") != null, 20_000);
 
-        // Narrow to Saman only.
+        // Narrow to Saman only: the ID-less bank chip is gone, the name stays.
         await(() -> findByText(ctx.getString(R.string.history_filter_banks)) != null, 20_000);
         click(findByText(ctx.getString(R.string.history_filter_banks)));
         await(() -> findInDialog(ctx.getString(R.string.history_filter_banks_title)) != null,
             10_000);
-        // The choices decrypt the whole history off the main thread, so they land later.
         checkInDialog(BankRules.displayName(ctx, SAMAN));
         click(findInDialog(ctx.getString(R.string.history_filter_apply)));
         // The filter bar's own count proves the narrowed render landed; only then is asserting
@@ -104,23 +103,36 @@ public class HistoryBankFilterUiTest {
         assertTrue(findByTextContaining("5,000,000") == null);
         assertNotNull("the header names the single selected bank",
             findByText(BankRules.displayName(ctx, SAMAN)));
+        assertTrue("no ID-less bank chip", findByText("Bank") == null);
 
-        // An account of another bank combines by AND: nothing is left on screen.
+        // With Saman selected only its account is offered.
         click(findByText(ctx.getString(R.string.history_filter_accounts)));
         await(() -> findInDialog(ctx.getString(R.string.history_filter_accounts_title)) != null,
             10_000);
-        checkInDialog(BankRules.displayName(ctx, MELLAT) + " — 111");
+        await(() -> findCheckInDialog(
+            BankRules.displayName(ctx, SAMAN) + " — 333") != null, 30_000);
+        assertTrue("other banks' accounts are not offered",
+            findCheckInDialog(BankRules.displayName(ctx, MELLAT) + " — 111") == null);
+        checkInDialog(BankRules.displayName(ctx, SAMAN) + " — 333");
         click(findInDialog(ctx.getString(R.string.history_filter_apply)));
-        await(() -> findByText(ctx.getString(R.string.history_empty_account)) != null, 20_000);
-        assertTrue(findByTextContaining("900,000") == null);
+        await(() -> findByText(ctx.getString(R.string.history_filter_accounts_count, 1)) != null,
+            20_000);
+        assertNotNull(findByTextContaining("900,000"));
 
-        // Clearing the accounts keeps the bank narrowing: Saman returns, Mellat stays out.
-        click(findByText(ctx.getString(R.string.history_filter_accounts_count, 1)));
-        await(() -> findInDialog(ctx.getString(R.string.history_filter_accounts_title)) != null,
+        // Switching banks prunes the stale account: Saman's 333 drops, Mellat opens whole.
+        click(findByText(ctx.getString(R.string.history_filter_banks_count, 1)));
+        await(() -> findInDialog(ctx.getString(R.string.history_filter_banks_title)) != null,
             10_000);
-        click(findInDialog(ctx.getString(R.string.history_filter_accounts_clear)));
-        await(() -> findByTextContaining("900,000") != null, 20_000);
-        assertTrue(findByTextContaining("30,000,000") == null);
+        await(() -> findCheckInDialog(BankRules.displayName(ctx, MELLAT)) != null, 30_000);
+        uncheckInDialog(BankRules.displayName(ctx, SAMAN));
+        checkInDialog(BankRules.displayName(ctx, MELLAT));
+        click(findInDialog(ctx.getString(R.string.history_filter_apply)));
+        await(() -> findByTextContaining("30,000,000") != null, 20_000);
+        assertNotNull(findByTextContaining("5,000,000"));
+        assertTrue(findByTextContaining("900,000") == null);
+        assertTrue("the pruned account selection is gone",
+            findByText(ctx.getString(R.string.history_filter_accounts)) != null
+                && findByText(ctx.getString(R.string.history_filter_accounts_count, 1)) == null);
 
         // Clearing the banks returns the full history.
         click(findByText(ctx.getString(R.string.history_filter_banks_count, 1)));
@@ -128,6 +140,43 @@ public class HistoryBankFilterUiTest {
             10_000);
         click(findInDialog(ctx.getString(R.string.history_filter_banks_clear)));
         await(() -> findByTextContaining("30,000,000") != null, 20_000);
+        await(() -> findByTextContaining("5,000,000") != null, 20_000);
+
+        // One account on its own matches it wherever it lives.
+        click(findByText(ctx.getString(R.string.history_filter_accounts)));
+        await(() -> findInDialog(ctx.getString(R.string.history_filter_accounts_title)) != null,
+            10_000);
+        await(() -> findCheckInDialog(
+            BankRules.displayName(ctx, MELLAT) + " — 111") != null, 30_000);
+        checkInDialog(BankRules.displayName(ctx, MELLAT) + " — 111");
+        click(findInDialog(ctx.getString(R.string.history_filter_apply)));
+        await(() -> findByText(ctx.getString(R.string.history_filter_accounts_count, 1)) != null,
+            20_000);
+        assertNotNull(findByTextContaining("30,000,000"));
+        assertTrue(findByTextContaining("5,000,000") == null);
+        assertTrue(findByTextContaining("900,000") == null);
+        assertNotNull("the header summarizes the cross-bank account scope",
+            findByText(ctx.getResources().getQuantityString(R.plurals.history_n_accounts, 1, 1)));
+
+        // A second account from another bank joins the scope.
+        click(findByText(ctx.getString(R.string.history_filter_accounts_count, 1)));
+        await(() -> findInDialog(ctx.getString(R.string.history_filter_accounts_title)) != null,
+            10_000);
+        await(() -> findCheckInDialog(
+            BankRules.displayName(ctx, SAMAN) + " — 333") != null, 30_000);
+        checkInDialog(BankRules.displayName(ctx, SAMAN) + " — 333");
+        click(findInDialog(ctx.getString(R.string.history_filter_apply)));
+        await(() -> findByText(ctx.getString(R.string.history_filter_accounts_count, 2)) != null,
+            20_000);
+        assertNotNull(findByTextContaining("30,000,000"));
+        assertNotNull(findByTextContaining("900,000"));
+        assertTrue(findByTextContaining("5,000,000") == null);
+
+        // Clearing the accounts returns the full history.
+        click(findByText(ctx.getString(R.string.history_filter_accounts_count, 2)));
+        await(() -> findInDialog(ctx.getString(R.string.history_filter_accounts_title)) != null,
+            10_000);
+        click(findInDialog(ctx.getString(R.string.history_filter_accounts_clear)));
         await(() -> findByTextContaining("5,000,000") != null, 20_000);
     }
 
@@ -168,6 +217,15 @@ public class HistoryBankFilterUiTest {
     /** Checks a dialog checkbox by label, atomically on the main thread: find, tap, verify
      *  checked. Retried until it sticks, since the choices populate asynchronously. */
     private static void checkInDialog(String want) {
+        setCheckedInDialog(want, true);
+    }
+
+    /** Unchecks a dialog checkbox by label, retried like {@link #checkInDialog}. */
+    private static void uncheckInDialog(String want) {
+        setCheckedInDialog(want, false);
+    }
+
+    private static void setCheckedInDialog(String want, boolean checked) {
         await(() -> {
             final boolean[] done = {false};
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
@@ -178,8 +236,8 @@ public class HistoryBankFilterUiTest {
                 for (CheckBox c : out) {
                     CharSequence s = c.getText();
                     if (s != null && want.equals(s.toString())) {
-                        if (!c.isChecked()) c.performClick();
-                        done[0] = c.isChecked();
+                        if (c.isChecked() != checked) c.performClick();
+                        done[0] = c.isChecked() == checked;
                         return;
                     }
                 }

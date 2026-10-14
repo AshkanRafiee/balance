@@ -309,7 +309,6 @@
     <string name="sender_share_issue_channel">Channel detection</string>
 
     <string name="history_title">History</string>
-    <string name="history_bank_chip">Bank</string>
     <string name="history_empty">No transactions found yet. Transaction history is built from bank SMS as they are scanned.</string>
     <string name="history_empty_bank">No transactions found for %1$s yet. Transaction history is built from bank SMS as they are scanned.</string>
     <string name="history_today">Today</string>
@@ -346,6 +345,7 @@
     <string name="history_filter_accounts_count">Accounts (%1$d)</string>
     <string name="history_filter_accounts_title">Filter by accounts</string>
     <string name="history_filter_accounts_empty">No accounts in history yet.</string>
+    <string name="history_filter_accounts_empty_banks">No accounts for the selected banks yet.</string>
     <string name="history_filter_accounts_clear">Clear account filter</string>
     <plurals name="history_n_banks">
         <item quantity="one">%1$d bank</item>

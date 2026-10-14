@@ -292,7 +292,6 @@
     <string name="sender_share_issue_channel">تشخیص کانال</string>
 
     <string name="history_title">تاریخچه</string>
-    <string name="history_bank_chip">بانک</string>
     <string name="history_empty">هنوز تراکنشی یافت نشده است. تاریخچهٔ تراکنش‌ها هنگام خواندن پیامک‌های بانکی ساخته می‌شود.</string>
     <string name="history_empty_bank">هنوز تراکنشی برای %1$s یافت نشده است. تاریخچهٔ تراکنش‌ها هنگام خواندن پیامک‌های بانکی ساخته می‌شود.</string>
     <string name="history_today">امروز</string>
@@ -329,6 +328,7 @@
     <string name="history_filter_accounts_count">حساب‌ها (%1$d)</string>
     <string name="history_filter_accounts_title">فیلتر بر اساس حساب‌ها</string>
     <string name="history_filter_accounts_empty">هنوز حسابی در تاریخچه نیست.</string>
+    <string name="history_filter_accounts_empty_banks">هنوز حسابی برای بانک‌های انتخاب‌شده در تاریخچه نیست.</string>
     <string name="history_filter_accounts_clear">پاک کردن فیلتر حساب‌ها</string>
     <plurals name="history_n_banks">
         <item quantity="one">%1$d بانک</item>
