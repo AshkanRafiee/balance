@@ -68,7 +68,8 @@ public class HistoryWarmupTest {
     @Test public void take_missesForANarrowedScope() throws Exception {
         seed();
         HistoryWarmup.warmNow(context);
-        HistoryReader.Result result = HistoryWarmup.take("Other", null, HistoryActivity.Filter.ALL,
+        HistoryReader.Result result = HistoryWarmup.take("Other", (String) null,
+            HistoryActivity.Filter.ALL,
             "", Collections.emptyList(), false, context);
         assertNull("a bank-narrowed view must not reuse the default warm-up", result);
         HistoryWarmup.invalidate();
@@ -77,7 +78,8 @@ public class HistoryWarmupTest {
     @Test public void take_withRewarm_refillsTheCacheInTheBackground() throws Exception {
         seed();
         HistoryWarmup.warmNow(context);
-        HistoryReader.Result first = HistoryWarmup.take(null, null, HistoryActivity.Filter.ALL,
+        HistoryReader.Result first = HistoryWarmup.take((String) null, (String) null,
+            HistoryActivity.Filter.ALL,
             "", Collections.emptyList(), RegionHelper.isIran(context), context, true);
         assertNotNull(first);
         try {
@@ -111,7 +113,7 @@ public class HistoryWarmupTest {
     }
 
     private HistoryReader.Result takeDefault() {
-        return HistoryWarmup.take(null, null, HistoryActivity.Filter.ALL, "",
+        return HistoryWarmup.take((String) null, (String) null, HistoryActivity.Filter.ALL, "",
             Collections.emptyList(), RegionHelper.isIran(context), context);
     }
 }
