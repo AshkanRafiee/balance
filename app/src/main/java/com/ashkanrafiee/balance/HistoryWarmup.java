@@ -5,6 +5,7 @@ import android.util.Log;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -69,7 +70,9 @@ final class HistoryWarmup {
      */
     static HistoryReader.Result take(String bank, String account, HistoryActivity.Filter filter,
             String query, List<String> tags, boolean iran, Context context) {
-        return take(bank, account, filter, query, tags, iran, context, false);
+        return take(bank == null ? null : Collections.singleton(bank),
+            account == null ? null : Collections.singleton(account),
+            filter, query, tags, iran, context, false);
     }
 
     /**
@@ -80,7 +83,19 @@ final class HistoryWarmup {
      */
     static HistoryReader.Result take(String bank, String account, HistoryActivity.Filter filter,
             String query, List<String> tags, boolean iran, Context context, boolean rewarm) {
-        Fingerprint wanted = new Fingerprint(bank, account, filter, query, tags, iran,
+        return take(bank == null ? null : Collections.singleton(bank),
+            account == null ? null : Collections.singleton(account),
+            filter, query, tags, iran, context, rewarm);
+    }
+
+    /**
+     * Same, over several banks and accounts at once. Empty collections mean no narrowing on
+     * that axis. Tests keep the single-bank default to stay deterministic.
+     */
+    static HistoryReader.Result take(Collection<String> banks,
+            Collection<String> accounts, HistoryActivity.Filter filter,
+            String query, List<String> tags, boolean iran, Context context, boolean rewarm) {
+        Fingerprint wanted = new Fingerprint(banks, accounts, filter, query, tags, iran,
             revisions(context), CalDate.today(iran).key());
         synchronized (LOCK) {
             if (cached == null || !wanted.equals(cachedKey)) return null;
@@ -102,7 +117,8 @@ final class HistoryWarmup {
             requestedDays.add(CalDate.of(today.year, today.month, day).key());
         }
         HistoryReader.Request request = new HistoryReader.Request(iran,
-            HistoryReader.DEFAULT_PAGE_SIZE, null, null, HistoryActivity.Filter.ALL, "",
+            HistoryReader.DEFAULT_PAGE_SIZE, (String) null, (String) null,
+            HistoryActivity.Filter.ALL, "",
             Collections.emptyList(), requestedDays, 0, HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
         HistoryReader.Result result = HistoryReader.summaryWithResiduals(context, request);
         boolean installed = false;
@@ -177,8 +193,8 @@ final class HistoryWarmup {
     }
 
     private static final class Fingerprint {
-        final String bank;
-        final String account;
+        final Set<String> banks;
+        final Set<String> accounts;
         final int direction;
         final String from;
         final String to;
@@ -188,10 +204,13 @@ final class HistoryWarmup {
         final String[] revisions;
         final String today;
 
-        Fingerprint(String bank, String account, HistoryActivity.Filter filter, String query,
+        Fingerprint(Collection<String> banks, Collection<String> accounts,
+                HistoryActivity.Filter filter, String query,
                 List<String> tags, boolean iran, String[] revisions, String today) {
-            this.bank = bank;
-            this.account = account;
+            this.banks = banks == null ? Collections.emptySet()
+                : Collections.unmodifiableSet(new LinkedHashSet<>(banks));
+            this.accounts = accounts == null ? Collections.emptySet()
+                : Collections.unmodifiableSet(new LinkedHashSet<>(accounts));
             this.direction = filter == null ? 0 : filter.direction;
             this.from = filter == null || filter.from == null ? null : filter.from.key();
             this.to = filter == null || filter.to == null ? null : filter.to.key();
@@ -206,8 +225,8 @@ final class HistoryWarmup {
         @Override public boolean equals(Object o) {
             if (!(o instanceof Fingerprint)) return false;
             Fingerprint other = (Fingerprint) o;
-            return Objects.equals(bank, other.bank)
-                && Objects.equals(account, other.account)
+            return Objects.equals(banks, other.banks)
+                && Objects.equals(accounts, other.accounts)
                 && direction == other.direction
                 && Objects.equals(from, other.from)
                 && Objects.equals(to, other.to)
@@ -219,7 +238,7 @@ final class HistoryWarmup {
         }
 
         @Override public int hashCode() {
-            return Objects.hash(bank, account, direction, from, to, query, tags, iran, today,
+            return Objects.hash(banks, accounts, direction, from, to, query, tags, iran, today,
                 java.util.Arrays.hashCode(revisions));
         }
     }

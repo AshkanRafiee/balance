@@ -320,6 +320,24 @@
     <string name="history_filter_tags_title">فیلتر بر اساس برچسب</string>
     <string name="history_filter_tags_empty">ابتدا به تراکنش‌ها برچسب اضافه کنید تا بتوانید تاریخچه را بر اساس آن‌ها فیلتر کنید.</string>
     <string name="history_filter_tags_clear">پاک کردن فیلتر برچسب</string>
+    <string name="history_filter_banks">بانک‌ها</string>
+    <string name="history_filter_banks_count">بانک‌ها (%1$d)</string>
+    <string name="history_filter_banks_title">فیلتر بر اساس بانک‌ها</string>
+    <string name="history_filter_banks_empty">هنوز بانکی در تاریخچه نیست.</string>
+    <string name="history_filter_banks_clear">پاک کردن فیلتر بانک‌ها</string>
+    <string name="history_filter_accounts">حساب‌ها</string>
+    <string name="history_filter_accounts_count">حساب‌ها (%1$d)</string>
+    <string name="history_filter_accounts_title">فیلتر بر اساس حساب‌ها</string>
+    <string name="history_filter_accounts_empty">هنوز حسابی در تاریخچه نیست.</string>
+    <string name="history_filter_accounts_clear">پاک کردن فیلتر حساب‌ها</string>
+    <plurals name="history_n_banks">
+        <item quantity="one">%1$d بانک</item>
+        <item quantity="other">%1$d بانک</item>
+    </plurals>
+    <plurals name="history_n_accounts">
+        <item quantity="one">%1$d حساب</item>
+        <item quantity="other">%1$d حساب</item>
+    </plurals>
     <string name="history_filter_apply">اعمال</string>
     <string name="history_filter_pick_from">روز از را انتخاب کنید</string>
     <string name="history_filter_pick_to">روز تا را انتخاب کنید — از: %1$s</string>

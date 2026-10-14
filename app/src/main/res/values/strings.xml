@@ -337,6 +337,24 @@
     <string name="history_filter_tags_title">Filter by tags</string>
     <string name="history_filter_tags_empty">Add tags to transactions first, then you can filter history by them.</string>
     <string name="history_filter_tags_clear">Clear tag filter</string>
+    <string name="history_filter_banks">Banks</string>
+    <string name="history_filter_banks_count">Banks (%1$d)</string>
+    <string name="history_filter_banks_title">Filter by banks</string>
+    <string name="history_filter_banks_empty">No banks in history yet.</string>
+    <string name="history_filter_banks_clear">Clear bank filter</string>
+    <string name="history_filter_accounts">Accounts</string>
+    <string name="history_filter_accounts_count">Accounts (%1$d)</string>
+    <string name="history_filter_accounts_title">Filter by accounts</string>
+    <string name="history_filter_accounts_empty">No accounts in history yet.</string>
+    <string name="history_filter_accounts_clear">Clear account filter</string>
+    <plurals name="history_n_banks">
+        <item quantity="one">%1$d bank</item>
+        <item quantity="other">%1$d banks</item>
+    </plurals>
+    <plurals name="history_n_accounts">
+        <item quantity="one">%1$d account</item>
+        <item quantity="other">%1$d accounts</item>
+    </plurals>
     <string name="history_filter_apply">Apply</string>
     <string name="history_filter_pick_from">Choose the From date</string>
     <string name="history_filter_pick_to">Choose the To date — From is %1$s</string>

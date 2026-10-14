@@ -49,8 +49,11 @@ final class HistoryReader {
     static final class Request {
         final boolean iran;
         final int pageSize;
-        final String bank;
-        final String account;
+        /** Selected canonical banks; empty means every bank. */
+        final Set<String> banks;
+        /** Selected account numbers across any bank; empty means every account. Combined with
+         *  {@link #banks} by AND, exactly like the history screen's picker. */
+        final Set<String> accounts;
         final HistoryActivity.Filter filter;
         final String searchQuery;
         final List<String> selectedTags;
@@ -67,12 +70,26 @@ final class HistoryReader {
                 HistoryActivity.Filter filter, String searchQuery,
                 Collection<String> selectedTags, Collection<String> requestedDayKeys,
                 int maxRequestedDays, int maxRowsPerDay) {
+            this(iran, pageSize, bank == null ? null : Collections.singleton(bank),
+                account == null ? null : Collections.singleton(account),
+                filter, searchQuery, selectedTags, requestedDayKeys,
+                maxRequestedDays, maxRowsPerDay);
+        }
+
+        /**
+         * Creates a read request narrowed to several banks and accounts at once. Empty
+         * collections mean no narrowing on that axis.
+         */
+        Request(boolean iran, int pageSize, Collection<String> banks,
+                Collection<String> accounts, HistoryActivity.Filter filter, String searchQuery,
+                Collection<String> selectedTags, Collection<String> requestedDayKeys,
+                int maxRequestedDays, int maxRowsPerDay) {
             if (maxRequestedDays < 0) throw new IllegalArgumentException("invalid page-day hint");
             if (maxRowsPerDay < 0) throw new IllegalArgumentException("invalid row page size");
             this.iran = iran;
             this.pageSize = pageSize;
-            this.bank = bank;
-            this.account = account;
+            this.banks = immutableSet(banks);
+            this.accounts = immutableSet(accounts);
             this.filter = filter == null ? HistoryActivity.Filter.ALL : filter;
             this.searchQuery = searchQuery == null ? "" : searchQuery.trim();
             this.selectedTags = immutableStrings(selectedTags);
@@ -88,14 +105,15 @@ final class HistoryReader {
 
         /** A no-filter request with an explicit store page size. */
         static Request all(boolean iran, int pageSize) {
-            return new Request(iran, pageSize, null, null, HistoryActivity.Filter.ALL, "",
+            return new Request(iran, pageSize, (String) null, (String) null,
+                HistoryActivity.Filter.ALL, "",
                 null, null, 0, 0);
         }
 
         /** Copies the request while changing only the expanded-day collection and row bound. */
         Request withRequestedDays(Collection<String> dayKeys, int maxRows) {
             int maxDays = dayKeys == null ? 0 : dayKeys.size();
-            return new Request(iran, pageSize, bank, account, filter, searchQuery, selectedTags,
+            return new Request(iran, pageSize, banks, accounts, filter, searchQuery, selectedTags,
                 dayKeys, maxDays, maxRows);
         }
     }
@@ -495,8 +513,8 @@ final class HistoryReader {
 
     private static boolean inScope(Transaction transaction, Request request) {
         if (transaction == null) return false;
-        if (request.bank != null && !request.bank.equals(transaction.bank)) return false;
-        return request.account == null || request.account.equals(transaction.account);
+        if (!request.banks.isEmpty() && !request.banks.contains(transaction.bank)) return false;
+        return request.accounts.isEmpty() || request.accounts.contains(transaction.account);
     }
 
     private static boolean matchesMovementFilter(Transaction transaction, Request request) {

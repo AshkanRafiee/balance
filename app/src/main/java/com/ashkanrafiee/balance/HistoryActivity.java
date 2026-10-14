@@ -136,12 +136,26 @@ public final class HistoryActivity extends Activity {
      *  Read once per screen, since the region can only change from the main screen. */
     private boolean iranCalendar = true;
     private CalDate today, yesterday;
-    /** Optional canonical bank name; when set, only that bank's transactions are shown. */
-    private String bankFilter;
+    /** Selected canonical banks; empty means every bank. Several banks narrow the whole screen —
+     *  movements, unaccounted detection, totals and export — to their union. */
+    private final Set<String> selectedBanks = new java.util.LinkedHashSet<>();
 
-    /** Optional account number (only meaningful alongside {@link #bankFilter}); when set, only
-     *  transactions of that account of the bank are shown. */
-    private String accountFilter;
+    /** Selected account numbers across any bank; empty means every account. Combined with
+     *  {@link #selectedBanks} by AND: a movement must match a selected bank (when any banks are
+     *  selected) and a selected account (when any accounts are). An account selection on its own
+     *  matches across banks. */
+    private final Set<String> selectedAccounts = new java.util.LinkedHashSet<>();
+
+    /** The bank when exactly one is selected, else null. Drives the single-bank header and the
+     *  compact per-bank rows. */
+    private String singleBank() {
+        return selectedBanks.size() == 1 ? selectedBanks.iterator().next() : null;
+    }
+
+    /** The account when exactly one is selected, else null. */
+    private String singleAccount() {
+        return selectedAccounts.size() == 1 ? selectedAccounts.iterator().next() : null;
+    }
 
     /** The active direction and date bounds, applied before the transactions are grouped so the hero
      *  and the breakdown always match what is on screen. Starts from {@link Filter#ALL} on every open
@@ -178,6 +192,21 @@ public final class HistoryActivity extends Activity {
      *  so its highlight and labels always mirror {@link #filter}. */
     private LinearLayout filterBar;
 
+    /** The screen's vertical root and its sticky header. The header is built once in
+     *  {@link #onCreate} but must be rebuilt when the bank/account scope changes, since unlike
+     *  the filter bar no render pass touches it. */
+    private LinearLayout rootLayout;
+    private View headerView;
+
+    /** Rebuilds the sticky header after the bank/account scope changes. */
+    private void rebuildHeader() {
+        if (rootLayout == null || headerView == null) return;
+        int index = rootLayout.indexOfChild(headerView);
+        rootLayout.removeView(headerView);
+        headerView = buildHeader();
+        rootLayout.addView(headerView, index, margin(0, 0, 0, 14));
+    }
+
     /** Watches for new bank SMS while the screen is open, triggering a silent history re-scan. */
     private ContentObserver smsObserver;
 
@@ -196,6 +225,12 @@ public final class HistoryActivity extends Activity {
     static void setRenderGateForTest(CountDownLatch started, CountDownLatch release) {
         renderGateStarted = started;
         renderGateRelease = release;
+    }
+
+    /** Test-only view of the dialogs this screen currently shows. Dialog windows live outside
+     *  the activity's own decor view, so UI tests cannot reach them by scanning it. */
+    static List<android.app.AlertDialog> shownDialogsForTest(HistoryActivity activity) {
+        return new ArrayList<>(activity.activeDialogs);
     }
 
     /** The placeholder blocks on screen while the history is being read, and the one animator that
@@ -528,9 +563,23 @@ public final class HistoryActivity extends Activity {
             preSearchMonths = stringSet(state, KEY_PRE_SEARCH_MONTHS);
             preSearchDays = stringSet(state, KEY_PRE_SEARCH_DAYS);
         }
-        bankFilter = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_BANK);
-        accountFilter = bankFilter == null ? null
-            : (getIntent() == null ? null : getIntent().getStringExtra(EXTRA_ACCOUNT));
+        // Rotation restores the picker's own selection; a fresh open takes the dashboard scope.
+        // The sets below are always saved together, so one key is enough to tell them apart
+        // from a state written before the bank/account picker existed.
+        if (state != null && state.containsKey(KEY_BANK_FILTERS)) {
+            java.util.ArrayList<String> savedBanks = state.getStringArrayList(KEY_BANK_FILTERS);
+            java.util.ArrayList<String> savedAccounts =
+                state.getStringArrayList(KEY_ACCOUNT_FILTERS);
+            if (savedBanks != null) selectedBanks.addAll(savedBanks);
+            if (savedAccounts != null) selectedAccounts.addAll(savedAccounts);
+        } else {
+            String intentBank =
+                getIntent() == null ? null : getIntent().getStringExtra(EXTRA_BANK);
+            if (intentBank != null) selectedBanks.add(intentBank);
+            String intentAccount = intentBank == null || getIntent() == null ? null
+                : getIntent().getStringExtra(EXTRA_ACCOUNT);
+            if (intentAccount != null) selectedAccounts.add(intentAccount);
+        }
         bg = color(R.color.bg);
         card = color(R.color.panel);
         muted = color(R.color.muted);
@@ -583,7 +632,9 @@ public final class HistoryActivity extends Activity {
         setContentView(host);
         host.addView(root, new FrameLayout.LayoutParams(-1, -1));
 
-        root.addView(buildHeader(), margin(0, 0, 0, 14));
+        rootLayout = root;
+        headerView = buildHeader();
+        root.addView(headerView, margin(0, 0, 0, 14));
         root.addView(buildSearchBar(), margin(0, 0, 0, 10));
         filterBar = new LinearLayout(this);
         filterBar.setOrientation(LinearLayout.VERTICAL);
@@ -703,27 +754,29 @@ public final class HistoryActivity extends Activity {
 
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-2, -2);
         titleParams.setMarginStart(dp(10));
-        if (bankFilter != null) {
+        String oneBank = singleBank();
+        String oneAccount = oneBank == null ? null : singleAccount();
+        if (oneBank != null) {
             // A bank or account view: the badge plus the bank's name identifies whose filtered
             // history this is; the chip flags a single account (else the whole bank), so an
             // account's history reads as a first-class scope, exactly like another bank's.
-            View badge = bankBadge(bankFilter);
+            View badge = bankBadge(oneBank);
             LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(dp(32), dp(32));
             badgeLp.setMarginStart(dp(4));
             bar.addView(badge, badgeLp);
-            TextView title = text(BankRules.displayName(this, bankFilter), 22, fg, medium());
+            TextView title = text(BankRules.displayName(this, oneBank), 22, fg, medium());
             title.setMaxLines(1);
             title.setEllipsize(android.text.TextUtils.TruncateAt.END);
             bar.addView(title, titleParams);
-            String chipText = accountFilter != null
-                ? getString(R.string.account_label) + " " + digits(accountFilter)
+            String chipText = oneAccount != null
+                ? getString(R.string.account_label) + " " + digits(oneAccount)
                 : getString(R.string.history_bank_chip);
             TextView chip = text(chipText, 11, badgeFg, medium());
             chip.setMaxLines(1);
             // Keep ordinary account numbers fully readable. Only unusually long values need the
             // ellipsis; applying it to every chip can truncate a short account while the header is
             // still settling its weighted width on older devices.
-            boolean longAccount = accountFilter != null && accountFilter.length() > 12;
+            boolean longAccount = oneAccount != null && oneAccount.length() > 12;
             chip.setEllipsize(longAccount ? android.text.TextUtils.TruncateAt.END : null);
             chip.setMinWidth(0);
             // Tighter sides than the plain chips: the copy glyph eats this chip's width too, and a
@@ -733,13 +786,26 @@ public final class HistoryActivity extends Activity {
             // The chip is the bar's flexible element: a very long account number makes the chip
             // shrink and ellipsize instead of pushing the export button out past the screen edge,
             // so the action stays visible no matter how long the account number is.
-            if (accountFilter != null) {
+            if (oneAccount != null) {
                 // An account chip carries the account number itself, so tapping it copies that
                 // number — the one value here its user cannot easily type by hand.
-                makeAccountChipCopyable(chip, digits(accountFilter));
+                makeAccountChipCopyable(chip, digits(oneAccount));
             } else {
                 chip.setBackground(rounded(badgeBg, 9));
             }
+            LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(0, -2, 1);
+            chipParams.setMarginStart(dp(8));
+            bar.addView(chip, chipParams);
+        } else if (!selectedBanks.isEmpty() || !selectedAccounts.isEmpty()) {
+            // A multi-bank or cross-bank account selection: the plain title plus a quiet scope
+            // summary, since no single badge can identify whose history this is.
+            TextView title = text(getString(R.string.history_title), 22, fg, medium());
+            bar.addView(title, titleParams);
+            TextView chip = text(scopeSummary(), 11, badgeFg, medium());
+            chip.setMaxLines(1);
+            chip.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            chip.setPadding(dp(6), dp(5), dp(6), dp(5));
+            chip.setBackground(rounded(badgeBg, 9));
             LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(0, -2, 1);
             chipParams.setMarginStart(dp(8));
             bar.addView(chip, chipParams);
@@ -881,8 +947,8 @@ public final class HistoryActivity extends Activity {
         final String query = searchQuery == null ? "" : searchQuery.trim();
         final List<String> tagSelection = new ArrayList<>(selectedTags);
         final Filter activeFilter = filter;
-        final String bank = bankFilter;
-        final String account = accountFilter;
+        final Set<String> banks = new java.util.LinkedHashSet<>(selectedBanks);
+        final Set<String> accounts = new java.util.LinkedHashSet<>(selectedAccounts);
         final boolean iran = iranCalendar;
         // App-owned handles captured up front: the worker below must not call back into the
         // activity except through runOnUiThread, so a late finish after destroy stays safe.
@@ -960,8 +1026,8 @@ public final class HistoryActivity extends Activity {
                         try (HistoryResidualReader.Staging staging =
                                 HistoryResidualReader.Staging.open(app)) {
                             TransactionStore.forEach(app, CsvExport.STREAM_PAGE_SIZE, transaction -> {
-                                if (inExportScope(transaction, bank, account)) staging.add(transaction);
-                                if (!exportMovementMatches(app, transaction, bank, account,
+                                if (inExportScope(transaction, banks, accounts)) staging.add(transaction);
+                                if (!exportMovementMatches(app, transaction, banks, accounts,
                                         activeFilter, iran, tagSelection, tokens, lookup)) return;
                                 movements.accept(transaction);
                             });
@@ -1084,11 +1150,11 @@ public final class HistoryActivity extends Activity {
         return new android.app.AlertDialog.Builder(this).setView(wrap).setCancelable(false).create();
     }
 
-    private boolean exportMovementMatches(Context context, Transaction transaction, String bank,
-            String account, Filter activeFilter, boolean iran, List<String> selected,
-            List<String> tokens, CsvExport.TextLookup lookup) throws Exception {
-        if (bank != null && !bank.equals(transaction.bank)) return false;
-        if (account != null && !account.equals(transaction.account)) return false;
+    private boolean exportMovementMatches(Context context, Transaction transaction,
+            Set<String> banks, Set<String> accounts, Filter activeFilter, boolean iran,
+            List<String> selected, List<String> tokens, CsvExport.TextLookup lookup)
+            throws Exception {
+        if (!inBankAccountScope(transaction, banks, accounts)) return false;
         if (activeFilter.direction == DIR_DEPOSIT && transaction.amount <= 0) return false;
         if (activeFilter.direction == DIR_WITHDRAWAL && transaction.amount >= 0) return false;
         CalDate date = calOf(transaction.date, iran);
@@ -1144,12 +1210,81 @@ public final class HistoryActivity extends Activity {
     }
 
     /** The bank/account scope the export stages for its residual walk: the whole scope, before
-     *  direction, date, tag and search narrowing. A null bank means every bank; a non-null account
-     *  without a bank matches across banks, exactly like the history reader's scope. */
-    private static boolean inExportScope(Transaction transaction, String bank, String account) {
-        if (transaction == null) return false;
-        if (bank != null && !bank.equals(transaction.bank)) return false;
-        return account == null || account.equals(transaction.account);
+     *  direction, date, tag and search narrowing. Empty sets mean every bank and account; an
+     *  account selection without banks matches across banks, exactly like the history reader's
+     *  scope. */
+    private static boolean inExportScope(Transaction transaction, Set<String> banks,
+            Set<String> accounts) {
+        return inBankAccountScope(transaction, banks, accounts);
+    }
+
+    // ====================================================================
+    // Bank/account scope
+    // ====================================================================
+
+    /** One account of one bank, as the account picker lists it. Neither field is ever null. */
+    static final class BankAccount {
+        final String bank;
+        final String account;
+
+        BankAccount(String bank, String account) {
+            this.bank = bank;
+            this.account = account;
+        }
+
+        @Override public boolean equals(Object o) {
+            if (!(o instanceof BankAccount)) return false;
+            BankAccount other = (BankAccount) o;
+            return bank.equals(other.bank) && account.equals(other.account);
+        }
+
+        @Override public int hashCode() {
+            return 31 * bank.hashCode() + account.hashCode();
+        }
+    }
+
+    /** Distinct canonical banks in first-seen order, skipping movements without a bank. */
+    static List<String> distinctBanks(List<Transaction> txs) {
+        List<String> out = new ArrayList<>();
+        if (txs == null) return out;
+        Set<String> seen = new java.util.LinkedHashSet<>();
+        for (Transaction t : txs) {
+            if (t == null || t.bank == null || !seen.add(t.bank)) continue;
+            out.add(t.bank);
+        }
+        return out;
+    }
+
+    /** Distinct (bank, account) pairs in first-seen order, skipping account-less movements. */
+    static List<BankAccount> distinctBankAccounts(List<Transaction> txs) {
+        List<BankAccount> out = new ArrayList<>();
+        if (txs == null) return out;
+        Set<BankAccount> seen = new java.util.LinkedHashSet<>();
+        for (Transaction t : txs) {
+            if (t == null || t.bank == null || t.account == null) continue;
+            BankAccount pair = new BankAccount(t.bank, t.account);
+            if (seen.add(pair)) out.add(pair);
+        }
+        return out;
+    }
+
+    /** Whether a movement belongs to a multi-bank/multi-account scope: it must match a
+     *  selected bank when any banks are selected, and a selected account when any accounts
+     *  are. Empty sets mean no narrowing on that axis. Shared by the reader and the export. */
+    static boolean inBankAccountScope(Transaction t, Set<String> banks, Set<String> accounts) {
+        if (t == null) return false;
+        if (banks != null && !banks.isEmpty() && !banks.contains(t.bank)) return false;
+        return accounts == null || accounts.isEmpty() || accounts.contains(t.account);
+    }
+
+    /** The header chip for a multi-bank or cross-bank account selection. */
+    private String scopeSummary() {
+        String banks = selectedBanks.isEmpty() ? null : getResources().getQuantityString(
+            R.plurals.history_n_banks, selectedBanks.size(), selectedBanks.size());
+        String accounts = selectedAccounts.isEmpty() ? null : getResources().getQuantityString(
+            R.plurals.history_n_accounts, selectedAccounts.size(), selectedAccounts.size());
+        if (banks != null && accounts != null) return banks + " · " + accounts;
+        return banks != null ? banks : accounts;
     }
 
     // ====================================================================
@@ -1157,7 +1292,8 @@ public final class HistoryActivity extends Activity {
     // ====================================================================
 
     /** Rebuilds the filter bar to mirror {@link #filter}: the movement-direction segment above the
-     *  date presets and a custom-range chip, plus a one-line summary when a custom range is active. */
+     *  date presets and a custom-range chip, then one scope row with the tag, bank and account
+     *  pickers, plus a one-line summary when a custom range is active. */
     private void rebuildFilterBar() {
         filterBar.removeAllViews();
         filterBar.addView(directionSegment());
@@ -1178,12 +1314,16 @@ public final class HistoryActivity extends Activity {
         dateLp.topMargin = dp(8);
         filterBar.addView(dateRow, dateLp);
 
-        LinearLayout tagRow = new LinearLayout(this);
-        tagRow.setOrientation(LinearLayout.HORIZONTAL);
-        addTagFilterChip(tagRow);
-        LinearLayout.LayoutParams tagLp = new LinearLayout.LayoutParams(-1, -2);
-        tagLp.topMargin = dp(8);
-        filterBar.addView(tagRow, tagLp);
+        // One scope row: the tag, bank and account pickers share the row width, so every
+        // filter stays one tap away without stacking three full-width rows.
+        LinearLayout scopeRow = new LinearLayout(this);
+        scopeRow.setOrientation(LinearLayout.HORIZONTAL);
+        addTagFilterChip(scopeRow);
+        addBankFilterChip(scopeRow);
+        addAccountFilterChip(scopeRow);
+        LinearLayout.LayoutParams scopeLp = new LinearLayout.LayoutParams(-1, -2);
+        scopeLp.topMargin = dp(8);
+        filterBar.addView(scopeRow, scopeLp);
 
         if (filter.rangePreset == RANGE_CUSTOM && (filter.from != null || filter.to != null)) {
             TextView summary = text(customRangeSummary(), 12, muted);
@@ -1194,7 +1334,8 @@ public final class HistoryActivity extends Activity {
     }
 
     /** One compact tag-filter action; the picker keeps the potentially long selection out of the
-     *  permanent filter bar while still showing how many exact tags narrow the list. */
+     *  permanent filter bar while still showing how many exact tags narrow the list. Shares its
+     *  row with the bank/account chips, so it takes a third of the width like its siblings. */
     private void addTagFilterChip(LinearLayout host) {
         String label = selectedTags.isEmpty()
             ? getString(R.string.history_filter_tags)
@@ -1202,13 +1343,220 @@ public final class HistoryActivity extends Activity {
         TextView chip = text(label, 12, selectedTags.isEmpty() ? fg : Color.WHITE, medium());
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
-        chip.setPadding(dp(12), dp(7), dp(12), dp(7));
+        chip.setAutoSizeTextTypeWithDefaults(android.widget.TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM);
+        chip.setPadding(dp(4), dp(7), dp(4), dp(7));
         chip.setBackground(freshRounded(selectedTags.isEmpty() ? chipBg : accent, 10));
         chip.setContentDescription(getString(R.string.history_filter_tags_accessibility, label));
         chip.setClickable(true);
         chip.setFocusable(true);
         chip.setOnClickListener(v -> tagFilterDialog());
-        host.addView(chip, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
+        lp.setMarginStart(dp(2));
+        lp.setMarginEnd(dp(2));
+        host.addView(chip, lp);
+    }
+
+    /** The bank scope chip: plain "Banks" with no selection, "Banks (N)" once narrowed. */
+    private void addBankFilterChip(LinearLayout host) {
+        String label = selectedBanks.isEmpty()
+            ? getString(R.string.history_filter_banks)
+            : getString(R.string.history_filter_banks_count, selectedBanks.size());
+        addScopeChip(host, label, !selectedBanks.isEmpty(), this::bankFilterDialog);
+    }
+
+    /** The account scope chip: plain "Accounts" with no selection, "Accounts (N)" once narrowed. */
+    private void addAccountFilterChip(LinearLayout host) {
+        String label = selectedAccounts.isEmpty()
+            ? getString(R.string.history_filter_accounts)
+            : getString(R.string.history_filter_accounts_count, selectedAccounts.size());
+        addScopeChip(host, label, !selectedAccounts.isEmpty(), this::accountFilterDialog);
+    }
+
+    /** One third of the scope row: a weighted chip sharing the row width with its siblings, so
+     *  all labels stay on-screen at any font scale. */
+    private void addScopeChip(LinearLayout host, String label, boolean active, Runnable action) {
+        TextView chip = text(label, 12, active ? Color.WHITE : fg, medium());
+        chip.setGravity(Gravity.CENTER);
+        chip.setSingleLine(true);
+        chip.setAutoSizeTextTypeWithDefaults(android.widget.TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM);
+        chip.setPadding(dp(4), dp(7), dp(4), dp(7));
+        chip.setBackground(freshRounded(active ? accent : chipBg, 10));
+        chip.setContentDescription(getString(R.string.history_filter_tags_accessibility, label));
+        chip.setClickable(true);
+        chip.setFocusable(true);
+        chip.setOnClickListener(v -> action.run());
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
+        lp.setMarginStart(dp(2));
+        lp.setMarginEnd(dp(2));
+        host.addView(chip, lp);
+    }
+
+    /** Lets the user narrow history to several banks at once. The choices derive from the whole
+     *  stored history (before the direction/date filters), so they stay stable while narrowing.
+     *  A selection the store no longer contains is dropped on open, so the scope self-heals
+     *  after deletions. The store read runs off the main thread: it decrypts the whole history,
+     *  and the dialog must open instantly even for large histories. */
+    private void bankFilterDialog() {
+        final LinkedHashSet<String> staged = new LinkedHashSet<>();
+        final String before = singleBank();
+        final boolean[] loaded = {false};
+
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(dp(20), dp(8), dp(20), 0);
+        wrap.addView(text(getString(R.string.history_stage_loading), 14, muted),
+            new LinearLayout.LayoutParams(-1, -2));
+
+        android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.history_filter_banks_title)
+            .setView(wrap)
+            .setPositiveButton(R.string.history_filter_apply, null)
+            .setNegativeButton(R.string.lock_cancel, null)
+            .setNeutralButton(R.string.history_filter_banks_clear, null)
+            .create();
+        dlg.setOnShowListener(v -> {
+            dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
+                if (!loaded[0]) return;
+                selectedBanks.clear();
+                selectedBanks.addAll(staged);
+                // An account selection only survives staying on its own single bank.
+                String after = singleBank();
+                if (after == null || !after.equals(before)) selectedAccounts.clear();
+                dlg.dismiss();
+                rebuildHeader();
+                render();
+            });
+            dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(button -> {
+                if (!loaded[0]) return;
+                selectedBanks.clear();
+                selectedAccounts.clear();
+                dlg.dismiss();
+                rebuildHeader();
+                render();
+            });
+        });
+        showDialog(dlg);
+        new Thread(() -> {
+            final List<String> choices = readHistoryBanks();
+            runOnUiThread(() -> {
+                if (!dlg.isShowing() || isDestroyed() || isFinishing()) return;
+                wrap.removeAllViews();
+                for (String selected : selectedBanks) {
+                    if (choices.contains(selected)) staged.add(selected);
+                }
+                if (choices.isEmpty()) {
+                    wrap.addView(text(getString(R.string.history_filter_banks_empty), 14, muted),
+                        new LinearLayout.LayoutParams(-1, -2));
+                } else {
+                    for (String choice : choices) {
+                        android.widget.CheckBox check = new android.widget.CheckBox(this);
+                        check.setText(BankRules.displayName(this, choice));
+                        check.setTextColor(fg);
+                        check.setTextSize(14);
+                        check.setChecked(staged.contains(choice));
+                        check.setOnCheckedChangeListener((button, checked) -> {
+                            if (checked) staged.add(choice);
+                            else staged.remove(choice);
+                        });
+                        wrap.addView(check, new LinearLayout.LayoutParams(-1, -2));
+                    }
+                }
+                loaded[0] = true;
+            });
+        }).start();
+    }
+
+    /** Lets the user narrow history to several accounts across any banks at once. An account
+     *  selection combines with the bank selection by AND; on its own it matches across banks.
+     *  Like the bank picker, the choices load off the main thread so the dialog opens at once. */
+    private void accountFilterDialog() {
+        final LinkedHashSet<String> staged = new LinkedHashSet<>();
+        final boolean[] loaded = {false};
+
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(dp(20), dp(8), dp(20), 0);
+        wrap.addView(text(getString(R.string.history_stage_loading), 14, muted),
+            new LinearLayout.LayoutParams(-1, -2));
+
+        android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.history_filter_accounts_title)
+            .setView(wrap)
+            .setPositiveButton(R.string.history_filter_apply, null)
+            .setNegativeButton(R.string.lock_cancel, null)
+            .setNeutralButton(R.string.history_filter_accounts_clear, null)
+            .create();
+        dlg.setOnShowListener(v -> {
+            dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
+                if (!loaded[0]) return;
+                selectedAccounts.clear();
+                selectedAccounts.addAll(staged);
+                dlg.dismiss();
+                rebuildHeader();
+                render();
+            });
+            dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(button -> {
+                if (!loaded[0]) return;
+                selectedAccounts.clear();
+                dlg.dismiss();
+                rebuildHeader();
+                render();
+            });
+        });
+        showDialog(dlg);
+        new Thread(() -> {
+            final List<BankAccount> choices = readHistoryBankAccounts();
+            runOnUiThread(() -> {
+                if (!dlg.isShowing() || isDestroyed() || isFinishing()) return;
+                wrap.removeAllViews();
+                for (String selected : selectedAccounts) {
+                    for (BankAccount choice : choices) {
+                        if (choice.account.equals(selected)) {
+                            staged.add(choice.account);
+                            break;
+                        }
+                    }
+                }
+                if (choices.isEmpty()) {
+                    wrap.addView(text(getString(R.string.history_filter_accounts_empty), 14, muted),
+                        new LinearLayout.LayoutParams(-1, -2));
+                } else {
+                    for (BankAccount choice : choices) {
+                        android.widget.CheckBox check = new android.widget.CheckBox(this);
+                        check.setText(BankRules.displayName(this, choice.bank) + " — "
+                            + digits(choice.account));
+                        check.setTextColor(fg);
+                        check.setTextSize(14);
+                        check.setChecked(staged.contains(choice.account));
+                        check.setOnCheckedChangeListener((button, checked) -> {
+                            if (checked) staged.add(choice.account);
+                            else staged.remove(choice.account);
+                        });
+                        wrap.addView(check, new LinearLayout.LayoutParams(-1, -2));
+                    }
+                }
+                loaded[0] = true;
+            });
+        }).start();
+    }
+
+    /** Distinct canonical banks in stored history, sorted by localized display name. */
+    private List<String> readHistoryBanks() {
+        List<String> banks = distinctBanks(BalanceData.readTransactions(this));
+        Collections.sort(banks, (a, b) -> BankRules.displayName(this, a)
+            .compareToIgnoreCase(BankRules.displayName(this, b)));
+        return banks;
+    }
+
+    /** Distinct (bank, account) pairs in stored history, sorted by bank display name then account. */
+    private List<BankAccount> readHistoryBankAccounts() {
+        List<BankAccount> pairs = distinctBankAccounts(BalanceData.readTransactions(this));
+        Collections.sort(pairs, (x, y) -> {
+            int byBank = BankRules.displayName(this, x.bank)
+                .compareToIgnoreCase(BankRules.displayName(this, y.bank));
+            return byBank != 0 ? byBank : x.account.compareTo(y.account);
+        });
+        return pairs;
     }
 
     /** Rebuilds the per-bank account chips: "All accounts" plus one chip per account the bank has
@@ -1759,6 +2107,8 @@ public final class HistoryActivity extends Activity {
     private static final String KEY_FILTER_TO_MONTH = "filter_to_month";
     private static final String KEY_FILTER_TO_DAY = "filter_to_day";
     private static final String KEY_FILTER_TAGS = "filter_tags";
+    private static final String KEY_BANK_FILTERS = "bank_filters";
+    private static final String KEY_ACCOUNT_FILTERS = "account_filters";
     private static final String KEY_SEARCH_QUERY = "search_query";
     private static final String KEY_SEARCH_EXPANDED_FOR = "search_expanded_for";
     private static final String KEY_PRE_SEARCH_YEARS = "pre_search_years";
@@ -1902,6 +2252,9 @@ public final class HistoryActivity extends Activity {
         outState.putInt(KEY_FILTER_DIRECTION, filter.direction);
         outState.putInt(KEY_FILTER_RANGE, filter.rangePreset);
         outState.putStringArrayList(KEY_FILTER_TAGS, new java.util.ArrayList<>(selectedTags));
+        outState.putStringArrayList(KEY_BANK_FILTERS, new java.util.ArrayList<>(selectedBanks));
+        outState.putStringArrayList(KEY_ACCOUNT_FILTERS,
+            new java.util.ArrayList<>(selectedAccounts));
         outState.putString(KEY_SEARCH_QUERY, searchQuery == null ? "" : searchQuery);
         outState.putString(KEY_SEARCH_EXPANDED_FOR, searchExpandedFor);
         putStringSet(outState, KEY_PRE_SEARCH_YEARS, preSearchYears);
@@ -2186,8 +2539,8 @@ public final class HistoryActivity extends Activity {
         final int uiGen = historyUiGen;
         final Context app = getApplicationContext();
         final Filter f = filter;
-        final String bank = bankFilter;
-        final String acct = accountFilter;
+        final Set<String> banks = new java.util.LinkedHashSet<>(selectedBanks);
+        final Set<String> accounts = new java.util.LinkedHashSet<>(selectedAccounts);
         final boolean iran = iranCalendar;
         final String query = searchQuery == null ? "" : searchQuery.trim();
         final List<String> tagSelection = new ArrayList<>(selectedTags);
@@ -2230,7 +2583,7 @@ public final class HistoryActivity extends Activity {
                 // it falls through to the fresh pass instead of showing an open empty day.
                 // Re-warm on a hit so a second open right behind this one usually finds
                 // a ready result too instead of waiting for the next dashboard resume.
-                result = HistoryWarmup.take(bank, acct, f, query, tagSelection, iran,
+                result = HistoryWarmup.take(banks, accounts, f, query, tagSelection, iran,
                     app, true);
                 if (result != null
                         && !result.requestedDayRows.keySet().containsAll(expandedSnapshot)) {
@@ -2250,7 +2603,7 @@ public final class HistoryActivity extends Activity {
                     // snapshot. This used to run a throwaway discovery pass and then repeat the
                     // entire decrypt for the requested days, so every search paid double.
                     HistoryReader.Request planRequest = new HistoryReader.Request(
-                        iran, HistoryReader.DEFAULT_PAGE_SIZE, bank, acct, f, query,
+                        iran, HistoryReader.DEFAULT_PAGE_SIZE, banks, accounts, f, query,
                         tagSelection, Collections.emptySet(), 0,
                         HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
                     result = HistoryReader.summaryWithResiduals(
@@ -2527,10 +2880,12 @@ public final class HistoryActivity extends Activity {
         } else if (filter.isActive() || !selectedTags.isEmpty()) {
             // A filter may hide every transaction even though history exists.
             empty = getString(R.string.history_empty_filtered);
-        } else if (accountFilter != null) {
+        } else if (singleBank() != null && singleAccount() != null) {
             empty = getString(R.string.history_empty_account);
-        } else if (bankFilter != null) {
-            empty = getString(R.string.history_empty_bank, BankRules.displayName(this, bankFilter));
+        } else if (singleBank() != null && selectedAccounts.isEmpty()) {
+            empty = getString(R.string.history_empty_bank, BankRules.displayName(this, singleBank()));
+        } else if (!selectedBanks.isEmpty() || !selectedAccounts.isEmpty()) {
+            empty = getString(R.string.history_empty_filtered);
         } else {
             empty = getString(R.string.history_empty);
         }
@@ -3380,7 +3735,7 @@ public final class HistoryActivity extends Activity {
 
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
-        boolean perBank = bankFilter != null;
+        boolean perBank = singleBank() != null;
         if (!perBank) {
             col.addView(text(BankRules.displayName(this, r.bank), 13, warnFg),
                 new LinearLayout.LayoutParams(-2, -2));
@@ -3484,7 +3839,7 @@ public final class HistoryActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPaddingRelative(dp(4), dp(3), dp(4), dp(3));
 
-        boolean perBank = bankFilter != null;
+        boolean perBank = singleBank() != null;
         if (!perBank) {
             View badge = bankBadge(t.bank);
             row.addView(badge, new LinearLayout.LayoutParams(dp(30), dp(30)));
