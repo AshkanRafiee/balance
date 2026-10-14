@@ -1482,16 +1482,23 @@ public final class HistoryActivity extends Activity {
         host.addView(chip, lp);
     }
 
-    /** Keeps a tall picker list inside its dialog: once laid out beyond the cap the list
-     *  scrolls instead of pushing the dialog off the screen. Short lists keep wrap height. */
-    private void capListHeight(final ScrollView scroll) {
-        scroll.post(() -> {
-            int cap = dp(300);
-            if (scroll.getHeight() > cap && scroll.getLayoutParams() != null) {
-                scroll.getLayoutParams().height = cap;
-                scroll.requestLayout();
+    /** A picker list that never pushes its dialog off the screen: short content keeps wrap
+     *  height, tall content is capped at measure time and scrolls. Capping in
+     *  {@code onMeasure} settles the dialog size in its first pass, so opening a picker
+     *  never shows a tall dialog that then snaps smaller. */
+    private ScrollView pickerScrollView() {
+        final int cap = dp(300);
+        return new ScrollView(this) {
+            @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                int mode = View.MeasureSpec.getMode(heightMeasureSpec);
+                int size = View.MeasureSpec.getSize(heightMeasureSpec);
+                if (mode == View.MeasureSpec.UNSPECIFIED || size > cap) {
+                    heightMeasureSpec = View.MeasureSpec.makeMeasureSpec(cap,
+                        View.MeasureSpec.AT_MOST);
+                }
+                super.onMeasure(widthMeasureSpec, heightMeasureSpec);
             }
-        });
+        };
     }
 
     /** Lets the user narrow history to several banks at once. The choices derive from the whole
@@ -1511,7 +1518,7 @@ public final class HistoryActivity extends Activity {
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setPadding(dp(20), dp(8), dp(20), 0);
-        ScrollView scroll = new ScrollView(this);
+        ScrollView scroll = pickerScrollView();
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(list, new FrameLayout.LayoutParams(-1, -2));
@@ -1560,7 +1567,7 @@ public final class HistoryActivity extends Activity {
         if (cached != null) {
             // Warm: full content before the window shows, so the dialog measures once and never
             // jumps.
-            ingestBankPairs(cached, staged, accountsByBank, list, scroll);
+            ingestBankPairs(cached, staged, accountsByBank, list);
             loaded[0] = true;
         } else {
             list.addView(text(getString(R.string.history_stage_loading), 14, muted),
@@ -1580,7 +1587,7 @@ public final class HistoryActivity extends Activity {
                 if (stored != null) scopePairsCache = pairs;
                 runOnUiThread(() -> {
                     if (!dlg.isShowing() || isDestroyed() || isFinishing()) return;
-                    ingestBankPairs(pairs, staged, accountsByBank, list, scroll);
+                    ingestBankPairs(pairs, staged, accountsByBank, list);
                     loaded[0] = true;
                 });
             }).start();
@@ -1590,8 +1597,7 @@ public final class HistoryActivity extends Activity {
     /** Fills the bank dialog from (bank, account) pairs in display order: the bank checkboxes
      *  plus the membership map the Apply step prunes against. */
     private void ingestBankPairs(List<BankAccount> pairs, Set<String> staged,
-            java.util.Map<String, Set<String>> accountsByBank, LinearLayout list,
-            ScrollView scroll) {
+            java.util.Map<String, Set<String>> accountsByBank, LinearLayout list) {
         list.removeAllViews();
         final LinkedHashSet<String> bankOrder = new LinkedHashSet<>();
         accountsByBank.clear();
@@ -1626,7 +1632,6 @@ public final class HistoryActivity extends Activity {
                 list.addView(check, new LinearLayout.LayoutParams(-1, -2));
             }
         }
-        capListHeight(scroll);
     }
 
     /** Lets the user narrow history to several accounts across any banks at once. An account
@@ -1640,7 +1645,7 @@ public final class HistoryActivity extends Activity {
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setPadding(dp(20), dp(8), dp(20), 0);
-        ScrollView scroll = new ScrollView(this);
+        ScrollView scroll = pickerScrollView();
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(list, new FrameLayout.LayoutParams(-1, -2));
@@ -1685,7 +1690,7 @@ public final class HistoryActivity extends Activity {
         });
         List<BankAccount> cached = scopePairsCache;
         if (cached != null) {
-            ingestAccountPairs(cached, staged, loadedChoices, list, scroll);
+            ingestAccountPairs(cached, staged, loadedChoices, list);
             loaded[0] = true;
         } else {
             list.addView(text(getString(R.string.history_stage_loading), 14, muted),
@@ -1705,7 +1710,7 @@ public final class HistoryActivity extends Activity {
                 if (stored != null) scopePairsCache = pairs;
                 runOnUiThread(() -> {
                     if (!dlg.isShowing() || isDestroyed() || isFinishing()) return;
-                    ingestAccountPairs(pairs, staged, loadedChoices, list, scroll);
+                    ingestAccountPairs(pairs, staged, loadedChoices, list);
                     loaded[0] = true;
                 });
             }).start();
@@ -1715,7 +1720,7 @@ public final class HistoryActivity extends Activity {
     /** Fills the account dialog from (bank, account) pairs: only the selected banks' accounts,
      *  or every account when no bank is picked. */
     private void ingestAccountPairs(List<BankAccount> pairs, Set<String> staged,
-            List<BankAccount> loadedChoices, LinearLayout list, ScrollView scroll) {
+            List<BankAccount> loadedChoices, LinearLayout list) {
         list.removeAllViews();
         loadedChoices.clear();
         for (BankAccount pair : pairs) {
@@ -1752,7 +1757,6 @@ public final class HistoryActivity extends Activity {
                 list.addView(check, new LinearLayout.LayoutParams(-1, -2));
             }
         }
-        capListHeight(scroll);
     }
 
     /** Stored transactions' distinct (bank, account) pairs, sorted by bank display name. */
