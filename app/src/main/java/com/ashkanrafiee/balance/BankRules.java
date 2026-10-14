@@ -136,6 +136,41 @@ final class BankRules {
         {"Bankino", "20004860", "J"}
     };
 
+    /** A bank authorization message is evidence about a possible payment, not a movement. The
+     * parser is deliberately shape-based: a known sender, an action, a separately stated amount,
+     * an explicit one-time-code marker and a clock are all required before any merchant text is
+     * exposed to history. This covers the common Iranian layouts used by Pasargad, Blu and Tejarat
+     * while leaving login/password-only messages out. */
+    private static final Pattern AUTH_AMOUNT = Pattern.compile(
+        "(?:مبلغ)\\s*[:：]?\\s*([0-9][0-9,]*)");
+    private static final Pattern AUTH_CODE = Pattern.compile(
+        "(?<![0-9])([0-9]{4,8})(?![0-9])");
+    private static final Pattern AUTH_CLOCK = Pattern.compile(
+        "(?<![0-9])([0-9]{1,2}):([0-9]{2})(?::([0-9]{2}))?(?![0-9])");
+    private static final Pattern AUTH_ACTION = Pattern.compile(
+        "(?:^|\\s)(?:خرید|پرداخت)(?:\\s|$)");
+    private static final Pattern AUTH_MARKER = Pattern.compile(
+        "(?:رمز|پویا|otp|one[- ]?time|کد\\s*(?:تایید|تأیید))",
+        Pattern.CASE_INSENSITIVE);
+
+    /** Structured authorization evidence. It intentionally contains no OTP value and no account;
+     * both are irrelevant after a completed movement has been matched. */
+    static final class Authorization {
+        final String bank;
+        final String merchant;
+        final long amount;
+        final int hour;
+        final int minute;
+
+        Authorization(String bank, String merchant, long amount, int hour, int minute) {
+            this.bank = bank;
+            this.merchant = merchant;
+            this.amount = amount;
+            this.hour = hour;
+            this.minute = minute;
+        }
+    }
+
     /** Version fingerprint of the rule tables, used to detect bank-list changes and force a full rescan.
      *  Assigned in a later static block once {@link #ACCOUNT_RULES} and {@link #REASON_RULES} are built,
      *  so account- and reason-rule changes also force the rebuild (their absence left existing installs
@@ -289,6 +324,11 @@ final class BankRules {
 
     private static int rulesVersion() {
         int v = 0;
+        v = v * 31 + AUTH_AMOUNT.pattern().hashCode();
+        v = v * 31 + AUTH_CODE.pattern().hashCode();
+        v = v * 31 + AUTH_CLOCK.pattern().hashCode();
+        v = v * 31 + AUTH_ACTION.pattern().hashCode();
+        v = v * 31 + AUTH_MARKER.pattern().hashCode();
         for (String[] rule : RULES) for (String alias : rule[1].split("\\|")) v = v * 31 + alias.hashCode();
         for (String[] rule : OFFICIAL_EXTRA_RULES) for (String alias : rule[1].split("\\|")) v = v * 31 + alias.hashCode();
         List<String> accounts = new ArrayList<>();
@@ -337,6 +377,84 @@ final class BankRules {
         }
         Alias e = EXACT.get(a);
         return e == null ? null : e.bank;
+    }
+
+    /** Parses a completed-payment authorization message without turning it into a balance or
+     * transaction. The returned merchant is the source's text, normalized only for line spacing;
+     * the code itself is checked and then discarded. */
+    static Authorization extractAuthorization(String bank, String body) {
+        if (bank == null || body == null || body.isEmpty()) return null;
+        String normalized = Digits.ascii(body).replace("\r\n", "\n").replace('\r', '\n');
+        String folded = BalanceData.normalizeLetters(normalized);
+        String[] rawLines = normalized.split("\n", -1);
+        String[] lines = folded.split("\n", -1);
+        int amountIndex = -1;
+        long amount = 0;
+        for (int i = 0; i < lines.length; i++) {
+            Matcher amountMatcher = AUTH_AMOUNT.matcher(cleanAuthorizationLine(lines[i]));
+            if (!amountMatcher.find()) continue;
+            try {
+                amount = Long.parseLong(amountMatcher.group(1).replace(",", ""));
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+            if (amount <= 0) return null;
+            amountIndex = i;
+            break;
+        }
+        if (amountIndex < 1) return null;
+
+        int actionIndex = -1;
+        for (int i = 0; i < amountIndex; i++) {
+            if (AUTH_ACTION.matcher(cleanAuthorizationLine(lines[i])).find()) actionIndex = i;
+        }
+        if (actionIndex < 0) return null;
+
+        String merchant = null;
+        for (int i = actionIndex + 1; i < amountIndex; i++) {
+            String candidate = cleanAuthorizationLine(rawLines[i]);
+            String matchCandidate = cleanAuthorizationLine(lines[i]);
+            if (candidate.isEmpty() || AUTH_MARKER.matcher(matchCandidate).find()) continue;
+            if (candidate.matches("[0-9 .,:/\\-]+")) continue;
+            merchant = candidate;
+        }
+        if (merchant == null || merchant.isEmpty() || merchant.length() > 120) return null;
+
+        int codeIndex = -1;
+        for (int i = amountIndex + 1; i < lines.length; i++) {
+            String line = cleanAuthorizationLine(lines[i]);
+            if (!AUTH_MARKER.matcher(line).find()) continue;
+            Matcher code = AUTH_CODE.matcher(line);
+            if (code.find()) {
+                codeIndex = i;
+                break;
+            }
+        }
+        if (codeIndex < 0) return null;
+
+        int hour = -1;
+        int minute = -1;
+        for (int i = codeIndex + 1; i < lines.length; i++) {
+            Matcher clock = AUTH_CLOCK.matcher(cleanAuthorizationLine(lines[i]));
+            while (clock.find()) {
+                int h = Integer.parseInt(clock.group(1));
+                int m = Integer.parseInt(clock.group(2));
+                if (h <= 23 && m <= 59) {
+                    hour = h;
+                    minute = m;
+                    break;
+                }
+            }
+            if (hour >= 0) break;
+        }
+        if (hour < 0) return null;
+        return new Authorization(bank, merchant, amount, hour, minute);
+    }
+
+    private static String cleanAuthorizationLine(String line) {
+        if (line == null) return "";
+        return line.replaceAll("[\\u202A-\\u202E\\u200E\\u200F]", "")
+            .trim().replaceAll("\\s+", " ");
     }
     static String normalize(String raw) {
         StringBuilder out = new StringBuilder();

@@ -55,8 +55,9 @@ final class BackupV2Restore {
     private static final int REASONS = 4;
     private static final int CHANNELS = 5;
     private static final int TAGS = 6;
+    private static final int MERCHANTS = 7;
 
-    private static final int SOURCE = 7;
+    private static final int SOURCE = 8;
 
     private static final int SECTION_SCHEMA = 1;
     private static final int SECTION_BALANCES = 1 << 1;
@@ -462,7 +463,7 @@ final class BackupV2Restore {
                     if ((seen & bit) != 0) throw invalid("duplicate legacy payload format");
                     seen |= bit;
                     long value = exactLong(json);
-                    if (value < 1 || value > 7) throw invalid("unsupported legacy payload format");
+                    if (value < 1 || value > 8) throw invalid("unsupported legacy payload format");
                     format = (int) value;
                     break;
                 case "balances":
@@ -495,6 +496,12 @@ final class BackupV2Restore {
                     seen |= bit;
                     parseLegacyTextMap(json, stage, CHANNELS);
                     break;
+                case "txMerchants":
+                    bit = 1 << 7;
+                    if ((seen & bit) != 0) throw invalid("duplicate legacy merchants");
+                    seen |= bit;
+                    parseLegacyTextMap(json, stage, MERCHANTS);
+                    break;
                 case "txTags":
                     bit = 1 << 6;
                     if ((seen & bit) != 0) throw invalid("duplicate legacy tags");
@@ -502,7 +509,7 @@ final class BackupV2Restore {
                     parseLegacyTags(json, stage);
                     break;
                 case "commitments":
-                    bit = 1 << 7;
+                    bit = 1 << 8;
                     if ((seen & bit) != 0) throw invalid("duplicate legacy commitments");
                     seen |= bit;
                     parseLegacyCommitments(json, stage);
@@ -816,13 +823,16 @@ final class BackupV2Restore {
             else if ("reasons".equals(kind)) { bit = 1 << 1; stageKind = REASONS; }
             else if ("channels".equals(kind)) { bit = 1 << 2; stageKind = CHANNELS; }
             else if ("tags".equals(kind)) { bit = 1 << 3; stageKind = TAGS; }
+            else if ("merchants".equals(kind)) { bit = 1 << 4; stageKind = MERCHANTS; }
             else throw invalid("unknown metadata kind");
             if ((seen & bit) != 0) throw invalid("duplicate metadata kind");
             seen |= bit;
             parseMetadataRows(json, stage, stageKind, stageKind == TAGS);
         }
         json.endObject();
-        if (seen != 0x0f) throw invalid("incomplete metadata");
+        // Merchant metadata was added after framed schema 2 was already deployed. Older valid
+        // backups omit it; absence must leave local merchant rows untouched during restore.
+        if ((seen & 0x0f) != 0x0f) throw invalid("incomplete metadata");
     }
 
     private static void parseMetadataRows(JsonReader json, InputStage stage, int kind,
@@ -1129,6 +1139,8 @@ final class BackupV2Restore {
             mergeMetadata(context, stage, CHANNELS, MetadataStore.CHANNELS, false, result);
         if (selection.contains(BackupManager.Section.TAGS))
             mergeMetadata(context, stage, TAGS, MetadataStore.TAGS, true, result);
+        if (selection.contains(BackupManager.Section.MERCHANTS))
+            mergeMetadata(context, stage, MERCHANTS, MetadataStore.MERCHANTS, false, result);
 
         if (selection.contains(BackupManager.Section.COMMITMENTS)) {
             mergeCommitments(context, stage, result, includeDeleted);

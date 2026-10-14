@@ -831,6 +831,8 @@ public class BackupRestoreTest {
         Transaction t = new Transaction("Tejarat", null, T + 100, 200_000L, "sig-A", "content-A");
         BalanceData.writeTransactions(ctx, Arrays.asList(t));
         BalanceData.setNote(ctx, t, "birthday gift from father");
+        BalanceData.mergeMerchants(ctx, java.util.Collections.singletonMap(
+            BalanceData.noteKey(t), "merchant from authorization"));
         Uri u = uri("notes-roundtrip.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
@@ -840,6 +842,8 @@ public class BackupRestoreTest {
         List<Transaction> out = BalanceData.readTransactions(ctx);
         assertEquals(1, out.size());
         assertEquals("birthday gift from father", BalanceData.getNote(ctx, out.get(0)));
+        assertEquals("merchant from authorization",
+            BalanceData.readMerchants(ctx).get(BalanceData.noteKey(out.get(0))));
     }
 
     @Test public void restore_backupWithoutNotes_preservesLocalNotes() throws Exception {
@@ -848,6 +852,8 @@ public class BackupRestoreTest {
         Transaction t = new Transaction("Tejarat", null, T + 100, 200_000L, "sig-A", "content-A");
         BalanceData.writeTransactions(ctx, Arrays.asList(t));
         BalanceData.setNote(ctx, t, "my private note");
+        BalanceData.mergeMerchants(ctx, java.util.Collections.singletonMap(
+            BalanceData.noteKey(t), "existing merchant"));
 
         String legacyPayload = "{\"payloadFormat\":2,\"balances\":{},"
             + "\"transactions\":{\"transactions\":[{\"bank\":\"Tejarat\",\"date\":" + (T + 100)
@@ -858,6 +864,8 @@ public class BackupRestoreTest {
         BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
         assertEquals("my private note",
             BalanceData.getNote(ctx, txByContent(BalanceData.readTransactions(ctx), "content-A")));
+        assertEquals("existing merchant", BalanceData.readMerchants(ctx).get(
+            BalanceData.noteKey(txByContent(BalanceData.readTransactions(ctx), "content-A"))));
     }
 
     @Test public void restore_notes_mergeUnionWithLocalWins() throws Exception {

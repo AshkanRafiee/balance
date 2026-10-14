@@ -77,13 +77,13 @@ public class HistoryCsvExportTest {
         assertEquals(1_253 + 1, rows.length);
         assertEquals(1_251, staged[0]);
         assertEquals("-7", parse(rows[1]).get(5));
-        assertEquals(CsvExport.KIND_UNACCOUNTED, parse(rows[1]).get(11));
+        assertEquals(CsvExport.KIND_UNACCOUNTED, parse(rows[1]).get(12));
         assertEquals("9", parse(rows[2]).get(5));
-        assertEquals(CsvExport.KIND_UNACCOUNTED, parse(rows[2]).get(11));
+        assertEquals(CsvExport.KIND_UNACCOUNTED, parse(rows[2]).get(12));
         assertEquals("0", parse(rows[3]).get(5));
-        assertEquals(CsvExport.KIND_MOVEMENT, parse(rows[3]).get(11));
+        assertEquals(CsvExport.KIND_MOVEMENT, parse(rows[3]).get(12));
         assertEquals("2500", parse(rows[rows.length - 1]).get(5));
-        assertEquals(CsvExport.KIND_MOVEMENT, parse(rows[rows.length - 1]).get(11));
+        assertEquals(CsvExport.KIND_MOVEMENT, parse(rows[rows.length - 1]).get(12));
         assertTemporaryFilesRemoved();
     }
 
@@ -138,7 +138,7 @@ public class HistoryCsvExportTest {
             output.toString());
         String[] rows = output.toString().split("\n", -1);
         assertEquals("10", parse(rows[1]).get(5));
-        assertEquals(CsvExport.KIND_UNACCOUNTED, parse(rows[2]).get(11));
+        assertEquals(CsvExport.KIND_UNACCOUNTED, parse(rows[2]).get(12));
         assertEquals("20", parse(rows[3]).get(5));
         assertEquals("21", parse(rows[4]).get(5));
         assertEquals("30", parse(rows[5]).get(5));
@@ -211,7 +211,7 @@ public class HistoryCsvExportTest {
             output.toString());
         String[] rows = output.toString().split("\n", -1);
         assertEquals("10", parse(rows[1]).get(5));
-        assertEquals(CsvExport.KIND_UNACCOUNTED, parse(rows[2]).get(11));
+        assertEquals(CsvExport.KIND_UNACCOUNTED, parse(rows[2]).get(12));
         assertEquals("20", parse(rows[3]).get(5));
         assertEquals("21", parse(rows[4]).get(5));
         assertEquals("30", parse(rows[5]).get(5));

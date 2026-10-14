@@ -65,6 +65,7 @@ public class BackupV2Test {
         BalanceData.setNote(context, transaction, largeNote);
         BalanceData.mergeReasons(context, Collections.singletonMap(key, "bank reason"));
         BalanceData.mergeChannels(context, Collections.singletonMap(key, "mobile channel"));
+        BalanceData.mergeMerchants(context, Collections.singletonMap(key, "merchant from authorization"));
         BalanceData.setTags(context, transaction, Arrays.asList("first tag", largeTag));
 
         List<Long> paid = Arrays.asList(T + DAY, T + 2 * DAY);
@@ -103,6 +104,7 @@ public class BackupV2Test {
         assertEquals(largeNote, BalanceData.getNote(context, restoredTransaction));
         assertEquals("bank reason", BalanceData.readReasons(context).get(key));
         assertEquals("mobile channel", BalanceData.readChannels(context).get(key));
+        assertEquals("merchant from authorization", BalanceData.readMerchants(context).get(key));
         assertEquals(Arrays.asList("first tag", largeTag),
             BalanceData.getTags(context, restoredTransaction));
 
@@ -274,6 +276,8 @@ public class BackupV2Test {
         Transaction transaction = new Transaction("Mellat", T + 1, -1L, "selection-sig");
         BalanceData.writeTransactions(context, Collections.singletonList(transaction));
         BalanceData.setNote(context, transaction, "selection-note");
+        BalanceData.mergeMerchants(context, Collections.singletonMap(
+            BalanceData.noteKey(transaction), "selection-merchant"));
         Commitment commitment = Commitment.create("selection", -100L, Commitment.ONCE,
             Commitment.startOfDay(T), null, false, 0);
         BalanceData.writeCommitments(context, Collections.singletonList(commitment));
@@ -288,13 +292,17 @@ public class BackupV2Test {
         assertTrue("unselected transactions must stay untouched",
             BalanceData.readTransactions(context).isEmpty());
         assertNull(BalanceData.getNote(context, transaction));
+        assertNull(BalanceData.readMerchants(context).get(BalanceData.noteKey(transaction)));
         assertTrue(BalanceData.readCommitments(context).isEmpty());
 
         BackupManager.restore(context, Uri.fromFile(backup), PASSWORD, null,
             java.util.EnumSet.of(BackupManager.Section.TRANSACTIONS,
-                BackupManager.Section.NOTES, BackupManager.Section.COMMITMENTS));
+                BackupManager.Section.NOTES, BackupManager.Section.MERCHANTS,
+                BackupManager.Section.COMMITMENTS));
         assertEquals(1, BalanceData.readTransactions(context).size());
         assertEquals("selection-note", BalanceData.getNote(context, transaction));
+        assertEquals("selection-merchant", BalanceData.readMerchants(context).get(
+            BalanceData.noteKey(transaction)));
         assertEquals(1, BalanceData.readCommitments(context).size());
     }
 

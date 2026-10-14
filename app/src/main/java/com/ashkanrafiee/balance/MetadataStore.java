@@ -51,6 +51,9 @@ final class MetadataStore {
     static final int REASONS = 2;
     static final int CHANNELS = 3;
     static final int TAGS = 4;
+    /** Merchant text read from a payment-authorization SMS and attached only after a settled
+     * transaction match. It is sourced metadata, never a user note. */
+    static final int MERCHANTS = 5;
     private static final int ALL = 0;
 
     static final String DB_NAME = "balance_metadata.db";
@@ -58,7 +61,7 @@ final class MetadataStore {
     static final int MAX_PAGE_SIZE = 1_000;
     private static final int DEFAULT_PAGE_SIZE = 256;
     private static final int MAX_KEY_LENGTH = 1_024;
-    private static final int DB_VERSION = 1;
+    private static final int DB_VERSION = 2;
     static final String TABLE = "metadata";
     private static final String META = "store_meta";
     private static final String OWNER = "owner";
@@ -286,6 +289,10 @@ final class MetadataStore {
         return readText(context, CHANNELS);
     }
 
+    static Map<String, String> readMerchants(Context context) throws Exception {
+        return readText(context, MERCHANTS);
+    }
+
     static boolean writeNotes(Context context, Map<String, String> values) throws Exception {
         return replaceText(context, NOTES, values);
     }
@@ -296,6 +303,10 @@ final class MetadataStore {
 
     static boolean writeChannels(Context context, Map<String, String> values) throws Exception {
         return replaceText(context, CHANNELS, values);
+    }
+
+    static boolean writeMerchants(Context context, Map<String, String> values) throws Exception {
+        return replaceText(context, MERCHANTS, values);
     }
 
     /** Compatibility read; the returned map owns fresh, mutable tag lists. */
@@ -431,6 +442,10 @@ final class MetadataStore {
         return mergeText(context, CHANNELS, values);
     }
 
+    static boolean mergeMerchants(Context context, Map<String, String> values) throws Exception {
+        return mergeText(context, MERCHANTS, values);
+    }
+
     static boolean mergeTextEntry(Context context, int kind, String key, String value)
             throws Exception {
         requireTextKind(kind);
@@ -510,7 +525,7 @@ final class MetadataStore {
                 requireKey(from);
                 requireKey(to);
                 if (from.equals(to)) continue;
-                for (int kind = NOTES; kind <= TAGS; kind++) {
+                for (int kind = NOTES; kind <= MERCHANTS; kind++) {
                     Row source = s.find(kind, from);
                     if (source == null) continue;
                     Row destination = s.find(kind, to);
@@ -584,10 +599,12 @@ final class MetadataStore {
                         db.delete(TABLE, null, null);
                         db.delete(META, null, null);
                     } else {
-                        db.delete(TABLE, "kind IN (?,?)",
-                            new String[]{Integer.toString(REASONS), Integer.toString(CHANNELS)});
+                        db.delete(TABLE, "kind IN (?,?,?)",
+                            new String[]{Integer.toString(REASONS), Integer.toString(CHANNELS),
+                                Integer.toString(MERCHANTS)});
                         putMeta(db, migrationKey(REASONS), "absent");
                         putMeta(db, migrationKey(CHANNELS), "absent");
+                        putMeta(db, migrationKey(MERCHANTS), "absent");
                         putMeta(db, REVISION, UUID.randomUUID().toString());
                     }
                     db.setTransactionSuccessful();
@@ -943,11 +960,12 @@ final class MetadataStore {
     }
 
     private static void requireTextKind(int kind) {
-        if (kind < NOTES || kind > CHANNELS) throw new IllegalArgumentException("not a text kind");
+        if (kind < NOTES || kind > MERCHANTS || kind == TAGS)
+            throw new IllegalArgumentException("not a text kind");
     }
 
     private static void requireKindOrAll(int kind) {
-        if (kind < ALL || kind > TAGS) throw new IllegalArgumentException("invalid metadata kind");
+        if (kind < ALL || kind > MERCHANTS) throw new IllegalArgumentException("invalid metadata kind");
     }
 
     private static void requirePageSize(int limit) {
@@ -1005,15 +1023,27 @@ final class MetadataStore {
 
         @Override public void onCreate(SQLiteDatabase db) {
             db.execSQL("CREATE TABLE " + TABLE + " (id INTEGER PRIMARY KEY AUTOINCREMENT,"
-                + " kind INTEGER NOT NULL CHECK(kind BETWEEN 1 AND 4),"
+                + " kind INTEGER NOT NULL CHECK(kind BETWEEN 1 AND 5),"
                 + " lookup TEXT NOT NULL UNIQUE, payload TEXT NOT NULL)");
             db.execSQL("CREATE INDEX metadata_kind_order ON " + TABLE + "(kind, id)");
             db.execSQL("CREATE TABLE " + META + " (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
         }
 
         @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-            // Future schema changes must migrate rows, never drop user-created notes or tags.
-            throw new IllegalStateException("unsupported metadata schema upgrade");
+            if (oldVersion < 2) {
+                // SQLite cannot alter the old CHECK constraint in place. Copy every encrypted row
+                // before replacing only the table definition; the row payloads, lookup indexes and
+                // metadata state are intentionally preserved byte-for-byte.
+                db.execSQL("CREATE TABLE metadata_new (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    + " kind INTEGER NOT NULL CHECK(kind BETWEEN 1 AND 5),"
+                    + " lookup TEXT NOT NULL UNIQUE, payload TEXT NOT NULL)");
+                db.execSQL("INSERT INTO metadata_new(id,kind,lookup,payload)"
+                    + " SELECT id,kind,lookup,payload FROM " + TABLE);
+                db.execSQL("DROP TABLE " + TABLE);
+                db.execSQL("ALTER TABLE metadata_new RENAME TO " + TABLE);
+                db.execSQL("CREATE INDEX metadata_kind_order ON " + TABLE + "(kind, id)");
+            }
+            if (newVersion > 2) throw new IllegalStateException("unsupported metadata schema upgrade");
         }
     }
 }

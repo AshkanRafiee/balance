@@ -844,4 +844,29 @@ public class BankRulesTest {
         assertTrue("one unparsable message must not cost seconds",
                 System.nanoTime() - started < 5_000_000_000L);
     }
+
+    // ---- payment authorization merchant evidence ------------------------------------------
+    @Test public void extractAuthorization_pasargadShape_readsMerchantWithoutCode() {
+        BankRules.Authorization authorization = BankRules.extractAuthorization("Pasargad",
+            "پاسارگاد\nخرید\nکانون وکلای سازمان س\nمبلغ:45,500,000\nرمز: 72552\n20:37:32");
+        assertEquals("کانون وکلای سازمان س", authorization.merchant);
+        assertEquals(45_500_000L, authorization.amount);
+        assertEquals(20, authorization.hour);
+        assertEquals(37, authorization.minute);
+    }
+
+    @Test public void extractAuthorization_bluShape_readsMerchant() {
+        BankRules.Authorization authorization = BankRules.extractAuthorization("Blu", BluMessages.OTP);
+        assertEquals("فروشگاه نمونه", authorization.merchant);
+        assertEquals(7_777_000L, authorization.amount);
+        assertEquals(13, authorization.hour);
+        assertEquals(46, authorization.minute);
+    }
+
+    @Test public void extractAuthorization_loginOtpOrMissingClock_isIgnored() {
+        assertNull(BankRules.extractAuthorization("Parsian",
+            "رمز ورود به اینترنت بانک یا همراه بانک:\n79466\nمهلت استفاده دو دقیقه"));
+        assertNull(BankRules.extractAuthorization("Pasargad",
+            "پاسارگاد\nخرید\nفروشگاه نمونه\nمبلغ:45,500,000\nرمز:72552"));
+    }
 }

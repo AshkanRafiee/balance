@@ -283,12 +283,14 @@ final class HistoryReader {
         final String note;
         final String reason;
         final String channel;
+        final String merchant;
         final List<String> tags;
 
-        Metadata(String note, String reason, String channel, List<String> tags) {
+        Metadata(String note, String reason, String channel, String merchant, List<String> tags) {
             this.note = note;
             this.reason = reason;
             this.channel = channel;
+            this.merchant = merchant;
             this.tags = tags == null ? Collections.emptyList()
                 : Collections.unmodifiableList(new ArrayList<>(tags));
         }
@@ -598,6 +600,7 @@ final class HistoryReader {
             String note = metadata.text(MetadataStore.NOTES, key);
             String reason = metadata.text(MetadataStore.REASONS, key);
             String channel = metadata.text(MetadataStore.CHANNELS, key);
+            String merchant = metadata.text(MetadataStore.MERCHANTS, key);
             List<String> tags = metadata.tags(key);
             CalDate date = calendarDate(transaction.date, request.iran,
                 Calendar.getInstance(Locale.getDefault()));
@@ -605,9 +608,10 @@ final class HistoryReader {
                 BankRules.displayName(context, transaction.bank), note, reason,
                 BankRules.reasonCaption(context, reason), channel,
                 BankRules.channelCaption(context, channel),
-                 CurrencyHelper.amount(toman, persian, transaction.amount),
+                CurrencyHelper.amount(toman, persian, transaction.amount),
                  direction(transaction.amount), dateText(date), timeText(transaction.date),
-                CalDate.monthName(date.month, request.iran, persian), compactDate(date), tags);
+                CalDate.monthName(date.month, request.iran, persian), compactDate(date), tags,
+                 merchant);
             return HistoryActivity.matchesTokens(haystack, tokens);
         }
 
@@ -884,12 +888,13 @@ final class HistoryReader {
         Map<String, String> notes = metadata.texts(MetadataStore.NOTES, keys);
         Map<String, String> reasons = metadata.texts(MetadataStore.REASONS, keys);
         Map<String, String> channels = metadata.texts(MetadataStore.CHANNELS, keys);
+        Map<String, String> merchants = metadata.texts(MetadataStore.MERCHANTS, keys);
         Map<String, List<String>> tags = metadata.tagsFor(keys);
         Map<String, Metadata> pageMetadata = new LinkedHashMap<>();
         for (String key : keys) {
             if (!pageMetadata.containsKey(key)) {
                 pageMetadata.put(key, new Metadata(notes.get(key), reasons.get(key),
-                    channels.get(key),
+                    channels.get(key), merchants.get(key),
                     tags.containsKey(key) ? tags.get(key) : Collections.emptyList()));
             }
         }

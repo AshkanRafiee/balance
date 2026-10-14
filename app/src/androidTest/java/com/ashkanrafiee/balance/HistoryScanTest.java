@@ -18,7 +18,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import java.io.InputStream;
+import java.util.Calendar;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Systematic history-scan tests against the real SMS provider (instrumented, no UI).
@@ -226,6 +228,28 @@ public class HistoryScanTest {
         int n = 0;
         for (Transaction t : txs) if (t.amount == amount) n++;
         return n;
+    }
+
+    @Test public void authorizationOtp_attachesMerchantOnlyToSettledWithdrawal() throws Exception {
+        long base = System.currentTimeMillis() - 60_000L;
+        Calendar clock = Calendar.getInstance();
+        clock.setTimeInMillis(base);
+        String time = String.format(Locale.US, "%02d:%02d", clock.get(Calendar.HOUR_OF_DAY),
+            clock.get(Calendar.MINUTE));
+        String confirmation = "123.456.78901234.5\n-45,500,000\n" + time
+            + "\nمانده: 123,456,789";
+        String otp = "پاسارگاد\nخرید\nفروشگاه نمونه\nمبلغ:45,500,000\nرمز: 72552\n" + time;
+
+        seed("B.Pasargad", confirmation, base);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        assertTrue(BalanceData.readMerchants(ctx).isEmpty());
+
+        seed("B.Pasargad", otp, base + 2_000L);
+        assertEquals(0, BalanceData.scanHistory(ctx));
+        List<Transaction> transactions = BalanceData.readTransactions(ctx);
+        assertEquals(1, transactions.size());
+        assertEquals("فروشگاه نمونه",
+            BalanceData.readMerchants(ctx).get(BalanceData.noteKey(transactions.get(0))));
     }
 
     private SharedPreferences prefs() {

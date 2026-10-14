@@ -43,11 +43,14 @@ public class MetadataStoreTest {
             singletonText("reason-key", "bank reason")));
         assertTrue(MetadataStore.mergeChannels(context,
             singletonText("channel-key", "bank channel")));
+        assertTrue(MetadataStore.mergeMerchants(context,
+            singletonText("merchant-key", "فروشگاه نمونه")));
         assertTrue(MetadataStore.setTags(context, "tag-key", Arrays.asList(" food ", "Bills", "FOOD")));
 
         assertEquals("private note", MetadataStore.getNote(context, "note-key"));
         assertEquals("bank reason", MetadataStore.readReasons(context).get("reason-key"));
         assertEquals("bank channel", MetadataStore.readChannels(context).get("channel-key"));
+        assertEquals("فروشگاه نمونه", MetadataStore.readMerchants(context).get("merchant-key"));
         assertEquals(Arrays.asList("food", "Bills"), MetadataStore.getTags(context, "tag-key"));
 
         SQLiteDatabase db = SQLiteDatabase.openDatabase(
@@ -61,6 +64,7 @@ public class MetadataStoreTest {
                     assertFalse(payload.contains("private note"));
                     assertFalse(payload.contains("bank reason"));
                     assertFalse(payload.contains("bank channel"));
+                    assertFalse(payload.contains("فروشگاه نمونه"));
                     assertFalse(payload.contains("food"));
                 }
             }
@@ -173,6 +177,7 @@ public class MetadataStoreTest {
         assertTrue(MetadataStore.setNote(context, "key", "note"));
         assertTrue(MetadataStore.mergeReasons(context, singletonText("key", "reason")));
         assertTrue(MetadataStore.mergeChannels(context, singletonText("key", "channel")));
+        assertTrue(MetadataStore.mergeMerchants(context, singletonText("key", "merchant")));
         assertTrue(MetadataStore.setTags(context, "key", Arrays.asList("tag")));
 
         MetadataStore.reset(context, false);
@@ -180,6 +185,7 @@ public class MetadataStoreTest {
         assertEquals(Arrays.asList("tag"), MetadataStore.getTags(context, "key"));
         assertTrue(MetadataStore.readReasons(context).isEmpty());
         assertTrue(MetadataStore.readChannels(context).isEmpty());
+        assertTrue(MetadataStore.readMerchants(context).isEmpty());
 
         MetadataStore.reset(context, true);
         assertTrue(MetadataStore.readNotes(context).isEmpty());

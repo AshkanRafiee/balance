@@ -84,6 +84,7 @@
     <string name="channel_branch">شعبه</string>
     <string name="channel_paya">پایا</string>
     <string name="row_fact_channel">از طریق: %1$s.</string>
+    <string name="row_fact_merchant">فروشندهٔ ذکرشده در مجوز پرداخت: %1$s.</string>
     <string name="row_fact_note">یادداشت شما: %1$s.</string>
     <string name="row_hint_edit_note">برای ویرایش، روی آن بزنید</string>
     <string name="widget_description">نمایش موجودی بانک‌ها در صفحهٔ اصلی</string>
@@ -159,6 +160,7 @@
     <string name="backup_restore_summary_metadata">جزئیات تاریخچه بازیابی شد</string>
     <string name="backup_restore_summary_none">پشتیبان موجودی جدیدتری ندارد</string>
     <string name="backup_restore_confirm">بازیابی</string>
+    <string name="restore_section_merchants">فروشندگان پرداخت</string>
     <string name="backup_validate_empty">رمز عبور را وارد کنید</string>
     <string name="backup_validate_short">رمز عبور باید حداقل ۸ کاراکتر باشد</string>
     <string name="backup_validate_mismatch">رمزهای عبور یکسان نیستند</string>

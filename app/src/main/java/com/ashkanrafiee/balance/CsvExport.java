@@ -21,11 +21,13 @@ import org.json.JSONArray;
  * Builds the UTF-8 CSV export of the transaction history. The columns stay machine-readable — an
  * ISO-8601 UTC timestamp and the raw signed rial figure — while extra human-friendly columns carry
  * the date in the active calendar, the time of day and the amount exactly as the app displays it
- * (including the chosen currency's unit label), plus the per-transaction note and whatever the bank
+ * (including the chosen currency's unit label), plus the per-transaction note, matched authorization
+ * merchant and whatever the bank
  * stated about the movement. Only RFC-4180 quoting is applied; the caller writes the text through the
  * Storage Access Framework, so nothing leaves the device until the user picks a location.
  *
- * <p>The {@code note} column carries the user's own words, the {@code tags} column carries the user's
+ * <p>The {@code note} column carries the user's own words, the {@code merchant} column carries text
+ * from a matched payment-authorization SMS, and the {@code tags} column carries the user's
  * ordered multi-value labels as a JSON array, and the {@code reason} and {@code channel} columns carry
  * the bank's words. They are separate stores, so a movement that has any combination shows all of them,
  * and none ever stands in for another. An unaccounted row has none — there is no message behind it for
@@ -50,7 +52,7 @@ final class CsvExport {
      *  the file regardless of the app's language. */
     static final String[] HEADER = {
         "bank", "account", "date", "date_local", "time", "amount_rial", "amount_display", "currency",
-        "note", "reason", "channel", "kind", "tags"
+        "note", "merchant", "reason", "channel", "kind", "tags"
     };
 
     /** {@code kind} value for a row parsed from one bank message. */
@@ -60,22 +62,30 @@ final class CsvExport {
 
     /** The per-transaction text an export carries, one map per kind of text, each keyed by the
      *  transaction identity so the columns stay in step with the rows. Grouped in one place because
-     *  they are the four metadata stores, read together from {@link BalanceData#readNotes},
+     *  they are the metadata stores, read together from {@link BalanceData#readNotes},
      *  {@link BalanceData#readReasons}, {@link BalanceData#readChannels} and {@link BalanceData#readTags}
      *  and written to the same file. */
     static final class Text {
         final Map<String, String> notes;
+        final Map<String, String> merchants;
         final Map<String, String> reasons;
         final Map<String, String> channels;
         final Map<String, List<String>> tags;
 
         Text(Map<String, String> notes, Map<String, String> reasons, Map<String, String> channels) {
-            this(notes, reasons, channels, null);
+            this(notes, null, reasons, channels, null);
         }
 
         Text(Map<String, String> notes, Map<String, String> reasons, Map<String, String> channels,
                 Map<String, List<String>> tags) {
+            this(notes, null, reasons, channels, tags);
+        }
+
+        Text(Map<String, String> notes, Map<String, String> merchants,
+                Map<String, String> reasons, Map<String, String> channels,
+                Map<String, List<String>> tags) {
             this.notes = notes;
+            this.merchants = merchants;
             this.reasons = reasons;
             this.channels = channels;
             this.tags = tags;
@@ -91,6 +101,7 @@ final class CsvExport {
      * time, so a history export does not need to materialize all notes, reasons, channels or tags. */
     interface TextLookup {
         String note(String key) throws Exception;
+        default String merchant(String key) throws Exception { return null; }
         String reason(String key) throws Exception;
         String channel(String key) throws Exception;
         List<String> tags(String key) throws Exception;
@@ -103,6 +114,10 @@ final class CsvExport {
         return new TextLookup() {
             @Override public String note(String key) {
                 return supplied.notes == null ? null : supplied.notes.get(key);
+            }
+
+            @Override public String merchant(String key) {
+                return supplied.merchants == null ? null : supplied.merchants.get(key);
             }
 
             @Override public String reason(String key) {
@@ -301,6 +316,7 @@ final class CsvExport {
             "",
             "",
             "",
+            "",
             KIND_UNACCOUNTED,
             ""
         };
@@ -314,6 +330,7 @@ final class CsvExport {
             calendar.get(Calendar.DAY_OF_MONTH), iran);
         String key = BalanceData.noteKey(t);
         String note = text.notes == null ? null : text.notes.get(key);
+        String merchant = text.merchants == null ? null : text.merchants.get(key);
         // What the bank stated is stored in its own words and captioned here, in the language the file
         // is written in, for the same reason the reason column is: the reader is a person with a
         // spreadsheet, not something that can resolve a Persian term.
@@ -335,6 +352,7 @@ final class CsvExport {
             CurrencyHelper.amount(context, t.amount),
             CurrencyHelper.label(context),
             guardFormula(note == null ? "" : note),
+            guardFormula(merchant == null ? "" : merchant),
             guardFormula(reason == null ? "" : reason),
             guardFormula(channel == null ? "" : channel),
             KIND_MOVEMENT,
@@ -355,6 +373,7 @@ final class CsvExport {
             calendar.get(Calendar.DAY_OF_MONTH), iran);
         String key = BalanceData.noteKey(t);
         String note = text.note(key);
+        String merchant = text.merchant(key);
         String reason = BankRules.reasonCaption(context, text.reason(key));
         String channel = BankRules.channelCaption(context, text.channel(key));
         String tagJson = "";
@@ -370,6 +389,7 @@ final class CsvExport {
             CurrencyHelper.amount(context, t.amount),
             CurrencyHelper.label(context),
             guardFormula(note == null ? "" : note),
+            guardFormula(merchant == null ? "" : merchant),
             guardFormula(reason == null ? "" : reason),
             guardFormula(channel == null ? "" : channel),
             KIND_MOVEMENT,

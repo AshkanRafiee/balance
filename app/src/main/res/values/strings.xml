@@ -84,6 +84,7 @@
     <string name="channel_branch">Bank branch</string>
     <string name="channel_paya">Paya</string>
     <string name="row_fact_channel">Channel: %1$s.</string>
+    <string name="row_fact_merchant">Merchant mentioned in payment authorization: %1$s.</string>
     <string name="row_fact_note">Your note: %1$s.</string>
     <string name="row_hint_edit_note">Tap to edit it</string>
     <string name="widget_description">Bank balances on your home screen</string>
@@ -169,6 +170,7 @@
     <string name="restore_section_reasons">Bank reasons</string>
     <string name="restore_section_channels">Bank channels</string>
     <string name="restore_section_tags">Tags</string>
+    <string name="restore_section_merchants">Payment merchants</string>
     <string name="restore_section_commitments">Commitments</string>
     <string name="restore_section_sources">Message records</string>
     <string name="restore_include_deleted">Bring back deleted commitments</string>

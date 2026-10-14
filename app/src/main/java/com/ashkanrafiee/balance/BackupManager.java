@@ -52,10 +52,11 @@ final class BackupManager {
     private static final int FORMAT_VERSION = 1;
     /** Payload shape: 1 = balances only, 2 = balances + transactions, 3 = balances + transactions +
      *  notes, 4 = those plus the reasons the banks stated, 5 = those plus the channels they stated,
-     *  6 = those plus user-created transaction tags, 7 = those plus user-created commitments.
+     *  6 = those plus user-created transaction tags, 7 = those plus user-created commitments,
+     *  8 = those plus matched payment-authorization merchants.
      *  Older backups are still read and missing
      *  metadata sections are left untouched during restore. */
-    private static final int PAYLOAD_FORMAT = 7;
+    private static final int PAYLOAD_FORMAT = 8;
     private static final String KDF_ALGORITHM = "PBKDF2WithHmacSHA256";
     private static final String CIPHER_ALGORITHM = "AES/GCM/NoPadding";
     private static final int ITERATIONS = 600_000;
@@ -94,6 +95,7 @@ final class BackupManager {
         REASONS,
         CHANNELS,
         TAGS,
+        MERCHANTS,
         COMMITMENTS,
         SOURCES
     }
@@ -183,6 +185,8 @@ final class BackupManager {
         writer.write(BalanceData.serializeTextMap(BalanceData.readReasons(context)));
         writer.write(",\"txChannels\":");
         writer.write(BalanceData.serializeTextMap(BalanceData.readChannels(context)));
+        writer.write(",\"txMerchants\":");
+        writer.write(BalanceData.serializeTextMap(BalanceData.readMerchants(context)));
         writer.write(",\"txTags\":");
         writer.write(BalanceData.serializeTagsMap(BalanceData.readTags(context)));
         writer.write(",\"commitments\":");
@@ -258,6 +262,7 @@ final class BackupManager {
         writeMetadata(context, json, MetadataStore.REASONS, false);
         writeMetadata(context, json, MetadataStore.CHANNELS, false);
         writeMetadata(context, json, MetadataStore.TAGS, true);
+        writeMetadata(context, json, MetadataStore.MERCHANTS, false);
         json.endObject();
 
         json.name("commitments");
@@ -324,7 +329,8 @@ final class BackupManager {
         if (kind == MetadataStore.NOTES) name = "notes";
         else if (kind == MetadataStore.REASONS) name = "reasons";
         else if (kind == MetadataStore.CHANNELS) name = "channels";
-        else name = "tags";
+        else if (kind == MetadataStore.TAGS) name = "tags";
+        else name = "merchants";
         json.name(name).beginArray();
         MetadataStore.forEach(context, kind, 256, row -> {
             json.beginObject().name("key").value(row.key);

@@ -1088,6 +1088,9 @@ public final class HistoryActivity extends Activity {
                         @Override public String channel(String key) throws Exception {
                             return metadata.text(MetadataStore.CHANNELS, key);
                         }
+                        @Override public String merchant(String key) throws Exception {
+                            return metadata.text(MetadataStore.MERCHANTS, key);
+                        }
                         @Override public List<String> tags(String key) throws Exception {
                             return metadata.tags(key);
                         }
@@ -1255,6 +1258,7 @@ public final class HistoryActivity extends Activity {
         boolean toman = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(context));
         String reason = lookup.reason(key);
         String channel = lookup.channel(key);
+        String merchant = lookup.merchant(key);
         String haystack = transactionSearchText(transaction,
             BankRules.displayName(context, transaction.bank), lookup.note(key), reason,
             BankRules.reasonCaption(context, reason), channel,
@@ -1262,7 +1266,7 @@ public final class HistoryActivity extends Activity {
                 transaction.amount), transaction.amount > 0 ? context.getString(R.string.history_deposit)
                 : transaction.amount < 0 ? context.getString(R.string.history_withdrawal) : null,
             dateText(date, fa), timeText(transaction.date, fa),
-            CalDate.monthName(date.month, iran, fa), compactDate(date, fa), tags);
+            CalDate.monthName(date.month, iran, fa), compactDate(date, fa), tags, merchant);
         return matchesTokens(haystack, tokens);
     }
 
@@ -2708,6 +2712,7 @@ public final class HistoryActivity extends Activity {
         private final Map<String, String> notes;
         private final Map<String, String> reasons;
         private final Map<String, String> channels;
+        private final Map<String, String> merchants;
         private final Map<String, List<String>> tags;
         private final boolean toman;
         private final boolean persian;
@@ -2721,12 +2726,14 @@ public final class HistoryActivity extends Activity {
 
         SearchPass(Context context, boolean iran, Map<String, String> notes,
                 Map<String, String> reasons, Map<String, String> channels,
+                Map<String, String> merchants,
                 Map<String, List<String>> tags) {
             this.context = context;
             this.iran = iran;
             this.notes = notes;
             this.reasons = reasons;
             this.channels = channels;
+            this.merchants = merchants;
             this.tags = tags;
             this.toman = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(context));
             this.persian = LocaleHelper.isPersian(context);
@@ -2793,6 +2800,7 @@ public final class HistoryActivity extends Activity {
         String note = pass.notes == null ? null : pass.notes.get(key);
         String reasonRaw = pass.reasons == null ? null : pass.reasons.get(key);
         String channelRaw = pass.channels == null ? null : pass.channels.get(key);
+        String merchant = pass.merchants == null ? null : pass.merchants.get(key);
         List<String> tagValues = pass.tags == null ? null : pass.tags.get(key);
         int[] g = gDate(t.date);
         CalDate d = CalDate.fromGregorian(g[0], g[1], g[2], pass.iran);
@@ -2801,7 +2809,7 @@ public final class HistoryActivity extends Activity {
             channelRaw, pass.channel(channelRaw),
             pass.amount(t.amount), pass.direction(t.amount),
             dateText(d, pass.persian), timeText(t.date, pass.persian),
-            monthName(d.month, pass.persian), compactDate(d, pass.persian), tagValues);
+            monthName(d.month, pass.persian), compactDate(d, pass.persian), tagValues, merchant);
     }
 
     /** One gap's searchable text in the current language, mirroring {@link #txHaystack}. */
@@ -4182,6 +4190,11 @@ public final class HistoryActivity extends Activity {
         if (caption != null) addChip(cell, caption, false, chipBg, muted, medium(), inset);
         String channel = BankRules.channelCaption(this, metadata == null ? null : metadata.channel);
         if (channel != null) addChip(cell, channel, false, chipBg, muted, medium(), inset);
+        String merchant = metadata == null ? null : metadata.merchant;
+        if (merchant != null) {
+            addChip(cell, getString(R.string.row_fact_merchant, merchant), false,
+                chipBg, muted, medium(), inset);
+        }
         String note = metadata == null ? null : metadata.note;
         if (note != null) addChip(cell, note, true, badgeBg, badgeFg, null, inset);
         List<String> tagValues = metadata == null ? null : metadata.tags;
@@ -4192,9 +4205,10 @@ public final class HistoryActivity extends Activity {
         // invitation to add a note, and a note — the user's own words, the one thing here that no
         // rescan can bring back — would never be heard at all. Each clause is a whole sentence, so they
         // read in order in either language rather than running into each other.
-        List<String> said = new ArrayList<>(5);
+        List<String> said = new ArrayList<>(6);
         if (caption != null) said.add(getString(R.string.row_fact_reason, caption));
         if (channel != null) said.add(getString(R.string.row_fact_channel, channel));
+        if (merchant != null) said.add(getString(R.string.row_fact_merchant, merchant));
         if (note != null) said.add(getString(R.string.row_fact_note, note));
         if (tagValues != null && !tagValues.isEmpty()) {
             said.add(getString(R.string.row_fact_tags,
@@ -4880,6 +4894,16 @@ public final class HistoryActivity extends Activity {
             String reasonRaw, String reasonCaption, String channelRaw, String channelCaption,
             String amountFormatted, String directionText, String dateText, String timeText,
             String monthName, String compactDate, List<String> tags) {
+        return transactionSearchText(t, bankDisplay, note, reasonRaw, reasonCaption, channelRaw,
+            channelCaption, amountFormatted, directionText, dateText, timeText, monthName,
+            compactDate, tags, null);
+    }
+
+    /** Same searchable movement text with a sourced merchant from a matched authorization SMS. */
+    static String transactionSearchText(Transaction t, String bankDisplay, String note,
+            String reasonRaw, String reasonCaption, String channelRaw, String channelCaption,
+            String amountFormatted, String directionText, String dateText, String timeText,
+            String monthName, String compactDate, List<String> tags, String merchant) {
         StringBuilder hay = new StringBuilder();
         if (t != null) {
             searchField(hay, t.bank);
@@ -4895,6 +4919,7 @@ public final class HistoryActivity extends Activity {
         searchField(hay, reasonCaption);
         searchField(hay, channelRaw);
         searchField(hay, channelCaption);
+        searchField(hay, merchant);
         if (tags != null) for (String tag : tags) searchField(hay, tag);
         searchField(hay, dateText);
         searchField(hay, timeText);

@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -560,10 +561,24 @@ final class BalanceData {
         catch (Exception e) { throw new IllegalStateException("metadata channels read failed", e); }
     }
 
+    /** Merchant text read from a matched payment-authorization SMS, separate from notes and bank
+     * reasons/channels. */
+    static Map<String, String> readMerchants(Context context) {
+        ensureResetComplete(context);
+        try { return MetadataStore.readMerchants(context); }
+        catch (Exception e) { throw new IllegalStateException("metadata merchants read failed", e); }
+    }
+
     /** Persists the supplied channels encrypted under {@link #KEY_TX_CHANNELS}. */
     static void writeChannels(Context context, Map<String, String> channels) {
         try { MetadataStore.writeChannels(context, channels); }
         catch (Exception e) { throw new IllegalStateException("metadata channels write failed", e); }
+    }
+
+    /** Replaces sourced merchant metadata; intended for backup compatibility helpers. */
+    static void writeMerchants(Context context, Map<String, String> merchants) {
+        try { MetadataStore.writeMerchants(context, merchants); }
+        catch (Exception e) { throw new IllegalStateException("metadata merchants write failed", e); }
     }
 
     /** Reads every saved tag assignment ({@code noteKey → ordered tag names}). */
@@ -802,6 +817,13 @@ final class BalanceData {
         catch (Exception e) { throw new IllegalStateException("metadata channels merge failed", e); }
     }
 
+    /** Folds merchants detected in authorization messages into their matched movements. A stored
+     * value wins, so a later duplicate or conflicting authorization can never overwrite history. */
+    static boolean mergeMerchants(Context context, Map<String, String> detected) {
+        try { return MetadataStore.mergeMerchants(context, detected); }
+        catch (Exception e) { throw new IllegalStateException("metadata merchants merge failed", e); }
+    }
+
     private static boolean mergeDetectedTextStore(Context context, String key,
             Map<String, String> detected) {
         if (detected == null || detected.isEmpty()) return false;
@@ -882,6 +904,8 @@ final class BalanceData {
         if (migrateTextKeys(reasons, replaced)) writeReasons(context, reasons);
         Map<String, String> channels = readChannels(context);
         if (migrateTextKeys(channels, replaced)) writeChannels(context, channels);
+        Map<String, String> merchants = readMerchants(context);
+        if (migrateTextKeys(merchants, replaced)) writeMerchants(context, merchants);
         Map<String, List<String>> tags = readTags(context);
         if (migrateTagKeys(tags, replaced)) writeTags(context, tags);
     }
@@ -1641,6 +1665,7 @@ final class BalanceData {
             // the cursor block.
             Map<String, String> detectedReasons = new LinkedHashMap<>();
             Map<String, String> detectedChannels = new LinkedHashMap<>();
+            Map<String, String> detectedMerchants = new LinkedHashMap<>();
             Map<String, List<Reconcile.Entry>> windows = null;
             boolean transactionsChanged = full;
             String selection = !full
@@ -2006,6 +2031,10 @@ final class BalanceData {
                     }
                     transactionsChanged = !fresh.isEmpty() || !placed.isEmpty();
                 }
+                // Authorization messages are not movements. Once the final stored transaction list
+                // is known, attach only uniquely matched merchant evidence from the encrypted source
+                // store. This also handles an OTP and its confirmation arriving in separate scans.
+                detectAuthorizationMerchants(context, stored, sourceRows, detectedMerchants);
                 completed = true;
             } catch (Exception e) {
                 failed = true;
@@ -2032,10 +2061,11 @@ final class BalanceData {
             // hold one for a movement that was not written.
             boolean reasonsChanged = mergeReasons(context, detectedReasons);
             boolean channelsChanged = mergeChannels(context, detectedChannels);
+            boolean merchantsChanged = mergeMerchants(context, detectedMerchants);
             // Reasons and channels are only ever recorded beside a movement the scan kept, so when
             // nothing was placed both merges are no-ops; the flags below still guard the gate
             // against that coupling ever changing.
-            textChanged = reasonsChanged || channelsChanged;
+            textChanged = reasonsChanged || channelsChanged || merchantsChanged;
             SharedPreferences.Editor editor = prefs.edit();
             // Only commit the rules version and watermark when the scan finished cleanly: marking a
             // full rebuild as done (or advancing past rows that failed) would skip the correction
@@ -2057,6 +2087,68 @@ final class BalanceData {
             HISTORY_SCANNING = false;
             if (added != 0 || failed || textChanged) notifyHistoryChanged();
         }
+    }
+
+    /** Finds merchants only from recognized authorization sources and only against settled
+     * withdrawals already present in history. Ambiguous transactions or conflicting merchants are
+     * intentionally discarded rather than guessed. */
+    private static void detectAuthorizationMerchants(Context context, List<Transaction> stored,
+            List<SourceEvidence> currentSources, Map<String, String> out) {
+        if (stored == null || stored.isEmpty() || out == null) return;
+        Map<String, Set<String>> candidates = new LinkedHashMap<>();
+        boolean sourceStoreRead = true;
+        try {
+            SourceStore.forEachSource(context, 256, source -> addAuthorizationCandidate(
+                source.bank, source.rawBody, source.arrivalTime, stored, candidates));
+        } catch (Exception e) {
+            sourceStoreRead = false;
+            Log.w(TAG, "authorization source scan failed; using current messages", e);
+        }
+        // A source-store failure must not crash or block history. The current batch still contains
+        // the raw recognized messages, so use it as a best-effort fallback without duplicating a
+        // successful source-store pass.
+        if (!sourceStoreRead && currentSources != null) {
+            for (SourceEvidence source : currentSources) {
+                String bank = BankRules.resolve(source.sender);
+                addAuthorizationCandidate(bank, source.body, source.arrival, stored, candidates);
+            }
+        }
+        for (Map.Entry<String, Set<String>> entry : candidates.entrySet()) {
+            if (entry.getValue().size() == 1)
+                out.put(entry.getKey(), entry.getValue().iterator().next());
+        }
+    }
+
+    private static void addAuthorizationCandidate(String bank, String body, long arrival,
+            List<Transaction> stored, Map<String, Set<String>> candidates) {
+        BankRules.Authorization authorization = BankRules.extractAuthorization(bank, body);
+        if (authorization == null) return;
+        Transaction match = null;
+        int matches = 0;
+        for (Transaction transaction : stored) {
+            if (!authorizationMatches(authorization, arrival, transaction)) continue;
+            match = transaction;
+            matches++;
+            if (matches > 1) return;
+        }
+        if (matches != 1 || match == null) return;
+        String key = noteKey(match);
+        candidates.computeIfAbsent(key, ignored -> new HashSet<>()).add(authorization.merchant);
+    }
+
+    private static boolean authorizationMatches(BankRules.Authorization authorization, long arrival,
+            Transaction transaction) {
+        if (authorization == null || transaction == null || transaction.balance == null
+                || !authorization.bank.equals(transaction.bank)
+                || transaction.amount != -authorization.amount) return false;
+        Calendar event = Calendar.getInstance();
+        event.setTimeInMillis(transaction.date);
+        Calendar received = Calendar.getInstance();
+        received.setTimeInMillis(arrival);
+        return event.get(Calendar.YEAR) == received.get(Calendar.YEAR)
+            && event.get(Calendar.DAY_OF_YEAR) == received.get(Calendar.DAY_OF_YEAR)
+            && event.get(Calendar.HOUR_OF_DAY) == authorization.hour
+            && event.get(Calendar.MINUTE) == authorization.minute;
     }
 
     /** Notifies registered listeners that a history re-scan finished with something to show — new

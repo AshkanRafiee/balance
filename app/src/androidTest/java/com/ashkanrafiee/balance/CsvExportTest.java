@@ -114,7 +114,7 @@ public class CsvExportTest {
         // A UTF-8 BOM leads the file so spreadsheets (Excel first) read Persian text as UTF-8 instead
         // of mis-decoding it; the header itself follows right after it.
         assertTrue(csv.startsWith("\uFEFF"));
-         assertEquals("bank,account,date,date_local,time,amount_rial,amount_display,currency,note,reason,channel,kind,tags",
+         assertEquals("bank,account,date,date_local,time,amount_rial,amount_display,currency,note,merchant,reason,channel,kind,tags",
             line(csv, 0).substring(1));
         assertEquals(1, csv.split("\n").length);
     }
@@ -153,15 +153,16 @@ public class CsvExportTest {
         Transaction t = new Transaction("bank_melli", "910251846", DATE_2026, 1_250_000L, "sig");
         String row = line(CsvExport.csv(ctx, Arrays.asList(t), noText()), 1);
         List<String> cells = parse(row);
-         assertEquals(13, cells.size());
+         assertEquals(14, cells.size());
         assertEquals(BankRules.displayName(ctx, "bank_melli"), cells.get(0));
         assertEquals("910251846", cells.get(1));
         assertEquals("2026-01-01T00:00:00Z", cells.get(2));
         assertEquals("1250000", cells.get(5));
-        assertEquals(CsvExport.KIND_MOVEMENT, cells.get(11));
+         assertEquals(CsvExport.KIND_MOVEMENT, cells.get(12));
         assertEquals("125,000", cells.get(6));
         assertEquals("Toman", cells.get(7));
-        assertEquals("", cells.get(8));
+         assertEquals("", cells.get(8));
+         assertEquals("", cells.get(9));
     }
 
     @Test public void row_accountMissing_leavesTheAccountCellEmpty() {
@@ -206,13 +207,14 @@ public class CsvExportTest {
         assertTrue(row.contains("\"picked up from the cashier, watch out, \"\"late\"\"\""));
         // …and a plain parser sees the original text unquoted in the last cell.
         List<String> cells = parse(row);
-         assertEquals(13, cells.size());
+         assertEquals(14, cells.size());
         assertEquals("picked up from the cashier, watch out, \"late\"", cells.get(8));
         // The reason is the bank's own statement, read out of the message; a movement with no
         // detected reason carries an empty cell rather than borrowing the note's words.
-        assertEquals("", cells.get(9));
-        assertEquals("", cells.get(10));
-        assertEquals(CsvExport.KIND_MOVEMENT, cells.get(11));
+         assertEquals("", cells.get(9));
+         assertEquals("", cells.get(10));
+         assertEquals("", cells.get(11));
+         assertEquals(CsvExport.KIND_MOVEMENT, cells.get(12));
     }
 
     @Test public void row_formulaStarterNotes_gainATextMarkerWhileAmountsStayRaw() {
@@ -243,9 +245,9 @@ public class CsvExportTest {
         tags.put(BalanceData.noteKey(t), Arrays.asList("groceries", "needs, review", "say \"later\""));
 
         List<String> cells = parse(line(CsvExport.csv(ctx, Arrays.asList(t), withTags(tags)), 1));
-        assertEquals(13, cells.size());
-        assertEquals("[\"groceries\",\"needs, review\",\"say \\\"later\\\"\"]", cells.get(12));
-        assertEquals(CsvExport.KIND_MOVEMENT, cells.get(11));
+         assertEquals(14, cells.size());
+         assertEquals("[\"groceries\",\"needs, review\",\"say \\\"later\\\"\"]", cells.get(13));
+         assertEquals(CsvExport.KIND_MOVEMENT, cells.get(12));
     }
 
     @Test public void row_tagsForAnotherTransaction_areNotAttached() {
@@ -256,7 +258,7 @@ public class CsvExportTest {
         java.util.Map<String, java.util.List<String>> tags = new java.util.HashMap<>();
         tags.put(BalanceData.noteKey(other), Arrays.asList("unrelated"));
         List<String> cells = parse(line(CsvExport.csv(ctx, Arrays.asList(t), withTags(tags)), 1));
-        assertEquals("", cells.get(12));
+         assertEquals("", cells.get(13));
     }
 
     @Test public void csv_persianNote_survivesUtf8RoundTripAfterTheBom() {
@@ -285,6 +287,20 @@ public class CsvExportTest {
     /** A Blu top-up: the bank titles the event, which the app stores and shows as a caption. */
     private static final String TOPUP = "شارژ شدی";
 
+    @Test public void row_withMatchedMerchant_usesItsOwnColumn() {
+        Transaction t = new Transaction("Pasargad", null, DATE_2026, -220_000L, "sig",
+            "content-merchant");
+        java.util.Map<String, String> merchants = new java.util.HashMap<>();
+        merchants.put(BalanceData.noteKey(t), "فروشگاه نمونه");
+        String row = line(CsvExport.csv(ctx, Arrays.asList(t),
+            new CsvExport.Text(null, merchants, null, null, null)), 1);
+        List<String> cells = parse(row);
+        assertEquals(14, cells.size());
+        assertEquals("", cells.get(8));
+        assertEquals("فروشگاه نمونه", cells.get(9));
+        assertEquals(CsvExport.KIND_MOVEMENT, cells.get(12));
+    }
+
     @Test public void row_withReason_writesTheCaptionBesideTheNote() {
         // The reason is exported as the caption the app shows, in the app's language, so the file
         // reads the way the screen does rather than carrying a raw bank string.
@@ -296,13 +312,14 @@ public class CsvExportTest {
         String row = line(CsvExport.csv(ctx, Arrays.asList(t), withText(notes, reasons)), 1);
 
         List<String> cells = parse(row);
-         assertEquals(13, cells.size());
+          assertEquals(14, cells.size());
         assertEquals("topped up my number", cells.get(8));
-        assertEquals("Phone top-up", cells.get(9));
+         assertEquals("", cells.get(9));
+         assertEquals("Phone top-up", cells.get(10));
         // A movement the bank named no channel for carries an empty cell there rather than borrowing
         // the note's or the reason's words.
-        assertEquals("", cells.get(10));
-        assertEquals(CsvExport.KIND_MOVEMENT, cells.get(11));
+         assertEquals("", cells.get(11));
+         assertEquals(CsvExport.KIND_MOVEMENT, cells.get(12));
     }
 
     @Test public void row_reasonIsCaptionedInTheAppLanguage() {
@@ -316,7 +333,7 @@ public class CsvExportTest {
         String row = line(CsvExport.csv(fa, Arrays.asList(t),
             withReasons(reasons)), 1);
 
-        assertEquals("دریافت پل", parse(row).get(9));
+         assertEquals("دریافت پل", parse(row).get(10));
     }
 
     @Test public void row_uncaptionableStoredReason_leavesTheCellEmpty() {
@@ -328,7 +345,7 @@ public class CsvExportTest {
         String row = line(CsvExport.csv(ctx, Arrays.asList(t),
             withReasons(reasons)), 1);
 
-        assertEquals("", parse(row).get(9));
+         assertEquals("", parse(row).get(10));
     }
 
     @Test public void row_reasonsWithoutAMatchingTransaction_changeNothing() {
@@ -341,7 +358,7 @@ public class CsvExportTest {
         String csv = CsvExport.csv(ctx, Arrays.asList(t),
             withReasons(reasons));
 
-        assertEquals("", parse(line(csv, 1)).get(9));
+         assertEquals("", parse(line(csv, 1)).get(10));
     }
 
     // -----------------------------------------------------------------------
@@ -369,11 +386,12 @@ public class CsvExportTest {
             new CsvExport.Text(notes, reasons, channelsOf(t, SHETAB))), 1);
 
         List<String> cells = parse(row);
-         assertEquals(13, cells.size());
+          assertEquals(14, cells.size());
         assertEquals("for the shop", cells.get(8));
-        assertEquals("Phone top-up", cells.get(9));
-        assertEquals("Shetab", cells.get(10));
-        assertEquals(CsvExport.KIND_MOVEMENT, cells.get(11));
+         assertEquals("", cells.get(9));
+         assertEquals("Phone top-up", cells.get(10));
+         assertEquals("Shetab", cells.get(11));
+         assertEquals(CsvExport.KIND_MOVEMENT, cells.get(12));
     }
 
     @Test public void row_channelIsCaptionedInTheAppLanguage() {
@@ -385,7 +403,7 @@ public class CsvExportTest {
         String row = line(CsvExport.csv(fa, Arrays.asList(t),
             withChannels(channelsOf(t, "سامانه پل (پرداخت لحظه ای)"))), 1);
 
-        assertEquals("سامانه پل (پرداخت لحظه‌ای)", parse(row).get(10));
+         assertEquals("سامانه پل (پرداخت لحظه‌ای)", parse(row).get(11));
     }
 
     @Test public void row_uncaptionableStoredChannel_leavesTheCellEmpty() {
@@ -395,7 +413,7 @@ public class CsvExportTest {
         String row = line(CsvExport.csv(ctx, Arrays.asList(t),
             withChannels(channelsOf(t, "درگاه اینترنتی"))), 1);
 
-        assertEquals("", parse(row).get(10));
+         assertEquals("", parse(row).get(11));
     }
 
     @Test public void row_channelsWithoutAMatchingTransaction_changeNothing() {
@@ -405,7 +423,7 @@ public class CsvExportTest {
         Transaction other = new Transaction("Tejarat", "01350000000", DATE_2024, -220_000L, "sig", "other-hash");
         String csv = CsvExport.csv(ctx, Arrays.asList(t), withChannels(channelsOf(other, SHETAB)));
 
-        assertEquals("", parse(line(csv, 1)).get(10));
+         assertEquals("", parse(line(csv, 1)).get(11));
     }
 
     @Test public void row_carryingOnlyOneKindOfText_leavesTheOtherColumnsEmpty() {
@@ -415,9 +433,10 @@ public class CsvExportTest {
         String row = line(CsvExport.csv(ctx, Arrays.asList(t), withChannels(channelsOf(t, SHETAB))), 1);
 
         List<String> cells = parse(row);
-        assertEquals("", cells.get(8));
-        assertEquals("", cells.get(9));
-        assertEquals("Shetab", cells.get(10));
+         assertEquals("", cells.get(8));
+         assertEquals("", cells.get(9));
+         assertEquals("", cells.get(10));
+         assertEquals("Shetab", cells.get(11));
     }
 
     // -----------------------------------------------------------------------
@@ -435,8 +454,8 @@ public class CsvExportTest {
         assertEquals(3, csv.split("\n").length);
 
         List<String> cells = parse(line(csv, 2));
-         assertEquals(13, cells.size());
-        assertEquals(CsvExport.KIND_UNACCOUNTED, cells.get(11));
+          assertEquals(14, cells.size());
+         assertEquals(CsvExport.KIND_UNACCOUNTED, cells.get(12));
         // It carries the same amount columns a movement does, because it moves the totals the same
         // way — a spreadsheet sum over the file has to reconcile with the app and the bank.
         assertEquals("-2000000", cells.get(5));
@@ -444,9 +463,10 @@ public class CsvExportTest {
         assertEquals(BankRules.displayName(ctx, "bank_melli"), cells.get(0));
         // …but there is no message behind it, so there is no note and nothing the bank stated — no
         // reason and no channel — to carry, and no content to claim.
-        assertEquals("", cells.get(8));
-        assertEquals("", cells.get(9));
-        assertEquals("", cells.get(10));
+         assertEquals("", cells.get(8));
+         assertEquals("", cells.get(9));
+         assertEquals("", cells.get(10));
+         assertEquals("", cells.get(11));
     }
 
     @Test public void csv_movementAndUnaccounted_interleaveByDate() {
@@ -457,9 +477,9 @@ public class CsvExportTest {
         Residual gap = new Residual("bank_melli", "1", DATE_2026, DATE_2026_LATER, -2_000_000L, 1);
         String csv = CsvExport.csv(ctx, Arrays.asList(between, before), Arrays.asList(gap),
             noText());
-        assertEquals("before", CsvExport.KIND_MOVEMENT, parse(line(csv, 1)).get(11));
-        assertEquals("gap", CsvExport.KIND_UNACCOUNTED, parse(line(csv, 2)).get(11));
-        assertEquals("statement", CsvExport.KIND_MOVEMENT, parse(line(csv, 3)).get(11));
+         assertEquals("before", CsvExport.KIND_MOVEMENT, parse(line(csv, 1)).get(12));
+         assertEquals("gap", CsvExport.KIND_UNACCOUNTED, parse(line(csv, 2)).get(12));
+         assertEquals("statement", CsvExport.KIND_MOVEMENT, parse(line(csv, 3)).get(12));
         assertEquals("2026-01-01T00:00:00Z", parse(line(csv, 1)).get(2));
         assertEquals("2026-01-03T00:00:00Z", parse(line(csv, 2)).get(2));
         assertEquals("2026-01-03T00:00:00Z", parse(line(csv, 3)).get(2));
@@ -471,8 +491,8 @@ public class CsvExportTest {
         Residual gap = new Residual("bank_melli", "1", DATE_2026, DATE_2026_LATER, -2_000_000L, 1);
         String csv = CsvExport.csv(ctx, Arrays.asList(statement), Arrays.asList(gap),
             noText());
-        assertEquals(CsvExport.KIND_UNACCOUNTED, parse(line(csv, 1)).get(11));
-        assertEquals(CsvExport.KIND_MOVEMENT, parse(line(csv, 2)).get(11));
+         assertEquals(CsvExport.KIND_UNACCOUNTED, parse(line(csv, 1)).get(12));
+         assertEquals(CsvExport.KIND_MOVEMENT, parse(line(csv, 2)).get(12));
     }
 
     @Test public void csv_unaccounted_onlyRows_isStillAValidFile() {
@@ -482,7 +502,7 @@ public class CsvExportTest {
             noText());
         assertTrue(csv.startsWith("\uFEFF"));
         assertEquals(2, csv.split("\n").length);
-        assertEquals(CsvExport.KIND_UNACCOUNTED, parse(line(csv, 1)).get(11));
+         assertEquals(CsvExport.KIND_UNACCOUNTED, parse(line(csv, 1)).get(12));
     }
 
     @Test public void csv_unaccounted_accountLessRow_leavesTheAccountCellEmpty() {
@@ -493,7 +513,7 @@ public class CsvExportTest {
             noText());
         List<String> cells = parse(line(csv, 1));
         assertEquals("", cells.get(1));
-        assertEquals(CsvExport.KIND_UNACCOUNTED, cells.get(11));
+         assertEquals(CsvExport.KIND_UNACCOUNTED, cells.get(12));
     }
 
     @Test public void csv_unaccountedTextCells_areSpreadsheetInert() {

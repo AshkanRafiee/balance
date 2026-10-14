@@ -17,15 +17,15 @@ Features:
 - Transaction history by day, month and year, showing out-of-order messages (a transfer and its fee) in their true order
 - Unaccounted money: when a balance statement changed by more than the messages explain, the difference appears as an amber "Unaccounted" row on the later statement's date and is counted in every total. It is proven by two statements your bank sent
 - Filter the history by deposits or withdrawals, by date, and by exact reusable tags — today, this month, this year, or a custom range in the Persian or Gregorian calendar. Search across the transaction details and tags
-- Movement reasons read from the bank: when a message names the event behind a movement — a phone top-up, a bill payment, a refund, an instant transfer — the row says so in your own language, and so does the channel it went through when the bank states that. Otherwise nothing is added, and neither ever mixes into your note
+- Bank-stated movement reasons and channels appear in your language when present, and stay separate from your note
+- Payment merchants read from authorization SMS: when a purchase message names a merchant and uniquely matches a completed withdrawal, the history shows it as sourced payment information. An OTP alone never creates or confirms a transaction, and ambiguous matches stay unattached
 - Private notes and multiple tags: tap any row to write your own words and labels about that movement; they follow it through every filter, into CSV exports and into encrypted backups
-- Optional commitments card: name your loans, debts, subscriptions and anything paid or received — once or recurring (daily to yearly), open-ended, with an end date or with a payment count — with separate remaining payable/receivable totals, monthly grouping, older paid dues and reminders
-- CSV export of exactly what the history shows at that moment, through the system file picker, with your notes and tags and the bank's reason and channel
-- Password-encrypted backup and restore of balances, history, notes, tags, commitments, reasons and channels
+- Optional commitments card for loans, debts, subscriptions and other recurring payments or receipts, with separate totals and reminders
+- CSV export of exactly what the history shows at that moment, through the system file picker, with your notes and tags and the bank's reason, channel and matched merchant
+- Password-encrypted backup and restore of balances, history, notes, tags, commitments, reasons, channels and matched payment merchants
 - Optional in-app lock with PIN, password or fingerprint, covering the app, the widget and screenshots/recents
 - English and Persian interface, Persian (Jalali) or Gregorian calendar, and a light or dark theme that follows the device
 - Report (Scan diagnostics): see which bank messages parse and which do not, and send or copy exactly the ones you pick
-- A full reset in the data menu, confirmed twice, with the option to delete your notes and tags as well
 
 Free and open source. If your bank's messages are not recognized, or a balance or account looks wrong, telling us — through the issue tracker, the Report screen or email — is the fastest way to get it added.
 

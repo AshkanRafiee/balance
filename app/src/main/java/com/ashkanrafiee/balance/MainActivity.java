@@ -1161,6 +1161,7 @@ public class MainActivity extends Activity {
             getString(R.string.restore_section_reasons),
             getString(R.string.restore_section_channels),
             getString(R.string.restore_section_tags),
+            getString(R.string.restore_section_merchants),
             getString(R.string.restore_section_commitments),
             getString(R.string.restore_section_sources),
             getString(R.string.restore_include_deleted)};
