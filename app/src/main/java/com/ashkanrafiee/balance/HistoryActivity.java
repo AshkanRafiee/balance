@@ -79,10 +79,10 @@ public final class HistoryActivity extends Activity {
     private static final int INITIAL_EXPANDED_DAY_LIMIT = 7;
     /** Keep the initial recent pages plus one explicitly opened older day in memory. */
     private static final int MAX_LOADED_DAY_PAGES = INITIAL_EXPANDED_DAY_LIMIT + 1;
-    /** A search can match rows across an unbounded number of days; the other matching days keep
+    /** A narrowing can match rows across an unbounded number of days; the other matching days keep
      *  their complete summaries and a load control, while only this bounded first window gets rows
      *  materialized immediately. */
-    private static final int MAX_INITIAL_SEARCH_DAY_PAGES = MAX_LOADED_DAY_PAGES;
+    private static final int MAX_INITIAL_NARROWED_DAY_PAGES = MAX_LOADED_DAY_PAGES;
     /** Visible to the instrumented tests so a test can tell an open year from a closed one, and one
      *  year's months from another's, by what is on screen rather than by reading its text. */
     static final String MONTH_TAG = "history_month";
@@ -184,14 +184,17 @@ public final class HistoryActivity extends Activity {
      *  through the saved state; never persisted across sessions. */
     private String searchQuery = "";
 
-    /** The query the breakdown was last expanded for. While a search is active every matching year,
-     *  month and day starts open so a match never hides inside a collapsed group; the sets below
-     *  keep the user's own collapses from then on, until the query itself changes. */
-    private String searchExpandedFor;
+    /** The narrowing the breakdown was last expanded for. While any narrowing is active
+     *  (text search, tags, banks, accounts, or the direction/date filter) every matching
+     *  year, month and day starts open so a match never hides inside a collapsed group;
+     *  the sets below keep the user's own collapses from then on, until the narrowing
+     *  itself changes. */
+    private String narrowingExpandedFor;
 
-    /** The expansion the screen had before the current search began, restored verbatim when the
-     *  search is cleared, so searching never leaves the whole history open behind it. */
-    private Set<String> preSearchYears, preSearchMonths, preSearchDays;
+    /** The expansion the screen had before the current narrowing began, restored verbatim
+     *  when every narrowing is cleared, so filtering never leaves the whole history open
+     *  behind it. */
+    private Set<String> preNarrowingYears, preNarrowingMonths, preNarrowingDays;
 
     /** The search field and its clear button, built once in {@link #onCreate} (never rebuilt by a
      *  render, so typing never loses focus) and driven with a short debounce. */
@@ -615,10 +618,10 @@ public final class HistoryActivity extends Activity {
             java.util.ArrayList<String> savedTags = state.getStringArrayList(KEY_FILTER_TAGS);
             if (savedTags != null) selectedTags.addAll(savedTags);
             searchQuery = state.getString(KEY_SEARCH_QUERY, "");
-            searchExpandedFor = state.getString(KEY_SEARCH_EXPANDED_FOR, null);
-            preSearchYears = stringSet(state, KEY_PRE_SEARCH_YEARS);
-            preSearchMonths = stringSet(state, KEY_PRE_SEARCH_MONTHS);
-            preSearchDays = stringSet(state, KEY_PRE_SEARCH_DAYS);
+            narrowingExpandedFor = state.getString(KEY_NARROWING_EXPANDED_FOR, null);
+            preNarrowingYears = stringSet(state, KEY_PRE_NARROWING_YEARS);
+            preNarrowingMonths = stringSet(state, KEY_PRE_NARROWING_MONTHS);
+            preNarrowingDays = stringSet(state, KEY_PRE_NARROWING_DAYS);
         }
         // Rotation restores the picker's own selection; a fresh open takes the dashboard scope.
         // The sets below are always saved together, so one key is enough to tell them apart
@@ -2355,10 +2358,10 @@ public final class HistoryActivity extends Activity {
     private static final String KEY_ACCOUNT_FILTERS = "account_filters";
     private static final String KEY_ACCOUNT_BANK = "account_bank";
     private static final String KEY_SEARCH_QUERY = "search_query";
-    private static final String KEY_SEARCH_EXPANDED_FOR = "search_expanded_for";
-    private static final String KEY_PRE_SEARCH_YEARS = "pre_search_years";
-    private static final String KEY_PRE_SEARCH_MONTHS = "pre_search_months";
-    private static final String KEY_PRE_SEARCH_DAYS = "pre_search_days";
+    private static final String KEY_NARROWING_EXPANDED_FOR = "search_expanded_for";
+    private static final String KEY_PRE_NARROWING_YEARS = "pre_search_years";
+    private static final String KEY_PRE_NARROWING_MONTHS = "pre_search_months";
+    private static final String KEY_PRE_NARROWING_DAYS = "pre_search_days";
 
     /** The sets of year, month and day keys currently expanded in the breakdown. The current year,
      *  current month and its days start expanded. */
@@ -2438,43 +2441,77 @@ public final class HistoryActivity extends Activity {
         return CalDate.today(iranCalendar);
     }
 
-    /** Gives tag narrowing its own expansion identity, so changing or clearing it restores the
-     *  same collapsed groups as text search does. */
-    private String expansionQuery(String query) {
+    /** Gives every narrowing its own expansion identity, so changing or clearing it
+     *  restores the same collapsed groups as text search does. Set order is normalized so
+     *  the same scope always keys the same. Kept static so the instrumented tests can
+     *  cover the filter axes directly. */
+    static String narrowingKey(String query, Collection<String> tags, Collection<String> banks,
+            Collection<String> accounts, Filter f) {
         String base = query == null ? "" : query;
-        if (selectedTags.isEmpty()) return base;
         StringBuilder key = new StringBuilder(base).append("\u0000tags:");
-        for (String tag : selectedTags) key.append(tag).append('|');
+        if (tags != null) {
+            List<String> sorted = new ArrayList<>(tags);
+            Collections.sort(sorted, String.CASE_INSENSITIVE_ORDER);
+            for (String tag : sorted) key.append(tag).append('|');
+        }
+        key.append("\u0000banks:");
+        if (banks != null) {
+            List<String> sorted = new ArrayList<>(banks);
+            Collections.sort(sorted, String.CASE_INSENSITIVE_ORDER);
+            for (String bank : sorted) key.append(bank).append('|');
+        }
+        key.append("\u0000accounts:");
+        if (accounts != null) {
+            List<String> sorted = new ArrayList<>(accounts);
+            Collections.sort(sorted);
+            for (String account : sorted) key.append(account).append('|');
+        }
+        key.append("\u0000dir:").append(f == null ? DIR_ALL : f.direction);
+        key.append("\u0000range:").append(f == null ? RANGE_ALL : f.rangePreset);
+        key.append("\u0000from:")
+            .append(f != null && f.from != null ? f.from.key() : "");
+        key.append("\u0000to:")
+            .append(f != null && f.to != null ? f.to.key() : "");
         return key.toString();
     }
 
-    /** Opens every matching year, month and day for a fresh query, so a match never hides inside a
-     *  collapsed group the query itself did not open. The expansion the search started from is
-     *  remembered and restored when the search is cleared, so searching never leaves the whole
-     *  history open behind it; collapses made mid-search are respected until the query changes. */
-    private void expandForSearch(String query, List<YearGroup> years) {
-        if (query == null || query.isEmpty()) {
-            if (searchExpandedFor != null) {
-                searchExpandedFor = null;
-                if (preSearchYears != null) {
-                    expandedYears.clear();
-                    expandedYears.addAll(preSearchYears);
-                    expandedMonths.clear();
-                    expandedMonths.addAll(preSearchMonths);
-                    expandedDays.clear();
-                    expandedDays.addAll(preSearchDays);
-                    preSearchYears = preSearchMonths = preSearchDays = null;
-                }
+    /** Whether any narrowing is active: text, tags, banks, accounts, or the
+     *  direction/date filter. */
+    private static boolean isNarrowingActive(String query, Collection<String> tags,
+            Collection<String> banks, Collection<String> accounts, Filter f) {
+        if (query != null && !query.isEmpty()) return true;
+        if (tags != null && !tags.isEmpty()) return true;
+        if (banks != null && !banks.isEmpty()) return true;
+        if (accounts != null && !accounts.isEmpty()) return true;
+        return f != null && f.isActive();
+    }
+
+    /** Opens every matching year, month and day for a fresh narrowing, so a match never
+     *  hides inside a collapsed group the narrowing itself did not open. The expansion
+     *  the narrowing started from is remembered and restored when every narrowing is
+     *  cleared, so filtering never leaves the whole history open behind it; collapses
+     *  made mid-narrowing are respected until the narrowing changes. */
+    private void expandForNarrowing(String key, boolean active, List<YearGroup> years) {
+        if (!active) {
+            if (preNarrowingYears != null) {
+                narrowingExpandedFor = null;
+                expandedYears.clear();
+                expandedYears.addAll(preNarrowingYears);
+                expandedMonths.clear();
+                expandedMonths.addAll(preNarrowingMonths);
+                expandedDays.clear();
+                expandedDays.addAll(preNarrowingDays);
+                preNarrowingYears = preNarrowingMonths = preNarrowingDays = null;
             }
             return;
         }
-        if (query.equals(searchExpandedFor)) return;
-        if (searchExpandedFor == null) {
-            preSearchYears = new java.util.LinkedHashSet<>(expandedYears);
-            preSearchMonths = new java.util.LinkedHashSet<>(expandedMonths);
-            preSearchDays = new java.util.LinkedHashSet<>(expandedDays);
+        if (key.equals(narrowingExpandedFor)) return;
+        if (preNarrowingYears == null) {
+            preNarrowingYears = new java.util.LinkedHashSet<>(expandedYears);
+            preNarrowingMonths = new java.util.LinkedHashSet<>(expandedMonths);
+            preNarrowingDays = new java.util.LinkedHashSet<>(expandedDays);
         }
-        searchExpandedFor = query;
+        narrowingExpandedFor = key;
         for (YearGroup y : years) {
             expandedYears.add(y.key());
             for (MonthGroup m : y.months) {
@@ -2502,10 +2539,10 @@ public final class HistoryActivity extends Activity {
             new java.util.ArrayList<>(selectedAccounts));
         outState.putString(KEY_ACCOUNT_BANK, accountBank);
         outState.putString(KEY_SEARCH_QUERY, searchQuery == null ? "" : searchQuery);
-        outState.putString(KEY_SEARCH_EXPANDED_FOR, searchExpandedFor);
-        putStringSet(outState, KEY_PRE_SEARCH_YEARS, preSearchYears);
-        putStringSet(outState, KEY_PRE_SEARCH_MONTHS, preSearchMonths);
-        putStringSet(outState, KEY_PRE_SEARCH_DAYS, preSearchDays);
+        outState.putString(KEY_NARROWING_EXPANDED_FOR, narrowingExpandedFor);
+        putStringSet(outState, KEY_PRE_NARROWING_YEARS, preNarrowingYears);
+        putStringSet(outState, KEY_PRE_NARROWING_MONTHS, preNarrowingMonths);
+        putStringSet(outState, KEY_PRE_NARROWING_DAYS, preNarrowingDays);
         writeDate(outState, KEY_FILTER_FROM_YEAR, KEY_FILTER_FROM_MONTH, KEY_FILTER_FROM_DAY, filter.from);
         writeDate(outState, KEY_FILTER_TO_YEAR, KEY_FILTER_TO_MONTH, KEY_FILTER_TO_DAY, filter.to);
     }
@@ -2797,10 +2834,18 @@ public final class HistoryActivity extends Activity {
         final List<String> tagSelection = new ArrayList<>(selectedTags);
         final Set<String> expandedSnapshot = new java.util.LinkedHashSet<>(expandedDays);
         final boolean seededSnapshot = expandedSeeded;
-        final String expansionKey = expansionQuery(query);
-        final String previousExpansionKey = searchExpandedFor;
-        final Set<String> savedPreSearchDays = preSearchDays == null ? null
-            : new java.util.LinkedHashSet<>(preSearchDays);
+        final String expansionKey = narrowingKey(query, tagSelection, banks, accounts, f);
+        final boolean expansionActive = isNarrowingActive(query, tagSelection, banks,
+            accounts, f);
+        if (narrowingExpandedFor == null) {
+            // First render for this scope (fresh open or rotation with verbatim-restored
+            // groups): adopt the scope without opening anything, so a scoped launch keeps
+            // its minimal cascade and only a later scope change expands.
+            narrowingExpandedFor = expansionKey;
+        }
+        final String previousExpansionKey = narrowingExpandedFor;
+        final Set<String> savedPreNarrowingDays = preNarrowingDays == null ? null
+            : new java.util.LinkedHashSet<>(preNarrowingDays);
                 final boolean expandAll = BalanceData.getExpandAllHistory(this);
         final boolean hadRenderedResult = historyResult != null;
         final WorkProgress renderProgress = new WorkProgress() {
@@ -2860,14 +2905,17 @@ public final class HistoryActivity extends Activity {
                     result = HistoryReader.summaryWithResiduals(
                         app, planRequest, renderProgress);
                     Set<String> requestedDays = plannedExpandedDays(result, expandedSnapshot,
-                        seededSnapshot, expandAll, expansionKey, previousExpansionKey,
-                        savedPreSearchDays, iran);
-                    if (!query.isEmpty() && requestedDays.size() > MAX_INITIAL_SEARCH_DAY_PAGES) {
-                        // Search summaries already contain every matching day and every matching-row
-                        // count. Limit only the eager row pages, leaving the rest expanded with an
-                        // explicit load control so no match disappears or becomes unsearchable.
+                        seededSnapshot, expandAll, expansionKey, expansionActive,
+                        previousExpansionKey, savedPreNarrowingDays, iran);
+                    if (expansionActive
+                            && requestedDays.size() > MAX_INITIAL_NARROWED_DAY_PAGES) {
+                        // Narrowed summaries already contain every matching day and every
+                        // matching-row count. Limit only the eager row pages, leaving the rest
+                        // expanded with an explicit load control so no match disappears or
+                        // becomes unsearchable.
                         requestedDays = new java.util.LinkedHashSet<>(
-                            new ArrayList<>(requestedDays).subList(0, MAX_INITIAL_SEARCH_DAY_PAGES));
+                            new ArrayList<>(requestedDays).subList(0,
+                                MAX_INITIAL_NARROWED_DAY_PAGES));
                     }
                     java.util.LinkedHashMap<String, HistoryReader.DayRows> pages =
                         new java.util.LinkedHashMap<>();
@@ -2919,7 +2967,7 @@ public final class HistoryActivity extends Activity {
                     body.setVisibility(View.GONE);
                     body.removeAllViews();
                     if (lists.years.isEmpty()) {
-                        expandForSearch(expansionQuery(query), lists.years);
+                        expandForNarrowing(expansionKey, expansionActive, lists.years);
                         emptyState();
                     } else {
                         body.addView(heroCard(lists), margin(0, 0, 0, 6));
@@ -2927,7 +2975,7 @@ public final class HistoryActivity extends Activity {
                             margin(0, 16, 0, 12));
                         allYears = lists.years;
                         seedExpanded();
-                        expandForSearch(expansionQuery(query), lists.years);
+                        expandForNarrowing(expansionKey, expansionActive, lists.years);
                         renderYears(body, allYears);
                     }
                     body.setVisibility(View.VISIBLE);
@@ -2974,7 +3022,8 @@ public final class HistoryActivity extends Activity {
      *  not consume row pages. */
     private static Set<String> plannedExpandedDays(HistoryReader.Result result,
             Set<String> expandedSnapshot, boolean seeded, boolean expandAll, String expansionKey,
-            String previousExpansionKey, Set<String> savedPreSearchDays, boolean iran) {
+            boolean expansionActive, String previousExpansionKey,
+            Set<String> savedPreNarrowingDays, boolean iran) {
         Set<String> visible = new java.util.LinkedHashSet<>(result.daySummaries.keySet());
         Set<String> requested = new java.util.LinkedHashSet<>();
         for (String key : expandedSnapshot) {
@@ -2998,15 +3047,15 @@ public final class HistoryActivity extends Activity {
             }
         }
 
-        if (expansionKey.isEmpty()) {
-            if (previousExpansionKey != null && savedPreSearchDays != null) {
+        if (!expansionActive) {
+            if (previousExpansionKey != null && savedPreNarrowingDays != null) {
                 requested.clear();
-                for (String key : savedPreSearchDays) {
+                for (String key : savedPreNarrowingDays) {
                     if (visible.contains(key)) requested.add(key);
                 }
             }
         } else if (!expansionKey.equals(previousExpansionKey)) {
-            // expandForSearch opens every group in a fresh search/tag expansion so no match is
+            // expandForNarrowing opens every group in a fresh narrowing so no match is
             // hidden inside a collapsed day.
             requested.addAll(visible);
         }

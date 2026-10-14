@@ -209,6 +209,29 @@ public class HistoryBankFilterUiTest {
         assertTrue(findByTextContaining("30,000,000") == null);
     }
 
+    @Test public void bankFilter_expandsMatchingMonths() {
+        // Narrowing to a bank opens its months: the older movement's row (marked by its
+        // note, which only a built row shows) appears with no manual expansion.
+        long old = now() - 200L * 24 * 3_600 * 1_000;
+        Transaction aged = new Transaction(SAMAN, "333", old, 900_000L, 999_000_000L, "c", null);
+        BalanceData.writeTransactions(ctx, new ArrayList<>(Arrays.asList(
+            new Transaction(MELLAT, "111", now() - 3_000L, -30_000_000L, 290_000_000L, "a", null),
+            aged)));
+        BalanceData.setNote(ctx, aged, "aged saman note");
+        launch();
+        await(() -> findByTextContaining("30,000,000") != null, 20_000);
+        assertTrue("the older month starts collapsed",
+            findByText("aged saman note") == null);
+
+        click(findByText(ctx.getString(R.string.history_filter_banks)));
+        await(() -> findInDialog(ctx.getString(R.string.history_filter_banks_title)) != null,
+            10_000);
+        await(() -> findCheckInDialog(BankRules.displayName(ctx, SAMAN)) != null, 30_000);
+        checkInDialog(BankRules.displayName(ctx, SAMAN));
+        click(findInDialog(ctx.getString(R.string.history_filter_apply)));
+        await(() -> findByText("aged saman note") != null, 20_000);
+    }
+
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------

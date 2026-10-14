@@ -263,4 +263,29 @@ public class HistoryScopeTest {
         assertEquals(Collections.singletonList(new HistoryActivity.BankAccount("Mellat", "111")),
             HistoryActivity.distinctBankAccounts(txs));
     }
+
+    @Test public void narrowingKey_coversEveryScopeAxis() {
+        HistoryActivity.Filter all = HistoryActivity.Filter.ALL;
+        String base = HistoryActivity.narrowingKey("", null, null, null, all);
+        // Set order never changes the identity.
+        assertEquals(
+            HistoryActivity.narrowingKey("", null,
+                new HashSet<>(Arrays.asList("Mellat", "Saman")), null, all),
+            HistoryActivity.narrowingKey("", null,
+                new HashSet<>(Arrays.asList("Saman", "Mellat")), null, all));
+        // Every axis moves the key.
+        assertFalse(base.equals(HistoryActivity.narrowingKey("saman", null, null, null, all)));
+        assertFalse(base.equals(HistoryActivity.narrowingKey("", new HashSet<>(Arrays.asList("x")),
+            null, null, all)));
+        assertFalse(base.equals(HistoryActivity.narrowingKey("", null,
+            new HashSet<>(Collections.singletonList("Mellat")), null, all)));
+        assertFalse(base.equals(HistoryActivity.narrowingKey("", null, null,
+            new HashSet<>(Collections.singletonList("111")), all)));
+        assertFalse(base.equals(HistoryActivity.narrowingKey("", null, null, null,
+            new HistoryActivity.Filter(HistoryActivity.DIR_DEPOSIT, HistoryActivity.RANGE_ALL,
+                null, null))));
+        assertFalse(base.equals(HistoryActivity.narrowingKey("", null, null, null,
+            new HistoryActivity.Filter(HistoryActivity.DIR_ALL, HistoryActivity.RANGE_CUSTOM,
+                CalDate.of(2026, 9, 1), CalDate.of(2026, 9, 10)))));
+    }
 }
