@@ -4,3 +4,4 @@
 • History days open with their transactions immediately instead of requiring an extra load step.
 • Shared diagnostics remove one-time codes, including codes in Parsian and Mehr Iran message formats.
 • Restoring selected notes, tags, reasons, channels or merchants now keeps them attached after app updates.
+• Fixed crashes on devices without clipboard support, with unreadable local data, or with very large message histories.
