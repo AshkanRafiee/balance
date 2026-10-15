@@ -46,9 +46,12 @@ final class ScanDiagnostics {
     /** OTP values must never leave the device through a diagnostics report. The surrounding
      * authorization layout remains shareable so merchant parsing can still be fixed. */
     private static final Pattern OTP_MARKER = Pattern.compile(
-        "(?:رمز|پویا|otp|one[- ]?time|کد\\s*(?:تایید|تأیید))", Pattern.CASE_INSENSITIVE);
+        "(?:رمز|پویا|otp|one[- ]?time|کد\\s*(?:تایید|تأیید)|"
+            + "(?<![A-Za-z])code(?![A-Za-z]))", Pattern.CASE_INSENSITIVE);
     private static final Pattern OTP_CODE = Pattern.compile(
         "(?<![0-9۰-۹٠-٩])[0-9۰-۹٠-٩]{4,8}(?![0-9۰-۹٠-٩])");
+    private static final Pattern HASHED_OTP_CODE = Pattern.compile(
+        "(?<=[#＃])\\s*[0-9۰-۹٠-٩]{4,8}(?![0-9۰-۹٠-٩])");
 
     /** One recognized bank and how many of its SMS messages the scan parsed. */
     static final class BankHit {
@@ -339,6 +342,7 @@ final class ScanDiagnostics {
             String original = lines[i];
             boolean marker = OTP_MARKER.matcher(original).find();
             String line = marker ? OTP_CODE.matcher(original).replaceAll("[redacted]") : original;
+            line = HASHED_OTP_CODE.matcher(line).replaceAll("[redacted]");
             if (!marker && redactNextNumericLine && original.trim()
                     .matches("[0-9۰-۹٠-٩]{4,8}")) {
                 line = original.replaceAll("[0-9۰-۹٠-٩]", "[redacted]");

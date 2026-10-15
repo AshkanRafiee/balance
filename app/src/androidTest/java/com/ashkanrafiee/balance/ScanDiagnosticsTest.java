@@ -3,6 +3,7 @@ package com.ashkanrafiee.balance;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -292,6 +293,14 @@ public class ScanDiagnosticsTest {
         assertTrue(txt.contains("مبلغ:45,500,000"));
         assertTrue(txt.contains("[redacted]"));
         assertTrue(!txt.contains("72552"));
+    }
+
+    @Test public void senderReport_redactsParsianCodeAndRepeatedHashCode() {
+        String body = "خرید\nفروشگاه نمونه\nمبلغ:120,000\nCode:12345678\n@bank.example #12345678";
+        String txt = ScanDiagnostics.sanitizeForReport(body);
+        assertTrue(txt.contains("Code:[redacted]"));
+        assertTrue(txt.contains("#[redacted]"));
+        assertFalse(txt.contains("12345678"));
     }
 
     @Test public void senderReport_noIssues_omitsTheLine() {

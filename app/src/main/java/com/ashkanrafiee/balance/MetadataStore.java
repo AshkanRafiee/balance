@@ -446,6 +446,27 @@ final class MetadataStore {
         return mergeText(context, MERCHANTS, values);
     }
 
+    /** Replaces only scan-detected merchant values. Backup restore remains local-first through
+     * {@link #mergeMerchants(Context, Map)}; a rescan is authoritative for a merchant parsed again
+     * from the current SMS rules and must be able to correct stale sourced text. */
+    static boolean replaceMerchants(Context context, Map<String, String> values) throws Exception {
+        if (values == null || values.isEmpty()) return false;
+        return access(context, MERCHANTS, true, true, s -> {
+            boolean changed = false;
+            for (Map.Entry<String, String> entry : values.entrySet()) {
+                requireKey(entry.getKey());
+                String text = normalizeText(entry.getValue());
+                if (text == null) continue;
+                Row old = s.find(MERCHANTS, entry.getKey());
+                if (old == null || !text.equals(old.text)) {
+                    s.put(MERCHANTS, entry.getKey(), text, null);
+                    changed = true;
+                }
+            }
+            return changed;
+        });
+    }
+
     static boolean removeMerchants(Context context, Collection<String> keys) throws Exception {
         if (keys == null || keys.isEmpty()) return false;
         return access(context, MERCHANTS, true, true, s -> {

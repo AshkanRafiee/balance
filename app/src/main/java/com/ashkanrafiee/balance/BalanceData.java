@@ -92,6 +92,9 @@ final class BalanceData {
     static final String KEY_HISTORY_SCHEMA = "history_schema";
     static final int HISTORY_SCHEMA = 1;
     static final String KEY_HISTORY_LAST_BALANCE = "history_last_balance";
+    /** A source-evidence read failed after movements were saved; retry merchant enrichment even
+     * when the inbox has no newer SMS. */
+    static final String KEY_MERCHANT_EVIDENCE_PENDING = "merchant_evidence_pending";
     static final String KEY_EXCLUDED = "excluded_banks";
     static final String KEY_SORT = "sort_mode";
     /** Durable reset state; a surviving marker means the next scan must retry cleanup first. */
@@ -821,11 +824,17 @@ final class BalanceData {
         catch (Exception e) { throw new IllegalStateException("metadata channels merge failed", e); }
     }
 
-    /** Folds merchants detected in authorization messages into their matched movements. A stored
-     * value wins, so a later duplicate or conflicting authorization can never overwrite history. */
+    /** Local-first merchant merge used by backup restore and compatibility callers. History scans
+     * use the authoritative replacement path below so a corrected SMS parse can replace stale
+     * sourced text without changing user-authored metadata. */
     static boolean mergeMerchants(Context context, Map<String, String> detected) {
         try { return MetadataStore.mergeMerchants(context, detected); }
         catch (Exception e) { throw new IllegalStateException("metadata merchants merge failed", e); }
+    }
+
+    private static boolean replaceDetectedMerchants(Context context, Map<String, String> detected) {
+        try { return MetadataStore.replaceMerchants(context, detected); }
+        catch (Exception e) { throw new IllegalStateException("metadata merchants replacement failed", e); }
     }
 
     static boolean removeMerchants(Context context, Set<String> keys) {
@@ -1092,6 +1101,7 @@ final class BalanceData {
             .remove(KEY_HISTORY_ID)
             .remove(KEY_SOURCE_FAILURE_BALANCE)
             .remove(KEY_SOURCE_FAILURE_HISTORY)
+            .remove(KEY_MERCHANT_EVIDENCE_PENDING)
             .remove(KEY_HISTORY_RULES_VERSION)
             .remove(KEY_HISTORY_SCHEMA)
             .remove(KEY_EXCLUDED)
@@ -1640,6 +1650,7 @@ final class BalanceData {
         boolean failed = false;
         boolean textChanged = false;
         boolean holdWatermark = false;
+        boolean merchantEvidenceReadable = true;
         try {
             List<Transaction> stored = null;
             SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
@@ -1725,6 +1736,7 @@ final class BalanceData {
                     holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_HISTORY,
                         captureSources(context, sourceRows, HISTORY_RULES_VERSION));
                 if (rows.isEmpty()) {
+                    textChanged |= refreshPendingMerchants(context, prefs);
                     if (full) {
                         if (!saveRecentMovements(context, new HashMap<>())
                                 || !saveLastBalances(context, new HashMap<>())) {
@@ -1871,8 +1883,8 @@ final class BalanceData {
                     long bal = extract(body);
                     if (bal >= 0) lastBalance.put(key, bal);
                 }
-                holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_HISTORY,
-                    captureSources(context, sourceRows, HISTORY_RULES_VERSION));
+                boolean sourcesCaptured = captureSources(context, sourceRows, HISTORY_RULES_VERSION);
+                holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_HISTORY, sourcesCaptured);
                 // Chain banks: keep the balance chain end correct when the true-newest movement was not
                 // among the rows scanned now (a previous scan already committed it), and place fresh
                 // chain members relative to their already-stored siblings when part of the pair was
@@ -2044,9 +2056,16 @@ final class BalanceData {
                 // Authorization messages are not movements. Once the final stored transaction list
                 // is known, attach only uniquely matched merchant evidence from the encrypted source
                 // store. This also handles an OTP and its confirmation arriving in separate scans.
-                detectAuthorizationMerchants(context, stored, detectedMerchants, ambiguousMerchants);
+                merchantEvidenceReadable = sourcesCaptured;
+                if (merchantEvidenceReadable)
+                    merchantEvidenceReadable = detectAuthorizationMerchants(context, stored,
+                        detectedMerchants, ambiguousMerchants);
                 if (!ambiguousMerchants.isEmpty())
                     detectedMerchants.keySet().removeAll(ambiguousMerchants);
+                // Hold a retry marker until the merchant metadata write has also succeeded. A
+                // source read or metadata-store failure after this point must not be lost merely
+                // because the movement rows themselves were saved.
+                prefs.edit().putBoolean(KEY_MERCHANT_EVIDENCE_PENDING, true).apply();
                 completed = true;
             } catch (Exception e) {
                 failed = true;
@@ -2074,8 +2093,10 @@ final class BalanceData {
             // hold one for a movement that was not written.
             boolean reasonsChanged = mergeReasons(context, detectedReasons);
             boolean channelsChanged = mergeChannels(context, detectedChannels);
-            boolean mergedMerchants = mergeMerchants(context, detectedMerchants);
-            boolean merchantsChanged = merchantsCleared || mergedMerchants;
+            boolean replacedMerchants = replaceDetectedMerchants(context, detectedMerchants);
+            boolean merchantsChanged = merchantsCleared || replacedMerchants;
+            if (merchantEvidenceReadable)
+                prefs.edit().remove(KEY_MERCHANT_EVIDENCE_PENDING).apply();
             // Reasons and channels are only ever recorded beside a movement the scan kept, so when
             // nothing was placed both merges are no-ops; the flags below still guard the gate
             // against that coupling ever changing.
@@ -2103,12 +2124,33 @@ final class BalanceData {
         }
     }
 
+    /** Retries a previously failed source-evidence enrichment pass even when no new inbox rows
+     * exist. This prevents a transient encrypted-store read failure from losing a merchant forever
+     * when the history watermark has already advanced. */
+    private static boolean refreshPendingMerchants(Context context, SharedPreferences prefs) {
+        if (!prefs.getBoolean(KEY_MERCHANT_EVIDENCE_PENDING, false)) return false;
+        try {
+            List<Transaction> stored = readTransactions(context);
+            Map<String, String> detected = new LinkedHashMap<>();
+            Set<String> ambiguous = new HashSet<>();
+            if (!detectAuthorizationMerchants(context, stored, detected, ambiguous)) return false;
+            detected.keySet().removeAll(ambiguous);
+            boolean changed = removeMerchants(context, ambiguous);
+            changed |= replaceDetectedMerchants(context, detected);
+            prefs.edit().remove(KEY_MERCHANT_EVIDENCE_PENDING).apply();
+            return changed;
+        } catch (Exception e) {
+            Log.w(TAG, "pending merchant enrichment failed; will retry", e);
+            return false;
+        }
+    }
+
     /** Finds merchants only from recognized authorization sources and only against settled
      * withdrawals already present in history. Ambiguous transactions or conflicting merchants are
      * intentionally discarded rather than guessed. */
-    private static void detectAuthorizationMerchants(Context context, List<Transaction> stored,
+    private static boolean detectAuthorizationMerchants(Context context, List<Transaction> stored,
             Map<String, String> out, Set<String> ambiguous) {
-        if (stored == null || stored.isEmpty() || out == null) return;
+        if (stored == null || stored.isEmpty() || out == null) return true;
         Map<String, Set<String>> candidates = new LinkedHashMap<>();
         List<AuthorizationEvidence> authorizations = new ArrayList<>();
         List<SettlementEvidence> settlements = new ArrayList<>();
@@ -2118,8 +2160,12 @@ final class BalanceData {
                     source.bank, source.rawBody);
                 if (authorization != null)
                     authorizations.add(new AuthorizationEvidence(authorization, source.arrivalTime));
+                int latestParserRevision = -1;
+                for (SourceStore.TransactionObservation observation : transactions)
+                    latestParserRevision = Math.max(latestParserRevision, observation.parserRevision);
                 for (SourceStore.TransactionObservation observation : transactions) {
                     Transaction transaction = observation.transaction;
+                    if (observation.parserRevision != latestParserRevision) continue;
                     if (transaction != null && transaction.balance != null)
                         settlements.add(new SettlementEvidence(source.bank, source.arrivalTime,
                             transaction));
@@ -2130,28 +2176,54 @@ final class BalanceData {
             // complete evidence set is unavailable, so defer merchant attachment rather than risk a
             // false singleton match from only the current batch.
             Log.w(TAG, "authorization source scan failed; deferring merchants", e);
-            return;
+            return false;
+        }
+        Map<String, List<SettlementEvidence>> settlementsByBankAndAmount = new HashMap<>();
+        for (SettlementEvidence settlement : settlements) {
+            String key = settlement.bank + "|" + settlement.transaction.amount;
+            settlementsByBankAndAmount.computeIfAbsent(key, ignored -> new ArrayList<>())
+                .add(settlement);
+        }
+        Map<String, Set<Transaction>> storedByIdentity = new HashMap<>();
+        for (Transaction transaction : stored) {
+            if (transaction.sig != null)
+                addStoredIdentity(storedByIdentity, "sig", transaction.sig, transaction);
+            if (transaction.content != null)
+                addStoredIdentity(storedByIdentity, "content", transaction.content, transaction);
         }
         for (AuthorizationEvidence authorization : authorizations) {
             Set<Transaction> matches = new HashSet<>();
-            for (SettlementEvidence settlement : settlements) {
-                if (!authorization.authorization.bank.equals(settlement.bank)
-                        || settlement.transaction.amount != -authorization.authorization.amount)
-                    continue;
-                Transaction storedTransaction = storedTransactionForObservation(stored,
-                    settlement.transaction);
-                if (storedTransaction == null) continue;
-                boolean matched = authorization.authorization.hour < 0
-                    ? Math.abs(authorization.arrival - settlement.arrival)
-                        <= CLOCKLESS_AUTHORIZATION_WINDOW_MS
-                    : authorizationMatches(authorization.authorization, authorization.arrival,
-                        storedTransaction);
-                if (matched) matches.add(storedTransaction);
+            String settlementKey = authorization.authorization.bank + "|"
+                + (-authorization.authorization.amount);
+            List<SettlementEvidence> possible = settlementsByBankAndAmount.get(settlementKey);
+            if (possible != null) {
+                for (SettlementEvidence settlement : possible) {
+                    Transaction storedTransaction = storedTransactionForObservation(storedByIdentity,
+                        settlement.transaction);
+                    if (storedTransaction == null) continue;
+                    boolean matched = authorization.authorization.hour < 0
+                        ? Math.abs(authorization.arrival - settlement.arrival)
+                            <= CLOCKLESS_AUTHORIZATION_WINDOW_MS
+                        : authorizationMatches(authorization.authorization, authorization.arrival,
+                            storedTransaction);
+                    if (matched) matches.add(storedTransaction);
+                }
+            }
+            // Clocked layouts carry their own event time, so retain the legacy direct match for
+            // transactions restored before source fingerprints existed. Clockless layouts must use
+            // source arrival times and cannot safely use this fallback.
+            if (authorization.authorization.hour >= 0) {
+                for (Transaction transaction : stored) {
+                    if (authorizationMatches(authorization.authorization, authorization.arrival,
+                            transaction)) matches.add(transaction);
+                }
             }
             if (matches.size() == 1) {
                 Transaction transaction = matches.iterator().next();
                 candidates.computeIfAbsent(noteKey(transaction), ignored -> new HashSet<>())
                     .add(authorization.authorization.merchant);
+            } else if (matches.size() > 1 && ambiguous != null) {
+                for (Transaction transaction : matches) ambiguous.add(noteKey(transaction));
             }
         }
         for (Map.Entry<String, Set<String>> entry : candidates.entrySet()) {
@@ -2160,22 +2232,35 @@ final class BalanceData {
             else if (entry.getValue().size() > 1 && ambiguous != null)
                 ambiguous.add(entry.getKey());
         }
+        return true;
     }
 
-    private static Transaction storedTransactionForObservation(List<Transaction> stored,
+    private static void addStoredIdentity(Map<String, Set<Transaction>> index, String kind,
+            String value, Transaction transaction) {
+        index.computeIfAbsent(observationIdentityKey(kind, transaction.bank, transaction.amount, value),
+            ignored -> new HashSet<>()).add(transaction);
+    }
+
+    private static String observationIdentityKey(String kind, String bank, long amount,
+            String value) {
+        return kind + "\u0000" + bank + "\u0000" + amount + "\u0000" + value;
+    }
+
+    private static Transaction storedTransactionForObservation(
+            Map<String, Set<Transaction>> storedByIdentity,
             Transaction observation) {
-        Transaction match = null;
-        for (Transaction transaction : stored) {
-            boolean sameContent = observation.content != null && transaction.content != null
-                && observation.content.equals(transaction.content);
-            boolean sameSignature = observation.sig != null && transaction.sig != null
-                && observation.sig.equals(transaction.sig);
-            if ((!sameContent && !sameSignature) || !observation.bank.equals(transaction.bank)
-                    || observation.amount != transaction.amount) continue;
-            if (match != null) return null;
-            match = transaction;
+        Set<Transaction> matches = new HashSet<>();
+        if (observation.sig != null) {
+            Set<Transaction> bySignature = storedByIdentity.get(observationIdentityKey("sig",
+                observation.bank, observation.amount, observation.sig));
+            if (bySignature != null) matches.addAll(bySignature);
         }
-        return match;
+        if (observation.content != null) {
+            Set<Transaction> byContent = storedByIdentity.get(observationIdentityKey("content",
+                observation.bank, observation.amount, observation.content));
+            if (byContent != null) matches.addAll(byContent);
+        }
+        return matches.size() == 1 ? matches.iterator().next() : null;
     }
 
     private static final class AuthorizationEvidence {
@@ -2207,12 +2292,21 @@ final class BalanceData {
         event.setTimeInMillis(transaction.date);
         Calendar received = Calendar.getInstance();
         received.setTimeInMillis(arrival);
-        if (event.get(Calendar.YEAR) != received.get(Calendar.YEAR)
-                || event.get(Calendar.DAY_OF_YEAR) != received.get(Calendar.DAY_OF_YEAR))
-            return false;
         if (authorization.hour < 0) return false;
-        return event.get(Calendar.HOUR_OF_DAY) == authorization.hour
-            && event.get(Calendar.MINUTE) == authorization.minute;
+        int eventMinute = event.get(Calendar.HOUR_OF_DAY) * 60
+            + event.get(Calendar.MINUTE);
+        int receivedMinute = received.get(Calendar.HOUR_OF_DAY) * 60
+            + received.get(Calendar.MINUTE);
+        boolean sameDay = event.get(Calendar.YEAR) == received.get(Calendar.YEAR)
+            && event.get(Calendar.DAY_OF_YEAR) == received.get(Calendar.DAY_OF_YEAR);
+        if (sameDay)
+            return eventMinute == authorization.hour * 60 + authorization.minute;
+        // The SMS may cross midnight while the bank's event clock still names the previous day.
+        // Permit only the adjacent-minute boundary; all other date mismatches remain rejected.
+        boolean adjacentMidnight = (eventMinute == 23 * 60 + 59 && receivedMinute == 0)
+            || (eventMinute == 0 && receivedMinute == 23 * 60 + 59);
+        return adjacentMidnight
+            && eventMinute == authorization.hour * 60 + authorization.minute;
     }
 
     /** Notifies registered listeners that a history re-scan finished with something to show — new

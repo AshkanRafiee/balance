@@ -905,4 +905,50 @@ public class BankRulesTest {
         assertNull(BankRules.extractAuthorization("Pasargad",
             "پاسارگاد\nخرید\nفروشگاه نمونه\nمبلغ:45,500,000\nرمز:72552"));
     }
+
+    @Test public void extractAuthorization_strictAmountAndCodeRejectsSpoofedLayouts() {
+        String prefix = "بانک ملت\nخرید\nفروشگاه نمونه\n";
+        assertNull(BankRules.extractAuthorization("Mellat", prefix + "مبلغ:120.50\nرمز:12345"));
+        assertNull(BankRules.extractAuthorization("Mellat", prefix + "مبلغ:1,23\nرمز:12345"));
+        assertNull(BankRules.extractAuthorization("Mellat", prefix + "مبلغ:-120\nرمز:12345"));
+        assertNull(BankRules.extractAuthorization("Mellat", prefix + "مبلغ:120 تومان\nرمز:12345"));
+        assertNull(BankRules.extractAuthorization("Mellat", prefix
+            + "مبلغ:120\nمبلغ:121\nرمز:12345"));
+        assertNull(BankRules.extractAuthorization("Mellat", prefix + "مبلغ:120\n12345"));
+    }
+
+    @Test public void extractAuthorization_actionMustBeAWholeVerifiedLine() {
+        assertNull(BankRules.extractAuthorization("Melli",
+            "بانک ملی\nورود به سامانه\nرمز:12345"));
+        assertNull(BankRules.extractAuthorization("Melli",
+            "بانک ملی\nانتقال\nمقصد نمونه\nمبلغ:120\nرمز:12345"));
+        assertNull(BankRules.extractAuthorization("Melli",
+            "بانک ملی\nتوضیح خرید در متن\nفروشگاه نمونه\nمبلغ:120\nرمز:12345"));
+        assertNull(BankRules.extractAuthorization("Melli",
+            "بانک ملی\nخرید\nشماره کارت: 1234\nمبلغ:120\nرمز:12345"));
+        assertNull(BankRules.extractAuthorization("Melli",
+            "بانک ملی\nخرید\n1234****5678\nمبلغ:120\nرمز:12345"));
+        assertNull(BankRules.extractAuthorization("Melli",
+            "بانک ملی\nخرید\nفروشگاه نمونه\nمبلغ:120\nرمز:12345\nمتن اضافه"));
+    }
+
+    @Test public void extractAuthorization_rejectsUnsupportedBanksAndInvalidClocks() {
+        String body = "بانک ناشناخته\nخرید\nفروشگاه نمونه\nمبلغ:120\nرمز:12345\n12:00";
+        assertNull(BankRules.extractAuthorization("Tejarat", body));
+        assertNull(BankRules.extractAuthorization("Pasargad",
+            "پاسارگاد\nخرید\nفروشگاه نمونه\nمبلغ:120\nرمز:12345\n12:00:60"));
+        assertNull(BankRules.extractAuthorization("Blu",
+            "بلو\nبفرمایید رمز پویا\nخرید\nفروشگاه نمونه\nمبلغ:120\nرمز:12345\n24:00"));
+    }
+
+    @Test public void extractAuthorization_clocklessBanksIgnoreExpiryLines() {
+        assertNull(BankRules.extractAuthorization("Mehr",
+            "خرید\nفروشگاه نمونه\n120 ریال\nرمز 123456\nاعتبار 20:00:00"));
+        assertNull(BankRules.extractAuthorization("Mellat",
+            "بانک ملت\nخرید\nفروشگاه نمونه\nمبلغ:120\nرمز:12345\nاعتبار 20:00:00"));
+        BankRules.Authorization authorization = BankRules.extractAuthorization("Mehr",
+            "خرید\nفروشگاه نمونه\n120 ریال\nرمز 123456\n@sample.domain #123456\nاعتبار 20:00:00");
+        assertEquals(-1, authorization.hour);
+        assertEquals(-1, authorization.minute);
+    }
 }

@@ -142,19 +142,29 @@ final class BankRules {
      * history. Most layouts also state a clock; the verified Parsian, Melli, Mehr, Mellat and Saderat
      * purchase layouts do not, so those use SMS arrival time during the later conservative match.
      * Login/password-only messages remain out. */
+    // Only integer rial amounts: grouping is either absent or consistently three digits.
+    private static final String AUTH_INTEGER = "([0-9]{1,19}|[0-9]{1,3}(?:,[0-9]{3}){1,6})";
+    private static final String AUTH_LAYOUT_VERSION = "strict-purchase-layouts-v2";
     private static final Pattern AUTH_AMOUNT = Pattern.compile(
-        "(?:مبلغ)\\s*[:：]?\\s*([0-9][0-9,]*)");
+        "مبلغ\\s*[:：]?\\s*" + AUTH_INTEGER + "(?:\\s*ریال)?");
     private static final Pattern AUTH_RIAL_AMOUNT = Pattern.compile(
-        "(?<![0-9])([0-9][0-9,]*)\\s*ریال(?![0-9])");
+        AUTH_INTEGER + "\\s*ریال");
     private static final Pattern AUTH_CODE = Pattern.compile(
-        "(?<![0-9])([0-9]{4,8})(?![0-9])");
+        "(?:رمز(?:\\s*پویا)?|Code)\\s*[:：]?\\s*[0-9]{4,8}",
+        Pattern.CASE_INSENSITIVE);
     private static final Pattern AUTH_CLOCK = Pattern.compile(
-        "(?<![0-9])([0-9]{1,2}):([0-9]{2})(?::([0-9]{2}))?(?![0-9])");
+        "([0-9]{1,2}):([0-9]{2})(?::([0-9]{2}))?");
     private static final Pattern AUTH_ACTION = Pattern.compile(
-        "(?:^|\\s)(?:خرید|پرداخت)(?:\\s|$)");
+        "(?:خرید(?: از)?|پرداخت)");
     private static final Pattern AUTH_MARKER = Pattern.compile(
         "(?:رمز|پویا|otp|code|one[- ]?time|کد\\s*(?:تایید|تأیید))",
         Pattern.CASE_INSENSITIVE);
+    private static final Pattern AUTH_ACCOUNT_LABEL = Pattern.compile(
+        "^(?:شماره\\s*)?(?:حساب|کارت|شبا)(?=[:：\\s0-9*#]|$)");
+    private static final Pattern AUTH_MEHR_LINK = Pattern.compile(
+        "@[A-Za-z0-9._-]+\\s+#[0-9]{4,8}");
+    private static final Pattern AUTH_EXPIRY = Pattern.compile(
+        "اعتبار\\s+[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?");
 
     /** Structured authorization evidence. It intentionally contains no OTP value and no account;
      * both are irrelevant after a completed movement has been matched. */
@@ -333,6 +343,10 @@ final class BankRules {
         v = v * 31 + AUTH_CLOCK.pattern().hashCode();
         v = v * 31 + AUTH_ACTION.pattern().hashCode();
         v = v * 31 + AUTH_MARKER.pattern().hashCode();
+        v = v * 31 + AUTH_ACCOUNT_LABEL.pattern().hashCode();
+        v = v * 31 + AUTH_MEHR_LINK.pattern().hashCode();
+        v = v * 31 + AUTH_EXPIRY.pattern().hashCode();
+        v = v * 31 + AUTH_LAYOUT_VERSION.hashCode();
         v = v * 31 + "Mellat|Saderat".hashCode();
         v = v * 31 + "Parsian|Melli|Mehr".hashCode();
         for (String[] rule : RULES) for (String alias : rule[1].split("\\|")) v = v * 31 + alias.hashCode();
@@ -390,16 +404,45 @@ final class BankRules {
      * the code itself is checked and then discarded. */
     static Authorization extractAuthorization(String bank, String body) {
         if (bank == null || body == null || body.isEmpty()) return null;
+        if (!"Pasargad".equals(bank) && !"Blu".equals(bank)
+                && !clocklessAuthorizationBank(bank)) return null;
         String normalized = Digits.ascii(body).replace("\u066C", ",").replace("\u060C", ",")
             .replace("\r\n", "\n").replace('\r', '\n');
-        String folded = BalanceData.normalizeLetters(normalized);
-        String[] rawLines = normalized.split("\n", -1);
-        String[] lines = folded.split("\n", -1);
+        List<String> rawLines = new ArrayList<>();
+        List<String> lines = new ArrayList<>();
+        for (String raw : normalized.split("\n", -1)) {
+            String line = cleanAuthorizationLine(raw);
+            if (line.isEmpty()) continue;
+            rawLines.add(line);
+            lines.add(BalanceData.normalizeLetters(line));
+        }
         int amountIndex = -1;
+        int actionIndex = -1;
+        int codeIndex = -1;
         long amount = 0;
-        for (int i = 0; i < lines.length; i++) {
-            Matcher amountMatcher = AUTH_AMOUNT.matcher(cleanAuthorizationLine(lines[i]));
-            if (!amountMatcher.find()) continue;
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            if (AUTH_ACTION.matcher(line).matches()) {
+                if (actionIndex >= 0) return null;
+                actionIndex = i;
+            }
+            if (AUTH_CODE.matcher(line).matches()) {
+                if (codeIndex >= 0) return null;
+                codeIndex = i;
+            }
+            Matcher amountMatcher = AUTH_AMOUNT.matcher(line);
+            boolean matched = amountMatcher.matches();
+            if (!matched && "Mehr".equals(bank)) {
+                amountMatcher = AUTH_RIAL_AMOUNT.matcher(line);
+                matched = amountMatcher.matches();
+            }
+            if (!matched) {
+                // Do not silently skip a second, malformed or differently denominated amount.
+                if (line.contains("مبلغ") || line.contains("ریال") || line.contains("تومان"))
+                    return null;
+                continue;
+            }
+            if (amountIndex >= 0) return null;
             try {
                 amount = Long.parseLong(amountMatcher.group(1).replace(",", ""));
             } catch (NumberFormatException ignored) {
@@ -407,74 +450,61 @@ final class BankRules {
             }
             if (amount <= 0) return null;
             amountIndex = i;
-            break;
         }
-        if (amountIndex < 0 && "Mehr".equals(bank)) {
-            for (int i = 0; i < lines.length; i++) {
-                Matcher amountMatcher = AUTH_RIAL_AMOUNT.matcher(cleanAuthorizationLine(lines[i]));
-                if (!amountMatcher.find()) continue;
-                try {
-                    amount = Long.parseLong(amountMatcher.group(1).replace(",", ""));
-                } catch (NumberFormatException ignored) {
-                    return null;
-                }
-                if (amount <= 0) return null;
-                amountIndex = i;
-                break;
-            }
-        }
-        if (amountIndex < 1) return null;
-
-        int actionIndex = -1;
-        for (int i = 0; i < amountIndex; i++) {
-            if (AUTH_ACTION.matcher(cleanAuthorizationLine(lines[i])).find()) actionIndex = i;
-        }
-        if (actionIndex < 0) return null;
-
-        String merchant = null;
-        for (int i = actionIndex + 1; i < amountIndex; i++) {
-            String candidate = cleanAuthorizationLine(rawLines[i]);
-            String matchCandidate = cleanAuthorizationLine(lines[i]);
-            if (candidate.isEmpty() || AUTH_MARKER.matcher(matchCandidate).find()) continue;
-            if (candidate.matches("[0-9 .,:/\\-]+")) continue;
-            merchant = candidate;
-        }
-        if (merchant == null || merchant.isEmpty() || merchant.length() > 120) return null;
-
-        int codeIndex = -1;
-        for (int i = amountIndex + 1; i < lines.length; i++) {
-            String line = cleanAuthorizationLine(lines[i]);
-            if (!AUTH_MARKER.matcher(line).find()) continue;
-            Matcher code = AUTH_CODE.matcher(line);
-            if (code.find()) {
-                codeIndex = i;
-                break;
-            }
-        }
-        if (codeIndex < 0) return null;
+        if (actionIndex < 0 || amountIndex != actionIndex + 2 || codeIndex != amountIndex + 1
+                || !authorizationHeader(bank, lines, actionIndex)) return null;
+        String merchant = rawLines.get(actionIndex + 1);
+        String foldedMerchant = lines.get(actionIndex + 1);
+        if (merchant.length() > 120 || !merchant.matches(".*\\p{L}.*")
+                || merchant.matches("[0-9xX*# .,:/\\-]+")
+                || AUTH_ACCOUNT_LABEL.matcher(foldedMerchant).find()
+                || AUTH_MARKER.matcher(foldedMerchant).find()) return null;
 
         // Mehr's observed clock is the code-expiry time, not the payment event time. The other
         // newly verified clockless layouts likewise do not print an event clock.
-        if (clocklessAuthorizationBank(bank))
-            return new Authorization(bank, merchant, amount, -1, -1);
-
-        int hour = -1;
-        int minute = -1;
-        for (int i = codeIndex + 1; i < lines.length; i++) {
-            Matcher clock = AUTH_CLOCK.matcher(cleanAuthorizationLine(lines[i]));
-            while (clock.find()) {
-                int h = Integer.parseInt(clock.group(1));
-                int m = Integer.parseInt(clock.group(2));
-                if (h <= 23 && m <= 59) {
-                    hour = h;
-                    minute = m;
-                    break;
-                }
+        if (clocklessAuthorizationBank(bank)) {
+            if ("Mehr".equals(bank)) {
+                if (lines.size() == codeIndex + 1) return new Authorization(bank, merchant, amount, -1, -1);
+                if (lines.size() != codeIndex + 3
+                        || !AUTH_MEHR_LINK.matcher(lines.get(codeIndex + 1)).matches()
+                        || !AUTH_EXPIRY.matcher(lines.get(codeIndex + 2)).matches()) return null;
+            } else if (lines.size() != codeIndex + 1) {
+                return null;
             }
-            if (hour >= 0) break;
+            return new Authorization(bank, merchant, amount, -1, -1);
         }
-        if (hour < 0 && !clocklessAuthorizationBank(bank)) return null;
+
+        // Only the verified standalone event-clock line can supply a time, never an expiry sentence.
+        if (lines.size() != codeIndex + 2) return null;
+        Matcher clock = AUTH_CLOCK.matcher(lines.get(codeIndex + 1));
+        if (!clock.matches()) return null;
+        int hour = Integer.parseInt(clock.group(1));
+        int minute = Integer.parseInt(clock.group(2));
+        int second = clock.group(3) == null ? 0 : Integer.parseInt(clock.group(3));
+        if (hour > 23 || minute > 59 || second > 59) return null;
         return new Authorization(bank, merchant, amount, hour, minute);
+    }
+
+    /** Prefixes of the verified layouts only; free text cannot introduce a purchase action. */
+    private static boolean authorizationHeader(String bank, List<String> lines, int actionIndex) {
+        switch (bank) {
+            case "Pasargad":
+                return actionIndex == 1 && "پاسارگاد".equals(lines.get(0));
+            case "Blu":
+                return actionIndex == 2 && "بلو".equals(lines.get(0))
+                    && "بفرمایید رمز پویا".equals(lines.get(1));
+            case "Melli":
+                return actionIndex == 1 && "بانک ملی".equals(lines.get(0));
+            case "Mellat":
+                return actionIndex == 1 && "بانک ملت".equals(lines.get(0));
+            case "Saderat":
+                return actionIndex == 1 && "بانک صادرات".equals(lines.get(0));
+            case "Parsian":
+            case "Mehr":
+                return actionIndex == 0;
+            default:
+                return false;
+        }
     }
 
     /** The observed Parsian, Melli, Mehr, Mellat and Saderat purchase authorization layouts omit an

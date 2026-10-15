@@ -19,6 +19,7 @@ import org.junit.runner.RunWith;
 
 import java.io.InputStream;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 
@@ -265,6 +266,90 @@ public class HistoryScanTest {
         assertEquals(1, transactions.size());
         assertEquals("فروشگاه نمونه",
             BalanceData.readMerchants(ctx).get(BalanceData.noteKey(transactions.get(0))));
+    }
+
+    @Test public void mehrAuthorization_matchesSourceArrivalToSettlementArrival() throws Exception {
+        long base = System.currentTimeMillis() - 60_000L;
+        Transaction transaction = new Transaction("Mehr", "account", base, -45_500L,
+            900_000L, "synthetic-sig", "synthetic-content");
+        BalanceData.writeTransactions(ctx, Collections.singletonList(transaction));
+        SourceStore.Source settlement = SourceStore.capture(ctx, "B.QMEHRIRAN",
+            "account\n45,500-\n1405/6/29-20:30\nمانده:900,000", base, BankRules.VERSION);
+        assertNotNull(settlement);
+        assertTrue(SourceStore.observeTransaction(ctx, settlement, BankRules.VERSION, transaction));
+        SourceStore.Source authorization = SourceStore.capture(ctx, "B.QMEHRIRAN",
+            "خريد\nفروشگاه نمونه\n45,500 ريال\nرمز 123456\n"
+                + "@bank.example #123456\nاعتبار 20:00:00", base + 2 * 60_000L,
+            BankRules.VERSION);
+        assertNotNull(authorization);
+        ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit()
+            .putBoolean(BalanceData.KEY_MERCHANT_EVIDENCE_PENDING, true).commit();
+
+        assertEquals(0, BalanceData.scanHistory(ctx));
+        assertEquals("فروشگاه نمونه", BalanceData.readMerchants(ctx).get(
+            BalanceData.noteKey(transaction)));
+    }
+
+    @Test public void clockedAuthorization_canEnrichLegacyTransactionWithoutFingerprint() throws Exception {
+        long base = System.currentTimeMillis() - 60_000L;
+        Calendar clock = Calendar.getInstance();
+        clock.setTimeInMillis(base);
+        String eventClock = String.format(Locale.US, "%02d:%02d:%02d",
+            clock.get(Calendar.HOUR_OF_DAY), clock.get(Calendar.MINUTE),
+            clock.get(Calendar.SECOND));
+        Transaction legacy = new Transaction("Pasargad", null, base, -45_500_000L,
+            900_000L, null, null);
+        BalanceData.writeTransactions(ctx, Collections.singletonList(legacy));
+        seed("B.Pasargad", "پاسارگاد\nخرید\nفروشگاه نمونه\n"
+            + "مبلغ:45,500,000\nرمز:72552\n" + eventClock, base);
+
+        assertEquals(0, BalanceData.scanHistory(ctx));
+        List<Transaction> transactions = BalanceData.readTransactions(ctx);
+        assertEquals(1, transactions.size());
+        assertEquals("فروشگاه نمونه",
+            BalanceData.readMerchants(ctx).get(BalanceData.noteKey(transactions.get(0))));
+    }
+
+    @Test public void clockedAuthorization_allowsTheOneMinuteMidnightRollover() throws Exception {
+        Calendar event = Calendar.getInstance();
+        event.add(Calendar.DAY_OF_YEAR, -1);
+        event.set(Calendar.HOUR_OF_DAY, 23);
+        event.set(Calendar.MINUTE, 59);
+        event.set(Calendar.SECOND, 0);
+        event.set(Calendar.MILLISECOND, 0);
+        long eventTime = event.getTimeInMillis();
+        Transaction legacy = new Transaction("Pasargad", null, eventTime, -45_500_000L,
+            900_000L, null, null);
+        BalanceData.writeTransactions(ctx, Collections.singletonList(legacy));
+        seed("B.Pasargad", "پاسارگاد\nخرید\nفروشگاه نمونه\n"
+            + "مبلغ:45,500,000\nرمز:72552\n23:59:00", eventTime + 60_000L);
+
+        assertEquals(0, BalanceData.scanHistory(ctx));
+        List<Transaction> transactions = BalanceData.readTransactions(ctx);
+        assertEquals(1, transactions.size());
+        assertEquals("فروشگاه نمونه",
+            BalanceData.readMerchants(ctx).get(BalanceData.noteKey(transactions.get(0))));
+    }
+
+    @Test public void ambiguousClocklessAuthorization_removesEarlierMerchant() throws Exception {
+        long base = System.currentTimeMillis() - 60_000L;
+        String first = "برداشت45,500 مانده 900,000";
+        String second = "برداشت45,500 مانده 900,001";
+        String otp = "بانک ملت\nخرید\nفروشگاه نمونه\nمبلغ:45,500\nرمز:12345";
+
+        seed("Mellat", first, base);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        seed("Mellat", otp, base + 2_000L);
+        assertEquals(0, BalanceData.scanHistory(ctx));
+        List<Transaction> afterFirst = BalanceData.readTransactions(ctx);
+        assertEquals(1, afterFirst.size());
+        assertEquals("فروشگاه نمونه",
+            BalanceData.readMerchants(ctx).get(BalanceData.noteKey(afterFirst.get(0))));
+
+        seed("Mellat", second, base + 3_000L);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        assertEquals(2, BalanceData.readTransactions(ctx).size());
+        assertTrue(BalanceData.readMerchants(ctx).isEmpty());
     }
 
     private SharedPreferences prefs() {

@@ -128,6 +128,91 @@ public class MetadataStoreTest {
         assertNull(legacyValue(BalanceData.KEY_TX_TAGS));
     }
 
+    @Test public void merchantSchemaUpgradePreservesExistingMetadataAndReopens() throws Exception {
+        assertTrue(MetadataStore.setNote(context, "old-note", "note before merchant schema"));
+        assertTrue(MetadataStore.mergeReasons(context,
+            singletonText("old-reason", "reason before merchant schema")));
+        assertTrue(MetadataStore.mergeChannels(context,
+            singletonText("old-channel", "channel before merchant schema")));
+        assertTrue(MetadataStore.setTags(context, "old-tags", Arrays.asList("one", "two")));
+
+        // Recreate the actual v1 table shape. Merchant rows did not exist yet, so only the four
+        // original kinds can be copied into the old CHECK constraint before opening v2 again.
+        SQLiteDatabase db = SQLiteDatabase.openDatabase(
+            context.getDatabasePath(MetadataStore.DB_NAME).getPath(), null,
+            SQLiteDatabase.OPEN_READWRITE);
+        try {
+            db.execSQL("CREATE TABLE metadata_v1 (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                + " kind INTEGER NOT NULL CHECK(kind BETWEEN 1 AND 4),"
+                + " lookup TEXT NOT NULL UNIQUE, payload TEXT NOT NULL)");
+            db.execSQL("INSERT INTO metadata_v1(id,kind,lookup,payload)"
+                + " SELECT id,kind,lookup,payload FROM " + MetadataStore.TABLE);
+            db.execSQL("DROP INDEX metadata_kind_order");
+            db.execSQL("CREATE INDEX metadata_kind_order ON metadata_v1(kind, id)");
+            db.execSQL("DROP TABLE " + MetadataStore.TABLE);
+            db.execSQL("ALTER TABLE metadata_v1 RENAME TO " + MetadataStore.TABLE);
+            db.setVersion(1);
+        } finally {
+            db.close();
+        }
+
+        // The next access reopens the file and runs the v1 -> v2 table migration.
+        assertEquals("note before merchant schema", MetadataStore.readNotes(context).get("old-note"));
+        assertEquals("reason before merchant schema",
+            MetadataStore.readReasons(context).get("old-reason"));
+        assertEquals("channel before merchant schema",
+            MetadataStore.readChannels(context).get("old-channel"));
+        assertEquals(Arrays.asList("one", "two"), MetadataStore.readTags(context).get("old-tags"));
+
+        assertTrue(MetadataStore.mergeMerchants(context,
+            singletonText("new-merchant", "merchant after schema upgrade")));
+        assertEquals("merchant after schema upgrade",
+            MetadataStore.readMerchants(context).get("new-merchant"));
+    }
+
+    @Test public void migrateTransactionMovesAllKindsLocalFirstIncludingMerchants() throws Exception {
+        Transaction source = new Transaction("AliasBank", "account", 100L, -42L,
+            null, null, null);
+        Transaction destination = new Transaction("AliasBank", "account", 100L, -42L,
+            null, null, "parser-v2-content");
+        String sourceKey = BalanceData.noteKey(source);
+        String destinationKey = BalanceData.noteKey(destination);
+
+        assertTrue(MetadataStore.setNote(context, sourceKey, "source note"));
+        assertTrue(MetadataStore.setNote(context, destinationKey, "local note"));
+        assertTrue(MetadataStore.mergeReasons(context,
+            singletonText(sourceKey, "source reason")));
+        assertTrue(MetadataStore.mergeReasons(context,
+            singletonText(destinationKey, "local reason")));
+        assertTrue(MetadataStore.mergeChannels(context,
+            singletonText(sourceKey, "source channel")));
+        assertTrue(MetadataStore.mergeChannels(context,
+            singletonText(destinationKey, "local channel")));
+        assertTrue(MetadataStore.mergeMerchants(context,
+            singletonText(sourceKey, "source merchant")));
+        assertTrue(MetadataStore.mergeMerchants(context,
+            singletonText(destinationKey, "local merchant")));
+        assertTrue(MetadataStore.setTags(context, sourceKey, Arrays.asList("source", "shared")));
+        assertTrue(MetadataStore.setTags(context, destinationKey,
+            Arrays.asList("local", "SHARED")));
+
+        Map<Transaction, Transaction> replaced = new LinkedHashMap<>();
+        replaced.put(source, destination);
+        assertTrue(MetadataStore.migrateTransactionText(context, replaced));
+
+        assertEquals("local note", MetadataStore.readNotes(context).get(destinationKey));
+        assertEquals("local reason", MetadataStore.readReasons(context).get(destinationKey));
+        assertEquals("local channel", MetadataStore.readChannels(context).get(destinationKey));
+        assertEquals("local merchant", MetadataStore.readMerchants(context).get(destinationKey));
+        assertEquals(Arrays.asList("local", "SHARED", "source"),
+            MetadataStore.getTags(context, destinationKey));
+        assertFalse(MetadataStore.readNotes(context).containsKey(sourceKey));
+        assertFalse(MetadataStore.readReasons(context).containsKey(sourceKey));
+        assertFalse(MetadataStore.readChannels(context).containsKey(sourceKey));
+        assertFalse(MetadataStore.readMerchants(context).containsKey(sourceKey));
+        assertFalse(MetadataStore.readTags(context).containsKey(sourceKey));
+    }
+
     @Test public void pageReadsOnlyTheRequestedWindow() throws Exception {
         Map<String, String> notes = new LinkedHashMap<>();
         for (int i = 0; i < MetadataStore.MAX_PAGE_SIZE + 37; i++)
@@ -190,6 +275,13 @@ public class MetadataStoreTest {
         MetadataStore.reset(context, true);
         assertTrue(MetadataStore.readNotes(context).isEmpty());
         assertTrue(MetadataStore.readTags(context).isEmpty());
+    }
+
+    @Test public void scanMerchantReplacementCorrectsOnlyTheSourcedValue() throws Exception {
+        assertTrue(MetadataStore.mergeMerchants(context, singletonText("key", "old merchant")));
+        assertTrue(MetadataStore.replaceMerchants(context,
+            singletonText("key", "corrected merchant")));
+        assertEquals("corrected merchant", MetadataStore.readMerchants(context).get("key"));
     }
 
     private Map<String, String> singletonText(String key, String value) {
