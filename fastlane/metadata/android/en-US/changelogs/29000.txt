@@ -1,0 +1,6 @@
+• Payment merchants from supported bank authorization messages now appear in history only when they uniquely match a completed withdrawal.
+• History exports and password-encrypted backups now include matched payment merchants.
+• History can now be narrowed by one or more banks and accounts, with the selected scope kept while browsing days.
+• History days open with their transactions immediately instead of requiring an extra load step.
+• Shared diagnostics remove one-time codes, including codes in Parsian and Mehr Iran message formats.
+• Restoring selected notes, tags, reasons, channels or merchants now keeps them attached after app updates.
