@@ -1,6 +1,7 @@
 package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -866,6 +867,61 @@ public class BackupRestoreTest {
             BalanceData.getNote(ctx, txByContent(BalanceData.readTransactions(ctx), "content-A")));
         assertEquals("existing merchant", BalanceData.readMerchants(ctx).get(
             BalanceData.noteKey(txByContent(BalanceData.readTransactions(ctx), "content-A"))));
+    }
+
+    @Test public void restore_legacyFullMetadataAliasIncludesMerchants() throws Exception {
+        Transaction incoming = new Transaction("AliasBank", "account", T + 100,
+            -42L, null, null, null);
+        String incomingKey = BalanceData.noteKey(incoming);
+        Transaction local = new Transaction("AliasBank", "account", T + 100,
+            -42L, null, null, "parser-v2-content");
+        BalanceData.writeTransactions(ctx, Arrays.asList(local));
+        String localKey = BalanceData.noteKey(local);
+        BalanceData.setNote(ctx, local, "local note");
+        BalanceData.mergeReasons(ctx, reasonsFor(local, "local reason"));
+        BalanceData.mergeChannels(ctx, channelsFor(local, "local channel"));
+        BalanceData.mergeMerchants(ctx, java.util.Collections.singletonMap(localKey,
+            "local merchant"));
+        BalanceData.setTags(ctx, local, Arrays.asList("local", "SHARED"));
+
+        java.util.Map<String, String> notes = new LinkedHashMap<>();
+        notes.put(incomingKey, "backup note");
+        java.util.Map<String, String> reasons = new LinkedHashMap<>();
+        reasons.put(incomingKey, "backup reason");
+        java.util.Map<String, String> channels = new LinkedHashMap<>();
+        channels.put(incomingKey, "backup channel");
+        java.util.Map<String, String> merchants = new LinkedHashMap<>();
+        merchants.put(incomingKey, "backup merchant");
+        java.util.Map<String, List<String>> tags = new LinkedHashMap<>();
+        tags.put(incomingKey, Arrays.asList("backup", "shared"));
+        org.json.JSONArray transactions = new org.json.JSONArray()
+            .put(BalanceData.transactionJson(incoming));
+        String payload = new org.json.JSONObject()
+            .put("payloadFormat", 8)
+            .put("balances", new org.json.JSONObject())
+            .put("transactions", new org.json.JSONObject().put("transactions", transactions))
+            .put("txNotes", new org.json.JSONObject(BalanceData.serializeTextMap(notes)))
+            .put("txReasons", new org.json.JSONObject(BalanceData.serializeTextMap(reasons)))
+            .put("txChannels", new org.json.JSONObject(BalanceData.serializeTextMap(channels)))
+            .put("txMerchants", new org.json.JSONObject(BalanceData.serializeTextMap(merchants)))
+            .put("txTags", new org.json.JSONObject(BalanceData.serializeTagsMap(tags)))
+            .toString();
+        File f = file("legacy-full-metadata-alias.balance");
+        writeLegacyBackup(f, payload, PASSWORD);
+
+        BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
+        assertEquals("local note", BalanceData.getNote(ctx, local));
+        assertEquals("local reason", BalanceData.readReasons(ctx).get(localKey));
+        assertEquals("local channel", BalanceData.readChannels(ctx).get(localKey));
+        assertEquals("local merchant", BalanceData.readMerchants(ctx).get(localKey));
+        assertEquals(Arrays.asList("local", "SHARED", "backup"),
+            BalanceData.getTags(ctx, local));
+        assertFalse(BalanceData.readNotes(ctx).containsKey(incomingKey));
+        assertFalse(BalanceData.readReasons(ctx).containsKey(incomingKey));
+        assertFalse(BalanceData.readChannels(ctx).containsKey(incomingKey));
+        assertFalse(BalanceData.readMerchants(ctx).containsKey(incomingKey));
+        assertFalse(BalanceData.readTags(ctx).containsKey(incomingKey));
     }
 
     @Test public void restore_notes_mergeUnionWithLocalWins() throws Exception {

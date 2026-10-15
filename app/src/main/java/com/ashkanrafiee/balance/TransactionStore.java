@@ -245,6 +245,29 @@ final class TransactionStore {
         return mergeResult(context, source, null);
     }
 
+    /** Calls {@code aliases} for incoming rows that already have a different local identity,
+     * without importing any transaction. This is used when a user restores only metadata: the
+     * metadata still needs the same parser-revision alias that a full transaction merge would have
+     * produced, but selecting metadata must never bring the transaction section along. */
+    static void collectAliases(Context context, StreamSource source, AliasVisitor aliases)
+            throws Exception {
+        if (source == null) throw new NullPointerException("source");
+        if (aliases == null) throw new NullPointerException("aliases");
+        access(context, false, true, false, s -> {
+            if (s == null) return null;
+            s.visit(DEFAULT_PAGE_SIZE, transaction -> {});
+            consume(source, incoming -> {
+                requireTransaction(incoming);
+                Transaction existing = s.find(incoming);
+                if (existing == null) return;
+                String from = BalanceData.noteKey(incoming);
+                String to = BalanceData.noteKey(existing);
+                if (!from.equals(to)) aliases.accept(from, to);
+            });
+            return null;
+        });
+    }
+
     /** Current store revision for cache validation; null when absent or unreadable. Read-only:
      *  it never creates the database, so a missing store stays missing. */
     static String revision(Context context) {

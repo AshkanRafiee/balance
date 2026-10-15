@@ -178,6 +178,8 @@ public class BackupV2Test {
         BalanceData.setNote(context, backupTransaction, "backup note");
         BalanceData.mergeReasons(context, Collections.singletonMap(incomingKey, "backup reason"));
         BalanceData.mergeChannels(context, Collections.singletonMap(incomingKey, "backup channel"));
+        BalanceData.mergeMerchants(context,
+            Collections.singletonMap(incomingKey, "backup merchant"));
         BalanceData.setTags(context, backupTransaction, Collections.singletonList("backup tag"));
         File backup = file("v2-alias.bin");
         BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
@@ -190,17 +192,49 @@ public class BackupV2Test {
         BalanceData.setNote(context, localTransaction, "local note");
         BalanceData.mergeReasons(context, Collections.singletonMap(localKey, "local reason"));
         BalanceData.mergeChannels(context, Collections.singletonMap(localKey, "local channel"));
+        BalanceData.mergeMerchants(context,
+            Collections.singletonMap(localKey, "local merchant"));
         BalanceData.setTags(context, localTransaction, Collections.singletonList("local tag"));
 
         BackupManager.restore(context, Uri.fromFile(backup), PASSWORD);
         assertEquals("local note", BalanceData.getNote(context, localTransaction));
         assertEquals("local reason", BalanceData.readReasons(context).get(localKey));
         assertEquals("local channel", BalanceData.readChannels(context).get(localKey));
+        assertEquals("local merchant", BalanceData.readMerchants(context).get(localKey));
         assertEquals(Arrays.asList("local tag", "backup tag"),
             BalanceData.getTags(context, localTransaction));
         assertFalse(BalanceData.readNotes(context).containsKey(incomingKey));
         assertFalse(BalanceData.readReasons(context).containsKey(incomingKey));
         assertFalse(BalanceData.readChannels(context).containsKey(incomingKey));
+        assertFalse(BalanceData.readMerchants(context).containsKey(incomingKey));
+    }
+
+    @Test public void restore_metadataOnlyRemapsParserAliasWithoutImportingTransaction()
+            throws Exception {
+        Transaction backupTransaction = new Transaction("AliasBank", "account", T + 10,
+            -42L, null, null, null);
+        BalanceData.writeTransactions(context, Collections.singletonList(backupTransaction));
+        String incomingKey = BalanceData.noteKey(backupTransaction);
+        BalanceData.setNote(context, backupTransaction, "backup note");
+        BalanceData.mergeMerchants(context, Collections.singletonMap(incomingKey,
+            "backup merchant"));
+        File backup = file("v2-metadata-alias.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+
+        BalanceData.reset(context, true);
+        Transaction localTransaction = new Transaction("AliasBank", "account", T + 10,
+            -42L, null, null, "new-content-digest");
+        BalanceData.writeTransactions(context, Collections.singletonList(localTransaction));
+        String localKey = BalanceData.noteKey(localTransaction);
+
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD, null,
+            java.util.EnumSet.of(BackupManager.Section.NOTES, BackupManager.Section.MERCHANTS));
+
+        assertEquals(1, BalanceData.readTransactions(context).size());
+        assertEquals("backup note", BalanceData.getNote(context, localTransaction));
+        assertEquals("backup merchant", BalanceData.readMerchants(context).get(localKey));
+        assertFalse(BalanceData.readNotes(context).containsKey(incomingKey));
+        assertFalse(BalanceData.readMerchants(context).containsKey(incomingKey));
     }
 
     @Test public void restore_unionsSettlementEventsAndPreservesLocalExplicitConflict()
@@ -285,6 +319,8 @@ public class BackupV2Test {
         File backup = file("v2-selection.bin");
         BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
         BalanceData.reset(context, true);
+        BalanceData.mergeMerchants(context,
+            Collections.singletonMap("local-only-merchant", "keep local merchant"));
 
         BackupManager.restore(context, Uri.fromFile(backup), PASSWORD, null,
             java.util.EnumSet.of(BackupManager.Section.BALANCES));
@@ -293,6 +329,8 @@ public class BackupV2Test {
             BalanceData.readTransactions(context).isEmpty());
         assertNull(BalanceData.getNote(context, transaction));
         assertNull(BalanceData.readMerchants(context).get(BalanceData.noteKey(transaction)));
+        assertEquals("keep local merchant",
+            BalanceData.readMerchants(context).get("local-only-merchant"));
         assertTrue(BalanceData.readCommitments(context).isEmpty());
 
         BackupManager.restore(context, Uri.fromFile(backup), PASSWORD, null,
@@ -303,6 +341,8 @@ public class BackupV2Test {
         assertEquals("selection-note", BalanceData.getNote(context, transaction));
         assertEquals("selection-merchant", BalanceData.readMerchants(context).get(
             BalanceData.noteKey(transaction)));
+        assertEquals("keep local merchant",
+            BalanceData.readMerchants(context).get("local-only-merchant"));
         assertEquals(1, BalanceData.readCommitments(context).size());
     }
 

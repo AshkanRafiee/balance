@@ -1123,6 +1123,21 @@ final class BackupV2Restore {
         if (selection.contains(BackupManager.Section.BALANCES))
             mergeBalances(context, stage, result);
 
+        boolean metadataSelected = selection.contains(BackupManager.Section.NOTES)
+            || selection.contains(BackupManager.Section.REASONS)
+            || selection.contains(BackupManager.Section.CHANNELS)
+            || selection.contains(BackupManager.Section.TAGS)
+            || selection.contains(BackupManager.Section.MERCHANTS);
+        if (metadataSelected && !selection.contains(BackupManager.Section.TRANSACTIONS)) {
+            // A metadata-only restore must still follow the same incoming-key to local-key alias
+            // that a transaction import would have produced. It must not, however, import the
+            // unselected transaction rows.
+            TransactionStore.collectAliases(context,
+                visitor -> stage.forEach(TRANSACTION,
+                    payload -> visitor.accept(readTransaction(payload))),
+                stage::addAlias);
+        }
+
         if (selection.contains(BackupManager.Section.TRANSACTIONS)) {
             TransactionStore.MergeResult merged = TransactionStore.mergeResult(context,
                 visitor -> stage.forEach(TRANSACTION,
