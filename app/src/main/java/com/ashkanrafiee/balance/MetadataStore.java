@@ -628,26 +628,47 @@ final class MetadataStore {
             context = DataGeneration.context(context);
             SharedPreferences prefs = context.getSharedPreferences(BalanceData.PREFS_DATA,
                 Context.MODE_PRIVATE);
-            try (Helper helper = new Helper(context)) {
-                SQLiteDatabase db = helper.getWritableDatabase();
-                db.beginTransaction();
-                try {
-                    if (alsoNotes) {
-                        db.delete(TABLE, null, null);
-                        db.delete(META, null, null);
-                    } else {
-                        db.delete(TABLE, "kind IN (?,?,?)",
-                            new String[]{Integer.toString(REASONS), Integer.toString(CHANNELS),
-                                Integer.toString(MERCHANTS)});
-                        putMeta(db, migrationKey(REASONS), "absent");
-                        putMeta(db, migrationKey(CHANNELS), "absent");
-                        putMeta(db, migrationKey(MERCHANTS), "absent");
-                        putMeta(db, REVISION, UUID.randomUUID().toString());
+            try {
+                try (Helper helper = new Helper(context)) {
+                    SQLiteDatabase db = helper.getWritableDatabase();
+                    db.beginTransaction();
+                    try {
+                        if (alsoNotes) {
+                            db.delete(TABLE, null, null);
+                            db.delete(META, null, null);
+                        } else {
+                            db.delete(TABLE, "kind IN (?,?,?)",
+                                new String[]{Integer.toString(REASONS), Integer.toString(CHANNELS),
+                                    Integer.toString(MERCHANTS)});
+                            putMeta(db, migrationKey(REASONS), "absent");
+                            putMeta(db, migrationKey(CHANNELS), "absent");
+                            putMeta(db, migrationKey(MERCHANTS), "absent");
+                            putMeta(db, REVISION, UUID.randomUUID().toString());
+                        }
+                        db.setTransactionSuccessful();
+                    } finally {
+                        db.endTransaction();
                     }
-                    db.setTransactionSuccessful();
-                } finally {
-                    db.endTransaction();
                 }
+            } catch (Exception e) {
+                // A corrupt metadata database must not brick reset: fall back to deleting the
+                // database files without opening them, mirroring TransactionStore.clearLocked.
+                // Only fall back for database failures; anything else still propagates.
+                if (!(e instanceof SQLiteException) && !(e.getCause() instanceof SQLiteException))
+                    throw e;
+                context.deleteDatabase(DB_NAME);
+                java.io.File database = context.getDatabasePath(DB_NAME);
+                java.io.File[] databaseFiles = {
+                    database,
+                    new java.io.File(database.getPath() + "-wal"),
+                    new java.io.File(database.getPath() + "-shm"),
+                    new java.io.File(database.getPath() + "-journal")
+                };
+                boolean cleared = true;
+                for (java.io.File file : databaseFiles) {
+                    if (file.exists() && !file.delete() && file.exists()) cleared = false;
+                }
+                if (!cleared) throw new IllegalStateException("metadata reset failed", e);
             }
             SharedPreferences.Editor cleanup = prefs.edit()
                 .remove(BalanceData.KEY_TX_REASONS)

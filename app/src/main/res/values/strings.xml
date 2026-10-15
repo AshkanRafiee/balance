@@ -286,6 +286,7 @@
     <string name="scan_diag_none_skipped">Every message is recognized — nothing to report.</string>
     <string name="scan_diag_none_skipped_restricted">No accessible SMS to report. Some restricted SMS may be hidden by Android, so this does not mean your inbox is empty.</string>
     <string name="scan_diag_open_sender">Report sender %1$s</string>
+    <string name="scan_diag_open_failed">Could not open the sender report</string>
     <string name="scan_diag_privacy">Nothing leaves this device unless you copy it or send it yourself.</string>
 
     <string name="sender_share_note">%1$d SMS from this sender — tick the samples to include.</string>

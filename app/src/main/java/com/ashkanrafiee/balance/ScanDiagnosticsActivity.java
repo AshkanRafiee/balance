@@ -175,7 +175,9 @@ public final class ScanDiagnosticsActivity extends Activity {
                     new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
                     null, null, Telephony.Sms.DATE + " DESC")) {
                 if (cursor != null) {
-                    while (cursor.moveToNext()) {
+                    // Bound diagnostics memory on very large inboxes: the query is newest-first,
+                    // so the first rows are the ones a format report needs.
+                    while (cursor.moveToNext() && rows.size() < 20000) {
                         rows.add(new Object[]{
                             cursor.getString(0), cursor.getString(1), cursor.getLong(2)});
                     }
@@ -348,12 +350,23 @@ public final class ScanDiagnosticsActivity extends Activity {
 
     private void openChooser(ScanDiagnostics.SenderHit h) {
         ArrayList<String> bodies = new ArrayList<>();
-        for (ScanDiagnostics.Message m : h.stored) bodies.add(m.body);
+        for (ScanDiagnostics.Message m : h.stored) {
+            String body = m.body == null ? "" : m.body;
+            // Keep the inter-activity payload well under the Binder limit; the full text stays
+            // in the diagnostics store and long samples are still identifiable.
+            bodies.add(body.length() > 8000 ? body.substring(0, 8000) : body);
+        }
         Intent i = new Intent(this, SenderShareActivity.class);
         i.putExtra(SenderShareActivity.EXTRA_SENDER, h.sender);
         if (h.bank != null) i.putExtra(SenderShareActivity.EXTRA_BANK, h.bank);
         i.putStringArrayListExtra(SenderShareActivity.EXTRA_MESSAGES, bodies);
-        startActivity(i);
+        try {
+            startActivity(i);
+        } catch (Exception e) {
+            android.util.Log.w("BalanceDiagnostics", "sender chooser failed", e);
+            android.widget.Toast.makeText(this, R.string.scan_diag_open_failed,
+                android.widget.Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void permissionCard() {

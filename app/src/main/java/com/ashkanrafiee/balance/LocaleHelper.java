@@ -39,6 +39,7 @@ public final class LocaleHelper {
         String tag = currentTag(context);
         if ("fa".equals(tag)) return true;
         if (tag == null || tag.isEmpty()) {
+            if (context.getResources().getConfiguration().getLocales().size() == 0) return false;
             Locale device = context.getResources().getConfiguration().getLocales().get(0);
             return device != null && "fa".equals(device.getLanguage());
         }

@@ -269,6 +269,7 @@
     <string name="scan_diag_none_skipped">همه‌ٔ پیامک‌ها شناخته‌شده‌اند — چیزی برای گزارش نیست.</string>
     <string name="scan_diag_none_skipped_restricted">پیامکِ قابل‌دسترسی برای گزارش نیست. برخی پیامک‌های محدودشده ممکن است توسط اندروید پنهان شوند؛ بنابراین این نتیجه به معنی خالی بودن صندوق پیامک نیست.</string>
     <string name="scan_diag_open_sender">گزارش فرستندهٔ %1$s</string>
+    <string name="scan_diag_open_failed">گزارش فرستنده باز نشد</string>
     <string name="scan_diag_privacy">هیچ داده‌ای از این دستگاه خارج نمی‌شود، مگر اینکه خودتان آن را کپی یا ارسال کنید.</string>
 
     <string name="sender_share_note">%1$d پیامک از این فرستنده — نمونه‌هایی را که می‌خواهید در گزارش باشند علامت بزنید.</string>

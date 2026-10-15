@@ -927,6 +927,10 @@ public final class HistoryActivity extends Activity {
     /** Copies the bare account number and schedules its guarded clear from the system clipboard. */
     private void copyAccount(String account) {
         ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (clipboard == null) {
+            Toast.makeText(this, R.string.toast_copied_account, Toast.LENGTH_SHORT).show();
+            return;
+        }
         ClipData clip = ClipData.newPlainText(account, account);
         if (android.os.Build.VERSION.SDK_INT >= 33) {
             android.os.PersistableBundle clipExtras = new android.os.PersistableBundle();
@@ -2535,9 +2539,13 @@ public final class HistoryActivity extends Activity {
     @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
-        outState.putStringArrayList(KEY_EXPANDED_YEARS, new java.util.ArrayList<>(expandedYears));
-        outState.putStringArrayList(KEY_EXPANDED_MONTHS, new java.util.ArrayList<>(expandedMonths));
-        outState.putStringArrayList(KEY_EXPANDED_DAYS, new java.util.ArrayList<>(expandedDays));
+        // Expanded-key sets can grow into the thousands with expand-all on a large history;
+        // persisting them all would exceed the ~1MB Binder transaction limit on rotate/fold
+        // (TransactionTooLargeException). Persist only a bounded recent window; the rest
+        // re-collapses, which is safe because days reopen on demand.
+        outState.putStringArrayList(KEY_EXPANDED_YEARS, cappedList(expandedYears, 100));
+        outState.putStringArrayList(KEY_EXPANDED_MONTHS, cappedList(expandedMonths, 200));
+        outState.putStringArrayList(KEY_EXPANDED_DAYS, cappedList(expandedDays, 200));
         outState.putBoolean(KEY_EXPANDED_SEEDED, expandedSeeded);
         if (scrollView != null) outState.putInt(KEY_SCROLL_Y, scrollView.getScrollY());
         outState.putInt(KEY_FILTER_DIRECTION, filter.direction);
@@ -2569,7 +2577,13 @@ public final class HistoryActivity extends Activity {
      *  search in flight to restore from. */
     private static void putStringSet(Bundle outState, String key, Set<String> set) {
         if (set == null) return;
-        outState.putStringArrayList(key, new java.util.ArrayList<>(set));
+        outState.putStringArrayList(key, cappedList(set, 200));
+    }
+
+    private static java.util.ArrayList<String> cappedList(Set<String> set, int max) {
+        java.util.ArrayList<String> list = new java.util.ArrayList<>(set);
+        if (list.size() > max) return new java.util.ArrayList<>(list.subList(0, max));
+        return list;
     }
 
     /** Reads back an expansion snapshot, or null when none was saved. */
@@ -2920,12 +2934,12 @@ public final class HistoryActivity extends Activity {
                     Set<String> requestedDays = plannedExpandedDays(result, expandedSnapshot,
                         seededSnapshot, expandAll, expansionKey, expansionActive,
                         previousExpansionKey, savedPreNarrowingDays, iran);
-                    if (expansionActive
-                            && requestedDays.size() > MAX_INITIAL_NARROWED_DAY_PAGES) {
-                        // Narrowed summaries already contain every matching day and every
-                        // matching-row count. Materialize rows eagerly only for the first
-                        // window; the remaining matching days keep their summaries and
-                        // open with their rows on tap.
+                    if (requestedDays.size() > MAX_INITIAL_NARROWED_DAY_PAGES) {
+                        // Materialize rows eagerly only for the first window; the remaining days
+                        // keep their summaries and open with their rows on tap. This cap applies
+                        // to expand-all as well as narrowing: building every day of a multi-year
+                        // history at once creates a large non-recycled view tree and can OOM
+                        // low-RAM phones.
                         requestedDays = new java.util.LinkedHashSet<>(
                             new ArrayList<>(requestedDays).subList(0,
                                 MAX_INITIAL_NARROWED_DAY_PAGES));
@@ -3685,7 +3699,7 @@ public final class HistoryActivity extends Activity {
         });
         head.addView(caret(open, 16), new LinearLayout.LayoutParams(dp(26), -2));
 
-        String yTitle = LocaleHelper.currentTag(this).equals("fa")
+        String yTitle = "fa".equals(LocaleHelper.currentTag(this))
             ? faDigits(y.year) : String.valueOf(y.year);
         TextView title = bold(yTitle, 18, fg);
         LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(-2, -2);

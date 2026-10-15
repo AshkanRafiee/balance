@@ -2589,6 +2589,10 @@ public class MainActivity extends Activity {
                 return;
             }
             ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard == null) {
+                Toast.makeText(MainActivity.this, getString(R.string.toast_copied_balance, label), Toast.LENGTH_SHORT).show();
+                return;
+            }
             long shown = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(MainActivity.this))
                 ? value / 10 : value;
             String amount = Long.toString(shown);

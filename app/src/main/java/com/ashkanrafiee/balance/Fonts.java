@@ -21,7 +21,13 @@ final class Fonts {
     /** The regular UI family: Vazirmatn in Persian, null (whatever the view had) otherwise. */
     static Typeface text(Context context) {
         if (!LocaleHelper.isPersian(context)) return null;
-        if (family == null) family = context.getResources().getFont(R.font.vazirmatn);
+        if (family == null) {
+            try {
+                family = context.getResources().getFont(R.font.vazirmatn);
+            } catch (Exception e) {
+                return null;
+            }
+        }
         return family;
     }
 
@@ -29,7 +35,13 @@ final class Fonts {
     static Typeface medium(Context context) {
         if (!LocaleHelper.isPersian(context))
             return Typeface.create("sans-serif-medium", Typeface.NORMAL);
-        if (medium == null) medium = context.getResources().getFont(R.font.vazirmatn_medium);
+        if (medium == null) {
+            try {
+                medium = context.getResources().getFont(R.font.vazirmatn_medium);
+            } catch (Exception e) {
+                return Typeface.create("sans-serif-medium", Typeface.NORMAL);
+            }
+        }
         return medium;
     }
 

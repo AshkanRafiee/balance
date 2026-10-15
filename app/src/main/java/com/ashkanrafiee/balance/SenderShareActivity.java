@@ -392,6 +392,10 @@ public final class SenderShareActivity extends Activity {
         String report = selectedText();
         int n = selected().size();
         ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (clipboard == null) {
+            Toast.makeText(this, getString(R.string.sender_share_copied, n), Toast.LENGTH_SHORT).show();
+            return n;
+        }
         ClipData clip = ClipData.newPlainText(sender, report);
         if (android.os.Build.VERSION.SDK_INT >= 33) {
             android.os.PersistableBundle clipExtras = new android.os.PersistableBundle();
