@@ -1961,10 +1961,16 @@ public class MainActivity extends Activity {
                         if (refreshAgain) { refreshAgain = false; refresh(pendingHard, pendingNotes, silent); }
                     });
                 }
-                try {
-                    BalanceData.scanHistory(app, refreshProgress);
-                } catch (Exception historyError) {
-                    android.util.Log.w("Balance", "history refresh failed", historyError);
+                if (hard) {
+                    // History is owned by its own screen. Ordinary dashboard refreshes only need
+                    // balances and the widget; the history screen scans its store when opened (and
+                    // while it remains visible). Reset & rescan is the exception because its
+                    // existing contract promises to rebuild every deleted projection immediately.
+                    try {
+                        BalanceData.scanHistory(app, refreshProgress);
+                    } catch (Exception historyError) {
+                        android.util.Log.w("Balance", "history refresh failed", historyError);
+                    }
                 }
             }).start();
         }
