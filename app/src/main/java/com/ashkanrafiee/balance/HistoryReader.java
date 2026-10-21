@@ -524,7 +524,7 @@ final class HistoryReader {
         if (filter.direction == HistoryActivity.DIR_DEPOSIT && transaction.amount <= 0) return false;
         if (filter.direction == HistoryActivity.DIR_WITHDRAWAL && transaction.amount >= 0) return false;
         if (filter.from == null && filter.to == null) return true;
-        CalDate date = calendarDate(transaction.date, request.iran, Calendar.getInstance(Locale.getDefault()));
+        CalDate date = calendarDate(transaction.date, request.iran, dateCalendar());
         if (filter.from != null && date.compare(filter.from) < 0) return false;
         return filter.to == null || date.compare(filter.to) <= 0;
     }
@@ -534,8 +534,7 @@ final class HistoryReader {
         if (filter.direction == HistoryActivity.DIR_DEPOSIT && residual.amount <= 0) return false;
         if (filter.direction == HistoryActivity.DIR_WITHDRAWAL && residual.amount >= 0) return false;
         if (filter.from == null && filter.to == null) return true;
-        CalDate date = calendarDate(residual.toDate, request.iran,
-            Calendar.getInstance(Locale.getDefault()));
+        CalDate date = calendarDate(residual.toDate, request.iran, dateCalendar());
         if (filter.from != null && date.compare(filter.from) < 0) return false;
         return filter.to == null || date.compare(filter.to) <= 0;
     }
@@ -602,8 +601,7 @@ final class HistoryReader {
             String channel = metadata.text(MetadataStore.CHANNELS, key);
             String merchant = metadata.text(MetadataStore.MERCHANTS, key);
             List<String> tags = metadata.tags(key);
-            CalDate date = calendarDate(transaction.date, request.iran,
-                Calendar.getInstance(Locale.getDefault()));
+            CalDate date = calendarDate(transaction.date, request.iran, dateCalendar());
             String haystack = HistoryActivity.transactionSearchText(transaction,
                 BankRules.displayName(context, transaction.bank), note, reason,
                 BankRules.reasonCaption(context, reason), channel,
@@ -617,8 +615,7 @@ final class HistoryReader {
 
         boolean matchesResidual(Residual residual) {
             if (tokens.isEmpty()) return true;
-            CalDate date = calendarDate(residual.toDate, request.iran,
-                Calendar.getInstance(Locale.getDefault()));
+            CalDate date = calendarDate(residual.toDate, request.iran, dateCalendar());
             String haystack = HistoryActivity.residualSearchText(residual,
                 BankRules.displayName(context, residual.bank),
                 CurrencyHelper.amount(toman, persian, residual.amount), direction(residual.amount),
@@ -723,25 +720,24 @@ final class HistoryReader {
         }
 
         void addTransaction(Transaction transaction) throws Exception {
-            add(transaction.date, transaction.amount, true);
+            CalDate date = add(transaction.date, transaction.amount, true);
             if (timeline != null) {
-                timeline.addTransaction(dayKey(transaction.date), transaction, transactionOrdinal);
+                timeline.addTransaction(date.key(), transaction, transactionOrdinal);
                 transactionOrdinal = nextOrdinal(transactionOrdinal);
             }
         }
 
         void addResidual(Residual residual) throws Exception {
-            add(residual.toDate, residual.amount, false);
+            CalDate date = add(residual.toDate, residual.amount, false);
             residualCount++;
             if (timeline != null) {
-                timeline.addResidual(dayKey(residual.toDate), residual, residualOrdinal);
+                timeline.addResidual(date.key(), residual, residualOrdinal);
                 residualOrdinal = nextOrdinal(residualOrdinal);
             }
         }
 
-        private void add(long dateMillis, long amount, boolean movement) {
-            CalDate date = calendarDate(dateMillis, request.iran,
-                Calendar.getInstance(Locale.getDefault()));
+        private CalDate add(long dateMillis, long amount, boolean movement) {
+            CalDate date = calendarDate(dateMillis, request.iran, dateCalendar());
             allTime.add(amount, movement);
             if (date.sameDay(todayDate)) today.add(amount, movement);
             if (date.year == todayDate.year && date.month == todayDate.month)
@@ -768,11 +764,7 @@ final class HistoryReader {
                 monthGroup.days.put(date.day, dayGroup);
             }
             dayGroup.stats.add(amount, movement);
-        }
-
-        String dayKey(long dateMillis) {
-            return calendarDate(dateMillis, request.iran,
-                Calendar.getInstance(Locale.getDefault())).key();
+            return date;
         }
 
         private long nextOrdinal(long ordinal) {
@@ -873,8 +865,7 @@ final class HistoryReader {
         List<String> keys = new ArrayList<>();
         CalDate date = null;
         for (HistoryTimeline.Entry entry : page.entries) {
-            if (date == null) date = calendarDate(entry.date, iran,
-                Calendar.getInstance(Locale.getDefault()));
+            if (date == null) date = calendarDate(entry.date, iran, dateCalendar());
             Row row = new Row(entry.date, entry.transaction, entry.residual, entry.tie);
             rows.add(row);
             if (entry.transaction != null) {
@@ -906,6 +897,45 @@ final class HistoryReader {
         calendar.setTimeInMillis(millis);
         return CalDate.fromGregorian(calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH) + 1,
             calendar.get(Calendar.DAY_OF_MONTH), iran);
+    }
+
+    /** Reuses one calendar per reader worker. Creating a Calendar for every movement and residual
+     * is a noticeable part of history loading on older devices. Locale and timezone are checked
+     * between conversions so a device configuration change during a long pass still takes effect,
+     * without resetting the calendar on every row when the platform returns equivalent timezone
+     * instances. */
+    private static final ThreadLocal<DateState> DATE_CAL = new ThreadLocal<DateState>() {
+        @Override protected DateState initialValue() { return new DateState(); }
+    };
+
+    private static Calendar dateCalendar() {
+        return DATE_CAL.get().calendar();
+    }
+
+    private static final class DateState {
+        private Calendar calendar;
+        private Locale locale;
+        private java.util.TimeZone timeZone;
+
+        Calendar calendar() {
+            Locale currentLocale = Locale.getDefault();
+            java.util.TimeZone currentZone = java.util.TimeZone.getDefault();
+            if (calendar == null || !currentLocale.equals(locale)
+                    || !sameTimeZone(currentZone, timeZone)) {
+                calendar = Calendar.getInstance(currentLocale);
+                calendar.setTimeZone(currentZone);
+                locale = currentLocale;
+                timeZone = currentZone;
+            }
+            return calendar;
+        }
+
+        private static boolean sameTimeZone(java.util.TimeZone first,
+                java.util.TimeZone second) {
+            return first != null && second != null
+                && first.getID().equals(second.getID())
+                && first.hasSameRules(second);
+        }
     }
 
     private static List<String> immutableStrings(Collection<String> input) {
