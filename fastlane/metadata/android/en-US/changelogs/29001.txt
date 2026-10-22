@@ -1,0 +1,4 @@
+• The dashboard refreshes faster by leaving transaction history work to the History screen.
+• History opens and searches faster, especially on devices with a large message history.
+• Tag filters now open without blocking the screen while their choices load.
+• Repeated refreshes avoid rewriting unchanged balance data.
