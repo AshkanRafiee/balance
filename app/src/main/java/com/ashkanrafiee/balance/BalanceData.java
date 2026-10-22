@@ -977,6 +977,7 @@ final class BalanceData {
                 Log.w(TAG, "refusing to persist empty balances over existing data");
                 return false;
             }
+            if (existing != null && balancesEqual(map, existing)) return true;
             String json = serialize(map);
             return DataGeneration.dataPrefs(context).edit()
                 .putString(KEY_BALANCES, encrypt(json)).commit();
@@ -984,6 +985,30 @@ final class BalanceData {
             Log.w(TAG, "write failed", e);
             return false;
         }
+    }
+
+    /** Compares balance fields without depending on JSON object ordering, so a refresh that found
+     * nothing new does not re-encrypt and commit the same preference payload. A malformed existing
+     * value deliberately falls through to the old write path, which gives the caller a chance to
+     * repair it instead of treating corruption as an unchanged store. */
+    private static boolean balancesEqual(LinkedHashMap<String, Bank> current, String stored)
+            throws Exception {
+        String json = stored.indexOf('{') == 0 ? stored : decrypt(stored);
+        LinkedHashMap<String, Bank> previous = parse(json);
+        if (previous.size() != current.size()) return false;
+        for (java.util.Map.Entry<String, Bank> entry : current.entrySet()) {
+            Bank old = previous.get(entry.getKey());
+            Bank now = entry.getValue();
+            if (old == null || now == null || !sameBank(old, now)) return false;
+        }
+        return true;
+    }
+
+    private static boolean sameBank(Bank first, Bank second) {
+        return first.amount == second.amount && first.date == second.date
+            && java.util.Objects.equals(first.name, second.name)
+            && java.util.Objects.equals(first.sender, second.sender)
+            && java.util.Objects.equals(first.account, second.account);
     }
 
     /** Discards every saved balance and transaction and forgets both scan watermarks, so the next scans

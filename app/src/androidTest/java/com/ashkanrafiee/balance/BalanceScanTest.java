@@ -219,6 +219,17 @@ public class BalanceScanTest {
         assertEquals(5000000L, amount(find(reread, "Saman")));
     }
 
+    @Test public void unchangedBalanceWrite_keepsEncryptedPayload() throws Exception {
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        saved.put("Mellat", new Bank("Mellat", 1_000_000L, T, "5000973189"));
+        assertTrue(BalanceData.write(ctx, saved));
+        String before = prefs().getString(BalanceData.KEY_BALANCES, null);
+
+        assertTrue(BalanceData.write(ctx, saved));
+        assertEquals("an unchanged balance map must not be re-encrypted", before,
+            prefs().getString(BalanceData.KEY_BALANCES, null));
+    }
+
     @Test public void liveBalanceScan_persistsBalanceObservations_andRetriesDoNotDuplicate()
             throws Exception {
         String body = "available balance 5,000,000";
