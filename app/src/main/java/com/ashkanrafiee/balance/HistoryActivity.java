@@ -264,10 +264,8 @@ public final class HistoryActivity extends Activity {
 
     /** Picker choices backing both dialogs: every distinct bank (including account-less
      *  ones like Blu, whose messages state no account number) plus the (bank, account)
-     *  pairs. Loaded once per screen in the background after the first render and
-     *  refreshed whenever the history may have changed; null means the next dialog open
-     *  loads it instead. A stale cache only ever hides a brand-new bank until the next
-     *  change — the scope itself always reads the live selection. */
+     *  pairs. Loaded lazily when the first scope dialog opens and refreshed whenever the
+     *  history may have changed; null means the next dialog open loads it. */
     private ScopeChoices scopeChoicesCache;
     /** Tag filter choices are loaded only when needed, off the UI thread, and reused until the
      * history/metadata snapshot changes. */
@@ -284,27 +282,6 @@ public final class HistoryActivity extends Activity {
             this.banks = banks;
             this.pairs = pairs;
         }
-    }
-
-    /** Loads the picker choices in the background unless already loaded. Runs after a render
-     *  completes so it never contends with the visible pass for the store. */
-    private void preloadScopeChoices() {
-        if (scopeChoicesCache != null || isDestroyed() || isFinishing()) return;
-        final Context app = getApplicationContext();
-        new Thread(() -> {
-            List<Transaction> stored;
-            try {
-                stored = BalanceData.readTransactions(app);
-            } catch (Exception e) {
-                android.util.Log.w("BalanceHistory", "scope choices preload failed", e);
-                return;
-            }
-            final List<Transaction> loaded = stored;
-            runOnUiThread(() -> {
-                if (isDestroyed() || isFinishing()) return;
-                if (scopeChoicesCache == null) scopeChoicesCache = scopeChoices(loaded);
-            });
-        }).start();
     }
 
     private void invalidateTagNames() {
@@ -3006,7 +2983,6 @@ public final class HistoryActivity extends Activity {
                     residualCount = completed.residualCount;
                     refreshDates();
                     rebuildFilterBar();
-                    preloadScopeChoices();
                     stopShimmer();
                     body.setContentDescription(null);
                     // Build the new tree while the container is gone: every addView on an

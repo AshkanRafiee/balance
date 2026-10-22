@@ -441,7 +441,7 @@ final class HistoryReader {
                     }
                 }
                 if (progress != null) progress.stage(R.string.history_stage_building);
-                return accumulator.result(false, residuals, null, null);
+                return accumulator.result(false, residuals, null, null, metadata);
             } finally {
                 accumulator.close();
             }
@@ -505,7 +505,7 @@ final class HistoryReader {
         Accumulator accumulator = new Accumulator(context, request);
         for (Transaction transaction : visibleTransactions) accumulator.addTransaction(transaction);
         for (Residual residual : visibleResiduals) accumulator.addResidual(residual);
-        return accumulator.result(true, true, visibleTransactions, visibleResiduals);
+        return accumulator.result(true, true, visibleTransactions, visibleResiduals, null);
     }
 
     /** Explicitly named compatibility entry point; it is intentionally not the bounded path. */
@@ -772,7 +772,8 @@ final class HistoryReader {
         }
 
         Result result(boolean reference, boolean residualsComplete, List<Transaction> transactions,
-                List<Residual> residuals) throws Exception {
+                List<Residual> residuals, MetadataStore.LookupSession sharedMetadata)
+                throws Exception {
             HistoryTimeline snapshot = timeline == null ? null : timeline.finish();
             timeline = null;
             List<YearSummary> yearResults = new ArrayList<>();
@@ -794,12 +795,16 @@ final class HistoryReader {
 
             LinkedHashMap<String, DayRows> rowResults = new LinkedHashMap<>();
             if (snapshot != null && !request.requestedDayKeys.isEmpty()) {
-                try (MetadataStore.LookupSession metadata =
-                        MetadataStore.LookupSession.open(context)) {
+                boolean ownMetadata = sharedMetadata == null;
+                MetadataStore.LookupSession metadata = ownMetadata
+                    ? MetadataStore.LookupSession.open(context) : sharedMetadata;
+                try {
                     for (String key : request.requestedDayKeys) {
                         rowResults.put(key, fromPage(metadata, snapshot,
                             snapshot.firstPage(key, request.maxRowsPerDay), request.iran));
                     }
+                } finally {
+                    if (ownMetadata) metadata.close();
                 }
             }
             List<Transaction> visibleTx = transactions == null ? null
