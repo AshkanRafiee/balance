@@ -230,6 +230,19 @@ public class BalanceScanTest {
             prefs().getString(BalanceData.KEY_BALANCES, null));
     }
 
+    @Test public void legacyBalanceRead_migratesToEncryptedPayload() throws Exception {
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        saved.put("Mellat", new Bank("Mellat", 1_000_000L, T, "5000973189"));
+        String legacy = BalanceData.serialize(saved);
+        assertTrue(prefs().edit().putString(BalanceData.KEY_BALANCES, legacy).commit());
+
+        assertEquals(1, BalanceData.read(ctx).size());
+        String migrated = prefs().getString(BalanceData.KEY_BALANCES, null);
+        assertNotNull(migrated);
+        assertTrue("legacy balance data must be encrypted during migration",
+            !migrated.trim().startsWith("{"));
+    }
+
     @Test public void liveBalanceScan_persistsBalanceObservations_andRetriesDoNotDuplicate()
             throws Exception {
         String body = "available balance 5,000,000";

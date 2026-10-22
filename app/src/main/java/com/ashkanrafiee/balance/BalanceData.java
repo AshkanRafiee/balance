@@ -993,7 +993,10 @@ final class BalanceData {
      * repair it instead of treating corruption as an unchanged store. */
     private static boolean balancesEqual(LinkedHashMap<String, Bank> current, String stored)
             throws Exception {
-        String json = stored.indexOf('{') == 0 ? stored : decrypt(stored);
+        // A plaintext JSON value is a legacy migration input. It must never count as unchanged:
+        // the normal write path must replace it with encrypted storage.
+        if (stored.indexOf('{') == 0) return false;
+        String json = decrypt(stored);
         LinkedHashMap<String, Bank> previous = parse(json);
         if (previous.size() != current.size()) return false;
         for (java.util.Map.Entry<String, Bank> entry : current.entrySet()) {

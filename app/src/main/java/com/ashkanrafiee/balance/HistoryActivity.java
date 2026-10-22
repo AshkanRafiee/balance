@@ -4488,6 +4488,7 @@ public final class HistoryActivity extends Activity {
                 .setOnClickListener(v -> {
                     BalanceData.setNote(this, t, input.getText().toString());
                     BalanceData.setTags(this, t, editedTags);
+                    invalidateTagNames();
                     dlg.dismiss();
                     render();
                 });
