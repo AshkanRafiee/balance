@@ -269,6 +269,9 @@ public final class HistoryActivity extends Activity {
      *  loads it instead. A stale cache only ever hides a brand-new bank until the next
      *  change — the scope itself always reads the live selection. */
     private ScopeChoices scopeChoicesCache;
+    /** Tag filter choices are loaded only when needed, off the UI thread, and reused until the
+     * history/metadata snapshot changes. */
+    private List<String> tagNamesCache;
 
     /** Every distinct bank plus every (bank, account) pair of the stored history, each
      *  sorted for display. Kept static so the instrumented tests can cover the
@@ -302,6 +305,10 @@ public final class HistoryActivity extends Activity {
                 if (scopeChoicesCache == null) scopeChoicesCache = scopeChoices(loaded);
             });
         }).start();
+    }
+
+    private void invalidateTagNames() {
+        tagNamesCache = null;
     }
 
     /** An account number is sensitive: it is copied to the clipboard only for the paste window,
@@ -1873,8 +1880,63 @@ public final class HistoryActivity extends Activity {
 
     /** Lets the user stage several reusable tags. A transaction must contain every selected tag. */
     private void tagFilterDialog() {
-        final List<String> choices = new ArrayList<>(BalanceData.readTagNames(this));
         final LinkedHashSet<String> staged = new LinkedHashSet<>();
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(dp(20), dp(8), dp(20), 0);
+        android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.history_filter_tags_title)
+            .setView(wrap)
+            .setPositiveButton(R.string.history_filter_apply, null)
+            .setNegativeButton(R.string.lock_cancel, null)
+            .setNeutralButton(R.string.history_filter_tags_clear, null)
+            .create();
+        dlg.setOnShowListener(v -> {
+            dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+            dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
+                selectedTags.clear();
+                selectedTags.addAll(staged);
+                dlg.dismiss();
+                rebuildFilterBar();
+                render();
+            });
+            dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(button -> {
+                selectedTags.clear();
+                dlg.dismiss();
+                rebuildFilterBar();
+                render();
+            });
+        });
+        showDialog(dlg);
+
+        List<String> cached = tagNamesCache;
+        if (cached != null) {
+            populateTagFilter(wrap, cached, staged, dlg);
+            return;
+        }
+        wrap.addView(text(getString(R.string.history_stage_loading), 14, muted),
+            new LinearLayout.LayoutParams(-1, -2));
+        final Context app = getApplicationContext();
+        new Thread(() -> {
+            List<String> loaded;
+            try {
+                loaded = BalanceData.readTagNames(app);
+            } catch (Exception e) {
+                android.util.Log.w("BalanceHistory", "tag choices read failed", e);
+                loaded = Collections.emptyList();
+            }
+            final List<String> result = new ArrayList<>(loaded);
+            runOnUiThread(() -> {
+                if (!dlg.isShowing() || isDestroyed() || isFinishing()) return;
+                tagNamesCache = result;
+                populateTagFilter(wrap, result, staged, dlg);
+            });
+        }, "history-tag-choices").start();
+    }
+
+    private void populateTagFilter(LinearLayout wrap, List<String> choices,
+            LinkedHashSet<String> staged, android.app.AlertDialog dlg) {
+        wrap.removeAllViews();
         for (String selected : selectedTags) {
             for (String choice : choices) {
                 if (BalanceData.sameTag(selected, choice)) {
@@ -1883,10 +1945,6 @@ public final class HistoryActivity extends Activity {
                 }
             }
         }
-
-        LinearLayout wrap = new LinearLayout(this);
-        wrap.setOrientation(LinearLayout.VERTICAL);
-        wrap.setPadding(dp(20), dp(8), dp(20), 0);
         if (choices.isEmpty()) {
             wrap.addView(text(getString(R.string.history_filter_tags_empty), 14, muted),
                 new LinearLayout.LayoutParams(-1, -2));
@@ -1903,46 +1961,9 @@ public final class HistoryActivity extends Activity {
                 });
                 wrap.addView(check, new LinearLayout.LayoutParams(-1, -2));
             }
-            android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
-                .setTitle(R.string.history_filter_tags_title)
-                .setView(wrap)
-                .setPositiveButton(R.string.history_filter_apply, null)
-                .setNegativeButton(R.string.lock_cancel, null)
-                .setNeutralButton(R.string.history_filter_tags_clear, null)
-                .create();
-            dlg.setOnShowListener(v -> {
-                dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
-                    selectedTags.clear();
-                    selectedTags.addAll(staged);
-                    dlg.dismiss();
-                    rebuildFilterBar();
-                    render();
-                });
-                dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(button -> {
-                    selectedTags.clear();
-                    dlg.dismiss();
-                    rebuildFilterBar();
-                    render();
-                });
-            });
-            showDialog(dlg);
-            return;
         }
-
-        android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
-            .setTitle(R.string.history_filter_tags_title)
-            .setView(wrap)
-            .setPositiveButton(R.string.lock_cancel, null)
-            .setNeutralButton(R.string.history_filter_tags_clear, null)
-            .create();
-        dlg.setOnShowListener(v -> dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL)
-            .setOnClickListener(button -> {
-                selectedTags.clear();
-                dlg.dismiss();
-                rebuildFilterBar();
-                render();
-            }));
-        showDialog(dlg);
+        if (dlg.isShowing())
+            dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setEnabled(!choices.isEmpty());
     }
 
     private static boolean containsTag(Collection<String> tags, String wanted) {
@@ -2626,6 +2647,7 @@ public final class HistoryActivity extends Activity {
                     || isDestroyed() || isFinishing()) return;
             // The store changed, so the cached picker choices may miss a brand-new bank.
             scopeChoicesCache = null;
+            invalidateTagNames();
             render();
         });
         BalanceData.addHistoryListener(onHistoryChanged);
@@ -2633,6 +2655,7 @@ public final class HistoryActivity extends Activity {
         // Same for anything that happened while the screen was closed (e.g. a dashboard
         // restore replacing the whole store): the render below reloads the choices after it.
         scopeChoicesCache = null;
+        invalidateTagNames();
         if (renderAfterResume) {
             renderAfterResume = false;
             render();
