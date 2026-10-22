@@ -409,6 +409,7 @@ final class HistoryReader {
                         stageResiduals && !memoryResiduals
                             ? HistoryResidualReader.Staging.open(context) : null) {
                     if (progress != null) progress.stage(R.string.history_stage_loading);
+                    List<Transaction> matchingBatch = new ArrayList<>(256);
                     TransactionStore.forEach(context, request.pageSize, transaction -> {
                         // Scope narrowing precedes all other filters. Residual detection needs the
                         // whole bank/account scope, so staging happens before narrowing predicates.
@@ -420,10 +421,13 @@ final class HistoryReader {
                             memoryScope.add(transaction);
                         }
                         if (!matchesMovementFilter(transaction, request)) return;
-                        if (!matchesTags(metadata, transaction, request.selectedTags)) return;
-                        if (!matcher.matchesTransaction(transaction)) return;
-                        accumulator.addTransaction(transaction);
+                        matchingBatch.add(transaction);
+                        if (matchingBatch.size() == 256) {
+                            matcher.addMatchingTransactions(matchingBatch, accumulator);
+                            matchingBatch.clear();
+                        }
                     });
+                    matcher.addMatchingTransactions(matchingBatch, accumulator);
                     if (residualStaging != null) {
                         if (progress != null) progress.stage(R.string.history_stage_gaps);
                         residualStaging.emit(residual -> {
@@ -601,6 +605,38 @@ final class HistoryReader {
             String channel = metadata.text(MetadataStore.CHANNELS, key);
             String merchant = metadata.text(MetadataStore.MERCHANTS, key);
             List<String> tags = metadata.tags(key);
+            return matchesTransaction(transaction, note, reason, channel, merchant, tags);
+        }
+
+        /** Matches one bounded transaction batch with one indexed lookup per metadata kind. */
+        void addMatchingTransactions(List<Transaction> transactions, Accumulator accumulator)
+                throws Exception {
+            if (transactions == null || transactions.isEmpty()) return;
+            List<String> keys = new ArrayList<>(transactions.size());
+            for (Transaction transaction : transactions) keys.add(BalanceData.noteKey(transaction));
+            Map<String, List<String>> tags = request.selectedTags.isEmpty() && tokens.isEmpty()
+                ? Collections.emptyMap() : metadata.tagsFor(keys);
+            Map<String, String> notes = tokens.isEmpty() ? Collections.emptyMap()
+                : metadata.texts(MetadataStore.NOTES, keys);
+            Map<String, String> reasons = tokens.isEmpty() ? Collections.emptyMap()
+                : metadata.texts(MetadataStore.REASONS, keys);
+            Map<String, String> channels = tokens.isEmpty() ? Collections.emptyMap()
+                : metadata.texts(MetadataStore.CHANNELS, keys);
+            Map<String, String> merchants = tokens.isEmpty() ? Collections.emptyMap()
+                : metadata.texts(MetadataStore.MERCHANTS, keys);
+            for (Transaction transaction : transactions) {
+                String key = BalanceData.noteKey(transaction);
+                List<String> tagValues = tags.get(key);
+                if (!matchesTags(tagValues, request.selectedTags)) continue;
+                if (!matchesTransaction(transaction, notes.get(key), reasons.get(key),
+                        channels.get(key), merchants.get(key), tagValues)) continue;
+                accumulator.addTransaction(transaction);
+            }
+        }
+
+        private boolean matchesTransaction(Transaction transaction, String note, String reason,
+                String channel, String merchant, List<String> tags) {
+            if (tokens.isEmpty()) return true;
             CalDate date = calendarDate(transaction.date, request.iran, dateCalendar());
             String haystack = HistoryActivity.transactionSearchText(transaction,
                 BankRules.displayName(context, transaction.bank), note, reason,
@@ -611,6 +647,24 @@ final class HistoryReader {
                 CalDate.monthName(date.month, request.iran, persian), compactDate(date), tags,
                  merchant);
             return HistoryActivity.matchesTokens(haystack, tokens);
+        }
+
+        private boolean matchesTags(List<String> actual, Collection<String> selected) {
+            if (selected == null || selected.isEmpty()) return true;
+            for (String wanted : selected) {
+                boolean found = false;
+                if (actual != null) {
+                    for (String tag : actual) {
+                        if (tag != null && wanted != null
+                                && tag.trim().equalsIgnoreCase(wanted.trim())) {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                if (!found) return false;
+            }
+            return true;
         }
 
         boolean matchesResidual(Residual residual) {
