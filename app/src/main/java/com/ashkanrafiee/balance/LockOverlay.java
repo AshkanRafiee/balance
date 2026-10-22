@@ -166,7 +166,7 @@ public final class LockOverlay extends FrameLayout {
         unlock.setBackground(rounded(accent, 16));
         unlock.setMinimumHeight(dp(52));
         unlock.setOnClickListener(v -> submit());
-        unlockLabel = text(getString(R.string.lock_action_unlock), 16, Color.WHITE);
+        unlockLabel = text(getString(R.string.lock_action_unlock), 16, BalanceUi.onPrimary(ctx));
         unlockLabel.setTypeface(Fonts.text(unlockLabel.getContext()), Typeface.BOLD);
         unlockLabel.setGravity(Gravity.CENTER);
         unlockLabel.setPadding(dp(16), dp(14), dp(16), dp(14));
@@ -688,7 +688,7 @@ public final class LockOverlay extends FrameLayout {
     private View buildCheckKey() {
         FrameLayout f = new FrameLayout(ctx);
         f.setBackground(oval(accent));
-        padCheckLabel = text("\u2713", 28, Color.WHITE);
+        padCheckLabel = text("\u2713", 28, BalanceUi.onPrimary(ctx));
         padCheckLabel.setGravity(Gravity.CENTER);
         f.addView(padCheckLabel, new FrameLayout.LayoutParams(-1, -1));
         padCheckSpin = spin(22);
@@ -727,7 +727,7 @@ public final class LockOverlay extends FrameLayout {
     /** A small indeterminate spinner for the confirm controls, tinted for the surface it sits on. */
     private ProgressBar spin(int sizeDip) {
         ProgressBar p = new ProgressBar(ctx);
-        p.setIndeterminateTintList(ColorStateList.valueOf(Color.WHITE));
+        p.setIndeterminateTintList(ColorStateList.valueOf(res(R.color.on_primary)));
         int s = dp(sizeDip);
         p.setLayoutParams(new ViewGroup.LayoutParams(s, s));
         return p;
@@ -747,10 +747,7 @@ public final class LockOverlay extends FrameLayout {
     }
 
     private GradientDrawable rounded(int color, float radius) {
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(color);
-        g.setCornerRadius(dp(radius));
-        return g;
+        return BalanceUi.rounded(ctx, color, radius);
     }
 
     private GradientDrawable oval(int color) {

@@ -76,10 +76,7 @@ public final class SenderShareActivity extends Activity {
     }
 
     GradientDrawable rounded(int color, float radius) {
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(color);
-        g.setCornerRadius(dp(radius));
-        return g;
+        return BalanceUi.rounded(this, color, radius);
     }
 
     LinearLayout.LayoutParams margin(int l, int t, int r, int b) {
@@ -152,6 +149,7 @@ public final class SenderShareActivity extends Activity {
         TextView back = text(rtl ? "›" : "‹", 34, fg);
         back.setGravity(Gravity.CENTER);
         back.setContentDescription(getString(R.string.about_back));
+        back.setBackground(BalanceUi.ripple(this, rounded(heroColor, 22), BalanceUi.rippleColor(this)));
         back.setOnClickListener(v -> finish());
         bar.addView(back, new LinearLayout.LayoutParams(dp(42), dp(48)));
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1);
@@ -321,7 +319,8 @@ public final class SenderShareActivity extends Activity {
         select.setGravity(Gravity.CENTER);
         select.setPadding(dp(14), dp(11), dp(14), dp(11));
         select.setMinHeight(dp(48));
-        select.setBackground(rounded(heroColor, 13));
+        select.setBackground(BalanceUi.ripple(this, rounded(heroColor, 16),
+            BalanceUi.rippleColor(this)));
         select.setOnClickListener(v -> {
             allChecked = !allChecked;
             for (CheckBox c : checks) c.setChecked(allChecked);
@@ -337,21 +336,23 @@ public final class SenderShareActivity extends Activity {
         copy.setMinHeight(dp(48));
         LinearLayout.LayoutParams copyP = new LinearLayout.LayoutParams(-2, -2);
         copyP.setMarginStart(dp(10));
-        copy.setBackground(rounded(heroColor, 13));
+        copy.setBackground(BalanceUi.ripple(this, rounded(heroColor, 16),
+            BalanceUi.rippleColor(this)));
         copy.setOnClickListener(v -> {
             int n = copySelected();
             if (n > 0) Toast.makeText(this, getString(R.string.sender_share_copied, n), Toast.LENGTH_SHORT).show();
         });
         row.addView(copy, copyP);
 
-        send = text(getString(R.string.sender_share_send, 0), 14, bg);
+        send = text(getString(R.string.sender_share_send, 0), 14, BalanceUi.onPrimary(this));
         send.setGravity(Gravity.CENTER);
         send.setTypeface(Fonts.text(send.getContext()), Typeface.BOLD);
         send.setPadding(dp(18), dp(11), dp(18), dp(11));
         send.setMinHeight(dp(48));
         LinearLayout.LayoutParams sendP = new LinearLayout.LayoutParams(0, -2, 1);
         sendP.setMarginStart(dp(10));
-        send.setBackground(rounded(accent, 13));
+        send.setBackground(BalanceUi.ripple(this, rounded(accent, 16),
+            BalanceUi.rippleColor(this)));
         send.setOnClickListener(v -> {
             int missing = missingSelection(!issueTags().isEmpty(), selected().size());
             if (missing != 0) {
