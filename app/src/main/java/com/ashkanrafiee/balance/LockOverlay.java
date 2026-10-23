@@ -166,7 +166,8 @@ public final class LockOverlay extends FrameLayout {
         unlock.setBackground(rounded(accent, 16));
         unlock.setMinimumHeight(dp(52));
         unlock.setOnClickListener(v -> submit());
-        unlockLabel = text(getString(R.string.lock_action_unlock), 16, Color.WHITE);
+        unlockLabel = text(getString(R.string.lock_action_unlock), 16,
+            res(R.color.expressive_on_primary));
         unlockLabel.setTypeface(Fonts.text(unlockLabel.getContext()), Typeface.BOLD);
         unlockLabel.setGravity(Gravity.CENTER);
         unlockLabel.setPadding(dp(16), dp(14), dp(16), dp(14));
@@ -688,7 +689,7 @@ public final class LockOverlay extends FrameLayout {
     private View buildCheckKey() {
         FrameLayout f = new FrameLayout(ctx);
         f.setBackground(oval(accent));
-        padCheckLabel = text("\u2713", 28, Color.WHITE);
+        padCheckLabel = text("\u2713", 28, res(R.color.expressive_on_primary));
         padCheckLabel.setGravity(Gravity.CENTER);
         f.addView(padCheckLabel, new FrameLayout.LayoutParams(-1, -1));
         padCheckSpin = spin(22);
@@ -727,7 +728,7 @@ public final class LockOverlay extends FrameLayout {
     /** A small indeterminate spinner for the confirm controls, tinted for the surface it sits on. */
     private ProgressBar spin(int sizeDip) {
         ProgressBar p = new ProgressBar(ctx);
-        p.setIndeterminateTintList(ColorStateList.valueOf(Color.WHITE));
+        p.setIndeterminateTintList(ColorStateList.valueOf(res(R.color.expressive_on_primary)));
         int s = dp(sizeDip);
         p.setLayoutParams(new ViewGroup.LayoutParams(s, s));
         return p;

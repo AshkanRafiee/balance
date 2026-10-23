@@ -98,7 +98,7 @@ public final class OnboardingActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(20), dp(14), dp(20), dp(14));
+        root.setPadding(dp(20), dp(10), dp(20), dp(14));
         root.setBackgroundColor(bg);
         root.setOnApplyWindowInsetsListener((v, i) -> {
             int top = 0, bottom = 0;
@@ -158,10 +158,12 @@ public final class OnboardingActivity extends Activity {
         primary = new TextView(this);
         primary.setTextSize(15);
         primary.setTypeface(Fonts.text(primary.getContext()), Typeface.BOLD);
-        primary.setTextColor(fg);
+        primary.setTextColor(ExpressiveUi.color(this, R.color.expressive_on_primary));
         primary.setGravity(Gravity.CENTER);
         primary.setPadding(dp(16), dp(14), dp(16), dp(14));
-        primary.setBackground(rounded(accent, 14));
+        primary.setBackground(ExpressiveUi.ripple(this,
+            ExpressiveUi.shape(this, ExpressiveUi.color(this, R.color.expressive_primary),
+                ExpressiveUi.RADIUS_CONTROL)));
         root.addView(primary);
 
         showStep(step);
@@ -242,11 +244,14 @@ public final class OnboardingActivity extends Activity {
         hero.setOrientation(LinearLayout.VERTICAL);
         hero.setGravity(Gravity.CENTER_HORIZONTAL);
         hero.setPadding(dp(20), dp(24), dp(20), dp(24));
-        hero.setBackground(rounded(color(R.color.hero), 22));
-        TextView mark = text("B", 25, bg);
+        hero.setBackground(ExpressiveUi.shape(this,
+            ExpressiveUi.color(this, R.color.expressive_primary_container),
+            ExpressiveUi.RADIUS_HERO));
+        TextView mark = text("B", 25, ExpressiveUi.color(this, R.color.expressive_on_primary));
         mark.setGravity(Gravity.CENTER);
         mark.setTypeface(Fonts.text(mark.getContext()), Typeface.BOLD);
-        mark.setBackground(rounded(accent, 16));
+        mark.setBackground(ExpressiveUi.shape(this,
+            ExpressiveUi.color(this, R.color.expressive_primary), 20));
         hero.addView(mark, new LinearLayout.LayoutParams(dp(56), dp(56)));
         TextView title = text(getString(R.string.app_name), 22, fg);
         title.setTypeface(Fonts.text(title.getContext()), Typeface.BOLD);

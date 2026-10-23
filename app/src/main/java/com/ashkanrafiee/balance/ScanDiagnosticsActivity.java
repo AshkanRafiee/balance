@@ -131,14 +131,19 @@ public final class ScanDiagnosticsActivity extends Activity {
 
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        TextView back = text(rtl ? "›" : "‹", 34, fg);
+        TextView back = text(rtl ? "›" : "‹", 28, fg);
         back.setGravity(Gravity.CENTER);
         back.setContentDescription(getString(R.string.about_back));
+        back.setBackground(ExpressiveUi.ripple(this,
+            ExpressiveUi.shape(this, color(R.color.expressive_surface_container_high),
+                ExpressiveUi.RADIUS_PILL)));
         back.setOnClickListener(v -> finish());
         bar.addView(back, new LinearLayout.LayoutParams(dp(42), dp(48)));
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-2, -2);
         titleParams.setMarginStart(dp(10));
-        bar.addView(text(getString(R.string.scan_diag_title), 21, fg), titleParams);
+        TextView diagnosticTitle = text(getString(R.string.scan_diag_title), 27, fg);
+        diagnosticTitle.setTypeface(Fonts.medium(this));
+        bar.addView(diagnosticTitle, titleParams);
         root.addView(bar, margin(0, 0, 0, 12));
 
         ScrollView scroll = new ScrollView(this);
@@ -386,7 +391,7 @@ public final class ScanDiagnosticsActivity extends Activity {
     }
 
     TextView button(String label, Runnable action) {
-        TextView b = text(label, 14, fg);
+        TextView b = text(label, 14, ExpressiveUi.color(this, R.color.expressive_on_primary));
         b.setGravity(Gravity.CENTER);
         b.setTypeface(Fonts.text(b.getContext()), Typeface.BOLD);
         b.setPadding(dp(16), dp(12), dp(16), dp(12));

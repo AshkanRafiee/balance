@@ -149,14 +149,18 @@ public final class SenderShareActivity extends Activity {
 
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        TextView back = text(rtl ? "›" : "‹", 34, fg);
+        TextView back = text(rtl ? "›" : "‹", 28, fg);
         back.setGravity(Gravity.CENTER);
         back.setContentDescription(getString(R.string.about_back));
+        back.setBackground(ExpressiveUi.ripple(this,
+            ExpressiveUi.shape(this, color(R.color.expressive_surface_container_high),
+                ExpressiveUi.RADIUS_PILL)));
         back.setOnClickListener(v -> finish());
         bar.addView(back, new LinearLayout.LayoutParams(dp(42), dp(48)));
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1);
         titleParams.setMarginStart(dp(10));
-        TextView title = text(sender, 20, fg);
+        TextView title = text(sender, 24, fg);
+        title.setTypeface(Fonts.medium(this));
         title.setMaxLines(1);
         title.setEllipsize(TextUtils.TruncateAt.MIDDLE);
         bar.addView(title, titleParams);
@@ -344,7 +348,8 @@ public final class SenderShareActivity extends Activity {
         });
         row.addView(copy, copyP);
 
-        send = text(getString(R.string.sender_share_send, 0), 14, bg);
+        send = text(getString(R.string.sender_share_send, 0), 14,
+            ExpressiveUi.color(this, R.color.expressive_on_primary));
         send.setGravity(Gravity.CENTER);
         send.setTypeface(Fonts.text(send.getContext()), Typeface.BOLD);
         send.setPadding(dp(18), dp(11), dp(18), dp(11));

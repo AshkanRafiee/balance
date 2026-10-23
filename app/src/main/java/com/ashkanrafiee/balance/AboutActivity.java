@@ -83,11 +83,11 @@ public final class AboutActivity extends Activity {
     public void onCreate(Bundle state) {
         super.onCreate(state);
         LargeScreenOrientation.apply(this);
-        bg = color(R.color.bg);
+        bg = color(R.color.expressive_surface);
         card = color(R.color.panel);
-        muted = color(R.color.muted);
-        accent = color(R.color.accent);
-        heroColor = color(R.color.hero);
+        muted = color(R.color.expressive_on_surface_variant);
+        accent = color(R.color.expressive_primary);
+        heroColor = color(R.color.expressive_primary_container);
         link = color(R.color.link);
         footerColor = color(R.color.footer);
         fg = color(R.color.fg);
@@ -98,7 +98,7 @@ public final class AboutActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(20), dp(14), dp(20), dp(14));
+        root.setPadding(dp(20), dp(10), dp(20), dp(14));
         root.setBackgroundColor(bg);
         root.setOnApplyWindowInsetsListener((v, i) -> {
             int top = 0, bottom = 0;
@@ -127,14 +127,19 @@ public final class AboutActivity extends Activity {
 
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        TextView back = text(rtl ? "›" : "‹", 34, fg);
+        TextView back = text(rtl ? "›" : "‹", 28, fg);
         back.setGravity(Gravity.CENTER);
         back.setContentDescription(getString(R.string.about_back));
+        back.setBackground(ExpressiveUi.ripple(this,
+            ExpressiveUi.shape(this, color(R.color.expressive_surface_container_high),
+                ExpressiveUi.RADIUS_PILL)));
         back.setOnClickListener(v -> finish());
         bar.addView(back, new LinearLayout.LayoutParams(dp(42), dp(48)));
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-2, -2);
         titleParams.setMarginStart(dp(10));
-        bar.addView(text(getString(R.string.about_title), 21, fg), titleParams);
+        TextView aboutTitle = text(getString(R.string.about_title), 27, fg);
+        aboutTitle.setTypeface(Fonts.medium(this));
+        bar.addView(aboutTitle, titleParams);
         root.addView(bar, margin(0, 0, 0, 16));
 
         ScrollView scroll = new ScrollView(this);
@@ -147,17 +152,20 @@ public final class AboutActivity extends Activity {
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
         hero.setGravity(Gravity.CENTER_HORIZONTAL);
-        hero.setPadding(dp(20), dp(24), dp(20), dp(24));
-        hero.setBackground(rounded(heroColor, 22));
-        TextView mark = text("B", 25, bg);
+        hero.setPadding(dp(22), dp(28), dp(22), dp(28));
+        hero.setBackground(ExpressiveUi.shape(this, heroColor, ExpressiveUi.RADIUS_HERO));
+        TextView mark = text("B", 25, color(R.color.expressive_on_primary));
         mark.setGravity(Gravity.CENTER);
         mark.setTypeface(Fonts.text(mark.getContext()), Typeface.BOLD);
-        mark.setBackground(rounded(accent, 16));
+        mark.setBackground(ExpressiveUi.shape(this, accent, 20));
         hero.addView(mark, new LinearLayout.LayoutParams(dp(56), dp(56)));
-        TextView title = text(getString(R.string.app_name), 24, fg);
+        TextView title = text(getString(R.string.app_name), 25,
+            color(R.color.expressive_on_primary_container));
+        title.setTypeface(Fonts.medium(this));
         title.setPadding(0, dp(14), 0, dp(2));
         hero.addView(title);
-        hero.addView(text(getString(R.string.tagline_offline_bank_balance), 13, color(R.color.subtitle)));
+        hero.addView(text(getString(R.string.tagline_offline_bank_balance), 13,
+            color(R.color.expressive_on_primary_container)));
         body.addView(hero, margin(0, 0, 0, 22));
 
         body.addView(section(getString(R.string.about_section_heading), getString(R.string.about_section_body)), margin(0, 0, 0, 10));
@@ -305,13 +313,18 @@ public final class AboutActivity extends Activity {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(16), dp(13), dp(16), dp(13));
-        box.setBackground(rounded(card, 15));
+        box.setBackground(ExpressiveUi.ripple(this,
+            ExpressiveUi.shape(this, card, ExpressiveUi.RADIUS_CONTROL)));
         box.addView(text(h, 12, muted));
         TextView v = text(value, 14, onClick != null ? link : fg);
         v.setPadding(0, dp(5), 0, 0);
         v.setMaxLines(2);
         v.setEllipsize(TextUtils.TruncateAt.END);
         if (onClick != null) {
+            box.setClickable(true);
+            box.setFocusable(true);
+            box.setContentDescription(h + ": " + value);
+            box.setOnClickListener(onClick);
             v.setOnClickListener(onClick);
         }
         box.addView(v);
