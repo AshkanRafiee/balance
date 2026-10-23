@@ -453,8 +453,7 @@ public class MainActivity extends Activity {
                     String chosen = CurrencyHelper.fixedCurrency(pos);
                     if (!chosen.equals(CurrencyHelper.currency(MainActivity.this))) {
                         CurrencyHelper.setCurrency(MainActivity.this, chosen);
-                        view.invalidate();
-                        BalanceWidgetProvider.push(MainActivity.this);
+                        refreshCurrencyPresentation();
                     }
                 }
             }
@@ -555,8 +554,7 @@ public class MainActivity extends Activity {
                         String chosen = CurrencyHelper.CUSTOM_PREFIX + typed;
                         if (!chosen.equals(CurrencyHelper.currency(this))) {
                             CurrencyHelper.setCurrency(this, chosen);
-                            view.invalidate();
-                            BalanceWidgetProvider.push(MainActivity.this);
+                            refreshCurrencyPresentation();
                         }
                     }
                 }
@@ -1371,6 +1369,13 @@ public class MainActivity extends Activity {
         return getResources().getColor(res, getTheme());
     }
 
+    /** Repaints every visible amount immediately after the display currency preference changes. */
+    void refreshCurrencyPresentation() {
+        if (view != null) view.invalidate();
+        if (dashboard != null) dashboard.render();
+        BalanceWidgetProvider.push(this);
+    }
+
     /**
      * The production dashboard composition. It deliberately uses native Views instead of a
      * screenshot-like canvas: every action is a real focusable node, responsive text can wrap, and
@@ -1762,7 +1767,9 @@ public class MainActivity extends Activity {
                 identity.addView(ExpressiveUi.label(this, account, 12,
                     ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 4, 0));
             }
-            top.addView(identity, new LinearLayout.LayoutParams(0, -2, 1));
+            LinearLayout.LayoutParams identityLp = new LinearLayout.LayoutParams(0, -2, 1);
+            identityLp.setMarginStart(ExpressiveUi.dp(this, 12));
+            top.addView(identity, identityLp);
             TextView menu = ExpressiveUi.label(this, "⋮", 25,
                 ExpressiveUi.color(this, R.color.muted));
             menu.setGravity(Gravity.CENTER);
@@ -1778,8 +1785,13 @@ public class MainActivity extends Activity {
             LinearLayout amountRow = ExpressiveUi.row(this);
             amountRow.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
             TextView stale = staleBadge(row);
-            if (stale != null) amountRow.addView(stale, new LinearLayout.LayoutParams(0, -2, 1));
-            else amountRow.addView(new View(MainActivity.this), new LinearLayout.LayoutParams(0, 1, 1));
+            if (stale != null) {
+                amountRow.addView(stale, new LinearLayout.LayoutParams(-2, -2));
+                amountRow.addView(new View(MainActivity.this),
+                    new LinearLayout.LayoutParams(0, 1, 1));
+            } else {
+                amountRow.addView(new View(MainActivity.this), new LinearLayout.LayoutParams(0, 1, 1));
+            }
             TextView amount = ExpressiveUi.heading(this, view.hidden ? "••••••"
                 : CurrencyHelper.amount(MainActivity.this, row.amount), 21);
             amount.setTextColor(row.excluded || BalanceData.isStale(MainActivity.this, row.bank.date)
@@ -1825,6 +1837,8 @@ public class MainActivity extends Activity {
                 ImageView image = new ImageView(MainActivity.this);
                 image.setImageDrawable(getDrawable(icon));
                 image.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+                image.setPadding(ExpressiveUi.dp(this, 4), ExpressiveUi.dp(this, 4),
+                    ExpressiveUi.dp(this, 4), ExpressiveUi.dp(this, 4));
                 image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
                 return image;
             }

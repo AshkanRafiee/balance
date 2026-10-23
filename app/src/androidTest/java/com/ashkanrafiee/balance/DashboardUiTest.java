@@ -136,6 +136,22 @@ public final class DashboardUiTest {
         });
     }
 
+    @Test public void changingCurrencyImmediatelyUpdatesVisibleAmountAndUnit() {
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        saved.put("Tejarat", new Bank("Tejarat", 1_000L, System.currentTimeMillis(), "5000"));
+        BalanceData.write(context, saved);
+        CurrencyHelper.setCurrency(context, CurrencyHelper.CURRENCY_TOMAN);
+        launch();
+        await(() -> hasText(currentRoot(), "100") && hasText(currentRoot(),
+            context.getString(R.string.unit_toman)), 10_000);
+        scenario.onActivity(activity -> {
+            CurrencyHelper.setCurrency(activity, CurrencyHelper.CURRENCY_RIAL);
+            activity.refreshCurrencyPresentation();
+        });
+        await(() -> hasText(currentRoot(), "1,000") && hasText(currentRoot(),
+            context.getString(R.string.unit_rial)), 5_000);
+    }
+
     private void launch() {
         scenario = ActivityScenario.launch(MainActivity.class);
     }
