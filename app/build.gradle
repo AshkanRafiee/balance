@@ -1,7 +1,7 @@
 plugins { id 'com.android.application' }
 
 android { namespace 'com.ashkanrafiee.balance'; compileSdk 36
-    defaultConfig { applicationId 'com.ashkanrafiee.balance'; minSdk 26; targetSdk 36; versionCode 29001; versionName '1.19.1'
+    defaultConfig { applicationId 'com.ashkanrafiee.balance'; minSdk 26; targetSdk 36; versionCode 30000; versionName '1.20.0'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
@@ -27,6 +27,12 @@ android { namespace 'com.ashkanrafiee.balance'; compileSdk 36
             // reproducible by F-Droid and third parties (AGP 8.3+ bundles VCS info by default).
             vcsInfo { include false }
         }
+    }
+    lint {
+        // The current AGP release requests a lint-gradle artifact that is not published in the
+        // configured Google Maven repository. Keep release assembly reproducible; lint remains
+        // available as a separate developer check when the matching artifact is available.
+        checkReleaseBuilds = false
     }
 }
 

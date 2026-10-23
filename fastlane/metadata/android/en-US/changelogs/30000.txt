@@ -1,0 +1,4 @@
+• Refreshed the dashboard, history, commitments and supporting screens with clearer layouts and easier actions.
+• Added automatic balance updates when new bank SMS messages arrive, without asking for another permission.
+• Improved Persian and right-to-left presentation, calendar switching, stale-balance information and accessibility.
+• Made diagnostics, backups and privacy states clearer when messages or stored data cannot be read.
