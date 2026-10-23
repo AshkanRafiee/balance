@@ -861,20 +861,22 @@ public final class CommitmentsActivity extends Activity {
         }
         line.addView(figure, new LinearLayout.LayoutParams(-2, -2));
         if (row.settled) {
-            TextView undo = text(getString(R.string.commitments_undo), 12, accent, medium());
-            undo.setBackground(rounded(chipBg, 10));
-            undo.setPadding(dp(12), dp(7), dp(12), dp(7));
+            TextView undo = ExpressiveUi.button(this,
+                getString(R.string.commitments_undo), false);
+            undo.setTextColor(accent);
+            undo.setMinimumHeight(dp(48));
+            undo.setPadding(dp(12), 0, dp(12), 0);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
             lp.setMarginStart(dp(10));
             undo.setOnClickListener(v -> undoSettled(row));
             line.addView(undo, lp);
         } else {
-            TextView pay = text(row.commitment.isPayment()
+            TextView pay = ExpressiveUi.button(this, row.commitment.isPayment()
                     ? getString(R.string.commitments_mark_paid)
-                    : getString(R.string.commitments_mark_received),
-                12, accent, medium());
-            pay.setBackground(rounded(chipBg, 10));
-            pay.setPadding(dp(12), dp(7), dp(12), dp(7));
+                    : getString(R.string.commitments_mark_received), false);
+            pay.setTextColor(accent);
+            pay.setMinimumHeight(dp(48));
+            pay.setPadding(dp(12), 0, dp(12), 0);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
             lp.setMarginStart(dp(10));
             pay.setOnClickListener(v -> markSettled(row));

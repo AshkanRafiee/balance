@@ -22,6 +22,7 @@
     <string name="dashboard_bank_actions">More actions for %1$s</string>
     <string name="dashboard_lock_action">Lock Balance</string>
     <string name="dashboard_mask_action">Show or hide balances</string>
+    <string name="commitments_loading">Loading commitments…</string>
 
     <string name="status_reading_sms">Reading bank SMS on this device…</string>
     <string name="status_permission_needed">SMS permission is needed to read balances</string>
@@ -331,6 +332,8 @@
     <string name="history_this_year">This year</string>
     <string name="history_total">All time</string>
     <string name="history_net">Net</string>
+    <string name="history_row_identity">%1$s · %2$s · %3$s at %4$s.</string>
+    <string name="history_row_amount">%1$s %2$s.</string>
     <string name="history_breakdown">BY YEAR</string>
     <string name="history_back">Back</string>
     <string name="history_yesterday">Yesterday</string>

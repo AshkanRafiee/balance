@@ -3297,7 +3297,10 @@ public final class HistoryActivity extends Activity {
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.addView(heroGrossCell(getString(R.string.history_filter_deposits), dep, depFg,
                 24), new LinearLayout.LayoutParams(0, -2, 1));
-            row.addView(hairDivider(), new LinearLayout.LayoutParams(dp(1), dp(56)));
+            LinearLayout.LayoutParams grossDividerParams = new LinearLayout.LayoutParams(
+                dp(1), dp(44));
+            grossDividerParams.setMargins(dp(12), dp(6), dp(12), dp(6));
+            row.addView(hairDivider(), grossDividerParams);
             row.addView(heroGrossCell(getString(R.string.history_filter_withdrawals), -wit,
                 witFg, 24), new LinearLayout.LayoutParams(0, -2, 1));
             hero.addView(row, margin(0, 10, 0, 0));
@@ -3338,10 +3341,16 @@ public final class HistoryActivity extends Activity {
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.addView(periodCell(getString(R.string.history_today), lists.todayDep,
                 lists.todayWit, todayColor), new LinearLayout.LayoutParams(0, -2, 1));
-            row.addView(hairDivider(), new LinearLayout.LayoutParams(dp(1), dp(62)));
+            LinearLayout.LayoutParams todayDividerParams = new LinearLayout.LayoutParams(
+                dp(1), dp(50));
+            todayDividerParams.setMargins(dp(10), dp(6), dp(10), dp(6));
+            row.addView(hairDivider(), todayDividerParams);
             row.addView(periodCell(getString(R.string.history_this_month), lists.monthDep,
                 lists.monthWit, monthColor), new LinearLayout.LayoutParams(0, -2, 1));
-            row.addView(hairDivider(), new LinearLayout.LayoutParams(dp(1), dp(62)));
+            LinearLayout.LayoutParams monthDividerParams = new LinearLayout.LayoutParams(
+                dp(1), dp(50));
+            monthDividerParams.setMargins(dp(10), dp(6), dp(10), dp(6));
+            row.addView(hairDivider(), monthDividerParams);
             row.addView(periodCell(getString(R.string.history_this_year), lists.yearDep,
                 lists.yearWit, yearColor), new LinearLayout.LayoutParams(0, -2, 1));
             hero.addView(row, new LinearLayout.LayoutParams(-1, -2));
@@ -4230,6 +4239,14 @@ public final class HistoryActivity extends Activity {
         // rescan can bring back — would never be heard at all. Each clause is a whole sentence, so they
         // read in order in either language rather than running into each other.
         List<String> said = new ArrayList<>(6);
+        String accountText = t.account == null ? "" : getString(R.string.account_label) + " "
+            + digits(t.account);
+        said.add(getString(R.string.history_row_identity,
+            BankRules.displayName(this, t.bank), accountText,
+            dateText(calOf(t.date, iranCalendar)), timeText(t.date)));
+        said.add(getString(R.string.history_row_amount,
+            t.amount >= 0 ? getString(R.string.history_deposit)
+                : getString(R.string.history_withdrawal), signedAmount(t.amount)));
         if (caption != null) said.add(getString(R.string.row_fact_reason, caption));
         if (channel != null) said.add(getString(R.string.row_fact_channel, channel));
         if (merchant != null) said.add(getString(R.string.row_fact_merchant, merchant));

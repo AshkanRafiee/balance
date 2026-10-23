@@ -22,6 +22,7 @@
     <string name="dashboard_bank_actions">عملیات بیشتر برای %1$s</string>
     <string name="dashboard_lock_action">قفل کردن Balance</string>
     <string name="dashboard_mask_action">نمایش یا مخفی کردن موجودی‌ها</string>
+    <string name="commitments_loading">در حال بارگذاری تعهدها…</string>
 
     <string name="status_reading_sms">در حال خواندن پیامک‌های بانکی این دستگاه…</string>
     <string name="status_permission_needed">برای خواندن موجودی به اجازهٔ دسترسی به پیامک نیاز است</string>
@@ -314,6 +315,8 @@
     <string name="history_this_year">امسال</string>
     <string name="history_total">مجموع کل</string>
     <string name="history_net">خالص</string>
+    <string name="history_row_identity">%1$s · %2$s · %3$s در ساعت %4$s.</string>
+    <string name="history_row_amount">%1$s %2$s.</string>
     <string name="history_breakdown">بر اساس سال</string>
     <string name="history_back">بازگشت</string>
     <string name="history_yesterday">دیروز</string>

@@ -480,6 +480,7 @@ public class MainActivity extends Activity {
                 if (chosen != BalanceData.getStaleDays(MainActivity.this)) {
                     BalanceData.setStaleDays(MainActivity.this, chosen);
                     view.invalidate();
+                    if (dashboard != null) dashboard.render();
                     BalanceWidgetProvider.push(MainActivity.this);
                 }
             }
@@ -1610,6 +1611,8 @@ public class MainActivity extends Activity {
             hero.setClickable(true);
             hero.setFocusable(true);
             hero.setContentDescription(getString(R.string.dashboard_open_history));
+            hero.setOnClickListener(v -> startActivity(new Intent(MainActivity.this,
+                HistoryActivity.class)));
             hero.setOnLongClickListener(v -> {
                 view.copyBalance(getString(R.string.total_label), view.total);
                 return true;
@@ -1649,7 +1652,7 @@ public class MainActivity extends Activity {
             card.addView(titleRow);
             if (!view.commitmentSummaryLoaded) {
                 view.ensureCommitmentSummary();
-                card.addView(ExpressiveUi.label(this, getString(R.string.status_reading_sms), 13,
+                card.addView(ExpressiveUi.label(this, getString(R.string.commitments_loading), 13,
                     ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 8, 0));
             } else if (!view.hasCommitments) {
                 card.addView(ExpressiveUi.label(this, getString(R.string.commitments_card_empty), 13,
@@ -1726,24 +1729,29 @@ public class MainActivity extends Activity {
             empty.setId(R.id.dashboard_empty_state);
             TextView title = ExpressiveUi.heading(this, getString(R.string.dashboard_no_accounts_title), 19);
             empty.addView(title);
-            TextView body = ExpressiveUi.label(this, view.status.equals(
-                getString(R.string.status_permission_needed))
+            boolean loading = view.refreshing;
+            TextView body = ExpressiveUi.label(this, loading
+                ? getString(R.string.status_reading_sms)
+                : view.status.equals(getString(R.string.status_permission_needed))
                 ? getString(R.string.status_permission_needed)
                 : getString(R.string.dashboard_no_accounts_body), 14,
                 ExpressiveUi.color(this, R.color.muted));
             body.setPadding(0, ExpressiveUi.dp(this, 8), 0, ExpressiveUi.dp(this, 16));
             empty.addView(body);
-            TextView scan = ExpressiveUi.button(this, getString(R.string.dashboard_scan_action), true);
+            TextView scan = ExpressiveUi.button(this,
+                loading ? getString(R.string.status_refreshing)
+                    : getString(R.string.dashboard_scan_action), true);
             Runnable scanAction = () -> {
                 if (checkSelfPermission(Manifest.permission.READ_SMS)
                         != PackageManager.PERMISSION_GRANTED) requestSms();
                 else view.refresh();
             };
             scan.setOnClickListener(v -> scanAction.run());
+            scan.setEnabled(!loading);
             empty.addView(scan, new LinearLayout.LayoutParams(-1, -2));
-            empty.setClickable(true);
+            empty.setClickable(!loading);
             empty.setFocusable(true);
-            empty.setOnClickListener(v -> scanAction.run());
+            if (!loading) empty.setOnClickListener(v -> scanAction.run());
             return empty;
         }
 
@@ -1765,6 +1773,10 @@ public class MainActivity extends Activity {
                 String account = view.hidden ? "••••••" : getString(R.string.account_label) + " "
                     + view.faDigits(row.bank.account);
                 identity.addView(ExpressiveUi.label(this, account, 12,
+                    ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 4, 0));
+            }
+            if (row.excluded) {
+                identity.addView(ExpressiveUi.label(this, getString(R.string.excluded_label), 11,
                     ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 4, 0));
             }
             LinearLayout.LayoutParams identityLp = new LinearLayout.LayoutParams(0, -2, 1);
@@ -1797,16 +1809,35 @@ public class MainActivity extends Activity {
             amount.setTextColor(row.excluded || BalanceData.isStale(MainActivity.this, row.bank.date)
                 ? ExpressiveUi.color(this, R.color.muted)
                 : ExpressiveUi.color(this, R.color.accent));
+            amount.setSingleLine(true);
+            amount.setEllipsize(android.text.TextUtils.TruncateAt.END);
             if (row.excluded) amount.setPaintFlags(amount.getPaintFlags()
                 | android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
             amountRow.addView(amount);
             TextView unit = ExpressiveUi.label(this, CurrencyHelper.label(MainActivity.this), 11,
                 ExpressiveUi.color(this, R.color.muted));
-            unit.setPadding(ExpressiveUi.dp(this, 6), ExpressiveUi.dp(this, 7), 0, 0);
+            unit.setSingleLine(true);
+            unit.setPaddingRelative(ExpressiveUi.dp(this, 6), ExpressiveUi.dp(this, 7), 0, 0);
             amountRow.addView(unit);
             card.addView(amountRow, ExpressiveUi.widthMatch(this, 10, 0));
-            card.setContentDescription(getString(R.string.dashboard_bank_history,
-                BankRules.displayName(MainActivity.this, row.bankName)));
+            String displayName = BankRules.displayName(MainActivity.this, row.bankName);
+            StringBuilder description = new StringBuilder(getString(
+                R.string.dashboard_bank_history, displayName));
+            if (row.bank.account != null) {
+                description.append(", ").append(getString(R.string.account_label)).append(" ")
+                    .append(view.hidden ? getString(R.string.accessibility_total_masked)
+                        : view.faDigits(row.bank.account));
+            }
+            if (!view.hidden) description.append(", ")
+                .append(CurrencyHelper.amount(MainActivity.this, row.amount)).append(" ")
+                .append(CurrencyHelper.label(MainActivity.this));
+            if (row.excluded) description.append(", ")
+                .append(getString(R.string.excluded_label));
+            if (!row.excluded && BalanceData.isStale(MainActivity.this, row.bank.date))
+                description.append(", ").append(getResources().getQuantityString(
+                    R.plurals.stale_days, BalanceData.staleDays(MainActivity.this, row.bank.date),
+                    BalanceData.staleDays(MainActivity.this, row.bank.date)));
+            card.setContentDescription(description.toString());
             card.setClickable(true);
             card.setFocusable(true);
             card.setOnClickListener(v -> openBankHistory(row));
@@ -1822,12 +1853,12 @@ public class MainActivity extends Activity {
             TextView badge = ExpressiveUi.label(this, getResources().getQuantityString(
                 R.plurals.stale_days, BalanceData.staleDays(MainActivity.this, row.bank.date),
                 BalanceData.staleDays(MainActivity.this, row.bank.date)), 11,
-                ExpressiveUi.color(this, R.color.warn));
+                ExpressiveUi.color(this, R.color.muted));
             badge.setPadding(ExpressiveUi.dp(this, 10), ExpressiveUi.dp(this, 6),
                 ExpressiveUi.dp(this, 10), ExpressiveUi.dp(this, 6));
             badge.setBackground(ExpressiveUi.outline(this,
-                ExpressiveUi.color(this, R.color.warn_bg), ExpressiveUi.RADIUS_PILL,
-                ExpressiveUi.color(this, R.color.warn)));
+                ExpressiveUi.color(this, R.color.expressive_surface_container_high),
+                ExpressiveUi.RADIUS_PILL, ExpressiveUi.color(this, R.color.outline)));
             return badge;
         }
 
@@ -3162,6 +3193,7 @@ public class MainActivity extends Activity {
                         : BalanceData.SORT_DATE_RECENT;
                     BalanceData.setSort(MainActivity.this, sortMode);
                     invalidate();
+                    if (dashboard != null) dashboard.render();
                 })
                 .create());
         }
@@ -3229,6 +3261,7 @@ public class MainActivity extends Activity {
                         excluded.addAll(BalanceData.getExcluded(MainActivity.this));
                         recalcTotal();
                         invalidate();
+                        if (dashboard != null) dashboard.render();
                         BalanceWidgetProvider.push(MainActivity.this);
                         Toast.makeText(MainActivity.this,
                             getString(excluded.contains(key)
