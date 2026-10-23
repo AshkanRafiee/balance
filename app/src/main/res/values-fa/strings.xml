@@ -67,6 +67,7 @@
     <string name="note_edit_hint">یک یادداشت خصوصی برای این تراکنش</string>
     <string name="note_save">ذخیره</string>
     <string name="note_save_failed">یادداشت ذخیره نشد؛ دوباره تلاش کنید.</string>
+    <string name="note_load_failed">یادداشت بارگذاری نشد؛ دوباره تلاش کنید.</string>
     <string name="note_clear">پاک کردن یادداشت</string>
     <string name="note_row_hint">برای افزودن یا ویرایش یادداشت این تراکنش، روی آن بزنید</string>
     <string name="tag_label">برچسب‌ها</string>

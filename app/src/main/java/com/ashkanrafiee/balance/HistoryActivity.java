@@ -4408,11 +4408,20 @@ public final class HistoryActivity extends Activity {
         input.setHint(getString(R.string.note_edit_hint));
         input.setTextColor(fg);
         input.setHintTextColor(muted);
-        String existing = BalanceData.getNote(this, t);
+        final String existing;
+        final List<String> initialTags;
+        try {
+            existing = BalanceData.getNote(this, t);
+            initialTags = new ArrayList<>(BalanceData.getTags(this, t));
+        } catch (RuntimeException error) {
+            android.util.Log.w("BalanceHistory", "note metadata read failed", error);
+            Toast.makeText(this, R.string.note_load_failed, Toast.LENGTH_SHORT).show();
+            return;
+        }
         input.setText(existing == null ? "" : existing);
         input.setSelection(input.getText().length());
 
-        final List<String> editedTags = new ArrayList<>(BalanceData.getTags(this, t));
+        final List<String> editedTags = new ArrayList<>(initialTags);
         final List<String> originalTags = new ArrayList<>(editedTags);
         LinearLayout selectedTagHost = new LinearLayout(this);
         selectedTagHost.setGravity(Gravity.CENTER_VERTICAL);
@@ -4476,7 +4485,13 @@ public final class HistoryActivity extends Activity {
         suggestionsScroll.setHorizontalScrollBarEnabled(false);
         suggestionsScroll.addView(suggestions,
             new android.widget.FrameLayout.LayoutParams(-2, -1));
-        List<String> suggestionsList = BalanceData.readTagNames(this);
+        List<String> suggestionsList;
+        try {
+            suggestionsList = BalanceData.readTagNames(this);
+        } catch (RuntimeException error) {
+            android.util.Log.w("BalanceHistory", "tag suggestions read failed", error);
+            suggestionsList = java.util.Collections.emptyList();
+        }
         int suggestionCount = Math.min(20, suggestionsList.size());
         for (int i = 0; i < suggestionCount; i++) {
             String suggestion = suggestionsList.get(i);

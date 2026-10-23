@@ -67,6 +67,7 @@
     <string name="note_edit_hint">A private note for this transaction</string>
     <string name="note_save">Save</string>
     <string name="note_save_failed">Could not save the note. Try again.</string>
+    <string name="note_load_failed">Could not load the note. Try again.</string>
     <string name="note_clear">Clear note</string>
     <string name="note_row_hint">Tap to add or edit a note for this transaction</string>
     <string name="tag_label">Tags</string>
