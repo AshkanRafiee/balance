@@ -1637,7 +1637,7 @@ public class MainActivity extends Activity {
             TextView title = ExpressiveUi.heading(this,
                 getString(R.string.commitments_card_title, commitmentMonthLabel()), 16);
             titleRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-            TextView open = ExpressiveUi.label(this, "›", 24,
+            TextView open = ExpressiveUi.label(this, rtl ? "←" : "→", 22,
                 ExpressiveUi.color(this, R.color.expressive_secondary));
             open.setGravity(Gravity.CENTER);
             titleRow.addView(open, new LinearLayout.LayoutParams(48, 48));
