@@ -1760,15 +1760,24 @@ public class MainActivity extends Activity {
                 ? ExpressiveUi.color(this, R.color.expressive_surface_container)
                 : ExpressiveUi.color(this, R.color.panel);
             LinearLayout card = ExpressiveUi.card(this, surface, ExpressiveUi.RADIUS_CARD, 14);
-            LinearLayout top = ExpressiveUi.row(this);
-            top.addView(bankBadge(row.bankName), new LinearLayout.LayoutParams(
+            LinearLayout body = ExpressiveUi.row(this);
+            body.setMinimumHeight(ExpressiveUi.dp(this, 58));
+            body.addView(bankBadge(row.bankName), new LinearLayout.LayoutParams(
                 ExpressiveUi.dp(this, 44), ExpressiveUi.dp(this, 44)));
             LinearLayout identity = ExpressiveUi.column(this);
+            LinearLayout nameLine = ExpressiveUi.row(this);
             TextView name = ExpressiveUi.heading(this,
                 BankRules.displayName(MainActivity.this, row.bankName), 16);
             name.setMaxLines(1);
             name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            identity.addView(name);
+            nameLine.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+            TextView stale = staleBadge(row);
+            if (stale != null) {
+                LinearLayout.LayoutParams staleLp = new LinearLayout.LayoutParams(-2, -2);
+                staleLp.setMarginStart(ExpressiveUi.dp(this, 8));
+                nameLine.addView(stale, staleLp);
+            }
+            identity.addView(nameLine);
             if (row.bank.account != null) {
                 String account = view.hidden ? "••••••" : getString(R.string.account_label) + " "
                     + view.faDigits(row.bank.account);
@@ -1781,7 +1790,29 @@ public class MainActivity extends Activity {
             }
             LinearLayout.LayoutParams identityLp = new LinearLayout.LayoutParams(0, -2, 1);
             identityLp.setMarginStart(ExpressiveUi.dp(this, 12));
-            top.addView(identity, identityLp);
+            body.addView(identity, identityLp);
+            LinearLayout amountColumn = ExpressiveUi.column(this);
+            amountColumn.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+            TextView amount = ExpressiveUi.heading(this, view.hidden ? "••••••"
+                : CurrencyHelper.amount(MainActivity.this, row.amount), 19);
+            amount.setSingleLine(true);
+            amount.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            amount.setTextColor(row.excluded || BalanceData.isStale(MainActivity.this, row.bank.date)
+                ? ExpressiveUi.color(this, R.color.muted)
+                : ExpressiveUi.color(this, R.color.accent));
+            if (row.excluded) amount.setPaintFlags(amount.getPaintFlags()
+                | android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
+            amountColumn.addView(amount, new LinearLayout.LayoutParams(-2, -2));
+            TextView unit = ExpressiveUi.label(this, CurrencyHelper.label(MainActivity.this), 11,
+                ExpressiveUi.color(this, R.color.muted));
+            unit.setGravity(Gravity.END);
+            unit.setSingleLine(true);
+            LinearLayout.LayoutParams unitLp = new LinearLayout.LayoutParams(-2, -2);
+            unitLp.topMargin = ExpressiveUi.dp(this, 3);
+            amountColumn.addView(unit, unitLp);
+            LinearLayout.LayoutParams amountLp = new LinearLayout.LayoutParams(-2, -2);
+            amountLp.setMarginStart(ExpressiveUi.dp(this, 8));
+            body.addView(amountColumn, amountLp);
             TextView menu = ExpressiveUi.label(this, "⋮", 25,
                 ExpressiveUi.color(this, R.color.muted));
             menu.setGravity(Gravity.CENTER);
@@ -1792,34 +1823,8 @@ public class MainActivity extends Activity {
             menu.setClickable(true);
             menu.setFocusable(true);
             menu.setOnClickListener(v -> view.showBankMenu(row.key, row.bankName, row.amount));
-            top.addView(menu);
-            card.addView(top);
-            LinearLayout amountRow = ExpressiveUi.row(this);
-            amountRow.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-            TextView stale = staleBadge(row);
-            if (stale != null) {
-                amountRow.addView(stale, new LinearLayout.LayoutParams(-2, -2));
-                amountRow.addView(new View(MainActivity.this),
-                    new LinearLayout.LayoutParams(0, 1, 1));
-            } else {
-                amountRow.addView(new View(MainActivity.this), new LinearLayout.LayoutParams(0, 1, 1));
-            }
-            TextView amount = ExpressiveUi.heading(this, view.hidden ? "••••••"
-                : CurrencyHelper.amount(MainActivity.this, row.amount), 21);
-            amount.setTextColor(row.excluded || BalanceData.isStale(MainActivity.this, row.bank.date)
-                ? ExpressiveUi.color(this, R.color.muted)
-                : ExpressiveUi.color(this, R.color.accent));
-            amount.setSingleLine(true);
-            amount.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            if (row.excluded) amount.setPaintFlags(amount.getPaintFlags()
-                | android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
-            amountRow.addView(amount);
-            TextView unit = ExpressiveUi.label(this, CurrencyHelper.label(MainActivity.this), 11,
-                ExpressiveUi.color(this, R.color.muted));
-            unit.setSingleLine(true);
-            unit.setPaddingRelative(ExpressiveUi.dp(this, 6), ExpressiveUi.dp(this, 7), 0, 0);
-            amountRow.addView(unit);
-            card.addView(amountRow, ExpressiveUi.widthMatch(this, 10, 0));
+            body.addView(menu);
+            card.addView(body);
             String displayName = BankRules.displayName(MainActivity.this, row.bankName);
             StringBuilder description = new StringBuilder(getString(
                 R.string.dashboard_bank_history, displayName));
