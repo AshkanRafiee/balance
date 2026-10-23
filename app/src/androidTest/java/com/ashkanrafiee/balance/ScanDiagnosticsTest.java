@@ -296,11 +296,11 @@ public class ScanDiagnosticsTest {
     }
 
     @Test public void senderReport_redactsParsianCodeAndRepeatedHashCode() {
-        String body = "خرید\nفروشگاه نمونه\nمبلغ:120,000\nCode:12345678\n@bank.example #12345678";
+        String body = "خرید\nفروشگاه نمونه\nمبلغ:120,000\nCode:123456789\n@bank.example #123456789";
         String txt = ScanDiagnostics.sanitizeForReport(body);
         assertTrue(txt.contains("Code:[redacted]"));
         assertTrue(txt.contains("#[redacted]"));
-        assertFalse(txt.contains("12345678"));
+        assertFalse(txt.contains("123456789"));
     }
 
     @Test public void senderReport_noIssues_omitsTheLine() {
