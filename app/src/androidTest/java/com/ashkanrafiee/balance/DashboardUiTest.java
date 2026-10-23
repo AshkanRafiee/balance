@@ -166,16 +166,19 @@ public final class DashboardUiTest {
             assertNotNull("RTL dashboard keeps its brand subtitle", subtitle);
             assertEquals(View.LAYOUT_DIRECTION_RTL, title.getLayoutDirection());
             assertEquals(View.LAYOUT_DIRECTION_RTL, subtitle.getLayoutDirection());
-            assertEquals(View.TEXT_ALIGNMENT_VIEW_END, title.getTextAlignment());
-            assertEquals(View.TEXT_ALIGNMENT_VIEW_END, subtitle.getTextAlignment());
-            int titleGravity = title.getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK;
-            int subtitleGravity = subtitle.getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK;
-            assertTrue(titleGravity == Gravity.END || titleGravity == Gravity.RIGHT);
-            assertTrue(subtitleGravity == Gravity.END || subtitleGravity == Gravity.RIGHT);
+            assertEquals(View.TEXT_ALIGNMENT_VIEW_START, title.getTextAlignment());
+            assertEquals(View.TEXT_ALIGNMENT_VIEW_START, subtitle.getTextAlignment());
+            assertEquals(Gravity.START,
+                title.getGravity() & Gravity.RELATIVE_HORIZONTAL_GRAVITY_MASK);
+            assertEquals(Gravity.START,
+                subtitle.getGravity() & Gravity.RELATIVE_HORIZONTAL_GRAVITY_MASK);
             ViewGroup brand = (ViewGroup) title.getParent();
+            ViewGroup header = (ViewGroup) brand.getParent();
             assertEquals(View.LAYOUT_DIRECTION_RTL, brand.getLayoutDirection());
             assertEquals("the title fills the brand width", brand.getWidth(), title.getWidth());
             assertEquals("the subtitle fills the brand width", brand.getWidth(), subtitle.getWidth());
+            assertTrue("the brand remains on the physical right in RTL",
+                brand.getLeft() + brand.getWidth() / 2 > header.getWidth() / 2);
         });
     }
 

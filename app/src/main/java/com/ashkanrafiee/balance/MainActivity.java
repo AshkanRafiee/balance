@@ -1426,17 +1426,16 @@ public class MainActivity extends Activity {
                 getString(R.string.subtitle_offline_bank_balances), 13,
                 ExpressiveUi.color(context, R.color.muted));
             int layoutDirection = rtl ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR;
-            int textGravity = rtl ? Gravity.END : Gravity.START;
             header.setLayoutDirection(layoutDirection);
             brand.setLayoutDirection(layoutDirection);
-            brand.setGravity(textGravity);
-            title.setGravity(textGravity);
-            subtitle.setGravity(textGravity);
+            // Logical start is the reading side: physical left in LTR and physical right in RTL.
+            brand.setGravity(Gravity.START);
+            title.setGravity(Gravity.START);
+            subtitle.setGravity(Gravity.START);
             ExpressiveUi.setTextDirection(title, rtl);
             ExpressiveUi.setTextDirection(subtitle, rtl);
-            title.setTextAlignment(rtl ? View.TEXT_ALIGNMENT_VIEW_END : View.TEXT_ALIGNMENT_VIEW_START);
-            subtitle.setTextAlignment(rtl
-                ? View.TEXT_ALIGNMENT_VIEW_END : View.TEXT_ALIGNMENT_VIEW_START);
+            title.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+            subtitle.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
             brand.addView(title, new LinearLayout.LayoutParams(-1, -2));
             brand.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
             header.addView(brand, new LinearLayout.LayoutParams(0, -2, 1));
