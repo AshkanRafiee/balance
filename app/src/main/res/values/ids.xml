@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="dashboard_screen" type="id" />
+    <item name="dashboard_total_card" type="id" />
+    <item name="dashboard_mask_button" type="id" />
+    <item name="dashboard_refresh_button" type="id" />
+    <item name="dashboard_lock_button" type="id" />
+    <item name="dashboard_commitments_card" type="id" />
+    <item name="dashboard_bank_list" type="id" />
+    <item name="dashboard_empty_state" type="id" />
+    <item name="dashboard_action_dock" type="id" />
+</resources>

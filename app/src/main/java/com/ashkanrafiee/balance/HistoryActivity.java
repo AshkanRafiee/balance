@@ -626,22 +626,22 @@ public final class HistoryActivity extends Activity {
             if (intentAccount != null) selectedAccounts.add(intentAccount);
             accountBank = intentAccount == null ? null : intentBank;
         }
-        bg = color(R.color.bg);
+        bg = color(R.color.expressive_surface);
         card = color(R.color.panel);
-        muted = color(R.color.muted);
-        accent = color(R.color.accent);
+        muted = color(R.color.expressive_on_surface_variant);
+        accent = color(R.color.expressive_primary);
         fg = color(R.color.fg);
-        divider = color(R.color.divider);
-        positiveColor = color(R.color.accent);
+        divider = color(R.color.outline);
+        positiveColor = color(R.color.expressive_primary);
         negativeColor = color(R.color.negative);
-        todayColor = color(R.color.accent);
+        todayColor = color(R.color.expressive_primary);
         monthColor = color(R.color.purple);
         yearColor = color(R.color.history_year);
-        heroTop = color(R.color.history_hero_top);
-        heroBottom = color(R.color.history_hero_bottom);
-        rail = color(R.color.history_rail);
-        openBg = color(R.color.history_open_bg);
-        chipBg = color(R.color.history_chip_bg);
+        heroTop = color(R.color.expressive_primary_container);
+        heroBottom = color(R.color.expressive_surface);
+        rail = color(R.color.expressive_primary);
+        openBg = color(R.color.expressive_surface_container);
+        chipBg = color(R.color.expressive_surface_container_high);
         depBg = color(R.color.history_dep_bg);
         depFg = color(R.color.history_dep_fg);
         witBg = color(R.color.history_wit_bg);
@@ -659,7 +659,7 @@ public final class HistoryActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(bg);
-        root.setPadding(dp(20), dp(14), dp(20), dp(14));
+        root.setPadding(dp(20), dp(10), dp(20), dp(14));
         root.setOnApplyWindowInsetsListener((v, i) -> {
             int top = 0, bottom = 0;
             if (android.os.Build.VERSION.SDK_INT >= 30) {
@@ -791,10 +791,11 @@ public final class HistoryActivity extends Activity {
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView back = text(rtl ? "›" : "‹", 24, fg);
+        TextView back = text(rtl ? "›" : "‹", 24, fg, medium());
         back.setGravity(Gravity.CENTER);
         back.setContentDescription(getString(R.string.history_back));
-        back.setBackground(ripple(rounded(chipBg, 20)));
+        back.setBackground(ExpressiveUi.ripple(this,
+            ExpressiveUi.shape(this, chipBg, ExpressiveUi.RADIUS_PILL)));
         back.setOnClickListener(v -> finish());
         bar.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
@@ -810,7 +811,7 @@ public final class HistoryActivity extends Activity {
             LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(dp(32), dp(32));
             badgeLp.setMarginStart(dp(4));
             bar.addView(badge, badgeLp);
-            TextView title = text(BankRules.displayName(this, oneBank), 22, fg, medium());
+            TextView title = text(BankRules.displayName(this, oneBank), 26, fg, medium());
             title.setMaxLines(1);
             title.setEllipsize(android.text.TextUtils.TruncateAt.END);
             bar.addView(title, titleParams);
@@ -859,7 +860,7 @@ public final class HistoryActivity extends Activity {
         } else if (!selectedBanks.isEmpty() || !selectedAccounts.isEmpty()) {
             // A multi-bank or cross-bank account selection: the plain title plus a quiet scope
             // summary, since no single badge can identify whose history this is.
-            TextView title = text(getString(R.string.history_title), 22, fg, medium());
+            TextView title = text(getString(R.string.history_title), 26, fg, medium());
             bar.addView(title, titleParams);
             TextView chip = text(scopeSummary(), 11, badgeFg, medium());
             chip.setMaxLines(1);
@@ -870,7 +871,7 @@ public final class HistoryActivity extends Activity {
             chipParams.setMarginStart(dp(8));
             bar.addView(chip, chipParams);
         } else {
-            TextView title = text(getString(R.string.history_title), 22, fg, medium());
+            TextView title = text(getString(R.string.history_title), 26, fg, medium());
             bar.addView(title, titleParams);
             // With nothing else before the action, keep the title apart from the export button with
             // a flex spacer so the button still sits at the far end of the bar.
@@ -878,11 +879,11 @@ public final class HistoryActivity extends Activity {
             bar.addView(new View(this), barSpacer);
         }
 
-        TextView export = text(getString(R.string.history_export_label), 14, muted, medium());
-        export.setGravity(Gravity.CENTER);
+        TextView export = ExpressiveUi.button(this,
+            getString(R.string.history_export_label), false);
+        export.setTextSize(14);
         export.setContentDescription(getString(R.string.history_export));
-        export.setPadding(dp(14), 0, dp(14), 0);
-        export.setBackground(ripple(rounded(chipBg, 20)));
+        export.setPadding(dp(16), 0, dp(16), 0);
         export.setOnClickListener(v -> startExport());
         LinearLayout.LayoutParams exportParams = new LinearLayout.LayoutParams(-2, dp(40));
         exportParams.setMarginStart(dp(6));
@@ -1440,12 +1441,15 @@ public final class HistoryActivity extends Activity {
         String label = selectedTags.isEmpty()
             ? getString(R.string.history_filter_tags)
             : getString(R.string.history_filter_tags_count, selectedTags.size());
-        TextView chip = text(label, 12, selectedTags.isEmpty() ? fg : Color.WHITE, medium());
+        TextView chip = text(label, 12, selectedTags.isEmpty() ? fg
+            : ExpressiveUi.color(this, R.color.expressive_on_primary), medium());
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
         chip.setAutoSizeTextTypeWithDefaults(android.widget.TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM);
         chip.setPadding(dp(4), dp(7), dp(4), dp(7));
-        chip.setBackground(freshRounded(selectedTags.isEmpty() ? chipBg : accent, 10));
+        chip.setBackground(ExpressiveUi.ripple(this,
+            ExpressiveUi.shape(this, selectedTags.isEmpty() ? chipBg : accent,
+                ExpressiveUi.RADIUS_CONTROL)));
         chip.setContentDescription(getString(R.string.history_filter_tags_accessibility, label));
         chip.setClickable(true);
         chip.setFocusable(true);
@@ -1475,12 +1479,14 @@ public final class HistoryActivity extends Activity {
     /** One third of the scope row: a weighted chip sharing the row width with its siblings, so
      *  all labels stay on-screen at any font scale. */
     private void addScopeChip(LinearLayout host, String label, boolean active, Runnable action) {
-        TextView chip = text(label, 12, active ? Color.WHITE : fg, medium());
+        TextView chip = text(label, 12, active
+            ? ExpressiveUi.color(this, R.color.expressive_on_primary) : fg, medium());
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
         chip.setAutoSizeTextTypeWithDefaults(android.widget.TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM);
         chip.setPadding(dp(4), dp(7), dp(4), dp(7));
-        chip.setBackground(freshRounded(active ? accent : chipBg, 10));
+        chip.setBackground(ExpressiveUi.ripple(this,
+            ExpressiveUi.shape(this, active ? accent : chipBg, ExpressiveUi.RADIUS_CONTROL)));
         chip.setContentDescription(getString(R.string.history_filter_tags_accessibility, label));
         chip.setClickable(true);
         chip.setFocusable(true);
@@ -1803,7 +1809,7 @@ public final class HistoryActivity extends Activity {
     private LinearLayout directionSegment() {
         LinearLayout seg = new LinearLayout(this);
         seg.setPadding(dp(3), dp(3), dp(3), dp(3));
-        seg.setBackground(rounded(chipBg, 14));
+        seg.setBackground(ExpressiveUi.shape(this, chipBg, ExpressiveUi.RADIUS_CONTROL));
         addSegmentChip(seg, getString(R.string.history_filter_all), DIR_ALL, () -> applyDirection(DIR_ALL));
         addSegmentChip(seg, getString(R.string.history_filter_deposits), DIR_DEPOSIT,
             () -> applyDirection(DIR_DEPOSIT));
@@ -1814,12 +1820,14 @@ public final class HistoryActivity extends Activity {
 
     private void addSegmentChip(LinearLayout host, String label, int id, Runnable action) {
         boolean selected = filter.direction == id;
-        TextView chip = text(label, 12, selected ? Color.WHITE : fg, medium());
+        TextView chip = text(label, 12, selected
+            ? ExpressiveUi.color(this, R.color.expressive_on_primary) : fg, medium());
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
         chip.setAutoSizeTextTypeWithDefaults(android.widget.TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM);
         chip.setPadding(dp(6), dp(8), dp(6), dp(8));
-        chip.setBackground(rounded(selected ? accent : chipBg, 11));
+        chip.setBackground(ExpressiveUi.ripple(this,
+            ExpressiveUi.shape(this, selected ? accent : chipBg, ExpressiveUi.RADIUS_CONTROL)));
         chip.setContentDescription(label);
         chip.setClickable(true);
         chip.setFocusable(true);
@@ -1831,12 +1839,14 @@ public final class HistoryActivity extends Activity {
      *  a quiet toggle. The chips share the row width, so labels stay on-screen at any font scale. */
     private void addFilterChip(LinearLayout host, String label, int id, boolean weight, Runnable action) {
         boolean selected = filter.rangePreset == id;
-        TextView chip = text(label, 12, selected ? Color.WHITE : fg, medium());
+        TextView chip = text(label, 12, selected
+            ? ExpressiveUi.color(this, R.color.expressive_on_primary) : fg, medium());
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
         chip.setAutoSizeTextTypeWithDefaults(android.widget.TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM);
         chip.setPadding(dp(4), dp(7), dp(4), dp(7));
-        chip.setBackground(freshRounded(selected ? accent : chipBg, 10));
+        chip.setBackground(ExpressiveUi.ripple(this,
+            ExpressiveUi.shape(this, selected ? accent : chipBg, ExpressiveUi.RADIUS_CONTROL)));
         chip.setContentDescription(label);
         if (action != null) {
             chip.setClickable(true);
@@ -2260,7 +2270,8 @@ public final class HistoryActivity extends Activity {
                 && picked[0].compare(day) <= 0 && day.compare(picked[1]) <= 0;
             boolean isToday = today.sameDay(day);
             TextView cell = text(fa ? faDigits(day.day) : Integer.toString(day.day), 12.5f,
-                fromSel || toSel ? Color.WHITE : fg);
+                fromSel || toSel ? ExpressiveUi.color(HistoryActivity.this,
+                    R.color.expressive_on_primary) : fg);
             cell.setGravity(Gravity.CENTER);
             if (fromSel || toSel) {
                 cell.setBackground(rounded(accent, 10));

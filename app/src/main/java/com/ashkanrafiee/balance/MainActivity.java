@@ -31,9 +31,12 @@ import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.OverScroller;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -55,6 +58,9 @@ public class MainActivity extends Activity {
      *  can grind at, so a very short code would nullify the 600k-iteration KDF. */
     private static final int MIN_BACKUP_PASSWORD_LENGTH = 8;
     private BalanceView view;
+    /** Native dashboard composition. BalanceView remains as a compatibility façade for the mature
+     * scan, store, widget and test contracts, but it is no longer the production renderer. */
+    private DashboardScreen dashboard;
     private boolean smsRequested;
     private String pendingBackupPassword;
     private LockOverlay lockOverlay;
@@ -84,6 +90,8 @@ public class MainActivity extends Activity {
         getWindow().setNavigationBarColor(resColor(R.color.nav_bar));
         getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(resColor(R.color.bg)));
         view = new BalanceView();
+        view.setVisibility(View.INVISIBLE);
+        view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         FrameLayout host = new FrameLayout(this);
         setContentView(host);
         host.addView(view, new FrameLayout.LayoutParams(
@@ -94,6 +102,9 @@ public class MainActivity extends Activity {
             view.invalidate();
             return insets;
         });
+        dashboard = new DashboardScreen(this);
+        host.addView(dashboard, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         lockOverlay = new LockOverlay(this);
         lockOverlay.setUnlockListener(() -> {
             Runnable action = pendingLockAction;
@@ -140,6 +151,7 @@ public class MainActivity extends Activity {
         if (view != null && BalanceData.isAutoHide(this)) {
             view.hidden = true;
             view.invalidate();
+            if (dashboard != null) dashboard.render();
         }
         if (view != null) view.stopMonthRefresh();
         if (LockManager.isEnabled(this)) {
@@ -204,6 +216,7 @@ public class MainActivity extends Activity {
             view.ensureCommitmentSummary();
             view.refresh();
             view.scheduleMonthRefresh();
+            if (dashboard != null) dashboard.render();
         }
         registerSmsObserver();
         // A fresh install that skipped or finished the introduction returns here without ever
@@ -526,6 +539,7 @@ public class MainActivity extends Activity {
             BalanceData.setShowCommitments(MainActivity.this, on);
             if (view != null) view.updateSmsBanner();
             if (view != null) view.invalidate();
+            if (dashboard != null) dashboard.render();
         });
         LinearLayout.LayoutParams commitmentsLp = new LinearLayout.LayoutParams(-1, -2);
         commitmentsLp.topMargin = dp(18);
@@ -1357,6 +1371,549 @@ public class MainActivity extends Activity {
         return getResources().getColor(res, getTheme());
     }
 
+    /**
+     * The production dashboard composition. It deliberately uses native Views instead of a
+     * screenshot-like canvas: every action is a real focusable node, responsive text can wrap, and
+     * the layout naturally adapts to RTL and large font scales. BalanceView below remains the
+     * compatibility façade for the existing scan/store/widget machinery.
+     */
+    final class DashboardScreen extends FrameLayout {
+        private final LinearLayout content;
+        private final PullContainer pull;
+        private final ImageButton maskButton;
+        private final ImageButton refreshButton;
+        private final ImageButton lockButton;
+        private boolean rtl;
+
+        DashboardScreen(Context context) {
+            super(context);
+            setId(R.id.dashboard_screen);
+            rtl = getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+            setBackgroundColor(ExpressiveUi.color(context, R.color.expressive_surface));
+            setFocusable(true);
+            setOnApplyWindowInsetsListener((v, insets) -> {
+                int top = 0, bottom = 0;
+                if (android.os.Build.VERSION.SDK_INT >= 30) {
+                    android.graphics.Insets system = insets.getInsets(
+                        android.view.WindowInsets.Type.systemBars());
+                    top = system.top;
+                    bottom = system.bottom;
+                } else {
+                    top = insets.getSystemWindowInsetTop();
+                    bottom = insets.getSystemWindowInsetBottom();
+                }
+                setPadding(0, top, 0, bottom);
+                return insets;
+            });
+
+            LinearLayout shell = ExpressiveUi.column(context);
+            shell.setPadding(ExpressiveUi.dp(context, 20), ExpressiveUi.dp(context, 12),
+                ExpressiveUi.dp(context, 20), ExpressiveUi.dp(context, 10));
+            addView(shell, new FrameLayout.LayoutParams(-1, -1));
+
+            LinearLayout header = ExpressiveUi.row(context);
+            LinearLayout brand = ExpressiveUi.column(context);
+            TextView title = ExpressiveUi.heading(context, getString(R.string.app_name), 27);
+            TextView subtitle = ExpressiveUi.label(context,
+                getString(R.string.subtitle_offline_bank_balances), 13,
+                ExpressiveUi.color(context, R.color.muted));
+            brand.addView(title);
+            brand.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
+            header.addView(brand, new LinearLayout.LayoutParams(0, -2, 1));
+
+            maskButton = ExpressiveUi.iconButton(context, null,
+                getString(R.string.dashboard_mask_action), false);
+            refreshButton = ExpressiveUi.iconButton(context,
+                getDrawable(R.drawable.ic_refresh), getString(R.string.dashboard_refresh), false);
+            lockButton = ExpressiveUi.iconButton(context,
+                getDrawable(R.drawable.ic_lock), getString(R.string.dashboard_lock_action), false);
+            maskButton.setId(R.id.dashboard_mask_button);
+            refreshButton.setId(R.id.dashboard_refresh_button);
+            lockButton.setId(R.id.dashboard_lock_button);
+            header.addView(maskButton, new LinearLayout.LayoutParams(
+                ExpressiveUi.dp(context, 48), ExpressiveUi.dp(context, 48)));
+            LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(
+                ExpressiveUi.dp(context, 48), ExpressiveUi.dp(context, 48));
+            refreshLp.setMarginStart(ExpressiveUi.dp(context, 6));
+            header.addView(refreshButton, refreshLp);
+            LinearLayout.LayoutParams lockLp = new LinearLayout.LayoutParams(
+                ExpressiveUi.dp(context, 48), ExpressiveUi.dp(context, 48));
+            lockLp.setMarginStart(ExpressiveUi.dp(context, 6));
+            header.addView(lockButton, lockLp);
+            shell.addView(header, ExpressiveUi.widthMatch(context, 0, 12));
+
+            maskButton.setOnClickListener(v -> {
+                view.hidden = !view.hidden;
+                getSharedPreferences(BalanceData.PREFS_PREF, MODE_PRIVATE).edit()
+                    .putBoolean(BalanceData.KEY_HIDDEN, view.hidden).apply();
+                render();
+            });
+            maskButton.setOnLongClickListener(v -> {
+                setAutoHideToggle();
+                render();
+                return true;
+            });
+            refreshButton.setOnClickListener(v -> {
+                view.refresh();
+                render();
+            });
+            lockButton.setOnClickListener(v -> onLockTap());
+            lockButton.setOnLongClickListener(v -> {
+                lockSettingsFlow();
+                return true;
+            });
+
+            content = ExpressiveUi.column(context);
+            content.setPadding(0, 0, 0, ExpressiveUi.dp(context, 24));
+            ScrollView scroll = new ScrollView(context);
+            scroll.setFillViewport(true);
+            scroll.setClipToPadding(false);
+            scroll.setVerticalScrollBarEnabled(false);
+            scroll.addView(content, new ScrollView.LayoutParams(-1, -2));
+            pull = new PullContainer(context, scroll);
+            shell.addView(pull, new LinearLayout.LayoutParams(-1, 0, 1));
+            shell.addView(buildActionDock(context), ExpressiveUi.widthMatch(context, 10, 0));
+            render();
+        }
+
+        private LinearLayout buildActionDock(Context context) {
+            LinearLayout dock = ExpressiveUi.row(context);
+            dock.setId(R.id.dashboard_action_dock);
+            dock.setGravity(Gravity.CENTER);
+            dock.setPadding(ExpressiveUi.dp(context, 4), ExpressiveUi.dp(context, 4),
+                ExpressiveUi.dp(context, 4), ExpressiveUi.dp(context, 4));
+            dock.setBackground(ExpressiveUi.shape(context,
+                ExpressiveUi.color(context, R.color.expressive_surface_container_high),
+                ExpressiveUi.RADIUS_PILL));
+            addDockAction(dock, getString(R.string.footer_report),
+                getString(R.string.footer_report), () -> startActivity(
+                    new Intent(MainActivity.this, ScanDiagnosticsActivity.class)));
+            addDockAction(dock, getString(R.string.footer_data),
+                getString(R.string.footer_data), MainActivity.this::dataDialog);
+            addDockAction(dock, getString(R.string.footer_display),
+                getString(R.string.footer_display), MainActivity.this::displayDialog);
+            addDockAction(dock, getString(R.string.footer_about),
+                getString(R.string.footer_about), () -> startActivity(
+                    new Intent(MainActivity.this, AboutActivity.class)));
+            return dock;
+        }
+
+        private void addDockAction(LinearLayout dock, String label, String description,
+                Runnable action) {
+            TextView item = ExpressiveUi.label(MainActivity.this, label, 12,
+                ExpressiveUi.color(MainActivity.this, R.color.expressive_on_surface_variant));
+            item.setGravity(Gravity.CENTER);
+            item.setContentDescription(description);
+            item.setMinHeight(ExpressiveUi.dp(MainActivity.this, 48));
+            item.setPadding(ExpressiveUi.dp(MainActivity.this, 8), 0,
+                ExpressiveUi.dp(MainActivity.this, 8), 0);
+            item.setClickable(true);
+            item.setFocusable(true);
+            item.setBackground(ExpressiveUi.ripple(MainActivity.this,
+                ExpressiveUi.shape(MainActivity.this,
+                    ExpressiveUi.color(MainActivity.this, R.color.expressive_surface_container_high),
+                    ExpressiveUi.RADIUS_PILL)));
+            item.setOnClickListener(v -> action.run());
+            dock.addView(item, new LinearLayout.LayoutParams(0, -2, 1));
+        }
+
+        void render() {
+            if (Looper.myLooper() != Looper.getMainLooper()) {
+                post(this::render);
+                return;
+            }
+            if (view == null) return;
+            rtl = getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+            setButtonIcon(maskButton, view.hidden ? R.drawable.ic_visibility_off
+                : R.drawable.ic_visibility, view.hidden);
+            setButtonIcon(refreshButton, R.drawable.ic_refresh, false);
+            setButtonIcon(lockButton, R.drawable.ic_lock, LockManager.isEnabled(MainActivity.this));
+            content.removeAllViews();
+            content.addView(buildOverviewLabel(), ExpressiveUi.widthMatch(this, 4, 12));
+            content.addView(buildHeroCard(), ExpressiveUi.widthMatch(this, 0, 14));
+            if (view.smsBanner) content.addView(buildSmsBanner(),
+                ExpressiveUi.widthMatch(this, 0, 14));
+            if (view.commitmentsCard) content.addView(buildCommitmentsCard(),
+                ExpressiveUi.widthMatch(this, 0, 14));
+            content.addView(buildBanksHeader(), ExpressiveUi.widthMatch(this, 4, 8));
+            content.addView(buildBanks(), ExpressiveUi.widthMatch(this, 0, 0));
+            pull.setRefreshing(view.refreshing);
+        }
+
+        private void setButtonIcon(ImageButton button, int drawableRes, boolean selected) {
+            Drawable drawable = getDrawable(drawableRes);
+            if (drawable != null) {
+                drawable = drawable.mutate();
+                drawable.setTint(ExpressiveUi.color(this, selected
+                    ? R.color.expressive_on_primary_container
+                    : R.color.expressive_on_surface_variant));
+                button.setImageDrawable(drawable);
+            }
+            int fill = ExpressiveUi.color(this, selected
+                ? R.color.expressive_primary_container
+                : R.color.expressive_surface_container_high);
+            button.setBackground(ExpressiveUi.ripple(this,
+                ExpressiveUi.shape(this, fill, ExpressiveUi.RADIUS_PILL)));
+        }
+
+        private TextView buildOverviewLabel() {
+            TextView label = ExpressiveUi.heading(this,
+                getString(R.string.dashboard_overview_label), 18);
+            label.setTextColor(ExpressiveUi.color(this, R.color.expressive_on_surface_variant));
+            return label;
+        }
+
+        private LinearLayout buildHeroCard() {
+            LinearLayout hero = ExpressiveUi.card(this,
+                ExpressiveUi.color(this, R.color.expressive_primary_container),
+                ExpressiveUi.RADIUS_HERO, 22);
+            hero.setId(R.id.dashboard_total_card);
+            TextView label = ExpressiveUi.label(this, getString(R.string.total_balance_label), 12,
+                ExpressiveUi.color(this, R.color.expressive_on_primary_container));
+            label.setLetterSpacing(.08f);
+            hero.addView(label);
+            LinearLayout amountRow = ExpressiveUi.row(this);
+            boolean emptyTotal = view.banks.isEmpty() || view.excluded.containsAll(view.banks.keySet());
+            String amountText = emptyTotal ? getString(R.string.total_empty_value)
+                : view.hidden ? "••••••" : CurrencyHelper.amount(MainActivity.this, view.total);
+            TextView amount = ExpressiveUi.heading(this, amountText, 42);
+            amount.setTextColor(ExpressiveUi.color(this, R.color.expressive_on_primary_container));
+            amount.setContentDescription(emptyTotal ? getString(R.string.total_empty_value)
+                : view.hidden
+                ? getString(R.string.accessibility_total_masked)
+                : getString(R.string.accessibility_total_balance,
+                    CurrencyHelper.amount(MainActivity.this, view.total) + " "
+                        + CurrencyHelper.label(MainActivity.this)));
+            amountRow.addView(amount, new LinearLayout.LayoutParams(0, -2, 1));
+            TextView unit = ExpressiveUi.label(this, CurrencyHelper.label(MainActivity.this), 14,
+                ExpressiveUi.color(this, R.color.expressive_on_primary_container));
+            unit.setGravity(Gravity.BOTTOM);
+            unit.setPadding(0, 0, 0, ExpressiveUi.dp(this, 8));
+            amountRow.addView(unit);
+            hero.addView(amountRow, new LinearLayout.LayoutParams(-1, -2));
+            TextView status = ExpressiveUi.label(this, view.status, 12,
+                ExpressiveUi.color(this, R.color.expressive_on_primary_container));
+            status.setAlpha(.82f);
+            status.setMaxLines(2);
+            hero.addView(status, ExpressiveUi.widthMatch(this, 4, 16));
+            TextView history = ExpressiveUi.button(this,
+                getString(R.string.dashboard_open_history), true);
+            history.setContentDescription(getString(R.string.dashboard_open_history));
+            history.setOnClickListener(v -> startActivity(new Intent(MainActivity.this,
+                HistoryActivity.class)));
+            hero.addView(history, new LinearLayout.LayoutParams(-1, -2));
+            hero.setClickable(true);
+            hero.setFocusable(true);
+            hero.setContentDescription(getString(R.string.dashboard_open_history));
+            hero.setOnLongClickListener(v -> {
+                view.copyBalance(getString(R.string.total_label), view.total);
+                return true;
+            });
+            return hero;
+        }
+
+        private LinearLayout buildSmsBanner() {
+            LinearLayout banner = ExpressiveUi.card(this,
+                ExpressiveUi.color(this, R.color.warn_bg), ExpressiveUi.RADIUS_CONTROL, 16);
+            TextView title = ExpressiveUi.heading(this, getString(R.string.banner_stale_title), 14);
+            title.setTextColor(ExpressiveUi.color(this, R.color.warn));
+            banner.addView(title);
+            TextView action = ExpressiveUi.label(this, getString(R.string.banner_stale_action), 12,
+                ExpressiveUi.color(this, R.color.warn));
+            action.setPadding(0, ExpressiveUi.dp(this, 4), 0, 0);
+            banner.addView(action);
+            banner.setClickable(true);
+            banner.setFocusable(true);
+            banner.setOnClickListener(v -> requestSms());
+            return banner;
+        }
+
+        private LinearLayout buildCommitmentsCard() {
+            LinearLayout card = ExpressiveUi.card(this,
+                ExpressiveUi.color(this, R.color.expressive_secondary_container),
+                ExpressiveUi.RADIUS_CARD, 18);
+            card.setId(R.id.dashboard_commitments_card);
+            LinearLayout titleRow = ExpressiveUi.row(this);
+            TextView title = ExpressiveUi.heading(this,
+                getString(R.string.commitments_card_title, commitmentMonthLabel()), 16);
+            titleRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+            TextView open = ExpressiveUi.label(this, "›", 24,
+                ExpressiveUi.color(this, R.color.expressive_secondary));
+            open.setGravity(Gravity.CENTER);
+            titleRow.addView(open, new LinearLayout.LayoutParams(48, 48));
+            card.addView(titleRow);
+            if (!view.commitmentSummaryLoaded) {
+                view.ensureCommitmentSummary();
+                card.addView(ExpressiveUi.label(this, getString(R.string.status_reading_sms), 13,
+                    ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 8, 0));
+            } else if (!view.hasCommitments) {
+                card.addView(ExpressiveUi.label(this, getString(R.string.commitments_card_empty), 13,
+                    ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 8, 0));
+                card.addView(ExpressiveUi.label(this, getString(R.string.commitments_card_empty_action), 12,
+                    ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 4, 0));
+            } else {
+                CommitmentsActivity.Summary summary = view.commitmentSummary;
+                long pay = summary.overduePay + summary.thisMonthPay;
+                long receive = summary.overdueReceive + summary.thisMonthReceive;
+                LinearLayout values = ExpressiveUi.row(this);
+                values.addView(commitmentValue(R.string.commitments_remaining_payable, pay,
+                    R.color.negative), new LinearLayout.LayoutParams(0, -2, 1));
+                values.addView(commitmentValue(R.string.commitments_remaining_receivable, receive,
+                    R.color.accent), new LinearLayout.LayoutParams(0, -2, 1));
+                card.addView(values, ExpressiveUi.widthMatch(this, 12, 0));
+            }
+            card.setClickable(true);
+            card.setFocusable(true);
+            card.setContentDescription(getString(R.string.dashboard_open_commitments));
+            card.setOnClickListener(v -> startActivity(new Intent(MainActivity.this,
+                CommitmentsActivity.class)));
+            return card;
+        }
+
+        private LinearLayout commitmentValue(int labelRes, long amount, int colorRes) {
+            LinearLayout column = ExpressiveUi.column(this);
+            TextView label = ExpressiveUi.label(this, getString(labelRes), 11,
+                ExpressiveUi.color(this, R.color.muted));
+            TextView value = ExpressiveUi.heading(this, view.hidden ? "••••••"
+                : CurrencyHelper.amount(MainActivity.this, Math.abs(amount)), 19);
+            value.setTextColor(ExpressiveUi.color(this, colorRes));
+            column.addView(label);
+            column.addView(value, ExpressiveUi.widthMatch(this, 4, 0));
+            return column;
+        }
+
+        private String commitmentMonthLabel() {
+            boolean iran = RegionHelper.isIran(MainActivity.this);
+            boolean persian = LocaleHelper.isPersian(MainActivity.this);
+            int[] civil = Commitment.civilDay(System.currentTimeMillis(),
+                iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN);
+            String year = persian ? HistoryActivity.faDigitsString(String.valueOf(civil[0]))
+                : String.valueOf(civil[0]);
+            return CalDate.monthName(civil[1], iran, persian) + " " + year;
+        }
+
+        private LinearLayout buildBanksHeader() {
+            LinearLayout header = ExpressiveUi.row(this);
+            TextView title = ExpressiveUi.heading(this, getString(R.string.section_banks), 24);
+            header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+            TextView sort = ExpressiveUi.button(this, view.sortLabel(), false);
+            sort.setContentDescription(view.sortLabel());
+            sort.setMinHeight(ExpressiveUi.dp(this, 44));
+            sort.setOnClickListener(v -> view.showSortDialog());
+            header.addView(sort, new LinearLayout.LayoutParams(-2, -2));
+            return header;
+        }
+
+        private View buildBanks() {
+            if (view.banks.isEmpty()) return buildEmptyBanks();
+            LinearLayout list = ExpressiveUi.column(this);
+            list.setId(R.id.dashboard_bank_list);
+            for (BalanceView.BankRow row : view.rows()) {
+                list.addView(buildBankRow(row), ExpressiveUi.widthMatch(this, 0, 10));
+            }
+            return list;
+        }
+
+        private LinearLayout buildEmptyBanks() {
+            LinearLayout empty = ExpressiveUi.card(this,
+                ExpressiveUi.color(this, R.color.expressive_surface_container),
+                ExpressiveUi.RADIUS_CARD, 22);
+            empty.setId(R.id.dashboard_empty_state);
+            TextView title = ExpressiveUi.heading(this, getString(R.string.dashboard_no_accounts_title), 19);
+            empty.addView(title);
+            TextView body = ExpressiveUi.label(this, view.status.equals(
+                getString(R.string.status_permission_needed))
+                ? getString(R.string.status_permission_needed)
+                : getString(R.string.dashboard_no_accounts_body), 14,
+                ExpressiveUi.color(this, R.color.muted));
+            body.setPadding(0, ExpressiveUi.dp(this, 8), 0, ExpressiveUi.dp(this, 16));
+            empty.addView(body);
+            TextView scan = ExpressiveUi.button(this, getString(R.string.dashboard_scan_action), true);
+            Runnable scanAction = () -> {
+                if (checkSelfPermission(Manifest.permission.READ_SMS)
+                        != PackageManager.PERMISSION_GRANTED) requestSms();
+                else view.refresh();
+            };
+            scan.setOnClickListener(v -> scanAction.run());
+            empty.addView(scan, new LinearLayout.LayoutParams(-1, -2));
+            empty.setClickable(true);
+            empty.setFocusable(true);
+            empty.setOnClickListener(v -> scanAction.run());
+            return empty;
+        }
+
+        private LinearLayout buildBankRow(BalanceView.BankRow row) {
+            int surface = row.excluded
+                ? ExpressiveUi.color(this, R.color.expressive_surface_container)
+                : ExpressiveUi.color(this, R.color.panel);
+            LinearLayout card = ExpressiveUi.card(this, surface, ExpressiveUi.RADIUS_CARD, 14);
+            LinearLayout top = ExpressiveUi.row(this);
+            top.addView(bankBadge(row.bankName), new LinearLayout.LayoutParams(
+                ExpressiveUi.dp(this, 44), ExpressiveUi.dp(this, 44)));
+            LinearLayout identity = ExpressiveUi.column(this);
+            TextView name = ExpressiveUi.heading(this,
+                BankRules.displayName(MainActivity.this, row.bankName), 16);
+            name.setMaxLines(1);
+            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            identity.addView(name);
+            if (row.bank.account != null) {
+                String account = view.hidden ? "••••••" : getString(R.string.account_label) + " "
+                    + view.faDigits(row.bank.account);
+                identity.addView(ExpressiveUi.label(this, account, 12,
+                    ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 4, 0));
+            }
+            top.addView(identity, new LinearLayout.LayoutParams(0, -2, 1));
+            TextView menu = ExpressiveUi.label(this, "⋮", 25,
+                ExpressiveUi.color(this, R.color.muted));
+            menu.setGravity(Gravity.CENTER);
+            menu.setContentDescription(getString(R.string.dashboard_bank_actions,
+                BankRules.displayName(MainActivity.this, row.bankName)));
+            menu.setMinWidth(ExpressiveUi.dp(this, 48));
+            menu.setMinHeight(ExpressiveUi.dp(this, 48));
+            menu.setClickable(true);
+            menu.setFocusable(true);
+            menu.setOnClickListener(v -> view.showBankMenu(row.key, row.bankName, row.amount));
+            top.addView(menu);
+            card.addView(top);
+            LinearLayout amountRow = ExpressiveUi.row(this);
+            amountRow.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+            TextView stale = staleBadge(row);
+            if (stale != null) amountRow.addView(stale, new LinearLayout.LayoutParams(0, -2, 1));
+            else amountRow.addView(new View(MainActivity.this), new LinearLayout.LayoutParams(0, 1, 1));
+            TextView amount = ExpressiveUi.heading(this, view.hidden ? "••••••"
+                : CurrencyHelper.amount(MainActivity.this, row.amount), 21);
+            amount.setTextColor(row.excluded || BalanceData.isStale(MainActivity.this, row.bank.date)
+                ? ExpressiveUi.color(this, R.color.muted)
+                : ExpressiveUi.color(this, R.color.accent));
+            if (row.excluded) amount.setPaintFlags(amount.getPaintFlags()
+                | android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
+            amountRow.addView(amount);
+            TextView unit = ExpressiveUi.label(this, CurrencyHelper.label(MainActivity.this), 11,
+                ExpressiveUi.color(this, R.color.muted));
+            unit.setPadding(ExpressiveUi.dp(this, 6), ExpressiveUi.dp(this, 7), 0, 0);
+            amountRow.addView(unit);
+            card.addView(amountRow, ExpressiveUi.widthMatch(this, 10, 0));
+            card.setContentDescription(getString(R.string.dashboard_bank_history,
+                BankRules.displayName(MainActivity.this, row.bankName)));
+            card.setClickable(true);
+            card.setFocusable(true);
+            card.setOnClickListener(v -> openBankHistory(row));
+            card.setOnLongClickListener(v -> {
+                view.copyBalance(BankRules.displayName(MainActivity.this, row.bankName), row.amount);
+                return true;
+            });
+            return card;
+        }
+
+        private TextView staleBadge(BalanceView.BankRow row) {
+            if (row.excluded || !BalanceData.isStale(MainActivity.this, row.bank.date)) return null;
+            TextView badge = ExpressiveUi.label(this, getResources().getQuantityString(
+                R.plurals.stale_days, BalanceData.staleDays(MainActivity.this, row.bank.date),
+                BalanceData.staleDays(MainActivity.this, row.bank.date)), 11,
+                ExpressiveUi.color(this, R.color.warn));
+            badge.setPadding(ExpressiveUi.dp(this, 10), ExpressiveUi.dp(this, 6),
+                ExpressiveUi.dp(this, 10), ExpressiveUi.dp(this, 6));
+            badge.setBackground(ExpressiveUi.outline(this,
+                ExpressiveUi.color(this, R.color.warn_bg), ExpressiveUi.RADIUS_PILL,
+                ExpressiveUi.color(this, R.color.warn)));
+            return badge;
+        }
+
+        private View bankBadge(String canonicalName) {
+            int icon = BankIcon.iconFor(canonicalName);
+            if (icon != 0) {
+                ImageView image = new ImageView(MainActivity.this);
+                image.setImageDrawable(getDrawable(icon));
+                image.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+                image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                return image;
+            }
+            TextView badge = ExpressiveUi.label(this, BankBadge.initials(canonicalName), 12,
+                Color.WHITE);
+            badge.setGravity(Gravity.CENTER);
+            badge.setTypeface(Fonts.medium(MainActivity.this));
+            badge.setBackground(ExpressiveUi.shape(this, BankBadge.colorFor(canonicalName), 16));
+            badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            return badge;
+        }
+
+        private void openBankHistory(BalanceView.BankRow row) {
+            Intent history = new Intent(MainActivity.this, HistoryActivity.class);
+            history.putExtra(HistoryActivity.EXTRA_BANK, row.bankName);
+            if (row.bank.account != null)
+                history.putExtra(HistoryActivity.EXTRA_ACCOUNT, row.bank.account);
+            startActivity(history);
+        }
+
+        /** A small platform-only pull gesture. The explicit refresh button remains available to
+         * keyboard and accessibility users, while the familiar downward gesture is preserved. */
+        final class PullContainer extends FrameLayout {
+            private final ScrollView scroll;
+            private final ProgressBar indicator;
+            private float downY;
+            private boolean pulling;
+
+            PullContainer(Context context, ScrollView scrollView) {
+                super(context);
+                scroll = scrollView;
+                addView(scroll, new FrameLayout.LayoutParams(-1, -1));
+                indicator = new ProgressBar(context);
+                indicator.setIndeterminate(true);
+                indicator.setVisibility(View.GONE);
+                FrameLayout.LayoutParams indicatorLp = new FrameLayout.LayoutParams(
+                    ExpressiveUi.dp(context, 28), ExpressiveUi.dp(context, 28), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+                indicatorLp.topMargin = ExpressiveUi.dp(context, 6);
+                addView(indicator, indicatorLp);
+            }
+
+            void setRefreshing(boolean refreshing) {
+                indicator.setVisibility(refreshing ? View.VISIBLE : View.GONE);
+            }
+
+            @Override public boolean onInterceptTouchEvent(MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        downY = event.getY();
+                        pulling = false;
+                        break;
+                    case MotionEvent.ACTION_MOVE:
+                        float delta = event.getY() - downY;
+                        if (!pulling && delta > ViewConfiguration.get(MainActivity.this)
+                                .getScaledTouchSlop() && scroll.getScrollY() == 0) {
+                            pulling = true;
+                            return true;
+                        }
+                        break;
+                }
+                return pulling;
+            }
+
+            @Override public boolean onTouchEvent(MotionEvent event) {
+                float delta = Math.max(0, event.getY() - downY);
+                if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                    scroll.setTranslationY(Math.min(ExpressiveUi.dp(MainActivity.this, 72), delta * .35f));
+                    indicator.setVisibility(delta > ExpressiveUi.dp(MainActivity.this, 36)
+                        ? View.VISIBLE : View.GONE);
+                    return true;
+                }
+                if (event.getActionMasked() == MotionEvent.ACTION_UP
+                        || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                    boolean trigger = event.getActionMasked() == MotionEvent.ACTION_UP
+                        && delta >= ExpressiveUi.dp(MainActivity.this, 60);
+                    scroll.animate().translationY(0).setDuration(180).start();
+                    indicator.setVisibility(View.GONE);
+                    pulling = false;
+                    if (trigger) {
+                        view.refresh();
+                        render();
+                    }
+                    return true;
+                }
+                return true;
+            }
+        }
+    }
+
     /** Package-visible for the stale-badge geometry tests. */
     final class BalanceView extends View {
         static final int ICON_NONE = 0, ICON_LOCK = 1, ICON_EYE = 2;
@@ -1728,6 +2285,7 @@ public class MainActivity extends Activity {
             refreshing = false;
             updateSmsBanner();
             invalidate();
+            if (dashboard != null) dashboard.render();
             final Context appContext = app.getApplicationContext();
             new Thread(() -> BalanceWidgetProvider.push(appContext), "balance-widget").start();
         }
@@ -1746,6 +2304,7 @@ public class MainActivity extends Activity {
             rows();
             scrollY = Math.max(0, Math.min(scrollY, maxScroll()));
             invalidate();
+            if (dashboard != null) dashboard.render();
         }
 
         /** Reloads the saved balances (e.g. after a restore) without re-scanning SMS.
@@ -1768,6 +2327,7 @@ public class MainActivity extends Activity {
             commitmentSummaryFailed = false;
             commitmentSummaryGen++;
             invalidate();
+            if (dashboard != null) dashboard.render();
         }
 
         /** Loads the commitments summary off the UI thread: the store read can wait behind a
@@ -1799,6 +2359,7 @@ public class MainActivity extends Activity {
                             commitmentSummaryFailed = true;
                         }
                         invalidate();
+                        if (dashboard != null) dashboard.render();
                     });
                     return;
                 }
@@ -1818,6 +2379,7 @@ public class MainActivity extends Activity {
                         commitmentSummaryStale = false;
                         commitmentSummaryFailed = false;
                         invalidate();
+                        if (dashboard != null) dashboard.render();
                     });
                 } catch (Exception e) {
                     android.util.Log.w("Balance", "commitment summary calculation failed", e);
@@ -1833,6 +2395,7 @@ public class MainActivity extends Activity {
                             commitmentSummaryFailed = true;
                         }
                         invalidate();
+                        if (dashboard != null) dashboard.render();
                     });
                 }
             }, "commitment-summary").start();

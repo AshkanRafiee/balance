@@ -274,10 +274,10 @@ public final class CommitmentsActivity extends Activity {
         iran = RegionHelper.isIran(this);
         persian = LocaleHelper.isPersian(this);
         fg = color(R.color.fg);
-        muted = color(R.color.muted);
-        accent = color(R.color.accent);
+        muted = color(R.color.expressive_on_surface_variant);
+        accent = color(R.color.expressive_primary);
         card = color(R.color.panel);
-        chipBg = color(R.color.history_chip_bg);
+        chipBg = color(R.color.expressive_surface_container_high);
         depBg = color(R.color.history_dep_bg);
         warnBg = color(R.color.warn_bg);
         warnFg = color(R.color.warn);
@@ -286,7 +286,7 @@ public final class CommitmentsActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(16), dp(12), dp(16), dp(24));
+        root.setPadding(dp(20), dp(12), dp(20), dp(24));
         root.setOnApplyWindowInsetsListener((v, i) -> {
             int top;
             int bottom;
@@ -546,9 +546,11 @@ public final class CommitmentsActivity extends Activity {
         TextView back = text(isRtl() ? "›" : "‹", 24, fg);
         back.setGravity(Gravity.CENTER);
         back.setContentDescription(getString(R.string.history_back));
+        back.setBackground(ExpressiveUi.ripple(this,
+            ExpressiveUi.shape(this, chipBg, ExpressiveUi.RADIUS_PILL)));
         back.setOnClickListener(v -> finish());
         titleBar.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
-        TextView title = text(getString(R.string.commitments_title), 22, fg, medium());
+        TextView title = text(getString(R.string.commitments_title), 27, fg, medium());
         titleBar.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         root.addView(titleBar, margin(0, 0, 0, 12));
 
@@ -592,17 +594,29 @@ public final class CommitmentsActivity extends Activity {
     private void heroCard(Summary summary) {
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
-        hero.setBackground(rounded(card, 20));
-        hero.setPadding(dp(18), dp(16), dp(18), dp(16));
-        hero.addView(text(getString(R.string.commitments_total), 12, muted, medium()),
-            new LinearLayout.LayoutParams(-2, -2));
+        hero.setBackground(ExpressiveUi.shape(this,
+            ExpressiveUi.color(this, R.color.expressive_primary_container),
+            ExpressiveUi.RADIUS_HERO));
+        hero.setPadding(dp(20), dp(18), dp(20), dp(18));
+        TextView totalLabel = text(getString(R.string.commitments_total), 12,
+            ExpressiveUi.color(this, R.color.expressive_on_primary_container), medium());
+        hero.addView(totalLabel, new LinearLayout.LayoutParams(-2, -2));
         long pay = summary.overduePay + summary.thisMonthPay;
         long receive = summary.overdueReceive + summary.thisMonthReceive;
-        hero.addView(bold(getString(R.string.commitments_payable) + " " + signedAmount(pay),
-            24, negativeColor), new LinearLayout.LayoutParams(-2, -2));
-        hero.addView(bold(getString(R.string.commitments_receivable) + " "
-            + signedAmount(receive), 24, accent), new LinearLayout.LayoutParams(-2, -2));
-        TextView window = text(getString(R.string.commitments_window_this_month), 12, muted);
+        LinearLayout values = new LinearLayout(this);
+        values.setOrientation(LinearLayout.HORIZONTAL);
+        TextView payable = bold(getString(R.string.commitments_payable) + "\n"
+            + signedAmount(pay), 22, negativeColor);
+        TextView receivable = bold(getString(R.string.commitments_receivable) + "\n"
+            + signedAmount(receive), 22, accent);
+        payable.setLineSpacing(0, 1.05f);
+        receivable.setLineSpacing(0, 1.05f);
+        values.addView(payable, new LinearLayout.LayoutParams(0, -2, 1));
+        values.addView(receivable, new LinearLayout.LayoutParams(0, -2, 1));
+        hero.addView(values, new LinearLayout.LayoutParams(-1, -2));
+        TextView window = text(getString(R.string.commitments_window_this_month), 12,
+            ExpressiveUi.color(this, R.color.expressive_on_primary_container));
+        window.setAlpha(.78f);
         hero.addView(window, new LinearLayout.LayoutParams(-2, -2));
         root.addView(hero, margin(0, 0, 0, 12));
     }
@@ -614,16 +628,12 @@ public final class CommitmentsActivity extends Activity {
         // button, instead of mirroring in RTL layouts. The labels are single-direction
         // strings, so they render the same centered inside either button.
         row.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
-        TextView manage = text(getString(R.string.commitments_manage), 15, fg, medium());
-        manage.setGravity(Gravity.CENTER);
-        manage.setBackground(rounded(chipBg, 14));
-        manage.setPadding(dp(16), dp(13), dp(16), dp(13));
+        TextView manage = ExpressiveUi.button(this,
+            getString(R.string.commitments_manage), false);
         manage.setOnClickListener(v -> manageDialog());
         row.addView(manage, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView add = text(getString(R.string.commitments_add), 15, Color.WHITE, medium());
-        add.setGravity(Gravity.CENTER);
-        add.setBackground(rounded(accent, 14));
-        add.setPadding(dp(16), dp(13), dp(16), dp(13));
+        TextView add = ExpressiveUi.button(this,
+            getString(R.string.commitments_add), true);
         add.setOnClickListener(v -> editorDialog(null));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
         lp.setMarginStart(dp(10));
@@ -1617,7 +1627,7 @@ public final class CommitmentsActivity extends Activity {
         for (int i = 0; i < chips.length; i++) {
             boolean on = i == selected;
             chips[i].setBackground(rounded(on ? accent : chipBg, 11));
-            chips[i].setTextColor(on ? Color.WHITE : fg);
+            chips[i].setTextColor(on ? ExpressiveUi.color(this, R.color.expressive_on_primary) : fg);
         }
     }
 

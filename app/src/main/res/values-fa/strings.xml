@@ -11,6 +11,17 @@
     <string name="total_history_hint">برای دیدن تاریخچه لمس کنید</string>
     <string name="accessibility_total_masked">مخفی است</string>
     <string name="accessibility_total_balance">موجودی کل %1$s</string>
+    <string name="dashboard_overview_label">نمای کلی پول شما</string>
+    <string name="dashboard_refresh">به‌روزرسانی موجودی‌ها</string>
+    <string name="dashboard_open_history">دیدن تاریخچهٔ تراکنش‌ها</string>
+    <string name="dashboard_open_commitments">دیدن تعهدها</string>
+    <string name="dashboard_no_accounts_title">هنوز حساب بانکی‌ای نیست</string>
+    <string name="dashboard_no_accounts_body">برای افزودن حساب‌ها، پیامک‌های بانکی را بخوانید.</string>
+    <string name="dashboard_scan_action">خواندن پیامک‌های بانکی</string>
+    <string name="dashboard_bank_history">باز کردن تاریخچهٔ %1$s</string>
+    <string name="dashboard_bank_actions">عملیات بیشتر برای %1$s</string>
+    <string name="dashboard_lock_action">قفل کردن Balance</string>
+    <string name="dashboard_mask_action">نمایش یا مخفی کردن موجودی‌ها</string>
 
     <string name="status_reading_sms">در حال خواندن پیامک‌های بانکی این دستگاه…</string>
     <string name="status_permission_needed">برای خواندن موجودی به اجازهٔ دسترسی به پیامک نیاز است</string>

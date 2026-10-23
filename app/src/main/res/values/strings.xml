@@ -11,6 +11,17 @@
     <string name="total_history_hint">Tap to open history</string>
     <string name="accessibility_total_masked">hidden</string>
     <string name="accessibility_total_balance">Total balance %1$s.</string>
+    <string name="dashboard_overview_label">Your money at a glance</string>
+    <string name="dashboard_refresh">Refresh balances</string>
+    <string name="dashboard_open_history">View transaction history</string>
+    <string name="dashboard_open_commitments">View commitments</string>
+    <string name="dashboard_no_accounts_title">No bank accounts yet</string>
+    <string name="dashboard_no_accounts_body">Scan your bank SMS to bring your accounts here.</string>
+    <string name="dashboard_scan_action">Scan bank SMS</string>
+    <string name="dashboard_bank_history">Open %1$s history</string>
+    <string name="dashboard_bank_actions">More actions for %1$s</string>
+    <string name="dashboard_lock_action">Lock Balance</string>
+    <string name="dashboard_mask_action">Show or hide balances</string>
 
     <string name="status_reading_sms">Reading bank SMS on this device…</string>
     <string name="status_permission_needed">SMS permission is needed to read balances</string>
