@@ -1770,13 +1770,18 @@ public class MainActivity extends Activity {
                 BankRules.displayName(MainActivity.this, row.bankName), 16);
             name.setMaxLines(1);
             name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            nameLine.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+            // Keep the age badge attached to the bank label. A weighted name slot used to push
+            // the badge all the way toward the amount column, making it look like amount metadata.
+            name.setMaxWidth(ExpressiveUi.dp(this, 180));
+            nameLine.addView(name, new LinearLayout.LayoutParams(-2, -2));
             TextView stale = staleBadge(row);
             if (stale != null) {
                 LinearLayout.LayoutParams staleLp = new LinearLayout.LayoutParams(-2, -2);
                 staleLp.setMarginStart(ExpressiveUi.dp(this, 8));
                 nameLine.addView(stale, staleLp);
             }
+            nameLine.addView(new View(MainActivity.this),
+                new LinearLayout.LayoutParams(0, 1, 1));
             identity.addView(nameLine);
             if (row.bank.account != null) {
                 String account = view.hidden ? "••••••" : getString(R.string.account_label) + " "
