@@ -62,6 +62,7 @@ public class MainActivity extends Activity {
      * scan, store, widget and test contracts, but it is no longer the production renderer. */
     private DashboardScreen dashboard;
     private boolean smsRequested;
+    private boolean mainResumed;
     private String pendingBackupPassword;
     private LockOverlay lockOverlay;
     private Runnable pendingLockAction;
@@ -147,6 +148,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        mainResumed = false;
         unregisterSmsObserver();
         if (view != null && BalanceData.isAutoHide(this)) {
             view.hidden = true;
@@ -204,6 +206,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        mainResumed = true;
         LockManager.cancelPendingLock();
         // Re-arm commitment reminders from the stored series: edits, a restored backup or a
         // newly granted notification permission all land here before the next due.
@@ -302,7 +305,7 @@ public class MainActivity extends Activity {
         smsObserver = new ContentObserver(new Handler(Looper.getMainLooper())) {
             @Override public void onChange(boolean selfChange) { onChange(selfChange, null); }
             @Override public void onChange(boolean selfChange, Uri uri) {
-                if (view != null) view.refreshSilent();
+                if (mainResumed && view != null) view.refreshSilent();
             }
         };
         getContentResolver().registerContentObserver(
@@ -546,7 +549,7 @@ public class MainActivity extends Activity {
             BalanceData.setShowCommitments(MainActivity.this, on);
             if (view != null) view.updateSmsBanner();
             if (view != null) view.invalidate();
-            if (dashboard != null) dashboard.render();
+            if (dashboard != null && mainResumed) dashboard.render();
         });
         LinearLayout.LayoutParams commitmentsLp = new LinearLayout.LayoutParams(-1, -2);
         commitmentsLp.topMargin = dp(18);
