@@ -1975,8 +1975,10 @@ public final class HistoryActivity extends Activity {
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setBackground(rounded(chipBg, 14));
-        bar.setPadding(dp(4), dp(2), dp(4), dp(2));
+        bar.setBackground(ExpressiveUi.shape(this, chipBg, ExpressiveUi.RADIUS_CONTROL));
+        bar.setMinimumHeight(dp(56));
+        bar.setPadding(dp(4), dp(4), dp(4), dp(4));
+        bar.setClipToOutline(true);
 
         TextView icon = text("\u2315", 16, muted, medium());
         icon.setGravity(Gravity.CENTER);
@@ -1992,7 +1994,8 @@ public final class HistoryActivity extends Activity {
         searchInput.setSingleLine(true);
         searchInput.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
         searchInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
-        searchInput.setPadding(dp(2), dp(10), dp(2), dp(10));
+        searchInput.setPaddingRelative(dp(2), dp(10), dp(2), dp(10));
+        searchInput.setMinimumHeight(dp(48));
         if (searchQuery != null && !searchQuery.isEmpty()) {
             searchInput.setText(searchQuery);
             searchInput.setSelection(searchInput.getText().length());
@@ -2704,7 +2707,9 @@ public final class HistoryActivity extends Activity {
             }
         };
         getContentResolver().registerContentObserver(
-            Telephony.Sms.Inbox.CONTENT_URI, true, smsObserver);
+            // Observe the provider collection: a new inbox row is reported on content://sms, not
+            // consistently on the Inbox child URI across Android releases.
+            Telephony.Sms.CONTENT_URI, true, smsObserver);
     }
 
     private void unregisterSmsObserver() {

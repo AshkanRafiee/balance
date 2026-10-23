@@ -305,7 +305,9 @@ public class MainActivity extends Activity {
             }
         };
         getContentResolver().registerContentObserver(
-            Telephony.Sms.Inbox.CONTENT_URI, true, smsObserver);
+            // SmsProvider notifies the collection URI for newly inserted messages; observing only
+            // the Inbox child URI misses provider writes on some Android releases.
+            Telephony.Sms.CONTENT_URI, true, smsObserver);
     }
 
     private void unregisterSmsObserver() {
@@ -1423,6 +1425,12 @@ public class MainActivity extends Activity {
             TextView subtitle = ExpressiveUi.label(context,
                 getString(R.string.subtitle_offline_bank_balances), 13,
                 ExpressiveUi.color(context, R.color.muted));
+            int textGravity = rtl ? Gravity.END : Gravity.START;
+            brand.setGravity(textGravity);
+            title.setGravity(textGravity);
+            subtitle.setGravity(textGravity);
+            ExpressiveUi.setTextDirection(title, rtl);
+            ExpressiveUi.setTextDirection(subtitle, rtl);
             brand.addView(title);
             brand.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
             header.addView(brand, new LinearLayout.LayoutParams(0, -2, 1));

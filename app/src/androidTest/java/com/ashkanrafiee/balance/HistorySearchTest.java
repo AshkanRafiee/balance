@@ -195,6 +195,29 @@ public class HistorySearchTest {
         await(() -> findCountInHeading(counted(2)) != null, 20_000);
     }
 
+    @Test public void seededSearchKeepsItsSurfaceAfterFiltering() {
+        storeTwoNotes();
+        launch();
+        EditText input = findSearchInput();
+        assertNotNull("the search field must be on screen", input);
+        assertTrue("the search field has a container", input.getParent() instanceof View);
+        View surface = (View) input.getParent();
+        assertTrue("the search field keeps a 48dp touch target",
+            input.getHeight() >= dp(48));
+        assertTrue("the search surface keeps a 56dp touch target",
+            surface.getMinimumHeight() >= dp(56));
+        android.graphics.drawable.Drawable background = surface.getBackground();
+        assertNotNull("the search surface has a background before filtering", background);
+        await(() -> background.getBounds().height() >= surface.getHeight() - dp(2), 5_000);
+
+        setSearch("groceries");
+        await(() -> findCountInHeading(counted(1)) != null, 20_000);
+        assertSame("rendering seeded results does not replace the search surface",
+            background, surface.getBackground());
+        assertTrue("the search surface remains fully painted after filtering",
+            background.getBounds().height() >= surface.getHeight() - dp(2));
+    }
+
     @Test public void search_noMatchSaysWhatItLookedFor() {
         storeTwoNotes();
         launch();
@@ -262,6 +285,10 @@ public class HistorySearchTest {
             ViewGroup g = (ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) collect(g.getChildAt(i), out);
         }
+    }
+
+    private int dp(int value) {
+        return (int) (value * ctx.getResources().getDisplayMetrics().density + .5f);
     }
 
     private static View findByDescription(String want) {

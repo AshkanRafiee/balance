@@ -8,6 +8,7 @@ import static org.junit.Assert.assertTrue;
 import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
@@ -150,6 +151,29 @@ public final class DashboardUiTest {
         });
         await(() -> hasText(currentRoot(), "1,000") && hasText(currentRoot(),
             context.getString(R.string.unit_rial)), 5_000);
+    }
+
+    @Test public void persianDashboardPlacesBrandOnTheReadingSide() {
+        LocaleHelper.setLanguage(context, "fa");
+        launch();
+        await(() -> findText(currentRoot(), context.getString(R.string.app_name)) != null, 10_000);
+        scenario.onActivity(activity -> {
+            TextView title = findText(activity.getWindow().getDecorView(),
+                activity.getString(R.string.app_name));
+            TextView subtitle = findText(activity.getWindow().getDecorView(),
+                activity.getString(R.string.subtitle_offline_bank_balances));
+            assertNotNull("RTL dashboard keeps its brand title", title);
+            assertNotNull("RTL dashboard keeps its brand subtitle", subtitle);
+            assertEquals(View.LAYOUT_DIRECTION_RTL, title.getLayoutDirection());
+            assertEquals(View.LAYOUT_DIRECTION_RTL, subtitle.getLayoutDirection());
+            int titleGravity = title.getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK;
+            int subtitleGravity = subtitle.getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK;
+            assertTrue(titleGravity == Gravity.END || titleGravity == Gravity.RIGHT);
+            assertTrue(subtitleGravity == Gravity.END || subtitleGravity == Gravity.RIGHT);
+            ViewGroup brand = (ViewGroup) title.getParent();
+            assertTrue("the brand remains on the right half in RTL", title.getRight()
+                > brand.getWidth() / 2);
+        });
     }
 
     private void launch() {
