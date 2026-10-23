@@ -327,7 +327,7 @@ public class MainActivity extends Activity {
      *  currency are all set once and together decide how text, dates and amounts are formatted,
      *  and the freshness threshold is the odd one out, with the lone on/off toggle below them
      *  showing or hiding the commitments card. Every picker applies its choice as soon
-     *  as it is selected — a changed region applies on the next history open, a changed theme or
+      *  as it is selected — a changed region repaints the dashboard and applies on the next history open, a changed theme or
      *  language recreates the screen, a changed currency re-renders the dashboard and the widget —
      *  so only a typed custom currency name waits for the OK button. */
     private void displayDialog() {
@@ -429,7 +429,10 @@ public class MainActivity extends Activity {
         calendarSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
                 int chosen = pos == 1 ? RegionHelper.REGION_INTERNATIONAL : RegionHelper.REGION_IRAN;
-                if (chosen != RegionHelper.region(MainActivity.this)) RegionHelper.setRegion(MainActivity.this, chosen);
+                if (chosen != RegionHelper.region(MainActivity.this)) {
+                    RegionHelper.setRegion(MainActivity.this, chosen);
+                    refreshRegionPresentation();
+                }
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
 
@@ -1375,6 +1378,17 @@ public class MainActivity extends Activity {
     /** Repaints every visible amount immediately after the display currency preference changes. */
     void refreshCurrencyPresentation() {
         if (view != null) view.invalidate();
+        if (dashboard != null) dashboard.render();
+        BalanceWidgetProvider.push(this);
+    }
+
+    /** Repaints calendar-dependent dashboard content immediately after the region/calendar changes. */
+    void refreshRegionPresentation() {
+        if (view != null) {
+            view.invalidateCommitmentSummary();
+            view.ensureCommitmentSummary();
+            view.invalidate();
+        }
         if (dashboard != null) dashboard.render();
         BalanceWidgetProvider.push(this);
     }

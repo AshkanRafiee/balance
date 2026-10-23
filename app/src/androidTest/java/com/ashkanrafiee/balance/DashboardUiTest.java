@@ -182,6 +182,27 @@ public final class DashboardUiTest {
         });
     }
 
+    @Test public void changingCalendarImmediatelyUpdatesCommitmentMonth() {
+        BalanceData.setShowCommitments(context, true);
+        RegionHelper.setRegion(context, RegionHelper.REGION_INTERNATIONAL);
+        launch();
+        String gregorian = "Commitments (" + monthLabel(false) + ")";
+        await(() -> findText(currentRoot(), gregorian) != null, 10_000);
+
+        scenario.onActivity(activity -> {
+            RegionHelper.setRegion(activity, RegionHelper.REGION_IRAN);
+            activity.refreshRegionPresentation();
+        });
+        String persianCalendar = "Commitments (" + monthLabel(true) + ")";
+        await(() -> findText(currentRoot(), persianCalendar) != null, 10_000);
+    }
+
+    private String monthLabel(boolean iran) {
+        int[] civil = Commitment.civilDay(System.currentTimeMillis(),
+            iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN);
+        return CalDate.monthName(civil[1], iran, false) + " " + civil[0];
+    }
+
     private void launch() {
         scenario = ActivityScenario.launch(MainActivity.class);
     }
