@@ -431,6 +431,7 @@ public class MainActivity extends Activity {
                 int chosen = pos == 1 ? RegionHelper.REGION_INTERNATIONAL : RegionHelper.REGION_IRAN;
                 if (chosen != RegionHelper.region(MainActivity.this)) {
                     RegionHelper.setRegion(MainActivity.this, chosen);
+                    CommitmentReminders.scheduleAll(MainActivity.this);
                     refreshRegionPresentation();
                 }
             }
@@ -2431,7 +2432,10 @@ public class MainActivity extends Activity {
                     android.util.Log.w("Balance", "commitment summary unreadable", e);
                     post(() -> {
                         commitmentSummaryLoading = false;
-                        if (gen != commitmentSummaryGen) return;
+                        if (gen != commitmentSummaryGen) {
+                            ensureCommitmentSummary();
+                            return;
+                        }
                         if (!commitmentSummaryLoaded) {
                             commitmentSummary = new CommitmentsActivity.Summary();
                             commitmentSummaryLoaded = true;
@@ -2454,7 +2458,10 @@ public class MainActivity extends Activity {
                     final boolean any = !commitments.isEmpty();
                     post(() -> {
                         commitmentSummaryLoading = false;
-                        if (gen != commitmentSummaryGen) return;
+                        if (gen != commitmentSummaryGen) {
+                            ensureCommitmentSummary();
+                            return;
+                        }
                         commitmentSummary = summary;
                         hasCommitments = any;
                         commitmentSummaryLoaded = true;
@@ -2467,7 +2474,10 @@ public class MainActivity extends Activity {
                     android.util.Log.w("Balance", "commitment summary calculation failed", e);
                     post(() -> {
                         commitmentSummaryLoading = false;
-                        if (gen != commitmentSummaryGen) return;
+                        if (gen != commitmentSummaryGen) {
+                            ensureCommitmentSummary();
+                            return;
+                        }
                         if (!commitmentSummaryLoaded) {
                             commitmentSummary = new CommitmentsActivity.Summary();
                             commitmentSummaryLoaded = true;

@@ -43,6 +43,9 @@ public final class DashboardUiTest {
     private boolean originalShowCommitments;
     private boolean originalHidden;
     private boolean originalAutoHide;
+    private String originalLanguage;
+    private String originalCurrency;
+    private int originalRegion;
 
     @Before public void setUp() throws Exception {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
@@ -52,6 +55,9 @@ public final class DashboardUiTest {
         originalShowCommitments = BalanceData.getShowCommitments(context);
         originalHidden = BalanceData.isHidden(context);
         originalAutoHide = BalanceData.isAutoHide(context);
+        originalLanguage = LocaleHelper.currentTag(context);
+        originalCurrency = CurrencyHelper.currency(context);
+        originalRegion = RegionHelper.region(context);
         LocaleHelper.setLanguage(context, "en");
         CurrencyHelper.setCurrency(context, CurrencyHelper.CURRENCY_RIAL);
         RegionHelper.setRegion(context, RegionHelper.REGION_INTERNATIONAL);
@@ -72,6 +78,9 @@ public final class DashboardUiTest {
         BalanceData.setShowCommitments(context, originalShowCommitments);
         setHidden(originalHidden);
         BalanceData.setAutoHide(context, originalAutoHide);
+        LocaleHelper.setLanguage(context, originalLanguage);
+        CurrencyHelper.setCurrency(context, originalCurrency);
+        RegionHelper.setRegion(context, originalRegion);
     }
 
     @Test public void emptyDashboard_exposesNativeActionsAndGuidance() {
