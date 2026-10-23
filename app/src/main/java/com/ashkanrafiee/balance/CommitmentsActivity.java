@@ -524,9 +524,10 @@ public final class CommitmentsActivity extends Activity {
         try {
             commitments = BalanceData.readCommitments(this);
         } catch (RuntimeException error) {
-            // A transient store/read failure must not take down the activity during resume. Keep
-            // the last rendered state and let the next resume or midnight refresh retry it.
+            // A transient store/read failure must not take down the activity during resume or look
+            // like an empty commitments list. Show an explicit retry state instead.
             android.util.Log.w("CommitmentsActivity", "commitment screen read failed", error);
+            renderLoadError();
             return;
         }
         root.removeAllViews();
@@ -537,6 +538,7 @@ public final class CommitmentsActivity extends Activity {
             summary = summarize(commitments, cal, now, WINDOW_MONTHS);
         } catch (RuntimeException error) {
             android.util.Log.w("CommitmentsActivity", "commitment summary calculation failed", error);
+            renderLoadError();
             return;
         }
 
@@ -575,6 +577,17 @@ public final class CommitmentsActivity extends Activity {
             }
             root.addView(monthCard(group), margin(0, 0, 0, 12));
         }
+    }
+
+    private void renderLoadError() {
+        root.removeAllViews();
+        TextView message = text(getString(R.string.commitments_load_failed), 14, muted);
+        message.setGravity(Gravity.CENTER);
+        root.addView(message, margin(16, 48, 16, 16));
+        TextView retry = ExpressiveUi.button(this,
+            getString(R.string.commitments_retry), true);
+        retry.setOnClickListener(v -> render());
+        root.addView(retry, margin(16, 0, 16, 0));
     }
 
     private long yearPay(Summary summary, int year) {

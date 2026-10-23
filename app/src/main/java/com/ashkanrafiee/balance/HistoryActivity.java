@@ -3723,7 +3723,7 @@ public final class HistoryActivity extends Activity {
         });
         head.addView(caret(open, 16), new LinearLayout.LayoutParams(dp(26), -2));
 
-        String yTitle = "fa".equals(LocaleHelper.currentTag(this))
+        String yTitle = LocaleHelper.isPersian(this)
             ? faDigits(y.year) : String.valueOf(y.year);
         TextView title = bold(yTitle, 18, fg);
         LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(-2, -2);
@@ -4413,6 +4413,7 @@ public final class HistoryActivity extends Activity {
         input.setSelection(input.getText().length());
 
         final List<String> editedTags = new ArrayList<>(BalanceData.getTags(this, t));
+        final List<String> originalTags = new ArrayList<>(editedTags);
         LinearLayout selectedTagHost = new LinearLayout(this);
         selectedTagHost.setGravity(Gravity.CENTER_VERTICAL);
         selectedTagHost.setHorizontalScrollBarEnabled(true);
@@ -4519,8 +4520,21 @@ public final class HistoryActivity extends Activity {
         dlg.setOnShowListener(d -> {
                 dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
                 .setOnClickListener(v -> {
-                    BalanceData.setNote(this, t, input.getText().toString());
-                    BalanceData.setTags(this, t, editedTags);
+                    try {
+                        BalanceData.setNote(this, t, input.getText().toString());
+                        BalanceData.setTags(this, t, editedTags);
+                    } catch (RuntimeException error) {
+                        android.util.Log.w("BalanceHistory", "note metadata save failed", error);
+                        try {
+                            BalanceData.setNote(this, t, existing);
+                            BalanceData.setTags(this, t, originalTags);
+                        } catch (RuntimeException rollbackError) {
+                            android.util.Log.w("BalanceHistory", "note metadata rollback failed",
+                                rollbackError);
+                        }
+                        Toast.makeText(this, R.string.note_save_failed, Toast.LENGTH_SHORT).show();
+                        return;
+                    }
                     invalidateTagNames();
                     dlg.dismiss();
                     render();
@@ -4529,7 +4543,13 @@ public final class HistoryActivity extends Activity {
                 dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL);
             if (clearNote != null) {
                 clearNote.setOnClickListener(v -> {
-                    BalanceData.setNote(this, t, null);
+                    try {
+                        BalanceData.setNote(this, t, null);
+                    } catch (RuntimeException error) {
+                        android.util.Log.w("BalanceHistory", "note clear failed", error);
+                        Toast.makeText(this, R.string.note_save_failed, Toast.LENGTH_SHORT).show();
+                        return;
+                    }
                     dlg.dismiss();
                     render();
                 });
@@ -5273,7 +5293,7 @@ public final class HistoryActivity extends Activity {
      *  names (Jalali script or the "Farvardin"-style transliteration) for the Iran region, and the
      *  Gregorian month names (Persian-scripted in the Persian UI) for International. */
     private String monthName(int month) {
-        return monthName(month, "fa".equals(LocaleHelper.currentTag(this)));
+        return monthName(month, LocaleHelper.isPersian(this));
     }
 
     /** Flag-taking core of {@link #monthName(int)}, so a pass over many rows resolves the language

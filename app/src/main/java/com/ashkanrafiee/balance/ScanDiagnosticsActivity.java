@@ -33,6 +33,7 @@ import java.util.List;
  *  amount, date, account, reason, channel or merchant is wrong. The inbox is read on demand for this screen
  *  only — nothing is stored, so the feature adds no new persisted data to a device. */
 public final class ScanDiagnosticsActivity extends Activity {
+    private static final int MAX_DIAGNOSTIC_ROWS = 5_000;
     private static final String TAG = "ScanDiag";
     int bg, card, muted, accent, heroColor, fg;
     private LockOverlay lockOverlay;
@@ -175,6 +176,7 @@ public final class ScanDiagnosticsActivity extends Activity {
     private void readInBackground() {
         new Thread(() -> {
             List<Object[]> rows = new ArrayList<>();
+            Exception readFailure = null;
             try (android.database.Cursor cursor = getContentResolver().query(
                     Telephony.Sms.Inbox.CONTENT_URI,
                     new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
@@ -182,21 +184,30 @@ public final class ScanDiagnosticsActivity extends Activity {
                 if (cursor != null) {
                     // Bound diagnostics memory on very large inboxes: the query is newest-first,
                     // so the first rows are the ones a format report needs.
-                    while (cursor.moveToNext() && rows.size() < 20000) {
+                    while (cursor.moveToNext() && rows.size() < MAX_DIAGNOSTIC_ROWS) {
                         rows.add(new Object[]{
                             cursor.getString(0), cursor.getString(1), cursor.getLong(2)});
                     }
                 }
             } catch (Exception e) {
                 Log.w(TAG, "inbox read failed", e);
+                readFailure = e;
             }
+            final boolean failed = readFailure != null;
             final ScanDiagnostics.Summary summary = ScanDiagnostics.analyze(rows);
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 body.removeAllViews();
-                render(summary);
+                if (failed) readFailureCard(); else render(summary);
             });
         }).start();
+    }
+
+    private void readFailureCard() {
+        LinearLayout box = cardBox();
+        box.addView(section(getString(R.string.scan_diag_read_failed)), margin(2, 0, 2, 12));
+        box.addView(button(getString(R.string.scan_diag_retry), this::startReading));
+        body.addView(box);
     }
 
     private void render(ScanDiagnostics.Summary s) {

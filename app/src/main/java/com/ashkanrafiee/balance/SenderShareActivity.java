@@ -250,6 +250,7 @@ public final class SenderShareActivity extends Activity {
         line.setPadding(0, dp(6), 0, dp(6));
         CheckBox box = new CheckBox(this);
         box.setChecked(false);
+        box.setContentDescription(label);
         issueChecks.add(box);
         line.addView(box, new LinearLayout.LayoutParams(dp(46), -2));
         TextView preview = text(label, 13, fg);
@@ -299,6 +300,8 @@ public final class SenderShareActivity extends Activity {
         line.setPadding(0, dp(6), 0, dp(6));
         CheckBox box = new CheckBox(this);
         box.setChecked(false);
+        box.setContentDescription(getString(R.string.sender_share_message_checkbox,
+            checks.size() + 1));
         checks.add(box);
         line.addView(box, new LinearLayout.LayoutParams(dp(46), -2));
         TextView preview = new TextView(this);
@@ -371,6 +374,10 @@ public final class SenderShareActivity extends Activity {
 
     private void updateButtons() {
         int n = selected().size();
+        allChecked = !checks.isEmpty();
+        for (CheckBox check : checks) allChecked &= check.isChecked();
+        select.setText(getString(allChecked ? R.string.sender_share_select_none
+            : R.string.sender_share_select_all));
         copy.setText(getString(R.string.sender_share_copy, n));
         send.setText(getString(R.string.sender_share_send, n));
     }

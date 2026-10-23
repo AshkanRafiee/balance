@@ -75,6 +75,8 @@ public final class LockOverlay extends FrameLayout {
     private boolean busy = false;
     private boolean fpPromptAllowed = true;
     private CancellationSignal fpCancel;
+    /** Invalidates callbacks from a biometric prompt that was cancelled or replaced. */
+    private int fingerprintGeneration;
     private Handler cooldownHandler;
     private Runnable cooldownTimer;
 
@@ -424,6 +426,7 @@ public final class LockOverlay extends FrameLayout {
      *  (e.g. on the way back in, while resumed) turns it back on. */
     void setAutoFingerprintEnabled(boolean enabled) {
         fpPromptAllowed = enabled;
+        if (!enabled) cancelFingerprint();
     }
 
     private void applyFingerprintRow() {
@@ -617,13 +620,17 @@ public final class LockOverlay extends FrameLayout {
         busy = true;
         setEntryEnabled(false);
         hideError();
+        final int generation = fingerprintGeneration;
         fpCancel = LockManager.startFingerprint(ctx, new LockManager.FpCallback() {
             @Override public void onFpSucceeded() {
+                if (generation != fingerprintGeneration || !fpPromptAllowed
+                        || getVisibility() != VISIBLE) return;
                 busy = false;
                 success();
             }
 
             @Override public void onFpFailed(int errorRes) {
+                if (generation != fingerprintGeneration || getVisibility() != VISIBLE) return;
                 busy = false;
                 setEntryEnabled(true);
                 if (errorRes != -1) showError(errorRes);
@@ -636,6 +643,7 @@ public final class LockOverlay extends FrameLayout {
     }
 
     private void cancelFingerprint() {
+        fingerprintGeneration++;
         if (fpCancel != null) {
             try {
                 fpCancel.cancel();

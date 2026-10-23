@@ -67,10 +67,18 @@ public class BalanceWidgetService extends RemoteViewsService {
         views.setTextColor(R.id.bank_amount, c.getColor(R.color.muted));
         // Stale stays muted like a fresh amount: freshness is metadata carried by the age
         // below, while amber stays reserved for things needing action.
-        boolean stale = !hidden && BalanceData.isStale(c, b.date);
+        boolean stale = BalanceData.isStale(c, b.date);
         if (hidden) {
+            String age = stale ? c.getResources().getQuantityString(
+                R.plurals.stale_days, BalanceData.staleDays(c, b.date),
+                BalanceData.staleDays(c, b.date)) : null;
             if (b.account != null) {
-                views.setTextViewText(R.id.bank_account, "\u2022\u2022\u2022\u2022\u2022\u2022");
+                views.setTextViewText(R.id.bank_account, age == null
+                    ? "\u2022\u2022\u2022\u2022\u2022\u2022"
+                    : "\u2022\u2022\u2022\u2022\u2022\u2022 \u00b7 " + age);
+                views.setViewVisibility(R.id.bank_account, View.VISIBLE);
+            } else if (age != null) {
+                views.setTextViewText(R.id.bank_account, age);
                 views.setViewVisibility(R.id.bank_account, View.VISIBLE);
             } else {
                 views.setViewVisibility(R.id.bank_account, View.GONE);

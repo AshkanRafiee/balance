@@ -66,6 +66,7 @@
     <string name="note_edit_title">Transaction note and tags</string>
     <string name="note_edit_hint">A private note for this transaction</string>
     <string name="note_save">Save</string>
+    <string name="note_save_failed">Could not save the note. Try again.</string>
     <string name="note_clear">Clear note</string>
     <string name="note_row_hint">Tap to add or edit a note for this transaction</string>
     <string name="tag_label">Tags</string>
@@ -231,6 +232,8 @@
     <string name="commitments_window_this_month">This month + overdue</string>
     <string name="commitments_card_empty">Track payables and receivables here.</string>
     <string name="commitments_card_empty_action">Tap to add a commitment. Hide it in Display.</string>
+    <string name="commitments_load_failed">Commitments could not be loaded.</string>
+    <string name="commitments_retry">Try again</string>
     <string name="commitments_card_title">Commitments (%1$s)</string>
     <string name="settings_commitments_card_label">Show commitments card on the dashboard</string>
     <string name="commitments_mark_paid">Mark paid</string>
@@ -281,6 +284,8 @@
 
     <string name="scan_diag_title">Scan diagnostics</string>
     <string name="scan_diag_reading">Reading SMS on this device…</string>
+    <string name="scan_diag_read_failed">The SMS inbox could not be read. No diagnostic result was generated.</string>
+    <string name="scan_diag_retry">Try again</string>
     <string name="scan_diag_permission">SMS permission is needed to inspect which messages are recognized. On some devices it is a restricted setting: if \'SMS\' is greyed out, open \'More\' → \'Allow restricted settings\', then allow it.</string>
     <string name="scan_diag_permission_action">Open settings</string>
     <string name="scan_diag_recognized">Recognized bank messages</string>
@@ -323,6 +328,7 @@
     <string name="sender_share_issue_reason">Reason detection</string>
     <string name="sender_share_issue_channel">Channel detection</string>
     <string name="sender_share_issue_merchant">Merchant detection</string>
+    <string name="sender_share_message_checkbox">Select message sample %1$d</string>
 
     <string name="history_title">History</string>
     <string name="history_empty">No transactions found yet. Transaction history is built from bank SMS as they are scanned.</string>

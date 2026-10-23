@@ -66,6 +66,7 @@
     <string name="note_edit_title">یادداشت و برچسب‌های تراکنش</string>
     <string name="note_edit_hint">یک یادداشت خصوصی برای این تراکنش</string>
     <string name="note_save">ذخیره</string>
+    <string name="note_save_failed">یادداشت ذخیره نشد؛ دوباره تلاش کنید.</string>
     <string name="note_clear">پاک کردن یادداشت</string>
     <string name="note_row_hint">برای افزودن یا ویرایش یادداشت این تراکنش، روی آن بزنید</string>
     <string name="tag_label">برچسب‌ها</string>
@@ -214,6 +215,8 @@
     <string name="commitments_window_this_month">این ماه + معوقه</string>
     <string name="commitments_card_empty">پرداختنی‌ها و دریافتنی‌هایتان را اینجا ثبت کنید.</string>
     <string name="commitments_card_empty_action">برای افزودن تعهد بزنید. آن را از «نمایش» پنهان کنید.</string>
+    <string name="commitments_load_failed">بارگذاری تعهدها ممکن نشد.</string>
+    <string name="commitments_retry">تلاش دوباره</string>
     <string name="commitments_card_title">تعهدات (%1$s)</string>
     <string name="settings_commitments_card_label">نمایش کارت تعهدات در صفحهٔ اصلی</string>
     <string name="commitments_mark_paid">پرداخت شد</string>
@@ -264,6 +267,8 @@
 
     <string name="scan_diag_title">تشخیص اسکن پیامک</string>
     <string name="scan_diag_reading">در حال خواندن پیامک‌های این دستگاه…</string>
+    <string name="scan_diag_read_failed">خواندن صندوق پیامک ممکن نشد؛ نتیجهٔ تشخیصی ساخته نشد.</string>
+    <string name="scan_diag_retry">تلاش دوباره</string>
     <string name="scan_diag_permission">برای دیدن کدام پیامک‌ها شناخته می‌شوند، مجوز پیامک لازم است. در برخی دستگاه‌ها این یک تنظیم محدود است: اگر «SMS» خاکستری بود، «More» ← «Allow restricted settings» را باز کنید و بعد اجازه دهید.</string>
     <string name="scan_diag_permission_action">باز کردن تنظیمات</string>
     <string name="scan_diag_recognized">پیامک‌های بانکی شناخته‌شده</string>
@@ -306,6 +311,7 @@
     <string name="sender_share_issue_reason">تشخیص دلیل</string>
     <string name="sender_share_issue_channel">تشخیص کانال</string>
     <string name="sender_share_issue_merchant">تشخیص فروشنده</string>
+    <string name="sender_share_message_checkbox">انتخاب نمونهٔ پیامک %1$d</string>
 
     <string name="history_title">تاریخچه</string>
     <string name="history_empty">هنوز تراکنشی یافت نشده است. تاریخچهٔ تراکنش‌ها هنگام خواندن پیامک‌های بانکی ساخته می‌شود.</string>

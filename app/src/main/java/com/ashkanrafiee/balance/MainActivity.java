@@ -216,6 +216,7 @@ public class MainActivity extends Activity {
             view.ensureCommitmentSummary();
             view.refresh();
             view.scheduleMonthRefresh();
+            HistoryWarmup.warm(this);
             if (dashboard != null) dashboard.render();
         }
         registerSmsObserver();
@@ -914,6 +915,10 @@ public class MainActivity extends Activity {
                     try {
                         if (changing) LockManager.changeCode(this, value, isPin);
                         else LockManager.enable(this, value, isPin, wantFp);
+                        // Publish the locked widget before touching the Activity UI. The activity
+                        // may be destroyed while PBKDF2 runs, but an existing widget must not keep
+                        // an unlocked RemoteViews snapshot until the next periodic update.
+                        BalanceWidgetProvider.push(getApplicationContext());
                         runOnUiThread(() -> {
                             if (isFinishing() || isDestroyed()) return;
                             dismissProgress();
@@ -1385,12 +1390,14 @@ public class MainActivity extends Activity {
 
     /** Repaints calendar-dependent dashboard content immediately after the region/calendar changes. */
     void refreshRegionPresentation() {
+        HistoryWarmup.invalidate();
         if (view != null) {
             view.invalidateCommitmentSummary();
             view.ensureCommitmentSummary();
             view.invalidate();
         }
         if (dashboard != null) dashboard.render();
+        HistoryWarmup.warm(this);
         BalanceWidgetProvider.push(this);
     }
 
@@ -1565,9 +1572,9 @@ public class MainActivity extends Activity {
             content.removeAllViews();
             content.addView(buildOverviewLabel(), ExpressiveUi.widthMatch(this, 4, 12));
             content.addView(buildHeroCard(), ExpressiveUi.widthMatch(this, 0, 14));
-            if (view.smsBanner) content.addView(buildSmsBanner(),
-                ExpressiveUi.widthMatch(this, 0, 14));
             if (view.commitmentsCard) content.addView(buildCommitmentsCard(),
+                ExpressiveUi.widthMatch(this, 0, 14));
+            if (view.smsBanner) content.addView(buildSmsBanner(),
                 ExpressiveUi.widthMatch(this, 0, 14));
             content.addView(buildBanksHeader(), ExpressiveUi.widthMatch(this, 4, 8));
             content.addView(buildBanks(), ExpressiveUi.widthMatch(this, 0, 0));
@@ -1682,6 +1689,16 @@ public class MainActivity extends Activity {
                 view.ensureCommitmentSummary();
                 card.addView(ExpressiveUi.label(this, getString(R.string.commitments_loading), 13,
                     ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 8, 0));
+            } else if (view.commitmentSummaryFailed) {
+                card.addView(ExpressiveUi.label(this, getString(R.string.commitments_load_failed), 13,
+                    ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 8, 0));
+                TextView retry = ExpressiveUi.button(this,
+                    getString(R.string.commitments_retry), false);
+                retry.setOnClickListener(v -> {
+                    view.invalidateCommitmentSummary();
+                    view.ensureCommitmentSummary();
+                });
+                card.addView(retry, ExpressiveUi.widthMatch(this, 6, 0));
             } else if (!view.hasCommitments) {
                 card.addView(ExpressiveUi.label(this, getString(R.string.commitments_card_empty), 13,
                     ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 8, 0));
@@ -2441,9 +2458,8 @@ public class MainActivity extends Activity {
                             commitmentSummaryLoaded = true;
                             commitmentSummaryStale = false;
                             hasCommitments = false;
-                        } else {
-                            commitmentSummaryFailed = true;
                         }
+                        commitmentSummaryFailed = true;
                         invalidate();
                         if (dashboard != null) dashboard.render();
                     });
@@ -2483,9 +2499,8 @@ public class MainActivity extends Activity {
                             commitmentSummaryLoaded = true;
                             commitmentSummaryStale = false;
                             hasCommitments = false;
-                        } else {
-                            commitmentSummaryFailed = true;
                         }
+                        commitmentSummaryFailed = true;
                         invalidate();
                         if (dashboard != null) dashboard.render();
                     });

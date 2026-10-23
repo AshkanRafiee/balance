@@ -146,7 +146,7 @@ public class HistoryRowFactsUiTest {
 
     @Test public void aMovementWithNeither_keepsThePlainNoteHint() {
         launch(ctx);
-        View row = findByDescription(ctx.getString(R.string.note_row_hint));
+        View row = findByDescriptionContaining(ctx.getString(R.string.note_row_hint));
         assertNotNull("a movement the bank said nothing about is just an invitation to add a note",
             row);
         assertTrue(row.isClickable());
@@ -159,7 +159,7 @@ public class HistoryRowFactsUiTest {
         launch(ctx);
 
         assertNull(findByText("درگاه اینترنتی"));
-        assertNotNull(findByDescription(ctx.getString(R.string.note_row_hint)));
+        assertNotNull(findByDescriptionContaining(ctx.getString(R.string.note_row_hint)));
     }
 
     @Test public void bothFacts_inPersian_areSpokenInPersian() {
@@ -208,8 +208,13 @@ public class HistoryRowFactsUiTest {
 
         View row = findByDescriptionContaining("rent for Ali");
         assertNotNull("the note must be spoken even when the bank said nothing", row);
-        assertEquals(ctx.getString(R.string.row_fact_note, "rent for Ali") + " "
-            + ctx.getString(R.string.row_hint_edit_note), spoken(row));
+        String said = spoken(row);
+        assertTrue(said.contains("Tejarat"));
+        assertTrue(said.contains("Account 01350000000"));
+        assertTrue(said.contains("Withdrawal"));
+        assertTrue(said.contains("−220,000"));
+        assertTrue(said.contains(ctx.getString(R.string.row_fact_note, "rent for Ali")));
+        assertTrue(said.endsWith(ctx.getString(R.string.row_hint_edit_note)));
         assertFalse("a row that already has a note must not be heard as inviting one",
             spoken(row).contains(ctx.getString(R.string.note_row_hint)));
     }
