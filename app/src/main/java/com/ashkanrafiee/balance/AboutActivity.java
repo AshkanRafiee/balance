@@ -45,7 +45,10 @@ public final class AboutActivity extends Activity {
     }
 
     GradientDrawable rounded(int color, float radius) {
-        return BalanceUi.rounded(this, color, radius);
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(dp(radius));
+        return g;
     }
 
     LinearLayout.LayoutParams margin(int l, int t, int r, int b) {
@@ -127,7 +130,6 @@ public final class AboutActivity extends Activity {
         TextView back = text(rtl ? "›" : "‹", 34, fg);
         back.setGravity(Gravity.CENTER);
         back.setContentDescription(getString(R.string.about_back));
-        back.setBackground(BalanceUi.ripple(this, rounded(heroColor, 22), BalanceUi.rippleColor(this)));
         back.setOnClickListener(v -> finish());
         bar.addView(back, new LinearLayout.LayoutParams(dp(42), dp(48)));
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-2, -2);

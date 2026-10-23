@@ -1440,7 +1440,7 @@ public final class HistoryActivity extends Activity {
         String label = selectedTags.isEmpty()
             ? getString(R.string.history_filter_tags)
             : getString(R.string.history_filter_tags_count, selectedTags.size());
-        TextView chip = text(label, 12, selectedTags.isEmpty() ? fg : BalanceUi.onPrimary(this), medium());
+        TextView chip = text(label, 12, selectedTags.isEmpty() ? fg : Color.WHITE, medium());
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
         chip.setAutoSizeTextTypeWithDefaults(android.widget.TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM);
@@ -1475,7 +1475,7 @@ public final class HistoryActivity extends Activity {
     /** One third of the scope row: a weighted chip sharing the row width with its siblings, so
      *  all labels stay on-screen at any font scale. */
     private void addScopeChip(LinearLayout host, String label, boolean active, Runnable action) {
-        TextView chip = text(label, 12, active ? BalanceUi.onPrimary(this) : fg, medium());
+        TextView chip = text(label, 12, active ? Color.WHITE : fg, medium());
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
         chip.setAutoSizeTextTypeWithDefaults(android.widget.TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM);
@@ -1814,7 +1814,7 @@ public final class HistoryActivity extends Activity {
 
     private void addSegmentChip(LinearLayout host, String label, int id, Runnable action) {
         boolean selected = filter.direction == id;
-        TextView chip = text(label, 12, selected ? BalanceUi.onPrimary(this) : fg, medium());
+        TextView chip = text(label, 12, selected ? Color.WHITE : fg, medium());
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
         chip.setAutoSizeTextTypeWithDefaults(android.widget.TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM);
@@ -1831,7 +1831,7 @@ public final class HistoryActivity extends Activity {
      *  a quiet toggle. The chips share the row width, so labels stay on-screen at any font scale. */
     private void addFilterChip(LinearLayout host, String label, int id, boolean weight, Runnable action) {
         boolean selected = filter.rangePreset == id;
-        TextView chip = text(label, 12, selected ? BalanceUi.onPrimary(this) : fg, medium());
+        TextView chip = text(label, 12, selected ? Color.WHITE : fg, medium());
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
         chip.setAutoSizeTextTypeWithDefaults(android.widget.TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM);
@@ -2260,7 +2260,7 @@ public final class HistoryActivity extends Activity {
                 && picked[0].compare(day) <= 0 && day.compare(picked[1]) <= 0;
             boolean isToday = today.sameDay(day);
             TextView cell = text(fa ? faDigits(day.day) : Integer.toString(day.day), 12.5f,
-                fromSel || toSel ? BalanceUi.onPrimary(HistoryActivity.this) : fg);
+                fromSel || toSel ? Color.WHITE : fg);
             cell.setGravity(Gravity.CENTER);
             if (fromSel || toSel) {
                 cell.setBackground(rounded(accent, 10));

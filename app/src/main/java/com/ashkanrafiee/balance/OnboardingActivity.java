@@ -62,7 +62,10 @@ public final class OnboardingActivity extends Activity {
     }
 
     GradientDrawable rounded(int color, float radius) {
-        return BalanceUi.rounded(this, color, radius);
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(dp(radius));
+        return g;
     }
 
     LinearLayout.LayoutParams margin(int l, int t, int r, int b) {
@@ -155,11 +158,10 @@ public final class OnboardingActivity extends Activity {
         primary = new TextView(this);
         primary.setTextSize(15);
         primary.setTypeface(Fonts.text(primary.getContext()), Typeface.BOLD);
-        primary.setTextColor(BalanceUi.onPrimary(this));
+        primary.setTextColor(fg);
         primary.setGravity(Gravity.CENTER);
         primary.setPadding(dp(16), dp(14), dp(16), dp(14));
-        primary.setBackground(BalanceUi.ripple(this, rounded(accent, 16),
-            BalanceUi.rippleColor(this)));
+        primary.setBackground(rounded(accent, 14));
         root.addView(primary);
 
         showStep(step);

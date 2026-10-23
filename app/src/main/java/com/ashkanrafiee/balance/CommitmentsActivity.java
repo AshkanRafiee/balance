@@ -546,7 +546,6 @@ public final class CommitmentsActivity extends Activity {
         TextView back = text(isRtl() ? "›" : "‹", 24, fg);
         back.setGravity(Gravity.CENTER);
         back.setContentDescription(getString(R.string.history_back));
-        back.setBackground(BalanceUi.ripple(this, rounded(chipBg, 22), BalanceUi.rippleColor(this)));
         back.setOnClickListener(v -> finish());
         titleBar.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
         TextView title = text(getString(R.string.commitments_title), 22, fg, medium());
@@ -617,15 +616,13 @@ public final class CommitmentsActivity extends Activity {
         row.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
         TextView manage = text(getString(R.string.commitments_manage), 15, fg, medium());
         manage.setGravity(Gravity.CENTER);
-        manage.setBackground(BalanceUi.ripple(this, rounded(chipBg, 16),
-            BalanceUi.rippleColor(this)));
+        manage.setBackground(rounded(chipBg, 14));
         manage.setPadding(dp(16), dp(13), dp(16), dp(13));
         manage.setOnClickListener(v -> manageDialog());
         row.addView(manage, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView add = text(getString(R.string.commitments_add), 15, BalanceUi.onPrimary(this), medium());
+        TextView add = text(getString(R.string.commitments_add), 15, Color.WHITE, medium());
         add.setGravity(Gravity.CENTER);
-        add.setBackground(BalanceUi.ripple(this, rounded(accent, 16),
-            BalanceUi.rippleColor(this)));
+        add.setBackground(rounded(accent, 14));
         add.setPadding(dp(16), dp(13), dp(16), dp(13));
         add.setOnClickListener(v -> editorDialog(null));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
@@ -1620,7 +1617,7 @@ public final class CommitmentsActivity extends Activity {
         for (int i = 0; i < chips.length; i++) {
             boolean on = i == selected;
             chips[i].setBackground(rounded(on ? accent : chipBg, 11));
-            chips[i].setTextColor(on ? BalanceUi.onPrimary(this) : fg);
+            chips[i].setTextColor(on ? Color.WHITE : fg);
         }
     }
 
@@ -1728,6 +1725,9 @@ public final class CommitmentsActivity extends Activity {
     }
 
     private GradientDrawable rounded(int color, float radius) {
-        return BalanceUi.rounded(this, color, radius);
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(dp(radius));
+        return g;
     }
 }

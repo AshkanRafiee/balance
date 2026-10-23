@@ -928,7 +928,7 @@ public class MainActivity extends Activity {
 
     private void styleSeg(TextView t, boolean selected) {
         t.setBackground(rounded(selected ? resColor(R.color.accent) : resColor(R.color.panel), 12));
-        t.setTextColor(selected ? BalanceUi.onPrimary(this) : resColor(R.color.muted));
+        t.setTextColor(selected ? Color.WHITE : resColor(R.color.muted));
     }
 
     private void applyLockInput(EditText e) {
@@ -939,7 +939,10 @@ public class MainActivity extends Activity {
     }
 
     private GradientDrawable rounded(int color, float radius) {
-        return BalanceUi.rounded(this, color, radius);
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(dp(radius));
+        return g;
     }
 
     private void toast(int res) {
@@ -2151,11 +2154,7 @@ public class MainActivity extends Activity {
 
             drawLockIcon(c, LockManager.isEnabled(MainActivity.this) ? active : accent);
 
-            // The total is the dashboard's expressive focal point: a tonal surface with a quiet
-            // outline gives it hierarchy without turning private financial data into a loud card.
-            round(c, 24, DashboardLayout.TOTAL_TOP, w - 24, DashboardLayout.TOTAL_BOTTOM, 30, panel);
-            roundStroke(c, 24, DashboardLayout.TOTAL_TOP, w - 24, DashboardLayout.TOTAL_BOTTOM,
-                30, 1f, resColor(R.color.divider));
+            round(c, 24, DashboardLayout.TOTAL_TOP, w - 24, DashboardLayout.TOTAL_BOTTOM, 28, panel);
             float totalLabelX = rtl ? w - 48 : 48;
             text(c, getString(R.string.total_balance_label), totalLabelX, 156, 13, muted, edgeAlign);
             if (banks.isEmpty() || excluded.containsAll(banks.keySet())) {
@@ -2166,10 +2165,7 @@ public class MainActivity extends Activity {
             } else {
                 totalValue(c, total, totalLabelX, 208, w - 150, rtl);
             }
-            round(c, w / 2f - 72, 230, w / 2f + 72, 258, 14, resColor(R.color.history_chip_bg));
-            text(c, getString(R.string.total_history_hint), w / 2f, 248, 11, accent, Paint.Align.CENTER);
-            round(c, rtl ? 42 : w - 84, 137, rtl ? 84 : w - 42, 175, 19,
-                resColor(R.color.primary_container));
+            text(c, getString(R.string.total_history_hint), w / 2f, 253, 11, muted, Paint.Align.CENTER);
             RectF eyeRect = rtl ? new RectF(45, 147, 75, 165) : new RectF(w - 75, 147, w - 45, 165);
             float eyeCenterX = rtl ? 60 : w - 60;
             p.setStyle(Paint.Style.STROKE);
@@ -2220,10 +2216,7 @@ public class MainActivity extends Activity {
                     String nameShown = fit(displayName, 17, Math.max(40, valueLeft - 100));
                     boolean stale = !row.excluded
                         && BalanceData.isStale(MainActivity.this, row.bank.date);
-                    round(c, 24, yy, w - 24, yy + 82, 22, row.excluded ? bg : panel);
-                    if (!row.excluded)
-                        roundStroke(c, 24, yy, w - 24, yy + 82, 22, 1f,
-                            resColor(R.color.divider));
+                    round(c, 24, yy, w - 24, yy + 82, 20, row.excluded ? bg : panel);
                     bankBadge(c, row.bankName, badgeX, yy + 41);
                     p.setColor(muted);
                     for (int dot = -1; dot <= 1; dot++)
@@ -2257,9 +2250,6 @@ public class MainActivity extends Activity {
             }
             c.restore();
 
-            // Keep secondary destinations visible as a single navigation surface instead of a
-            // barely-there line of links. The hit bands below remain unchanged for compatibility.
-            round(c, 24, by - 28, w - 24, by + 24, 26, resColor(R.color.history_chip_bg));
             p.setTextSize(13);
             String aboutText = getString(R.string.footer_about);
             String langText = getString(R.string.footer_display);
