@@ -1,0 +1,3 @@
+• Added Pasargad payment merchant detection for the bank's payment-service messages.
+• History now refreshes automatically whenever it opens, including bank and account filters.
+• Improved history loading so newly received bank messages appear without a manual pull.
