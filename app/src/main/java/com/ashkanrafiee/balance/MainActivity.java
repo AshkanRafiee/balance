@@ -1444,7 +1444,8 @@ public class MainActivity extends Activity {
                 ExpressiveUi.dp(context, 20), ExpressiveUi.dp(context, 10));
             addView(shell, new FrameLayout.LayoutParams(-1, -1));
 
-            LinearLayout header = ExpressiveUi.row(context);
+            boolean largeText = getResources().getConfiguration().fontScale >= 1.3f;
+            LinearLayout header = largeText ? ExpressiveUi.column(context) : ExpressiveUi.row(context);
             LinearLayout brand = ExpressiveUi.column(context);
             TextView title = ExpressiveUi.heading(context, getString(R.string.app_name), 27);
             TextView subtitle = ExpressiveUi.label(context,
@@ -1463,7 +1464,9 @@ public class MainActivity extends Activity {
             subtitle.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
             brand.addView(title, new LinearLayout.LayoutParams(-1, -2));
             brand.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
-            header.addView(brand, new LinearLayout.LayoutParams(0, -2, 1));
+            header.addView(brand, largeText
+                ? ExpressiveUi.widthMatch(context, 0, 0)
+                : new LinearLayout.LayoutParams(0, -2, 1));
 
             maskButton = ExpressiveUi.iconButton(context, null,
                 getString(R.string.dashboard_mask_action), false);
@@ -1474,16 +1477,22 @@ public class MainActivity extends Activity {
             maskButton.setId(R.id.dashboard_mask_button);
             refreshButton.setId(R.id.dashboard_refresh_button);
             lockButton.setId(R.id.dashboard_lock_button);
-            header.addView(maskButton, new LinearLayout.LayoutParams(
+            LinearLayout controls = largeText ? ExpressiveUi.row(context) : header;
+            if (largeText) {
+                controls.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+                controls.setLayoutDirection(layoutDirection);
+            }
+            controls.addView(maskButton, new LinearLayout.LayoutParams(
                 ExpressiveUi.dp(context, 48), ExpressiveUi.dp(context, 48)));
             LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(
                 ExpressiveUi.dp(context, 48), ExpressiveUi.dp(context, 48));
             refreshLp.setMarginStart(ExpressiveUi.dp(context, 6));
-            header.addView(refreshButton, refreshLp);
+            controls.addView(refreshButton, refreshLp);
             LinearLayout.LayoutParams lockLp = new LinearLayout.LayoutParams(
                 ExpressiveUi.dp(context, 48), ExpressiveUi.dp(context, 48));
             lockLp.setMarginStart(ExpressiveUi.dp(context, 6));
-            header.addView(lockButton, lockLp);
+            controls.addView(lockButton, lockLp);
+            if (largeText) header.addView(controls, ExpressiveUi.widthMatch(context, 8, 0));
             shell.addView(header, ExpressiveUi.widthMatch(context, 0, 12));
 
             maskButton.setOnClickListener(v -> {
@@ -1547,6 +1556,12 @@ public class MainActivity extends Activity {
             TextView item = ExpressiveUi.label(MainActivity.this, label, 12,
                 ExpressiveUi.color(MainActivity.this, R.color.expressive_on_surface_variant));
             item.setGravity(Gravity.CENTER);
+            if (getResources().getConfiguration().fontScale >= 1.3f) {
+                item.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 10);
+                item.setSingleLine(true);
+                item.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                fitSingleLineToWidth(item, 10, 8);
+            }
             item.setContentDescription(description);
             item.setMinHeight(ExpressiveUi.dp(MainActivity.this, 48));
             item.setPadding(ExpressiveUi.dp(MainActivity.this, 8), 0,
@@ -1604,6 +1619,9 @@ public class MainActivity extends Activity {
             TextView label = ExpressiveUi.heading(this,
                 getString(R.string.dashboard_overview_label), 18);
             label.setTextColor(ExpressiveUi.color(this, R.color.expressive_on_surface_variant));
+            label.setSingleLine(true);
+            label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            fitSingleLineToWidth(label, 18, 12);
             return label;
         }
 
@@ -1616,11 +1634,21 @@ public class MainActivity extends Activity {
                 ExpressiveUi.color(this, R.color.expressive_on_primary_container));
             label.setLetterSpacing(.08f);
             hero.addView(label);
-            LinearLayout amountRow = ExpressiveUi.row(this);
+            boolean veryLargeText = getResources().getConfiguration().fontScale >= 2.5f;
+            LinearLayout amountRow = veryLargeText ? ExpressiveUi.column(this) : ExpressiveUi.row(this);
+            if (veryLargeText) amountRow.setGravity(Gravity.END);
             boolean emptyTotal = view.banks.isEmpty() || view.excluded.containsAll(view.banks.keySet());
             String amountText = emptyTotal ? getString(R.string.total_empty_value)
                 : view.hidden ? "••••••" : CurrencyHelper.amount(MainActivity.this, view.total);
             TextView amount = ExpressiveUi.heading(this, amountText, 42);
+            // Keep the total a single readable figure. A weighted TextView can otherwise wrap a
+            // longer total at a large system font scale, splitting the number at an arbitrary comma
+            // while the unit remains on the first line. Auto-sizing down within the hero preserves
+            // the user's larger typography where there is room and only yields size when the number
+            // genuinely needs it.
+            amount.setSingleLine(true);
+            amount.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            fitSingleLineToWidth(amount, 42, 10);
             amount.setTextColor(ExpressiveUi.color(this, R.color.expressive_on_primary_container));
             amount.setContentDescription(emptyTotal ? getString(R.string.total_empty_value)
                 : view.hidden
@@ -1628,12 +1656,24 @@ public class MainActivity extends Activity {
                 : getString(R.string.accessibility_total_balance,
                     CurrencyHelper.amount(MainActivity.this, view.total) + " "
                         + CurrencyHelper.label(MainActivity.this)));
-            amountRow.addView(amount, new LinearLayout.LayoutParams(0, -2, 1));
+            if (veryLargeText) {
+                amount.setGravity(rtl ? Gravity.END : Gravity.START);
+                amountRow.addView(amount, ExpressiveUi.widthMatch(this, 0, 0));
+            } else {
+                amountRow.addView(amount, new LinearLayout.LayoutParams(0, -2, 1));
+            }
             TextView unit = ExpressiveUi.label(this, CurrencyHelper.label(MainActivity.this), 14,
                 ExpressiveUi.color(this, R.color.expressive_on_primary_container));
-            unit.setGravity(Gravity.BOTTOM);
+            unit.setGravity(veryLargeText ? Gravity.END : Gravity.BOTTOM);
+            unit.setSingleLine(true);
+            unit.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            unit.setMaxWidth(ExpressiveUi.dp(this, 120));
             unit.setPadding(0, 0, 0, ExpressiveUi.dp(this, 8));
-            amountRow.addView(unit);
+            fitSingleLineToWidth(unit, 14, 10);
+            LinearLayout.LayoutParams unitLp = new LinearLayout.LayoutParams(-2, -2);
+            if (veryLargeText) unitLp.topMargin = ExpressiveUi.dp(this, 4);
+            else unitLp.setMarginStart(ExpressiveUi.dp(this, 10));
+            amountRow.addView(unit, unitLp);
             hero.addView(amountRow, new LinearLayout.LayoutParams(-1, -2));
             TextView status = ExpressiveUi.label(this, view.status, 12,
                 ExpressiveUi.color(this, R.color.expressive_on_primary_container));
@@ -1642,6 +1682,15 @@ public class MainActivity extends Activity {
             hero.addView(status, ExpressiveUi.widthMatch(this, 4, 16));
             TextView history = ExpressiveUi.button(this,
                 getString(R.string.dashboard_open_history), true);
+            history.setSingleLine(true);
+            history.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            if (getResources().getConfiguration().fontScale >= 1.3f) {
+                history.setPadding(ExpressiveUi.dp(this, 8), ExpressiveUi.dp(this, 11),
+                    ExpressiveUi.dp(this, 8), ExpressiveUi.dp(this, 11));
+                fitSingleLineToWidth(history, 10, 8);
+            } else {
+                fitSingleLineToWidth(history, 14, 10);
+            }
             history.setContentDescription(getString(R.string.dashboard_open_history));
             history.setOnClickListener(v -> startActivity(new Intent(MainActivity.this,
                 HistoryActivity.class)));
@@ -1808,64 +1857,85 @@ public class MainActivity extends Activity {
                 ? ExpressiveUi.color(this, R.color.expressive_surface_container)
                 : ExpressiveUi.color(this, R.color.panel);
             LinearLayout card = ExpressiveUi.card(this, surface, ExpressiveUi.RADIUS_CARD, 14);
-            LinearLayout body = ExpressiveUi.row(this);
-            body.setMinimumHeight(ExpressiveUi.dp(this, 58));
-            body.addView(bankBadge(row.bankName), new LinearLayout.LayoutParams(
+            boolean largeText = getResources().getConfiguration().fontScale >= 1.3f;
+            LinearLayout body = largeText ? ExpressiveUi.column(this) : ExpressiveUi.row(this);
+            LinearLayout top = largeText ? ExpressiveUi.row(this) : body;
+            top.setMinimumHeight(ExpressiveUi.dp(this, 58));
+            top.addView(bankBadge(row.bankName), new LinearLayout.LayoutParams(
                 ExpressiveUi.dp(this, 44), ExpressiveUi.dp(this, 44)));
             LinearLayout identity = ExpressiveUi.column(this);
-            LinearLayout nameLine = ExpressiveUi.row(this);
             TextView name = ExpressiveUi.heading(this,
                 BankRules.displayName(MainActivity.this, row.bankName), 16);
             name.setMaxLines(1);
             name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            // Keep the age badge attached to the bank label. A weighted name slot used to push
-            // the badge all the way toward the amount column, making it look like amount metadata.
-            name.setMaxWidth(ExpressiveUi.dp(this, 180));
-            nameLine.addView(name, new LinearLayout.LayoutParams(-2, -2));
             TextView stale = staleBadge(row);
-            if (stale != null) {
-                LinearLayout.LayoutParams staleLp = new LinearLayout.LayoutParams(-2, -2);
-                staleLp.setMarginStart(ExpressiveUi.dp(this, 8));
-                nameLine.addView(stale, staleLp);
+            // At the normal size the age stays beside the bank name. Once the user's text is large,
+            // keeping both in one horizontal measurement pass can give the badge a few pixels of
+            // width, which makes a short "181 days" pill wrap into a tall vertical border. Stack
+            // the metadata instead: the card is allowed to grow, while both labels retain their
+            // readable size and the amount column keeps its own space.
+            if (largeText) {
+                identity.addView(name, ExpressiveUi.widthMatch(this, 0, 0));
+                if (stale != null) {
+                    LinearLayout.LayoutParams staleLp = new LinearLayout.LayoutParams(-2, -2);
+                    staleLp.topMargin = ExpressiveUi.dp(this, 4);
+                    identity.addView(stale, staleLp);
+                }
+            } else {
+                LinearLayout nameLine = ExpressiveUi.row(this);
+                nameLine.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+                if (stale != null) {
+                    LinearLayout.LayoutParams staleLp = new LinearLayout.LayoutParams(-2, -2);
+                    staleLp.setMarginStart(ExpressiveUi.dp(this, 8));
+                    nameLine.addView(stale, staleLp);
+                }
+                identity.addView(nameLine, ExpressiveUi.widthMatch(this, 0, 0));
             }
-            nameLine.addView(new View(MainActivity.this),
-                new LinearLayout.LayoutParams(0, 1, 1));
-            identity.addView(nameLine);
+            TextView accountView = null;
             if (row.bank.account != null) {
                 String account = view.hidden ? "••••••" : getString(R.string.account_label) + " "
                     + view.faDigits(row.bank.account);
-                identity.addView(ExpressiveUi.label(this, account, 12,
-                    ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 4, 0));
+                accountView = ExpressiveUi.label(this, account, 12,
+                    ExpressiveUi.color(this, R.color.muted));
+                accountView.setMaxLines(2);
+                accountView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                if (!largeText) identity.addView(accountView, ExpressiveUi.widthMatch(this, 4, 0));
             }
-            if (row.excluded) {
+            if (row.excluded && !largeText) {
                 identity.addView(ExpressiveUi.label(this, getString(R.string.excluded_label), 11,
                     ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 4, 0));
             }
             LinearLayout.LayoutParams identityLp = new LinearLayout.LayoutParams(0, -2, 1);
             identityLp.setMarginStart(ExpressiveUi.dp(this, 12));
-            body.addView(identity, identityLp);
+            top.addView(identity, identityLp);
             LinearLayout amountColumn = ExpressiveUi.column(this);
             amountColumn.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
             TextView amount = ExpressiveUi.heading(this, view.hidden ? "••••••"
                 : CurrencyHelper.amount(MainActivity.this, row.amount), 19);
             amount.setSingleLine(true);
             amount.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            if (largeText) {
+                amount.setGravity(Gravity.END);
+                fitSingleLineToWidth(amount, 19, 12);
+            }
             amount.setTextColor(row.excluded || BalanceData.isStale(MainActivity.this, row.bank.date)
                 ? ExpressiveUi.color(this, R.color.muted)
                 : ExpressiveUi.color(this, R.color.accent));
             if (row.excluded) amount.setPaintFlags(amount.getPaintFlags()
                 | android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
-            amountColumn.addView(amount, new LinearLayout.LayoutParams(-2, -2));
+            amountColumn.addView(amount, new LinearLayout.LayoutParams(largeText ? -1 : -2, -2));
             TextView unit = ExpressiveUi.label(this, CurrencyHelper.label(MainActivity.this), 11,
                 ExpressiveUi.color(this, R.color.muted));
             unit.setGravity(Gravity.END);
             unit.setSingleLine(true);
-            LinearLayout.LayoutParams unitLp = new LinearLayout.LayoutParams(-2, -2);
+            LinearLayout.LayoutParams unitLp = new LinearLayout.LayoutParams(largeText ? -1 : -2, -2);
             unitLp.topMargin = ExpressiveUi.dp(this, 3);
             amountColumn.addView(unit, unitLp);
-            LinearLayout.LayoutParams amountLp = new LinearLayout.LayoutParams(-2, -2);
-            amountLp.setMarginStart(ExpressiveUi.dp(this, 8));
-            body.addView(amountColumn, amountLp);
+            if (!largeText) {
+                LinearLayout.LayoutParams amountLp = new LinearLayout.LayoutParams(-2, -2);
+                amountLp.setMarginStart(ExpressiveUi.dp(this, 8));
+                top.addView(amountColumn, amountLp);
+            }
             TextView menu = ExpressiveUi.label(this, "⋮", 25,
                 ExpressiveUi.color(this, R.color.muted));
             menu.setGravity(Gravity.CENTER);
@@ -1876,7 +1946,22 @@ public class MainActivity extends Activity {
             menu.setClickable(true);
             menu.setFocusable(true);
             menu.setOnClickListener(v -> view.showBankMenu(row.key, row.bankName, row.amount));
-            body.addView(menu);
+            top.addView(menu);
+            if (largeText) {
+                body.addView(top, ExpressiveUi.widthMatch(this, 0, 0));
+                if (accountView != null) {
+                    LinearLayout.LayoutParams accountLp = ExpressiveUi.widthMatch(this, 4, 0);
+                    accountLp.setMarginStart(ExpressiveUi.dp(this, 56));
+                    body.addView(accountView, accountLp);
+                }
+                if (row.excluded) {
+                    LinearLayout.LayoutParams excludedLp = ExpressiveUi.widthMatch(this, 4, 0);
+                    excludedLp.setMarginStart(ExpressiveUi.dp(this, 56));
+                    body.addView(ExpressiveUi.label(this, getString(R.string.excluded_label), 11,
+                        ExpressiveUi.color(this, R.color.muted)), excludedLp);
+                }
+                body.addView(amountColumn, ExpressiveUi.widthMatch(this, 4, 0));
+            }
             card.addView(body);
             String displayName = BankRules.displayName(MainActivity.this, row.bankName);
             StringBuilder description = new StringBuilder(getString(
@@ -1906,12 +1991,44 @@ public class MainActivity extends Activity {
             return card;
         }
 
+        /** Reduces a large amount only after its weighted slot has a real width. TextView's
+         * built-in auto-size can measure a weighted, single-line child before that width settles and
+         * leave the number ellipsized even though a smaller readable size would fit. Measuring once
+         * after layout keeps the whole grouped number visible without allowing a comma split. */
+        private void fitSingleLineToWidth(TextView text, float largestSp, float smallestSp) {
+            Runnable fit = () -> {
+                int available = text.getWidth() - text.getPaddingLeft() - text.getPaddingRight();
+                if (available <= 0) return;
+                float size = largestSp;
+                while (size > smallestSp) {
+                    text.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, size);
+                    if (text.getPaint().measureText(text.getText().toString()) <= available) return;
+                    size -= 1;
+                }
+                text.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, smallestSp);
+            };
+            if (text.getWidth() > 0) {
+                fit.run();
+                return;
+            }
+            text.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+                @Override public void onLayoutChange(View v, int left, int top, int right, int bottom,
+                        int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                    if (right <= left) return;
+                    text.removeOnLayoutChangeListener(this);
+                    fit.run();
+                }
+            });
+        }
+
         private TextView staleBadge(BalanceView.BankRow row) {
             if (row.excluded || !BalanceData.isStale(MainActivity.this, row.bank.date)) return null;
             TextView badge = ExpressiveUi.label(this, getResources().getQuantityString(
                 R.plurals.stale_days, BalanceData.staleDays(MainActivity.this, row.bank.date),
                 BalanceData.staleDays(MainActivity.this, row.bank.date)), 11,
                 ExpressiveUi.color(this, R.color.muted));
+            badge.setSingleLine(true);
+            badge.setMaxLines(1);
             badge.setPadding(ExpressiveUi.dp(this, 10), ExpressiveUi.dp(this, 6),
                 ExpressiveUi.dp(this, 10), ExpressiveUi.dp(this, 6));
             badge.setBackground(ExpressiveUi.outline(this,
