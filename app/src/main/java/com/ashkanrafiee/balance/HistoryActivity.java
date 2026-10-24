@@ -2809,15 +2809,36 @@ public final class HistoryActivity extends Activity {
         }
     }
 
-    /** Starts a history scan only for the currently resumed listener generation. */
+    /** Refreshes inbox-backed balances and history for the currently resumed listener generation.
+     *  Opening history is itself a refresh action: otherwise the first render can read the old
+     *  transaction snapshot before a newly arrived SMS has ever been captured, especially when a
+     *  bank/account filter makes the stale result look intentionally empty. */
     private void startHistoryScan(int listenerGen, Context app) {
         if (listenerGen != historyListenerGen || !historyResumed
                 || isDestroyed() || isFinishing()) return;
         new Thread(() -> {
             try {
+                if (checkSelfPermission(Manifest.permission.READ_SMS)
+                        == PackageManager.PERMISSION_GRANTED) {
+                    java.util.LinkedHashMap<String, Bank> saved = BalanceData.read(app);
+                    BalanceData.scanSms(app, saved);
+                    BalanceWidgetProvider.push(app);
+                }
                 BalanceData.scanHistory(app);
             } catch (Exception e) {
-                android.util.Log.w("BalanceHistory", "history scan failed", e);
+                android.util.Log.w("BalanceHistory", "history refresh failed", e);
+            } finally {
+                // A first open can start with no history rows and therefore produce no store
+                // change notification. Always render after the open-triggered scan so an inbox
+                // that was never scanned before (including a bank/account-filtered launch) cannot
+                // remain on the pre-scan empty state until the user pulls to refresh.
+                runOnUiThread(() -> {
+                    if (listenerGen != historyListenerGen || !historyResumed
+                            || isDestroyed() || isFinishing()) return;
+                    scopeChoicesCache = null;
+                    invalidateTagNames();
+                    render();
+                });
             }
         }, "history-scan").start();
     }

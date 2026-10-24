@@ -42,6 +42,14 @@ public class BankRulesTest {
         assertEquals("Pasargad", BankRules.resolve("+98500019000"));
     }
 
+    @Test public void resolve_pasargadPaymentServiceNumber_returnsPasargad() {
+        // The handset presents this sender as (982) 000-9000; the provider gives the app its
+        // digits-only form, and normalize() also accepts the country-code and local suffix forms.
+        assertEquals("Pasargad", BankRules.resolve("(982) 000-9000"));
+        assertEquals("Pasargad", BankRules.resolve("+9820009000"));
+        assertEquals("Pasargad", BankRules.resolve("20009000"));
+    }
+
     @Test public void resolve_duplicateCalendarLongAlias_returnsBank() {
         assertEquals("Sina", BankRules.resolve("50003700798704"));
     }
@@ -853,6 +861,15 @@ public class BankRulesTest {
         assertEquals(45_500_000L, authorization.amount);
         assertEquals(20, authorization.hour);
         assertEquals(37, authorization.minute);
+    }
+
+    @Test public void extractAuthorization_pasargadDateAndTimeLine_readsMerchant() {
+        BankRules.Authorization authorization = BankRules.extractAuthorization("Pasargad",
+            "پاسارگاد\nخرید\nديجي پي\nمبلغ:45,500,000\nرمز: 72552\n06/29_21:06");
+        assertEquals("ديجي پي", authorization.merchant);
+        assertEquals(45_500_000L, authorization.amount);
+        assertEquals(21, authorization.hour);
+        assertEquals(6, authorization.minute);
     }
 
     @Test public void extractAuthorization_bluShape_readsMerchant() {

@@ -67,7 +67,7 @@ final class BankRules {
     }
 
     private static final String[][] RULES = {
-        {"Pasargad", "b.pasargad|098500019000|98500019000|+98500019000", "J"},
+        {"Pasargad", "b.pasargad|098500019000|98500019000|+98500019000|+9820009000", "J"},
         {"Eghtesad Novin", "ENBank|Enbank|+9890004800|90004800", "J"},
         {"Shahr", "+98200035|20005|20003502|+98200085|700820428285|9200035|98200035|200035", "J"},
         {"Ansar", "+98200036|100036|98100038", "J"},
@@ -153,7 +153,8 @@ final class BankRules {
         "(?:رمز(?:\\s*پویا)?|Code)\\s*[:：]?\\s*[0-9]{4,8}",
         Pattern.CASE_INSENSITIVE);
     private static final Pattern AUTH_CLOCK = Pattern.compile(
-        "([0-9]{1,2}):([0-9]{2})(?::([0-9]{2}))?");
+        "(?:(?:[0-9]{1,4}[./])?[0-9]{1,2}[./][0-9]{1,4}[_\\s-]+)?"
+            + "([0-9]{1,2}):([0-9]{2})(?::([0-9]{2}))?");
     private static final Pattern AUTH_ACTION = Pattern.compile(
         "(?:خرید(?: از)?|پرداخت)");
     private static final Pattern AUTH_MARKER = Pattern.compile(
