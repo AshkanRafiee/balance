@@ -1,0 +1,2 @@
+• Added eight curated theme colors so you can make Balance feel like your own.
+• Kept the selected color in sync across the app and the home-screen widget, with readable light and dark variants.
