@@ -112,6 +112,7 @@
     <string name="settings_language_label">Language</string>
     <string name="settings_currency_label">Currency</string>
     <string name="settings_theme_label">Theme</string>
+    <string name="settings_color_label">Theme color</string>
     <string name="settings_widget_theme_label">Widget theme</string>
     <string name="onboarding_skip">Skip</string>
     <string name="onboarding_next">Next</string>
@@ -151,6 +152,14 @@
     <string name="theme_system">System default</string>
     <string name="theme_dark">Dark</string>
     <string name="theme_light">Light</string>
+    <string name="theme_color_ocean">Ocean</string>
+    <string name="theme_color_violet">Violet</string>
+    <string name="theme_color_rose">Rose</string>
+    <string name="theme_color_forest">Forest</string>
+    <string name="theme_color_sunset">Sunset</string>
+    <string name="theme_color_indigo">Indigo</string>
+    <string name="theme_color_coral">Coral</string>
+    <string name="theme_color_berry">Berry</string>
     <string name="currency_toman">Toman</string>
     <string name="currency_rial">Rial</string>
     <string name="currency_custom">Custom</string>

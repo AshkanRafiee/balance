@@ -267,6 +267,7 @@ public final class CommitmentsActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        ThemeColorHelper.apply(this);
         LargeScreenOrientation.apply(this);
         // A draft snapshotted before rotation or process death comes back with the screen; the
         // next unlocked resume reopens it, exactly like a plain pause round-trip.
@@ -1699,7 +1700,7 @@ public final class CommitmentsActivity extends Activity {
     }
 
     private int color(int res) {
-        return getResources().getColor(res, getTheme());
+        return ThemeColorHelper.color(this, res);
     }
 
     private int dp(float v) {

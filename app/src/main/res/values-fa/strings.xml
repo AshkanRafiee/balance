@@ -112,6 +112,7 @@
     <string name="settings_language_label">زبان</string>
     <string name="settings_currency_label">واحد پول</string>
     <string name="settings_theme_label">پوسته</string>
+    <string name="settings_color_label">رنگ پوسته</string>
     <string name="settings_widget_theme_label">پوستهٔ ویجت</string>
     <string name="onboarding_skip">رد شدن</string>
     <string name="onboarding_next">بعدی</string>
@@ -149,6 +150,14 @@
     <string name="theme_system">پیش‌فرض سیستم</string>
     <string name="theme_dark">تیره</string>
     <string name="theme_light">روشن</string>
+    <string name="theme_color_ocean">اقیانوسی</string>
+    <string name="theme_color_violet">بنفش</string>
+    <string name="theme_color_rose">رز</string>
+    <string name="theme_color_forest">جنگلی</string>
+    <string name="theme_color_sunset">غروب</string>
+    <string name="theme_color_indigo">نیلی</string>
+    <string name="theme_color_coral">مرجانی</string>
+    <string name="theme_color_berry">توتی</string>
     <string name="currency_toman">تومان</string>
     <string name="currency_rial">ریال</string>
     <string name="currency_custom">دلخواه</string>

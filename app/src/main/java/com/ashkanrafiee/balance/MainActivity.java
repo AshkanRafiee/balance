@@ -27,6 +27,7 @@ import android.view.MotionEvent;
 import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -83,6 +84,7 @@ public class MainActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        ThemeColorHelper.apply(this);
         LargeScreenOrientation.apply(this);
         BalanceData.migrateExpandAllToDebugMenu(this);
         if (android.os.Build.VERSION.SDK_INT >= 30)
@@ -322,13 +324,15 @@ public class MainActivity extends Activity {
     }
 
     /** The combined Display dialog behind the footer item: the dropdowns in a single menu, so the
-     *  color theme (see {@link ThemeHelper}), the widget's own theme, the interface language, the
-     *  calendar system (see {@link RegionHelper}), the currency unit (see {@link CurrencyHelper})
+     *  color theme (see {@link ThemeHelper}), the selected theme color, the widget's own theme,
+     *  the interface language, the calendar system (see {@link RegionHelper}), the currency unit
+     *  (see {@link CurrencyHelper})
      *  and the balance-freshness threshold are all chosen in one place. They are ordered by how
      *  often they are changed, and then grouped by kind, so related options sit together instead
-     *  of having to be hunted for: the two color themes are what a user reaches for most — mostly
-     *  to turn dark mode on for the evening — and read as a pair, the language, calendar and
-     *  currency are all set once and together decide how text, dates and amounts are formatted,
+     *  of having to be hunted for: the theme mode and color are what a user reaches for most — mostly
+     *  to turn dark mode on for the evening or make Balance feel like their own — and read as a pair,
+     *  while language, calendar and currency are all set once and together decide how text, dates
+     *  and amounts are formatted,
      *  and the freshness threshold is the odd one out, with the lone on/off toggle below them
      *  showing or hiding the commitments card. Every picker applies its choice as soon
       *  as it is selected — a changed region repaints the dashboard and applies on the next history open, a changed theme or
@@ -380,6 +384,69 @@ public class MainActivity extends Activity {
             @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
 
         });
+
+        String[] colorChoices = ThemeColorHelper.CHOICES;
+        String[] colorLabels = {
+            getString(R.string.theme_color_ocean), getString(R.string.theme_color_violet),
+            getString(R.string.theme_color_rose), getString(R.string.theme_color_forest),
+            getString(R.string.theme_color_sunset), getString(R.string.theme_color_indigo),
+            getString(R.string.theme_color_coral), getString(R.string.theme_color_berry)
+        };
+        Spinner colorSpin = new Spinner(this);
+        ArrayAdapter<String> colorAdapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_item, colorLabels) {
+            private View paletteRow(int position, boolean dropDown) {
+                LinearLayout row = new LinearLayout(MainActivity.this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                int horizontal = dp(dropDown ? 10 : 4);
+                row.setPadding(horizontal, dp(4), horizontal, dp(4));
+                row.setMinimumHeight(dp(48));
+
+                TextView swatch = new TextView(MainActivity.this);
+                swatch.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                swatch.setBackground(ExpressiveUi.outline(MainActivity.this,
+                    ThemeColorHelper.swatch(MainActivity.this, colorChoices[position]), 50,
+                    resColor(R.color.outline)));
+                row.addView(swatch, new LinearLayout.LayoutParams(dp(28), dp(28)));
+
+                TextView label = ExpressiveUi.label(MainActivity.this, colorLabels[position], 14,
+                    resColor(R.color.fg));
+                label.setGravity(Gravity.CENTER_VERTICAL);
+                LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(0, -2, 1);
+                labelLp.setMarginStart(dp(10));
+                row.addView(label, labelLp);
+                return row;
+            }
+
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                return paletteRow(position, false);
+            }
+
+            @Override public View getDropDownView(int position, View convertView, ViewGroup parent) {
+                return paletteRow(position, true);
+            }
+        };
+        colorAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        colorSpin.setAdapter(colorAdapter);
+        String storedColor = ThemeColorHelper.themeColor(this);
+        for (int i = 0; i < colorChoices.length; i++)
+            if (colorChoices[i].equals(storedColor)) { colorSpin.setSelection(i); break; }
+        colorSpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
+                String chosen = colorChoices[Math.min(pos, colorChoices.length - 1)];
+                if (!chosen.equals(ThemeColorHelper.themeColor(MainActivity.this))) {
+                    ThemeColorHelper.setThemeColor(MainActivity.this, chosen);
+                    // The widget receives literal color values, so rebuild it immediately just like
+                    // the app's own screens rather than waiting for its periodic refresh.
+                    BalanceWidgetProvider.push(MainActivity.this);
+                    recreate();
+                }
+            }
+
+            @Override public void onNothingSelected(android.widget.AdapterView<?> p) { }
+        });
+
         // The widget's own theme, for the times the app and the home screen want to disagree — a dark
         // app with a light widget on a light wallpaper. It changes nothing inside the app, so unlike
         // the theme above it does not recreate the screen, it just repaints the widget.
@@ -500,6 +567,9 @@ public class MainActivity extends Activity {
         TextView themeLabel = new TextView(this);
         themeLabel.setText(getString(R.string.settings_theme_label));
         themeLabel.setTextSize(14);
+        TextView colorLabel = new TextView(this);
+        colorLabel.setText(getString(R.string.settings_color_label));
+        colorLabel.setTextSize(14);
         TextView widgetThemeLabel = new TextView(this);
         widgetThemeLabel.setText(getString(R.string.settings_widget_theme_label));
         widgetThemeLabel.setTextSize(14);
@@ -518,6 +588,10 @@ public class MainActivity extends Activity {
 
         box.addView(themeLabel);
         box.addView(themeSpin);
+        LinearLayout.LayoutParams colorLp = new LinearLayout.LayoutParams(-1, -2);
+        colorLp.topMargin = dp(18);
+        box.addView(colorLabel, colorLp);
+        box.addView(colorSpin);
         LinearLayout.LayoutParams widgetThemeLp = new LinearLayout.LayoutParams(-1, -2);
         widgetThemeLp.topMargin = dp(18);
         box.addView(widgetThemeLabel, widgetThemeLp);
@@ -555,9 +629,12 @@ public class MainActivity extends Activity {
         commitmentsLp.topMargin = dp(18);
         box.addView(showCommitments, commitmentsLp);
 
+        ScrollView displayScroll = new ScrollView(this);
+        displayScroll.setFillViewport(true);
+        displayScroll.addView(box, new ScrollView.LayoutParams(-1, -2));
         showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.footer_display))
-            .setView(box)
+            .setView(displayScroll)
             .setPositiveButton(android.R.string.ok, (d, w) -> {
                 if (currencySpin.getSelectedItemPosition() == 2) {
                     String typed = customInput.getText().toString().trim();
@@ -1381,7 +1458,7 @@ public class MainActivity extends Activity {
     }
 
     private int resColor(int res) {
-        return getResources().getColor(res, getTheme());
+        return ThemeColorHelper.color(this, res);
     }
 
     /** Repaints every visible amount immediately after the display currency preference changes. */

@@ -60,7 +60,7 @@ public final class SenderShareActivity extends Activity {
     private boolean restoredAllChecked;
 
     int color(int res) {
-        return getResources().getColor(res, getTheme());
+        return ThemeColorHelper.color(this, res);
     }
 
     int dp(float n) {
@@ -96,6 +96,7 @@ public final class SenderShareActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        ThemeColorHelper.apply(this);
         LargeScreenOrientation.apply(this);
         if (state != null) {
             restoredMessages = state.getBooleanArray(STATE_MESSAGES);

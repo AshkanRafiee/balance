@@ -45,7 +45,7 @@ public class BalanceWidgetService extends RemoteViewsService {
         views.setInt(R.id.widget_root, "setLayoutDirection",
             c.getResources().getConfiguration().getLayoutDirection());
         views.setInt(R.id.widget_root, "setBackgroundResource", WidgetTheme.background(c));
-        views.setTextColor(R.id.widget_locked_msg, c.getColor(R.color.muted));
+        views.setTextColor(R.id.widget_locked_msg, ThemeColorHelper.color(c, R.color.muted));
         views.setOnClickPendingIntent(R.id.widget_root, BalanceWidgetProvider.openApp(c));
         return views;
     }
@@ -62,9 +62,9 @@ public class BalanceWidgetService extends RemoteViewsService {
             hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : CurrencyHelper.amount(c, b.amount));
         // Literal colors, not resource ids, or the launcher re-resolves them in its own palette and
         // the app's theme stops reaching the rows. See WidgetTheme.
-        views.setTextColor(R.id.bank_name, c.getColor(R.color.bank_name));
-        views.setTextColor(R.id.bank_account, c.getColor(R.color.muted));
-        views.setTextColor(R.id.bank_amount, c.getColor(R.color.muted));
+        views.setTextColor(R.id.bank_name, ThemeColorHelper.color(c, R.color.bank_name));
+        views.setTextColor(R.id.bank_account, ThemeColorHelper.color(c, R.color.muted));
+        views.setTextColor(R.id.bank_amount, ThemeColorHelper.color(c, R.color.muted));
         // Stale stays muted like a fresh amount: freshness is metadata carried by the age
         // below, while amber stays reserved for things needing action.
         boolean stale = BalanceData.isStale(c, b.date);
@@ -127,7 +127,7 @@ public class BalanceWidgetService extends RemoteViewsService {
         RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance_empty);
         views.setInt(R.id.widget_empty, "setLayoutDirection",
             c.getResources().getConfiguration().getLayoutDirection());
-        views.setTextColor(R.id.widget_empty, c.getColor(R.color.empty));
+        views.setTextColor(R.id.widget_empty, ThemeColorHelper.color(c, R.color.empty));
         views.setTextViewText(R.id.widget_empty, c.getString(message));
         views.setViewVisibility(R.id.widget_empty, View.VISIBLE);
         views.setOnClickPendingIntent(R.id.widget_empty, BalanceWidgetProvider.openApp(c));

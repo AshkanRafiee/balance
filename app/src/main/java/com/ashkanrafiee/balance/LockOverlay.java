@@ -726,7 +726,7 @@ public final class LockOverlay extends FrameLayout {
     // ====================================================================
 
     private int res(int r) {
-        return ctx.getResources().getColor(r, ctx.getTheme());
+        return ThemeColorHelper.color(ctx, r);
     }
 
     private int dp(float v) {

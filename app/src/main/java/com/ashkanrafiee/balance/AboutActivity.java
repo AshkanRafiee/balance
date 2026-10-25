@@ -29,7 +29,7 @@ public final class AboutActivity extends Activity {
     int versionTaps;
 
     int color(int res) {
-        return getResources().getColor(res, getTheme());
+        return ThemeColorHelper.color(this, res);
     }
 
     int dp(float n) {
@@ -82,6 +82,7 @@ public final class AboutActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        ThemeColorHelper.apply(this);
         LargeScreenOrientation.apply(this);
         bg = color(R.color.expressive_surface);
         card = color(R.color.panel);

@@ -39,7 +39,7 @@ public final class OnboardingActivity extends Activity {
     private float downX, downY;
     private int step;
 
-    int color(int res) { return getResources().getColor(res, getTheme()); }
+    int color(int res) { return ThemeColorHelper.color(this, res); }
 
     int dp(float n) { return (int) (n * getResources().getDisplayMetrics().density + .5f); }
 
@@ -82,6 +82,7 @@ public final class OnboardingActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        ThemeColorHelper.apply(this);
         LargeScreenOrientation.apply(this);
         if (state != null) step = state.getInt(STATE_STEP, PAGE_WELCOME);
         bg = color(R.color.bg);

@@ -12,4 +12,31 @@
         <item name="android:navigationBarColor">@color/nav_bar</item>
         <item name="android:windowLightNavigationBar" tools:ignore="NewApi">@bool/is_light_nav_bar</item>
     </style>
+
+    <!-- Applied at runtime after the stored palette is known, so native controls and dialogs use
+         the same primary color as the hand-built screens. -->
+    <style name="BalancePaletteOcean">
+        <item name="android:colorAccent">@color/palette_ocean_primary</item>
+    </style>
+    <style name="BalancePaletteViolet">
+        <item name="android:colorAccent">@color/palette_violet_primary</item>
+    </style>
+    <style name="BalancePaletteRose">
+        <item name="android:colorAccent">@color/palette_rose_primary</item>
+    </style>
+    <style name="BalancePaletteForest">
+        <item name="android:colorAccent">@color/palette_forest_primary</item>
+    </style>
+    <style name="BalancePaletteSunset">
+        <item name="android:colorAccent">@color/palette_sunset_primary</item>
+    </style>
+    <style name="BalancePaletteIndigo">
+        <item name="android:colorAccent">@color/palette_indigo_primary</item>
+    </style>
+    <style name="BalancePaletteCoral">
+        <item name="android:colorAccent">@color/palette_coral_primary</item>
+    </style>
+    <style name="BalancePaletteBerry">
+        <item name="android:colorAccent">@color/palette_berry_primary</item>
+    </style>
 </resources>

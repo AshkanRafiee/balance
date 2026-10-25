@@ -341,7 +341,7 @@ public final class HistoryActivity extends Activity {
     private final Map<Long, GradientDrawable> fillCache = new HashMap<>();
 
     int color(int res) {
-        return getResources().getColor(res, getTheme());
+        return ThemeColorHelper.color(this, res);
     }
 
     int dp(float n) {
@@ -584,6 +584,7 @@ public final class HistoryActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        ThemeColorHelper.apply(this);
         LargeScreenOrientation.apply(this);
         // The task may have been restored straight into history without the dashboard running.
         BalanceData.migrateExpandAllToDebugMenu(this);

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Light-mode palette colors. Every primary/on-primary and container/on-container pair is
+         deliberately contrast-safe for the text roles that use it. -->
+    <color name="palette_ocean_primary">#006874</color>
+    <color name="palette_ocean_on_primary">#FFFFFF</color>
+    <color name="palette_ocean_container">#A8EEF2</color>
+    <color name="palette_ocean_on_container">#002022</color>
+
+    <color name="palette_violet_primary">#6750A4</color>
+    <color name="palette_violet_on_primary">#FFFFFF</color>
+    <color name="palette_violet_container">#E9DDFF</color>
+    <color name="palette_violet_on_container">#211047</color>
+
+    <color name="palette_rose_primary">#A72D5C</color>
+    <color name="palette_rose_on_primary">#FFFFFF</color>
+    <color name="palette_rose_container">#FFD9E2</color>
+    <color name="palette_rose_on_container">#3B071B</color>
+
+    <color name="palette_forest_primary">#006C4C</color>
+    <color name="palette_forest_on_primary">#FFFFFF</color>
+    <color name="palette_forest_container">#A7F3D0</color>
+    <color name="palette_forest_on_container">#002114</color>
+
+    <color name="palette_sunset_primary">#8B5000</color>
+    <color name="palette_sunset_on_primary">#FFFFFF</color>
+    <color name="palette_sunset_container">#FFE0B2</color>
+    <color name="palette_sunset_on_container">#2A1700</color>
+
+    <color name="palette_indigo_primary">#405F91</color>
+    <color name="palette_indigo_on_primary">#FFFFFF</color>
+    <color name="palette_indigo_container">#D8E2FF</color>
+    <color name="palette_indigo_on_container">#001A40</color>
+
+    <color name="palette_coral_primary">#A83D00</color>
+    <color name="palette_coral_on_primary">#FFFFFF</color>
+    <color name="palette_coral_container">#FFDBC9</color>
+    <color name="palette_coral_on_container">#3A0A00</color>
+
+    <color name="palette_berry_primary">#8C3D6B</color>
+    <color name="palette_berry_on_primary">#FFFFFF</color>
+    <color name="palette_berry_container">#FFD8EC</color>
+    <color name="palette_berry_on_container">#3A0A27</color>
+</resources>

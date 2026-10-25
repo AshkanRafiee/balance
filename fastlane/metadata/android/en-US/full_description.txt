@@ -24,7 +24,7 @@ Features:
 - CSV export of exactly what the history shows at that moment, through the system file picker, with your notes and tags and the bank's reason, channel and matched merchant
 - Password-encrypted backup and restore of balances, history, notes, tags, commitments, reasons, channels, matched payment merchants and recognized SMS source samples
 - Optional in-app lock with PIN, password or fingerprint, covering the app, the widget and screenshots/recents
-- English and Persian interface, Persian (Jalali) or Gregorian calendar, and a light or dark theme that follows the device
+- English and Persian interface, Persian (Jalali) or Gregorian calendar, light or dark mode, and eight curated theme colors
 - Report (Scan diagnostics): see which bank messages parse and which do not, and send or copy exactly the ones you pick
 
 Free and open source. If your bank's messages are not recognized, or a balance or account looks wrong, telling us — through the issue tracker, the Report screen or email — is the fastest way to get it added.

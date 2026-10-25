@@ -30,7 +30,7 @@ final class ExpressiveUi {
     private ExpressiveUi() { }
 
     static int color(Context context, int res) {
-        return context.getResources().getColor(res, context.getTheme());
+        return ThemeColorHelper.color(context, res);
     }
 
     static int color(View view, int res) { return color(view.getContext(), res); }
