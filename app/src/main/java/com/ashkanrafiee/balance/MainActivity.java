@@ -1032,7 +1032,8 @@ public class MainActivity extends Activity {
 
     private void styleSeg(TextView t, boolean selected) {
         t.setBackground(rounded(selected ? resColor(R.color.accent) : resColor(R.color.panel), 12));
-        t.setTextColor(selected ? Color.WHITE : resColor(R.color.muted));
+        t.setTextColor(selected ? resColor(R.color.expressive_on_primary)
+            : resColor(R.color.muted));
     }
 
     private void applyLockInput(EditText e) {
