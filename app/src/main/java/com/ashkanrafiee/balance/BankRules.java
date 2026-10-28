@@ -522,7 +522,7 @@ final class BankRules {
     }
     static String normalize(String raw) {
         StringBuilder out = new StringBuilder();
-        for (char c : Digits.ascii(raw).toCharArray()) {
+        for (char c : TextNormalizer.normalize(raw).toCharArray()) {
             if (Character.isLetterOrDigit(c)) out.append(Character.toLowerCase(c));
         }
         String s = out.toString();

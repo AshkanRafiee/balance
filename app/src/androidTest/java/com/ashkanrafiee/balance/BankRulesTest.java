@@ -104,6 +104,10 @@ public class BankRulesTest {
         assertEquals("Middle East", BankRules.resolve("بانک خاورمیانه"));
     }
 
+    @Test public void resolve_middleEastArabicLetterSender_returnsBank() {
+        assertEquals("Middle East", BankRules.resolve("بانك خاورميانه"));
+    }
+
     @Test public void displayName_fa_usesShortNames() {
         // Card names stay short: no قرض‌الحسنه prefix on Mehr/Resalat, no ایران suffix
         // on Melli/Saderat.

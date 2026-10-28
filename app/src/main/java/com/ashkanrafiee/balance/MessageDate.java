@@ -80,7 +80,7 @@ final class MessageDate {
      *             and so cannot say it themselves */
     static long eventTime(String body, long arrival, CalendarSystem cal) {
         if (body == null) return arrival;
-        String s = Digits.ascii(body);
+        String s = TextNormalizer.normalize(body);
         int[] clock = clock(s);
 
         Matcher full = FULL_YEAR_DATE.matcher(s);

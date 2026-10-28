@@ -2494,9 +2494,9 @@ final class BalanceData {
      *  negative value for a withdrawal and a positive one for a deposit. */
     static Long extractTransaction(String raw) {
         if (raw == null) return null;
-        String s = digits(raw.replace("\u066C", ",").replace("\u060C", ","));
+        String s = normalizeLetters(raw);
         if (otp.matcher(s).find()) return null;
-        String n = normalizeLetters(s);
+        String n = s;
 
         long amount = -1;
         int sign = 0;
@@ -3038,13 +3038,7 @@ final class BalanceData {
      *  Persian counterparts, so a word the sender spelled either way is the same word to every matcher
      *  and caption table in the app. */
     static String normalizeLetters(String s) {
-        StringBuilder b = new StringBuilder(s.length());
-        for (char c : s.toCharArray()) {
-            if (c == '\u064A' || c == '\u06CC') b.append('\u06CC');
-            else if (c == '\u0643') b.append('\u06A9');
-            else b.append(c);
-        }
-        return b.toString();
+        return TextNormalizer.normalize(s);
     }
 
     static String digits(String s) {

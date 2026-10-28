@@ -57,6 +57,11 @@ public class BalanceExtractTest {
             "\u0645\u0648\u062c\u0648\u062f\u06cc \u062d\u0633\u0627\u0628 \u0634\u0645\u0627: 1,250,000 \u0631\u06cc\u0627\u0644"));
     }
 
+    @Test public void extract_arabicVariantsDiacriticsAndFullwidthPunctuation_readTheSameBalance() {
+        assertEquals(1250000L, BalanceData.extract(
+            "\u0645\u064e\u0648\u062c\u0648\u062f\u0649\uFF1A \u0661\u066C\u0662\u0665\u0660\u066C\u0660\u0660\u0660 \u0631\u064a\u0627\u0644"));
+    }
+
     // ---- OTP must never be parsed as a balance -----------------------------------------
     @Test public void extract_otpPersianRamz_rejected() {
         assertEquals(-1L, BalanceData.extract("\u0631\u0645\u0632 \u0648\u0631\u0648\u062F \u0634\u0645\u0627: 123456"));
@@ -81,6 +86,8 @@ public class BalanceExtractTest {
         // Persian balance keyword was previously read as that balance, and is now refused.
         assertEquals(-1L, BalanceData.extract(
             "\u0643\u062f \u062a\u0627\u06cc\u06cc\u062f: 123456 \u0645\u0648\u062c\u0648\u062f\u06cc: 5000"));
+        assertEquals(-1L, BalanceData.extract(
+            "\u0643\u064f\u062f \u062a\u064e\u0623\u0652\u064a\u0650\u064a\u062f: 123456 \u0645\u0648\u062c\u0648\u062f\u06cc: 5000"));
     }
 
     // ---- candidate selection -----------------------------------------------------------
