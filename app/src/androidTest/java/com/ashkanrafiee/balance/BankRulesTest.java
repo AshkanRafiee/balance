@@ -743,8 +743,11 @@ public class BankRulesTest {
             assertEquals("row must be {bank, shape, label}", 3, row.length);
             assertTrue("row bank not known: " + row[0], known.contains(row[0]));
             assertTrue("duplicate bank row: " + row[0], banksSeen.add(row[0]));
-            assertTrue("unknown shape: " + row[1], row[1].equals("labeled-line"));
-            assertTrue("label must end with its colon: " + row[2], row[2].endsWith(":"));
+            assertTrue("unknown shape: " + row[1], row[1].equals("labeled-line")
+                || row[1].equals("final-prefix"));
+            if (row[1].equals("labeled-line"))
+                assertTrue("label must end with its colon: " + row[2], row[2].endsWith(":"));
+            else assertTrue("prefix must not be empty", !row[2].isEmpty());
         }
     }
 
@@ -816,7 +819,7 @@ public class BankRulesTest {
         // Every other bank's movements carry no channel: Blu messages have a reason line but never a
         // channel line, and no other bank has been seen to name one.
         for (String bank : BankRules.supportedNames())
-            if (!bank.equals("Tejarat"))
+            if (!bank.equals("Tejarat") && !bank.equals("Sepah"))
                 assertNull(bank, BankRules.extractChannel(bank, TejaratMessages.WITHDRAWAL_SHETAB));
     }
 
@@ -831,6 +834,10 @@ public class BankRulesTest {
         // The bank writes its own label; a sender that spells the yeh the other way states the same
         // channel, and folding the two letter forms is what makes it land on the same stored value.
         assertEquals("شتاب", BankRules.extractChannel("Tejarat", TejaratMessages.PERSIAN_YEH_CHANNEL));
+    }
+
+    @Test public void extractChannel_sepahFinalTransferLine_returnsPaya() {
+        assertEquals("پایا", BankRules.extractChannel("Sepah", SepahMessages.REPORTED_ARABIC_MIXED));
     }
 
     @Test public void extractChannel_indentedAndMarkedChannelLines_matchTheSameChannel() {

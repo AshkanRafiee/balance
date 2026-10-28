@@ -146,6 +146,25 @@ public class SepahBankTest {
         assertEquals(Long.valueOf(3_125_000L), transaction.balance);
     }
 
+    @Test public void reportedArabicMixedLayout_readsEveryCoreFieldAndPayaChannel() {
+        String body = SepahMessages.REPORTED_ARABIC_MIXED;
+        assertEquals(BANK, BankRules.resolve(SENDER));
+        assertEquals("1400000000000", BankRules.extractAccount(BANK, body));
+        assertEquals(17_280_000L, (long) BalanceData.extractTransaction(body));
+        assertEquals(237_506_120L, BalanceData.extract(body));
+        assertEquals(persian(1405, 6, 8, 5, 59),
+            MessageDate.eventTime(body, ARRIVAL, BankRules.calendar(BANK)));
+        assertNull(BankRules.extractReason(BANK, body));
+        assertEquals("پایا", BankRules.extractChannel(BANK, body));
+
+        Transaction transaction = BalanceData.parseMovement(BANK, SENDER, body,
+            persian(1405, 6, 8, 5, 59), false, 0);
+        assertNotNull(transaction);
+        assertEquals("1400000000000", transaction.account);
+        assertEquals(17_280_000L, transaction.amount);
+        assertEquals(Long.valueOf(237_506_120L), transaction.balance);
+    }
+
     @Test public void providerScan_storesSepahMovementAndReason_withoutInventingChannel()
             throws Exception {
         providerTouched = true;

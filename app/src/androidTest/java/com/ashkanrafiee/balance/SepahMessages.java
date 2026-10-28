@@ -63,4 +63,14 @@ final class SepahMessages {
         + "مانده:3,125,000\n"
         + "7/15-10:48\n"
         + "دستورپرداخت وارده پل کدپيگيري 1405071510484217";
+
+    /** An anonymized copy of the user-reported layout, preserving its Arabic/Persian mix,
+     * Arabic-Indic digits, Arabic thousands separators and fullwidth colon. */
+    static final String REPORTED_ARABIC_MIXED =
+        "بانك سپه\n"
+        + "واريز:17\u066C280\u066C000ريال\n"
+        + "حساب\uFF1A1400000000000\n"
+        + "مانده:237\u066C506\u066C120\n"
+        + "\u0668/\u0666-\u0665:\u0665\u0669\n"
+        + "انتقال وجه پايا";
 }
