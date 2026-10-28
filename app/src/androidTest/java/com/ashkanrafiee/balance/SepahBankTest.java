@@ -148,17 +148,18 @@ public class SepahBankTest {
 
     @Test public void reportedArabicMixedLayout_readsEveryCoreFieldAndPayaChannel() {
         String body = SepahMessages.REPORTED_ARABIC_MIXED;
+        long reportedArrival = persian(1405, 8, 7, 12, 0);
         assertEquals(BANK, BankRules.resolve(SENDER));
         assertEquals("1400000000000", BankRules.extractAccount(BANK, body));
         assertEquals(17_280_000L, (long) BalanceData.extractTransaction(body));
         assertEquals(237_506_120L, BalanceData.extract(body));
-        assertEquals(persian(1405, 6, 8, 5, 59),
-            MessageDate.eventTime(body, ARRIVAL, BankRules.calendar(BANK)));
+        assertEquals(persian(1405, 8, 6, 5, 59),
+            MessageDate.eventTime(body, reportedArrival, BankRules.calendar(BANK)));
         assertNull(BankRules.extractReason(BANK, body));
         assertEquals("پایا", BankRules.extractChannel(BANK, body));
 
         Transaction transaction = BalanceData.parseMovement(BANK, SENDER, body,
-            persian(1405, 6, 8, 5, 59), false, 0);
+            persian(1405, 8, 6, 5, 59), false, 0);
         assertNotNull(transaction);
         assertEquals("1400000000000", transaction.account);
         assertEquals(17_280_000L, transaction.amount);
