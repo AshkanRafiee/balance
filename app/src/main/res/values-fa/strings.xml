@@ -339,6 +339,7 @@
     <string name="history_yesterday">دیروز</string>
     <string name="history_expanded">باز شده</string>
     <string name="history_loading">در حال بارگذاری تاریخچه</string>
+    <string name="history_refreshing">در حال تازه‌سازی تاریخچه</string>
     <string name="history_load_failed">بارگذاری تاریخچه ممکن نشد. برای تلاش دوباره صفحه را به پایین بکشید.</string>
     <string name="history_collapsed">بسته شده</string>
     <string name="history_deposit">واریز</string>

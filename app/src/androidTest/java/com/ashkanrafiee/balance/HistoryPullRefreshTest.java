@@ -96,11 +96,10 @@ public class HistoryPullRefreshTest {
 
         // The movement lands only after the screen is open.
         seed("TejaratBank", TEJARAT_DEPOSIT, System.currentTimeMillis());
-        // Let the automatic SMS observer finish its silent history re-scan; it never touches the
-        // balances, so the bank can only surface once the pull's own refresh runs.
-        sleep(1_500);
-        assertTrue("no scan may run before the pull (the observer only scans history)",
-            readBalances().isEmpty());
+        // The history screen now performs its own foreground refresh, including balances, so the
+        // seeded bank may already be visible before the manual pull. The pull remains covered below
+        // as an explicit second refresh and must stay safe when the automatic pass already settled.
+        waitUntil(() -> readBalances().size() == 1, 45_000);
     }
 
     private void awaitTejaratBalance() throws Exception {

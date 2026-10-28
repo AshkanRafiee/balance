@@ -356,6 +356,7 @@
     <string name="history_yesterday">Yesterday</string>
     <string name="history_expanded">Expanded</string>
     <string name="history_loading">Loading history</string>
+    <string name="history_refreshing">Refreshing history</string>
     <string name="history_load_failed">History could not be loaded. Pull to refresh and try again.</string>
     <string name="history_collapsed">Collapsed</string>
     <string name="history_deposit">Deposit</string>

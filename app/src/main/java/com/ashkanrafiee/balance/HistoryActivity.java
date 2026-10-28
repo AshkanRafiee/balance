@@ -709,7 +709,6 @@ public final class HistoryActivity extends Activity {
         lockOverlay.setVisibility(View.GONE);
 
         updateSecureFlag();
-        render();
         if (pendingScroll > 0) {
             int offset = pendingScroll;
             scrollView.post(() -> scrollView.scrollTo(0, offset));
@@ -2401,6 +2400,8 @@ public final class HistoryActivity extends Activity {
     private int historyListenerGen;
     private boolean historyResumed;
     private boolean renderAfterResume;
+    /** The render generation that must finish before the automatic-open refresh indicator settles. */
+    private int automaticRefreshTargetGen = -1;
 
     /** A small bounded set of day pages is kept in the activity heap. The disk timeline retains the rest. */
     private final Map<String, HistoryReader.DayRows> loadedDayPages = new java.util.LinkedHashMap<>();
@@ -2648,8 +2649,9 @@ public final class HistoryActivity extends Activity {
         // restore replacing the whole store): the render below reloads the choices after it.
         scopeChoicesCache = null;
         invalidateTagNames();
-        if (renderAfterResume) {
+        if (renderAfterResume || historyResult == null) {
             renderAfterResume = false;
+            if (scrollView != null) scrollView.beginAutomaticRefresh();
             render();
         }
         // The delayed lock may have engaged while we were paused on a ROM that skipped onStop;
@@ -2672,6 +2674,8 @@ public final class HistoryActivity extends Activity {
         renderGen++;
         historyUiGen++;
         historyListenerGen++;
+        automaticRefreshTargetGen = -1;
+        if (scrollView != null) scrollView.cancelAutomaticRefresh();
         unregisterSmsObserver();
         dismissDialogs();
         if (LockManager.isEnabled(this)) {
@@ -2817,6 +2821,7 @@ public final class HistoryActivity extends Activity {
     private void startHistoryScan(int listenerGen, Context app) {
         if (listenerGen != historyListenerGen || !historyResumed
                 || isDestroyed() || isFinishing()) return;
+        if (scrollView != null) scrollView.beginAutomaticRefresh();
         new Thread(() -> {
             try {
                 if (checkSelfPermission(Manifest.permission.READ_SMS)
@@ -2838,6 +2843,7 @@ public final class HistoryActivity extends Activity {
                             || isDestroyed() || isFinishing()) return;
                     scopeChoicesCache = null;
                     invalidateTagNames();
+                    automaticRefreshTargetGen = renderGen + 1;
                     render();
                 });
             }
@@ -3043,6 +3049,7 @@ public final class HistoryActivity extends Activity {
                         renderYears(body, allYears);
                     }
                     body.setVisibility(View.VISIBLE);
+                    finishAutomaticRefreshForRender(gen);
                 });
             } catch (Throwable e) {
                 if (result != null) {
@@ -3067,6 +3074,7 @@ public final class HistoryActivity extends Activity {
                     // view remains generation-gated below.
                     stopShimmer();
                     if (gen != renderGen || lifecycleStale(uiGen)) return;
+                    finishAutomaticRefreshForRender(gen);
                     body.setContentDescription(null);
                     // Gone while rebuilding, as in the success path above: one measure instead of
                     // one per frame.
@@ -3079,6 +3087,13 @@ public final class HistoryActivity extends Activity {
                 });
             }
         }).start();
+    }
+
+    /** Settles an automatic refresh only after the render requested by its scan was accepted. */
+    private void finishAutomaticRefreshForRender(int gen) {
+        if (automaticRefreshTargetGen < 0 || gen < automaticRefreshTargetGen) return;
+        automaticRefreshTargetGen = -1;
+        if (scrollView != null) scrollView.finishAutomaticRefresh();
     }
 
     /** Determines which visible days the existing seed/search rules will open after this result is
@@ -5497,6 +5512,7 @@ public final class HistoryActivity extends Activity {
         float downY;
         float pullShift, pullFrac, pullFade, spinAngle;
         boolean pulling, refreshing, refreshAgain;
+        boolean automaticRefreshing, automaticOwnsRefresh;
         boolean indicatorVisible, spinnerRunning, retracting;
         long spinDeadline;
         View indicatorOverlay;
@@ -5550,6 +5566,7 @@ public final class HistoryActivity extends Activity {
                         pullFade = 0;
                         indicatorVisible = false;
                         retracting = false;
+                        setContentDescription(null);
                         refreshIndicator();
                     } else {
                         refreshIndicator();
@@ -5636,6 +5653,7 @@ public final class HistoryActivity extends Activity {
             pullFade = 1;
             pullFrac = 1;
             spinDeadline = System.currentTimeMillis() + 400;
+            setContentDescription(getString(R.string.history_refreshing));
             handler.removeCallbacks(refreshTicker);
             handler.postDelayed(refreshTicker, 16);
             refreshIndicator();
@@ -5660,7 +5678,39 @@ public final class HistoryActivity extends Activity {
             spinnerRunning = false;
             retracting = false;
             pullShift = pullFrac = pullFade = 0;
+            setContentDescription(null);
             refreshIndicator();
+        }
+
+        /** Starts the same visible spinner for an automatic first-open or resume refresh. */
+        void beginAutomaticRefresh() {
+            automaticRefreshing = true;
+            if (refreshing) return;
+            refreshing = true;
+            automaticOwnsRefresh = true;
+            beginSpin();
+        }
+
+        /** Ends only the automatic refresh this view started; a user pull may still own the scan. */
+        void finishAutomaticRefresh() {
+            automaticRefreshing = false;
+            if (!automaticOwnsRefresh) return;
+            automaticOwnsRefresh = false;
+            refreshing = false;
+            if (refreshAgain) {
+                refreshAgain = false;
+                handler.post(this::refreshAll);
+            }
+        }
+
+        /** Cancels an automatic indicator when the Activity leaves the foreground. */
+        void cancelAutomaticRefresh() {
+            automaticRefreshing = false;
+            if (!automaticOwnsRefresh) return;
+            automaticOwnsRefresh = false;
+            refreshing = false;
+            refreshAgain = false;
+            retractIndicator();
         }
 
         /** Re-scans the SMS inbox (balances and widget) and then the history in the background,

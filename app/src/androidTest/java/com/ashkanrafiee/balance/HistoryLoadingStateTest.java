@@ -96,6 +96,28 @@ public class HistoryLoadingStateTest {
         }
     }
 
+    @Test public void firstOpenAutomaticRefresh_showsSpinnerUntilHistoryFinishes() throws Exception {
+        storeEnoughToBeSlowToRead();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        HistoryActivity.setRenderGateForTest(started, release);
+        openHistory();
+        try {
+            assertTrue("the first history render should reach the gate",
+                started.await(10, TimeUnit.SECONDS));
+            assertNotNull("automatic history refresh must be visible while the first read runs",
+                findByDescription(ctx.getString(R.string.history_refreshing)));
+            release.countDown();
+            await(() -> findByText(ctx.getString(R.string.history_breakdown)) != null,
+                60_000, "the refreshed history to finish rendering");
+            await(() -> findByDescription(ctx.getString(R.string.history_refreshing)) == null,
+                10_000, "the automatic refresh indicator to settle");
+        } finally {
+            HistoryActivity.setRenderGateForTest(null, null);
+            release.countDown();
+        }
+    }
+
     @Test public void onceLoaded_thePlaceholdersAreGone() {
         storeEnoughToBeSlowToRead();
         openHistory();
