@@ -1,0 +1,4 @@
+• Added private notes to amber Unaccounted rows. Notes appear in history, search, CSV exports and encrypted backups.
+• When a delayed SMS identifies one exact missing movement, its note follows that movement; ambiguous matches stay safely unattached.
+• Improved support for Arabic and Persian SMS variants, including additional payment-channel details.
+• Improved SMS diagnostics and history refresh feedback, including clearer handling when Android hides restricted messages.
