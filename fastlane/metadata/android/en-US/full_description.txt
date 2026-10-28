@@ -19,14 +19,14 @@ Features:
 - Filter the history by deposits or withdrawals, by date, and by exact reusable tags — today, this month, this year, or a custom range in the Persian or Gregorian calendar. Search across the transaction details and tags
 - Bank-stated movement reasons and channels appear in your language when present, and stay separate from your note
 - Payment merchants read from authorization SMS: when a purchase message names a merchant and uniquely matches a completed withdrawal, the history shows it as sourced payment information. An OTP alone never creates or confirms a transaction, and ambiguous matches stay unattached
-- Private notes and multiple tags: tap any row to write your own words and labels about that movement; they follow it through every filter, into CSV exports and into encrypted backups
-- Optional commitments card for loans, debts, subscriptions and other recurring payments or receipts, with separate totals and reminders
-- CSV export of exactly what the history shows at that moment, through the system file picker, with your notes and tags and the bank's reason, channel and matched merchant
-- Password-encrypted backup and restore of balances, history, notes, tags, commitments, reasons, channels, matched payment merchants and recognized SMS source samples
+- Private notes on any history row, including amber Unaccounted rows, plus multiple tags on movements: add your own words and labels, with notes following their row into filters, CSV exports and encrypted backups. A note on an Unaccounted row disappears with that derived row if a delayed SMS closes the gap
+- Optional commitments card for recurring payments or receipts, with separate totals and reminders
+- CSV export of exactly what the history shows at that moment, through the system file picker, with notes on movements or Unaccounted rows, movement tags, and the bank's reason, channel and matched merchant
+- Password-encrypted backup and restore of balances, history, notes, tags, commitments, bank facts and recognized SMS source samples
 - Optional in-app lock with PIN, password or fingerprint, covering the app, the widget and screenshots/recents
 - English and Persian interface, Persian (Jalali) or Gregorian calendar, light or dark mode, and eight curated theme colors
 - Report (Scan diagnostics): see which bank messages parse, choose what is wrong, and send or copy your samples; OTP values are removed
 
-Free and open source. If your bank's messages are not recognized, or a balance or account looks wrong, telling us — through the issue tracker, the Report screen or email — is the fastest way to get it added.
+Free and open source. If a bank message or balance looks wrong, report it through the issue tracker or Report screen.
 
 If Balance is useful to you, you can support its development: donation options are in the project readme at https://github.com/AshkanRafiee/balance#donate
