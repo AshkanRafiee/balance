@@ -646,6 +646,7 @@ public class ScanDiagnosticsTest {
             assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_reason)));
             assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_channel)));
             assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_merchant)));
+            assertTrue(all.contains(ctx.getString(R.string.sender_share_issue_otp)));
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
                 List<android.widget.CheckBox> checks = new ArrayList<>();
                 findChecks(act.getWindow().getDecorView(), checks);

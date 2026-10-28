@@ -927,6 +927,15 @@ public class BankRulesTest {
         assertEquals(-1, mehr.hour);
     }
 
+    @Test public void extractAuthorization_arabicMixedFormsAndFullwidthPunctuation_areAccepted() {
+        BankRules.Authorization authorization = BankRules.extractAuthorization("Melli",
+            "بانك ملي\r\nخُرَيْد\r\nفروشگاه نمونه\r\nمبلغ：\u0661\u0662\u0660،\u0660\u0660\u0660\r\n"
+                + "رَمْز：۱۲۳۴۵۶۷");
+        assertEquals("فروشگاه نمونه", authorization.merchant);
+        assertEquals(120_000L, authorization.amount);
+        assertEquals(-1, authorization.hour);
+    }
+
     @Test public void extractAuthorization_loginOtpOrMissingClock_isIgnored() {
         assertNull(BankRules.extractAuthorization("Parsian",
             "رمز ورود به اینترنت بانک یا همراه بانک:\n79466\nمهلت استفاده دو دقیقه"));

@@ -321,6 +321,7 @@
     <string name="sender_share_issue_reason">تشخیص دلیل</string>
     <string name="sender_share_issue_channel">تشخیص کانال</string>
     <string name="sender_share_issue_merchant">تشخیص فروشنده</string>
+    <string name="sender_share_issue_otp">حذف رمز یکبارمصرف</string>
     <string name="sender_share_message_checkbox">انتخاب نمونهٔ پیامک %1$d</string>
 
     <string name="history_title">تاریخچه</string>

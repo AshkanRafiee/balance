@@ -42,6 +42,7 @@ final class ScanDiagnostics {
     static final String ISSUE_REASON = "Reason detection";
     static final String ISSUE_CHANNEL = "Channel detection";
     static final String ISSUE_MERCHANT = "Merchant detection";
+    static final String ISSUE_OTP = "OTP redaction";
 
     /** OTP values must never leave the device through a diagnostics report. The surrounding
      * authorization layout remains shareable so merchant parsing can still be fixed. */

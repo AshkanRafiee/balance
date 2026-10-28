@@ -237,7 +237,8 @@ public final class SenderShareActivity extends Activity {
             getString(R.string.sender_share_issue_date),
             getString(R.string.sender_share_issue_reason),
             getString(R.string.sender_share_issue_channel),
-            getString(R.string.sender_share_issue_merchant)
+            getString(R.string.sender_share_issue_merchant),
+            getString(R.string.sender_share_issue_otp)
         };
         for (String label : labels) box.addView(issueRow(label));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
@@ -265,7 +266,7 @@ public final class SenderShareActivity extends Activity {
         String[] all = {ScanDiagnostics.ISSUE_ACCOUNT, ScanDiagnostics.ISSUE_BALANCE,
             ScanDiagnostics.ISSUE_NUMBER, ScanDiagnostics.ISSUE_AMOUNT, ScanDiagnostics.ISSUE_DATE,
             ScanDiagnostics.ISSUE_REASON, ScanDiagnostics.ISSUE_CHANNEL,
-            ScanDiagnostics.ISSUE_MERCHANT};
+            ScanDiagnostics.ISSUE_MERCHANT, ScanDiagnostics.ISSUE_OTP};
         List<String> tags = new ArrayList<>();
         for (int i = 0; i < issueChecks.size() && i < all.length; i++)
             if (issueChecks.get(i).isChecked()) tags.add(all[i]);
