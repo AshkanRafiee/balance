@@ -531,6 +531,44 @@ final class BalanceData {
         return t.content != null ? "c:" + t.content : txIdentityKey(t);
     }
 
+    /**
+     * The identity a note is stored under for a residual. A residual is not a transaction, so its
+     * identity is the account slot and the two raw statement timestamps that bracket it. The
+     * derived amount and movement count are intentionally absent: reconciliation may change either
+     * without changing the statement pair the user annotated. Length-prefixed fields keep bank and
+     * account values unambiguous even if they ever contain a separator used by another key format.
+     */
+    static String residualNoteKey(Residual residual) {
+        if (residual == null) throw new NullPointerException("residual");
+        String identity = "residual-note-v1\n"
+            + identityField(residual.bank)
+            + identityField(residual.account)
+            + residual.fromDate + "\n"
+            + residual.toDate;
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256")
+                .digest(identity.getBytes(StandardCharsets.UTF_8));
+            StringBuilder key = new StringBuilder(2 + hash.length * 2).append("r:");
+            for (byte value : hash) {
+                int b = value & 0xFF;
+                key.append(Character.forDigit(b >>> 4, 16))
+                    .append(Character.forDigit(b & 0xF, 16));
+            }
+            return key.toString();
+        } catch (Exception e) {
+            throw new IllegalStateException("residual note identity failed", e);
+        }
+    }
+
+    /** Alias matching the transaction note identity facade. */
+    static String noteKey(Residual residual) {
+        return residualNoteKey(residual);
+    }
+
+    private static String identityField(String value) {
+        return value == null ? "-1:" : value.length() + ":" + value;
+    }
+
     /** Reads every saved note ({@code noteKey → text}), newest-first irrelevant since it is a plain
      *  lookup map. A missing or corrupt store reads as empty, never null. */
     static Map<String, String> readNotes(Context context) {
@@ -894,11 +932,37 @@ final class BalanceData {
         catch (Exception e) { throw new IllegalStateException("metadata note read failed", e); }
     }
 
+    /** Reads a note by its already-canonical metadata key. */
+    static String getNote(Context context, String key) {
+        ensureResetComplete(context);
+        try { return MetadataStore.getNote(context, key); }
+        catch (Exception e) { throw new IllegalStateException("metadata note read failed", e); }
+    }
+
+    /** The residual's note, or null when none is saved. */
+    static String getNote(Context context, Residual residual) {
+        ensureResetComplete(context);
+        try { return MetadataStore.getNote(context, noteKey(residual)); }
+        catch (Exception e) { throw new IllegalStateException("metadata residual note read failed", e); }
+    }
+
     /** Saves (or with a blank input, clears) the note for a transaction. The text is trimmed and
      *  retained in the encrypted metadata store without a lifetime entry-count cap. */
     static void setNote(Context context, Transaction t, String text) {
         try { MetadataStore.setNote(context, t, text); }
         catch (Exception e) { throw new IllegalStateException("metadata note write failed", e); }
+    }
+
+    /** Saves (or with a blank input, clears) a note by its already-canonical metadata key. */
+    static void setNote(Context context, String key, String text) {
+        try { MetadataStore.setNote(context, key, text); }
+        catch (Exception e) { throw new IllegalStateException("metadata note write failed", e); }
+    }
+
+    /** Saves (or with a blank input, clears) the note for a residual. */
+    static void setNote(Context context, Residual residual, String text) {
+        try { MetadataStore.setNote(context, noteKey(residual), text); }
+        catch (Exception e) { throw new IllegalStateException("metadata residual note write failed", e); }
     }
 
     /** Moves the text attached to a movement that a full-history rebuild would orphan: when a stored

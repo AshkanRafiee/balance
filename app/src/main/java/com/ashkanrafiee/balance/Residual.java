@@ -63,6 +63,15 @@ final class Residual {
     }
 
     /**
+     * The stable metadata identity for this residual. It deliberately excludes the amount and the
+     * number of movements: both are derived values that can change when a delayed message fills the
+     * gap, while the statements and account that proved the gap remain the same.
+     */
+    String noteKey() {
+        return BalanceData.residualNoteKey(this);
+    }
+
+    /**
      * Every provable residual in the supplied movements, oldest first within each account slot.
      *
      * <p>Movements are grouped by the same composite key the balance screen uses, so two accounts of
