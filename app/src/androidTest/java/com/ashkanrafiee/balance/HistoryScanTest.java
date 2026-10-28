@@ -3,6 +3,7 @@ package com.ashkanrafiee.balance;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -1230,6 +1231,7 @@ public class HistoryScanTest {
         long until = at(2026, 9, 10, 9, 0);
         assertTrue("the gap must predate the late message, or it proves nothing",
             gap.get(0).toDate < until);
+        BalanceData.setNote(ctx, gap.get(0), "late cash withdrawal");
 
         // The movement the app was never told about: 2,034,872,000 out on the 7th, and the resulting
         // balance of 498,563,016 is exactly where the two known messages say it must be.
@@ -1250,6 +1252,10 @@ public class HistoryScanTest {
             persian(1405, 6, 7, 12, 0), late.date);
         assertTrue("it must predate its own arrival, which is the whole point",
             late.date < until);
+        assertEquals("an exact one-to-one late movement inherits the residual note",
+            "late cash withdrawal", BalanceData.getNote(ctx, late));
+        assertNull("the residual note key is moved, not duplicated",
+            BalanceData.getNote(ctx, gap.get(0)));
     }
 
     @Test public void aBackDatedMessageThatDoesNotFitTheChain_mustNotSilenceTheGap() throws Exception {
@@ -1263,7 +1269,8 @@ public class HistoryScanTest {
         seed("TejaratBank", TEJARAT_DEPOSIT, announced);
         seed("TejaratBank", TEJARAT_WITHDRAWAL, announced + 3600000L);
         assertEquals(2, BalanceData.scanHistory(ctx));
-        assertEquals(1, Residual.between(BalanceData.readTransactions(ctx)).size());
+        Residual original = Residual.between(BalanceData.readTransactions(ctx)).get(0);
+        BalanceData.setNote(ctx, original, "review this gap");
 
         // Same shape, same old date, but it claims a different amount and leaves a different balance.
         seed("TejaratBank", TEJARAT_MISCOUNTED_LATE_MOVEMENT, at(2026, 9, 10, 9, 0));
@@ -1274,6 +1281,8 @@ public class HistoryScanTest {
             1, still.size());
         assertEquals("and the shortfall must be reported, not quietly reduced to nothing",
             -1334872000L, still.get(0).amount);
+        assertEquals("a non-exact late message must not receive the residual note",
+            "review this gap", BalanceData.getNote(ctx, original));
     }
 
     private static long at(int y, int mo, int d, int h, int mi) {

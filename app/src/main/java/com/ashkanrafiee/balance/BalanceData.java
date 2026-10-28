@@ -1780,6 +1780,7 @@ final class BalanceData {
             Map<String, String> detectedMerchants = new LinkedHashMap<>();
             Set<String> ambiguousMerchants = new HashSet<>();
             Map<String, List<Reconcile.Entry>> windows = null;
+            List<Residual> notedResiduals = new ArrayList<>();
             boolean transactionsChanged = full;
             String selection = !full
                 ? "(" + Telephony.Sms.DATE + " > ? OR (" + Telephony.Sms.DATE
@@ -1787,6 +1788,7 @@ final class BalanceData {
             String[] args = selection != null ? new String[]{Long.toString(cursorDate),
                 Long.toString(cursorDate), Long.toString(cursorId)} : null;
             Map<String, Long> lastBalance = null;
+            List<Transaction> fresh = new ArrayList<>();
             try (Cursor cursor = context.getContentResolver().query(
                 Telephony.Sms.Inbox.CONTENT_URI,
                 new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE,
@@ -1858,6 +1860,22 @@ final class BalanceData {
                 }
                 stored = readTransactions(context);
                 if (!full) {
+                    Map<String, String> notes = readNotes(context);
+                    boolean hasResidualNotes = false;
+                    for (String key : notes.keySet()) {
+                        if (key != null && key.startsWith("r:")) {
+                            hasResidualNotes = true;
+                            break;
+                        }
+                    }
+                    if (hasResidualNotes) {
+                        for (Residual residual : Residual.between(stored)) {
+                            if (notes.containsKey(residualNoteKey(residual)))
+                                notedResiduals.add(residual);
+                        }
+                    }
+                }
+                if (!full) {
                     for (Transaction t : stored) {
                         if (t.sig != null) seenSigs.add(t.sig);
                         else seenLegacy.add(legacyEntryKey(t));
@@ -1901,7 +1919,6 @@ final class BalanceData {
                 // chain appear in their true order. Everything else keeps its current relative order.
                 rows = reorderByChains(rows, chainPosByBank);
 
-                List<Transaction> fresh = new ArrayList<>();
                 List<Transaction> placed = new ArrayList<>();
                 Set<String> addedSigs = new HashSet<>();
                 Map<Transaction, String> freeByFresh = new HashMap<>();
@@ -2170,6 +2187,8 @@ final class BalanceData {
                 completed = false;
                 return added;
             }
+            if (!full && !notedResiduals.isEmpty())
+                migrateResolvedResidualNotes(context, notedResiduals, stored, fresh);
             if (windows != null && !saveRecentMovements(context, windows)) {
                 failed = true;
                 completed = false;
@@ -2213,6 +2232,94 @@ final class BalanceData {
         } finally {
             HISTORY_SCANNING = false;
             if (added != 0 || failed || textChanged) notifyHistoryChanged();
+        }
+    }
+
+    /**
+     * Carries a note from a residual that disappeared during an incremental scan only when the
+     * scan contains one and exactly one new movement inside the residual's bracket, and that
+     * movement has the residual's signed amount. Multiple new movements are deliberately ambiguous:
+     * even if their sum closes the gap, attaching the note to one of them would invent a match.
+     * Full rebuilds do not use this path because their fresh list is the whole inbox, not a set of
+     * newly arrived messages.
+     */
+    private static void migrateResolvedResidualNotes(Context context, List<Residual> before,
+            List<Transaction> after, List<Transaction> fresh) {
+        if (before == null || before.isEmpty() || after == null || fresh == null || fresh.isEmpty())
+            return;
+        Set<String> remaining = new HashSet<>();
+        for (Residual residual : Residual.between(after)) remaining.add(residualNoteKey(residual));
+
+        Map<String, String> candidateDestinations = new LinkedHashMap<>();
+        Map<String, List<String>> sourcesByDestination = new HashMap<>();
+        for (Residual residual : before) {
+            String source = residualNoteKey(residual);
+            if (remaining.contains(source)) continue;
+            Transaction match = null;
+            int candidates = 0;
+            for (Transaction transaction : fresh) {
+                if (!residual.key().equals(storageKey(transaction.bank, transaction.account))) continue;
+                if (transaction.date <= residual.fromDate || transaction.date >= residual.toDate) continue;
+                candidates++;
+                match = transaction;
+            }
+            if (candidates != 1 || match == null || match.balance == null
+                    || match.amount != residual.amount
+                    || !residualBracketCloses(residual, after)) continue;
+            String destination = noteKey(match);
+            candidateDestinations.put(source, destination);
+            sourcesByDestination.computeIfAbsent(destination, ignored -> new ArrayList<>()).add(source);
+        }
+        Map<String, String> aliases = new LinkedHashMap<>();
+        for (Map.Entry<String, String> candidate : candidateDestinations.entrySet()) {
+            List<String> sources = sourcesByDestination.get(candidate.getValue());
+            if (sources != null && sources.size() == 1) aliases.put(candidate.getKey(), candidate.getValue());
+        }
+        if (aliases.isEmpty()) return;
+        try {
+            MetadataStore.migrateKeys(context, aliases);
+        } catch (Exception e) {
+            // The core transaction scan has already committed. A metadata failure must not make a
+            // valid late SMS disappear; the residual note remains safely stored rather than being
+            // deleted or attached to an uncertain destination.
+            Log.w(TAG, "resolved residual note migration failed", e);
+        }
+    }
+
+    /** Verifies the specific old bracket, rather than trusting only that some residual vanished. */
+    private static boolean residualBracketCloses(Residual residual, List<Transaction> transactions) {
+        Transaction opener = null;
+        Transaction closer = null;
+        int openers = 0;
+        int closers = 0;
+        long inside = 0;
+        boolean exact = true;
+        for (Transaction transaction : transactions) {
+            if (transaction == null
+                    || !residual.key().equals(storageKey(transaction.bank, transaction.account))) continue;
+            if (transaction.date == residual.fromDate && transaction.balance != null) {
+                openers++;
+                opener = transaction;
+            }
+            if (transaction.date == residual.toDate && transaction.balance != null) {
+                closers++;
+                closer = transaction;
+            }
+            if (transaction.date > residual.fromDate && transaction.date <= residual.toDate) {
+                if (exact) {
+                    try {
+                        inside = Math.addExact(inside, transaction.amount);
+                    } catch (ArithmeticException overflow) {
+                        exact = false;
+                    }
+                }
+            }
+        }
+        if (openers != 1 || closers != 1 || !exact) return false;
+        try {
+            return Math.subtractExact(Math.subtractExact(closer.balance, opener.balance), inside) == 0;
+        } catch (ArithmeticException overflow) {
+            return false;
         }
     }
 
