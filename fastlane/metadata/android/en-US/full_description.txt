@@ -1,4 +1,4 @@
-Balance reads bank SMS on your phone and shows the latest balance for supported banks — split per account when stated — plus the combined total. No account, cloud, analytics or internet permission: parsing is on-device and stored data is encrypted. Balance does not upload or send it; Report, sharing, CSV export and backup only hand selected data to the app or location you choose.
+Balance reads bank SMS on your phone and shows the latest balance for supported banks — split per account when stated — plus the total. No account, cloud, analytics or internet permission: parsing is on-device and stored data is encrypted. Balance does not upload or send it; Report, sharing, CSV export and backup only hand selected data to the app or location you choose.
 
 Currently built for users in Iran, with Iranian banks and their Persian message formats.
 
@@ -25,7 +25,7 @@ Features:
 - Password-encrypted backup and restore of balances, history, notes, tags, commitments, reasons, channels, matched payment merchants and recognized SMS source samples
 - Optional in-app lock with PIN, password or fingerprint, covering the app, the widget and screenshots/recents
 - English and Persian interface, Persian (Jalali) or Gregorian calendar, light or dark mode, and eight curated theme colors
-- Report (Scan diagnostics): see which bank messages parse and which do not, and send or copy exactly the ones you pick
+- Report (Scan diagnostics): see which bank messages parse, choose what is wrong, and send or copy your samples; OTP values are removed
 
 Free and open source. If your bank's messages are not recognized, or a balance or account looks wrong, telling us — through the issue tracker, the Report screen or email — is the fastest way to get it added.
 
