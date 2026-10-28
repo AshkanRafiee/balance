@@ -8,6 +8,9 @@ import java.text.Normalizer;
  * punctuation, because line boundaries and separators carry meaning to the bank layouts.
  */
 final class TextNormalizer {
+    /** Bump when parser-visible normalization changes so stored SMS results are rescanned. */
+    static final String VERSION = "arabic-persian-parser-v2";
+
     private TextNormalizer() {}
 
     /**

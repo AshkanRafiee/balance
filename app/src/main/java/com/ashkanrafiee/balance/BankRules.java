@@ -338,6 +338,7 @@ final class BankRules {
 
     private static int rulesVersion() {
         int v = 0;
+        v = v * 31 + TextNormalizer.VERSION.hashCode();
         v = v * 31 + AUTH_AMOUNT.pattern().hashCode();
         v = v * 31 + AUTH_RIAL_AMOUNT.pattern().hashCode();
         v = v * 31 + AUTH_CODE.pattern().hashCode();
