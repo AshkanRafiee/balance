@@ -1285,6 +1285,55 @@ public class HistoryScanTest {
             "review this gap", BalanceData.getNote(ctx, original));
     }
 
+    @Test public void aRulesDrivenFullRescan_migratesAnExactResidualNote() throws Exception {
+        long announced = at(2026, 8, 30, 9, 0);
+        seed("TejaratBank", TEJARAT_DEPOSIT, announced);
+        seed("TejaratBank", TEJARAT_WITHDRAWAL, announced + 3600000L);
+        assertEquals(2, BalanceData.scanHistory(ctx));
+        Residual gap = Residual.between(BalanceData.readTransactions(ctx)).get(0);
+        BalanceData.setNote(ctx, gap, "full rebuild note");
+
+        seed("TejaratBank", TEJARAT_LATE_MOVEMENT, at(2026, 9, 10, 9, 0));
+        ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit()
+            .putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
+                BalanceData.HISTORY_RULES_VERSION - 1).commit();
+        assertEquals("a full rebuild reprocesses all three inbox movements", 3,
+            BalanceData.scanHistory(ctx));
+
+        Transaction late = null;
+        for (Transaction transaction : BalanceData.readTransactions(ctx)) {
+            if (transaction.amount == -2034872000L) late = transaction;
+        }
+        assertNotNull(late);
+        assertEquals("full rebuild note", BalanceData.getNote(ctx, late));
+        assertNull(BalanceData.getNote(ctx, gap));
+    }
+
+    @Test public void pendingResidualNoteMigration_drainsWithoutANewSms() throws Exception {
+        Transaction opener = new Transaction("Tejarat", null, T, 100L, 800L,
+            "opener", "opener-content");
+        Transaction closer = new Transaction("Tejarat", null, T + 2_000L, 0L, 600L,
+            "closer", "closer-content");
+        List<Transaction> before = java.util.Arrays.asList(closer, opener);
+        BalanceData.writeTransactions(ctx, before);
+        Residual gap = Residual.between(before).get(0);
+        BalanceData.setNote(ctx, gap, "queued note");
+
+        Transaction late = new Transaction("Tejarat", null, T + 1_000L, -200L, 600L,
+            "late", "late-content");
+        BalanceData.writeTransactions(ctx, java.util.Arrays.asList(closer, late, opener));
+        java.util.Map<String, String> aliases = new java.util.LinkedHashMap<>();
+        aliases.put(BalanceData.residualNoteKey(gap), BalanceData.noteKey(late));
+        assertTrue(DataGeneration.dataPrefs(ctx).edit()
+            .putString(BalanceData.KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS,
+                BalanceData.encryptStorePayload(BalanceData.serializeTextMap(aliases)))
+            .commit());
+
+        assertEquals(0, BalanceData.scanHistory(ctx));
+        assertEquals("queued note", BalanceData.getNote(ctx, late));
+        assertNull(BalanceData.getNote(ctx, gap));
+    }
+
     private static long at(int y, int mo, int d, int h, int mi) {
         java.util.Calendar c = java.util.Calendar.getInstance();
         c.clear();

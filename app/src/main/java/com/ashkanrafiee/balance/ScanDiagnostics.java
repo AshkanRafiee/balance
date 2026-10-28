@@ -2,6 +2,7 @@ package com.ashkanrafiee.balance;
 
 import android.content.Context;
 
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -46,14 +47,9 @@ final class ScanDiagnostics {
 
     /** OTP values must never leave the device through a diagnostics report. The surrounding
      * authorization layout remains shareable so merchant parsing can still be fixed. */
-    private static final String OTP_DIGITS = "0-9０-９۰-۹٠-٩";
     private static final Pattern OTP_MARKER = Pattern.compile(
         "(?:رمز|پویا|otp|one[- ]?time|کد\\s*(?:تایید|تأیید)|"
             + "(?<![A-Za-z])code(?![A-Za-z]))", Pattern.CASE_INSENSITIVE);
-    private static final Pattern OTP_CODE = Pattern.compile(
-        "(?<![" + OTP_DIGITS + "])[" + OTP_DIGITS + "]{4,16}(?![" + OTP_DIGITS + "])");
-    private static final Pattern HASHED_OTP_CODE = Pattern.compile(
-        "(?<=[#＃])\\s*[" + OTP_DIGITS + "]{4,16}(?![" + OTP_DIGITS + "])");
 
     /** One recognized bank and how many of its SMS messages the scan parsed. */
     static final class BankHit {
@@ -344,16 +340,164 @@ final class ScanDiagnostics {
             String original = lines[i];
             String normalized = TextNormalizer.normalize(original);
             boolean marker = OTP_MARKER.matcher(normalized).find();
-            String line = marker ? OTP_CODE.matcher(original).replaceAll("[redacted]") : original;
-            line = HASHED_OTP_CODE.matcher(line).replaceAll("[redacted]");
-            if (!marker && redactNextNumericLine && normalized.trim().matches("[0-9]{4,8}")) {
-                line = original.replaceAll("[" + OTP_DIGITS + "]", "[redacted]");
+            String line = marker ? redactDigitRuns(original) : original;
+            if (!marker) line = redactHashCodes(line);
+            if (!marker && redactNextNumericLine && isNumericOtpLine(normalized)) {
+                line = redactDigitRuns(original);
             }
             if (i > 0) out.append('\n');
             out.append(line);
-            redactNextNumericLine = marker && !OTP_CODE.matcher(normalized).find();
+            redactNextNumericLine = marker && !containsOtpRun(normalized);
         }
         return out.toString();
+    }
+
+    /** Redacts digit sequences even when Unicode compatibility digits, bidi controls, combining
+     * marks, or spaces separate the code points in the source SMS. A marker line is intentionally
+     * conservative: any sequence of four or more digit characters is safer to remove than to leak. */
+    private static String redactDigitRuns(String input) {
+        StringBuilder out = new StringBuilder(input.length());
+        for (int i = 0; i < input.length();) {
+            int cp = input.codePointAt(i);
+            int next = i + Character.charCount(cp);
+            if (!otpDigit(cp)) {
+                out.appendCodePoint(cp);
+                i = next;
+                continue;
+            }
+            int end = next;
+            int digits = 1;
+            while (end < input.length()) {
+                int separated = end;
+                while (separated < input.length()) {
+                    int separator = input.codePointAt(separated);
+                    if (!otpSeparator(separator)) break;
+                    separated += Character.charCount(separator);
+                }
+                if (separated >= input.length() || !otpDigit(input.codePointAt(separated))) break;
+                end = separated + Character.charCount(input.codePointAt(separated));
+                digits++;
+            }
+            if (digits >= 4) out.append("[redacted]");
+            else out.append(input, i, end);
+            i = end;
+        }
+        return out.toString();
+    }
+
+    /** Redacts every hash-prefixed code, not just the last one on a line. */
+    private static String redactHashCodes(String input) {
+        StringBuilder out = new StringBuilder(input.length());
+        for (int i = 0; i < input.length();) {
+            int cp = input.codePointAt(i);
+            int next = i + Character.charCount(cp);
+            out.appendCodePoint(cp);
+            i = next;
+            if (cp != '#' && cp != '＃') continue;
+
+            int separated = i;
+            while (separated < input.length()) {
+                int separator = input.codePointAt(separated);
+                if (!otpSeparator(separator)) break;
+                separated += Character.charCount(separator);
+            }
+            if (separated >= input.length()) continue;
+            int digit = input.codePointAt(separated);
+            if (!otpDigit(digit)) continue;
+
+            int end = separated + Character.charCount(digit);
+            int digits = otpDigitCount(digit);
+            while (end < input.length()) {
+                int nextSeparated = end;
+                while (nextSeparated < input.length()) {
+                    int separator = input.codePointAt(nextSeparated);
+                    if (!otpSeparator(separator)) break;
+                    nextSeparated += Character.charCount(separator);
+                }
+                if (nextSeparated >= input.length()) break;
+                int nextDigit = input.codePointAt(nextSeparated);
+                if (!otpDigit(nextDigit)) break;
+                digits += otpDigitCount(nextDigit);
+                end = nextSeparated + Character.charCount(nextDigit);
+            }
+            if (digits >= 4) {
+                out.append("[redacted]");
+                i = end;
+            } else {
+                out.append(input, i, end);
+                i = end;
+            }
+        }
+        return out.toString();
+    }
+
+    private static boolean otpDigit(int cp) {
+        return otpDigitCount(cp) > 0;
+    }
+
+    private static int otpDigitCount(int cp) {
+        if (Character.digit(cp, 10) >= 0) return 1;
+        String compatible = Normalizer.normalize(new String(Character.toChars(cp)),
+            Normalizer.Form.NFKC);
+        int count = 0;
+        for (int i = 0; i < compatible.length();) {
+            int normalized = compatible.codePointAt(i);
+            i += Character.charCount(normalized);
+            if (Character.digit(normalized, 10) >= 0) count++;
+        }
+        return count;
+    }
+
+    private static boolean otpSeparator(int cp) {
+        int type = Character.getType(cp);
+        return Character.isWhitespace(cp) || Character.isSpaceChar(cp)
+            || type == Character.NON_SPACING_MARK
+            || type == Character.COMBINING_SPACING_MARK
+            || type == Character.ENCLOSING_MARK
+            || type == Character.FORMAT
+            || cp == 0x061C || cp == 0x200C || cp == 0x200D || cp == 0x200E || cp == 0x200F
+            || cp == 0xFEFF || (cp >= 0x202A && cp <= 0x202E)
+            || (cp >= 0x2066 && cp <= 0x2069);
+    }
+
+    private static boolean isNumericOtpLine(String input) {
+        int digits = 0;
+        for (int i = 0; i < input.length();) {
+            int cp = input.codePointAt(i);
+            i += Character.charCount(cp);
+            if (otpDigit(cp)) digits += otpDigitCount(cp);
+            else if (!otpSeparator(cp)) return false;
+        }
+        return digits >= 4 && digits <= 16;
+    }
+
+    private static boolean containsOtpRun(String input) {
+        for (int i = 0; i < input.length();) {
+            int cp = input.codePointAt(i);
+            int next = i + Character.charCount(cp);
+            if (!otpDigit(cp)) {
+                i = next;
+                continue;
+            }
+            int digits = otpDigitCount(cp);
+            int end = next;
+            while (end < input.length()) {
+                int separated = end;
+                while (separated < input.length()) {
+                    int separator = input.codePointAt(separated);
+                    if (!otpSeparator(separator)) break;
+                    separated += Character.charCount(separator);
+                }
+                if (separated >= input.length()) break;
+                int nextDigit = input.codePointAt(separated);
+                if (!otpDigit(nextDigit)) break;
+                digits += otpDigitCount(nextDigit);
+                end = separated + Character.charCount(nextDigit);
+            }
+            if (digits >= 4) return true;
+            i = end;
+        }
+        return false;
     }
 
     /** The subject line for a per-sender report. */

@@ -250,6 +250,14 @@ public class CsvExportTest {
          assertEquals(CsvExport.KIND_MOVEMENT, cells.get(12));
     }
 
+    @Test public void customCurrencyLabel_isSpreadsheetInert() {
+        CurrencyHelper.setCurrency(ctx,
+            CurrencyHelper.CUSTOM_PREFIX + "=HYPERLINK(\"https://x\")");
+        Transaction t = new Transaction("Mellat", DATE_2026, 1_000L);
+        List<String> cells = parse(line(CsvExport.csv(ctx, Arrays.asList(t), noText()), 1));
+        assertEquals("'=HYPERLINK(\"https://x\")", cells.get(7));
+    }
+
     @Test public void row_tagsForAnotherTransaction_areNotAttached() {
         Transaction t = new Transaction("bank_melli", null, DATE_2026, 1_250_000L, "sig",
             "content-tags");

@@ -1131,6 +1131,11 @@ public class MainActivity extends Activity {
             String password = pendingBackupPassword;
             pendingBackupPassword = null;
             if (resultCode != RESULT_OK || data == null || data.getData() == null || password == null) return;
+            if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) {
+                pendingLockAction = null;
+                if (lockOverlay != null) lockOverlay.showLock();
+                return;
+            }
             createBackup(data.getData(), password);
         } else if (requestCode == REQ_PICK_RESTORE) {
             LockManager.cancelUnlockHold();

@@ -317,6 +317,34 @@ public class ScanDiagnosticsTest {
         assertFalse(txt.contains("１２３４５６"));
     }
 
+    @Test public void senderReport_redactsOtpSeparatedByInvisibleOrBidiCharacters() {
+        String body = "رمز: 1\u200B2\u20603\u20664\u0301\nرمز پویا: ۱۲\u202e۳۴۵۶";
+        String txt = ScanDiagnostics.sanitizeForReport(body);
+        assertTrue(txt.contains("[redacted]"));
+        assertFalse(txt.contains("1\u200B2\u20603\u20664"));
+        assertFalse(txt.contains("۱۲\u202e۳۴۵۶"));
+    }
+
+    @Test public void senderReport_redactsSpacedAndCombiningMarkDigits() {
+        String body = "رمز: 1 2\u03013 4\u00A0";
+        String txt = ScanDiagnostics.sanitizeForReport(body);
+        assertTrue(txt.contains("[redacted]"));
+        assertFalse(txt.contains("1 2\u03013 4"));
+    }
+
+    @Test public void senderReport_redactsCompatibilityDigits() {
+        String body = "رمز: ①②③④ ㊿①②";
+        String txt = ScanDiagnostics.sanitizeForReport(body);
+        assertTrue(txt.contains("[redacted]"));
+        assertFalse(txt.contains("①②③④"));
+        assertFalse(txt.contains("㊿①②"));
+    }
+
+    @Test public void senderReport_redactsEveryHashedCodeOnALine() {
+        String txt = ScanDiagnostics.sanitizeForReport("reference #1234 and ＃۵۶۷۸");
+        assertEquals("reference #[redacted] and ＃[redacted]", txt);
+    }
+
     @Test public void senderReport_noIssues_omitsTheLine() {
         List<ScanDiagnostics.Message> sel = new ArrayList<>();
         sel.add(new ScanDiagnostics.Message("lay out 1,000 Toman", 1000L));

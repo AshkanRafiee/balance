@@ -156,19 +156,70 @@ final class DataGeneration {
         }
     }
 
-    /** Test isolation seam; production resets intentionally keep the published generation. */
-    static void clearForTests(Context input) {
+    /** Deletes every superseded generation while retaining the selected generation and its data. */
+    static void clearRollbackGenerations(Context input) {
         synchronized (BalanceData.class) {
             Context root = rootContext(input);
             Manifest manifest = null;
             try { manifest = readManifest(root); } catch (Exception ignored) { }
-            if (manifest != null) root.deleteSharedPreferences(prefsName(manifest.generation));
-            deleteRecursively(generationsDirectory(root));
-            File manifestFile = manifestFile(root);
-            if (manifestFile.exists()) manifestFile.delete();
-            File backup = new File(manifestFile.getPath() + ".bak");
-            if (backup.exists()) backup.delete();
+            File directory = generationsDirectory(root);
+            File[] children = directory.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    if (manifest != null && child.isDirectory()
+                            && child.getName().equals(manifest.generation)) continue;
+                    if (child.isDirectory()) root.deleteSharedPreferences(prefsName(child.getName()));
+                    deleteRecursively(child);
+                }
+            }
+            deleteGenerationPreferences(root, manifest == null ? null : manifest.generation);
+            File[] remaining = directory.listFiles();
+            if (manifest == null && remaining != null && remaining.length != 0)
+                throw new IllegalStateException("rollback generation data could not be deleted");
+            if (manifest != null && remaining != null) {
+                for (File child : remaining) {
+                    if (child.isDirectory() && !child.getName().equals(manifest.generation))
+                        throw new IllegalStateException("rollback generation data could not be deleted");
+                }
+            }
         }
+    }
+
+    /** Deletes the published generation, every rollback generation and their preference namespaces. */
+    static void clearAllGenerations(Context input) {
+        synchronized (BalanceData.class) {
+            Context root = rootContext(input);
+            File directory = generationsDirectory(root);
+            deleteRecursively(directory);
+            deleteGenerationPreferences(root, null);
+            File manifestFile = manifestFile(root);
+            if (manifestFile.exists() && !manifestFile.delete() && manifestFile.exists())
+                throw new IllegalStateException("generation manifest could not be deleted");
+            File backup = new File(manifestFile.getPath() + ".bak");
+            if (backup.exists() && !backup.delete() && backup.exists())
+                throw new IllegalStateException("generation manifest backup could not be deleted");
+            if (directory.exists()) throw new IllegalStateException("generation data could not be deleted");
+        }
+    }
+
+    private static void deleteGenerationPreferences(Context root, String keepGeneration) {
+        File sharedPrefs = new File(root.getApplicationInfo().dataDir, "shared_prefs");
+        File[] files = sharedPrefs.listFiles();
+        if (files == null) return;
+        String keep = keepGeneration == null ? null : prefsName(keepGeneration) + ".xml";
+        String prefix = PREFS_PREFIX;
+        for (File file : files) {
+            if (!file.getName().startsWith(prefix)
+                    || file.getName().equals(keep)
+                    || (keep != null && file.getName().equals(keep + ".bak"))) continue;
+            if (!file.delete() && file.exists())
+                throw new IllegalStateException("generation preferences could not be deleted");
+        }
+    }
+
+    /** Test isolation seam. */
+    static void clearForTests(Context input) {
+        clearAllGenerations(input);
     }
 
     /** Refreshes the fail-closed database inventory after an explicit store reset. */

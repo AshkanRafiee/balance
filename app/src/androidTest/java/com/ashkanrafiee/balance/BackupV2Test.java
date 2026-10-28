@@ -405,6 +405,10 @@ public class BackupV2Test {
             generations.size() <= 2);
         assertEquals(1, BalanceData.readCommitments(context).size());
         assertEquals("Kept", BalanceData.readCommitments(context).get(0).name);
+
+        BalanceData.reset(context, false);
+        assertEquals("a full reset must remove rollback generations but retain the active one", 1,
+            DataGeneration.generationNamesForTests(context).size());
     }
 
     @Test public void restore_includeDeleted_bringsBackDeletedAndForgetsTombstone()

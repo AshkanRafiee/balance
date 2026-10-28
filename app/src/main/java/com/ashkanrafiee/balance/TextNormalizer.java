@@ -9,7 +9,7 @@ import java.text.Normalizer;
  */
 final class TextNormalizer {
     /** Bump when parser-visible normalization changes so stored SMS results are rescanned. */
-    static final String VERSION = "arabic-persian-parser-v2";
+    static final String VERSION = "arabic-persian-parser-v3";
 
     private TextNormalizer() {}
 
@@ -73,7 +73,8 @@ final class TextNormalizer {
     }
 
     private static boolean isInvisible(int cp) {
-        return cp == 0x061C || cp == 0x200C || cp == 0x200D || cp == 0x200E || cp == 0x200F
+        return Character.getType(cp) == Character.FORMAT
+            || cp == 0x061C || cp == 0x200C || cp == 0x200D || cp == 0x200E || cp == 0x200F
             || cp == 0xFEFF || (cp >= 0x202A && cp <= 0x202E)
             || (cp >= 0x2066 && cp <= 0x2069);
     }

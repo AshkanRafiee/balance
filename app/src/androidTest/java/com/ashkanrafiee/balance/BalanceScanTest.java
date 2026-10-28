@@ -672,6 +672,19 @@ public class BalanceScanTest {
         assertNull(BalanceData.getNote(ctx, noteTarget));
     }
 
+    @Test public void resetCannotDowngradeAnAlreadyRequestedNoteDeletion() {
+        Transaction noteTarget = new Transaction("Saman", T, 200_000L);
+        BalanceData.setNote(ctx, noteTarget, "must be deleted");
+        assertTrue(prefs().edit()
+            .putBoolean(BalanceData.KEY_RESET_IN_PROGRESS, true)
+            .putBoolean(BalanceData.KEY_RESET_ALSO_NOTES, true)
+            .commit());
+
+        BalanceData.reset(ctx, false);
+
+        assertNull(BalanceData.getNote(ctx, noteTarget));
+    }
+
     @Test public void interruptedReset_balanceScanFirstRebuildsBothStoresWithoutOldData() throws Exception {
         seed("500095", "برداشت: 100 موجودی: 900", T + 1000);
         LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
