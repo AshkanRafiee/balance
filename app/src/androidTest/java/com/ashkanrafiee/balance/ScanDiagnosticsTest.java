@@ -303,6 +303,20 @@ public class ScanDiagnosticsTest {
         assertFalse(txt.contains("123456789"));
     }
 
+    @Test public void senderReport_redactsArabicOtpMarkerAndDigits() {
+        String body = "خرید\nفروشگاه نمونه\nمبلغ:۱۲۰٬۰۰۰\nكُد تَأْيِيد: ۱۲۳۴۵۶";
+        String txt = ScanDiagnostics.sanitizeForReport(body);
+        assertTrue(txt.contains("[redacted]"));
+        assertFalse(txt.contains("۱۲۳۴۵۶"));
+    }
+
+    @Test public void senderReport_redactsArabicOtpOnFollowingLine() {
+        String body = "پويا\n１２３４５６";
+        String txt = ScanDiagnostics.sanitizeForReport(body);
+        assertTrue(txt.contains("[redacted]"));
+        assertFalse(txt.contains("１２３４５６"));
+    }
+
     @Test public void senderReport_noIssues_omitsTheLine() {
         List<ScanDiagnostics.Message> sel = new ArrayList<>();
         sel.add(new ScanDiagnostics.Message("lay out 1,000 Toman", 1000L));

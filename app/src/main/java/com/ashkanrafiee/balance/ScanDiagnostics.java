@@ -45,13 +45,14 @@ final class ScanDiagnostics {
 
     /** OTP values must never leave the device through a diagnostics report. The surrounding
      * authorization layout remains shareable so merchant parsing can still be fixed. */
+    private static final String OTP_DIGITS = "0-9０-９۰-۹٠-٩";
     private static final Pattern OTP_MARKER = Pattern.compile(
         "(?:رمز|پویا|otp|one[- ]?time|کد\\s*(?:تایید|تأیید)|"
             + "(?<![A-Za-z])code(?![A-Za-z]))", Pattern.CASE_INSENSITIVE);
     private static final Pattern OTP_CODE = Pattern.compile(
-        "(?<![0-9۰-۹٠-٩])[0-9۰-۹٠-٩]{4,16}(?![0-9۰-۹٠-٩])");
+        "(?<![" + OTP_DIGITS + "])[" + OTP_DIGITS + "]{4,16}(?![" + OTP_DIGITS + "])");
     private static final Pattern HASHED_OTP_CODE = Pattern.compile(
-        "(?<=[#＃])\\s*[0-9۰-۹٠-٩]{4,16}(?![0-9۰-۹٠-٩])");
+        "(?<=[#＃])\\s*[" + OTP_DIGITS + "]{4,16}(?![" + OTP_DIGITS + "])");
 
     /** One recognized bank and how many of its SMS messages the scan parsed. */
     static final class BankHit {
@@ -340,16 +341,16 @@ final class ScanDiagnostics {
         boolean redactNextNumericLine = false;
         for (int i = 0; i < lines.length; i++) {
             String original = lines[i];
-            boolean marker = OTP_MARKER.matcher(original).find();
+            String normalized = TextNormalizer.normalize(original);
+            boolean marker = OTP_MARKER.matcher(normalized).find();
             String line = marker ? OTP_CODE.matcher(original).replaceAll("[redacted]") : original;
             line = HASHED_OTP_CODE.matcher(line).replaceAll("[redacted]");
-            if (!marker && redactNextNumericLine && original.trim()
-                    .matches("[0-9۰-۹٠-٩]{4,8}")) {
-                line = original.replaceAll("[0-9۰-۹٠-٩]", "[redacted]");
+            if (!marker && redactNextNumericLine && normalized.trim().matches("[0-9]{4,8}")) {
+                line = original.replaceAll("[" + OTP_DIGITS + "]", "[redacted]");
             }
             if (i > 0) out.append('\n');
             out.append(line);
-            redactNextNumericLine = marker && !OTP_CODE.matcher(original).find();
+            redactNextNumericLine = marker && !OTP_CODE.matcher(normalized).find();
         }
         return out.toString();
     }

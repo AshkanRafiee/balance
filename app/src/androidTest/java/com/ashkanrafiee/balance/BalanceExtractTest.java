@@ -180,4 +180,9 @@ public class BalanceExtractTest {
         assertNull(BalanceData.parseMovement("Mellat", "10002533",
             "رمز ورود شما: 123456", 1700000000000L, false, 0L));
     }
+
+    @Test public void extractTransaction_otpArabicFormsAreRejectedBeforeMovementParsing() {
+        assertNull(BalanceData.extractTransaction(
+            "كُد تَأْيِيد: ۱۲۳۴۵۶\nموجودى: ۵۰۰۰"));
+    }
 }
