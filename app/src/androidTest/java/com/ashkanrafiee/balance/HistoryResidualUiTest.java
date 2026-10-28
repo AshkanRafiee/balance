@@ -175,6 +175,21 @@ public class HistoryResidualUiTest {
         await(() -> findByDescriptionContaining("Unaccounted") != null, 10_000);
     }
 
+    @Test public void aDetectedGap_showsItsSavedNoteWithoutChangingAmberMeaning() {
+        storeAGap();
+        Residual gap = Residual.between(BalanceData.readTransactions(ctx)).get(0);
+        BalanceData.setNote(ctx, gap, "cash withdrawal to check");
+        launch();
+
+        assertNotNull("the saved residual note must be visible",
+            findByText("cash withdrawal to check"));
+        View row = findByDescriptionContaining("cash withdrawal to check");
+        assertNotNull("the amber row must announce its note", row);
+        assertTrue("the row remains the explanation action", row.isClickable());
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> row.performClick());
+        await(() -> findByText(ctx.getString(R.string.residual_note_edit)) != null, 10_000);
+    }
+
     @Test public void aDetectedGap_tappingTheExplanationsButton_survivesBuildingIt() {
         storeAGap();
         launch();

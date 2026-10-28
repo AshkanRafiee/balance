@@ -180,6 +180,26 @@ public class HistoryReaderTest {
         assertEquals(-37L, result.total);
     }
 
+    @Test public void summaryWithResiduals_searchesAndLoadsResidualNotes() throws Exception {
+        long first = epoch(2026, 9, 10);
+        List<Transaction> stored = Arrays.asList(
+            new Transaction(BANK, ACCOUNT, first + 2 * DAY, -5L, 283L, "later", null),
+            new Transaction(BANK, ACCOUNT, first, -30L, 290L, "first", null));
+        assertTrue(BalanceData.writeTransactions(context, stored));
+        Residual residual = Residual.between(stored).get(0);
+        BalanceData.setNote(context, residual, "cash withdrawal");
+        String day = CalDate.fromGregorian(2026, 9, 12, false).key();
+        HistoryReader.Request request = new HistoryReader.Request(false, 1, BANK, ACCOUNT,
+            HistoryActivity.Filter.ALL, "cash withdrawal", null, Collections.singleton(day), 1, 4);
+
+        HistoryReader.Result result = HistoryReader.summaryWithResiduals(context, request);
+        assertEquals(0L, result.movementCount);
+        assertEquals(-2L, result.total);
+        HistoryReader.DayRows rows = result.requestedDayRows.get(day);
+        assertEquals(1, rows.residuals.size());
+        assertEquals("cash withdrawal", rows.metadata.get(BalanceData.residualNoteKey(residual)).note);
+    }
+
     @Test public void summaryConversionKeepsAggregatesAndOnlyRequestedDayRows() throws Exception {
         long newer = epoch(2026, 9, 15);
         List<Transaction> stored = Arrays.asList(

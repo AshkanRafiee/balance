@@ -135,6 +135,15 @@ public class HistorySearchTest {
         assertFalse(HistoryActivity.matchesSearch(hay, "groceries"));
     }
 
+    @Test public void residualHaystack_includesItsNote() {
+        Residual r = new Residual(MELLAT, ONE, BASE - DAY, BASE, -5_000_000L, 0);
+        String hay = HistoryActivity.residualSearchText(r, "Mellat", "5,000,000",
+            "Withdrawal", "Unaccounted", "August 26 2026", "20:16", "August", "2026/8/26",
+            "cash withdrawal to check");
+        assertTrue(HistoryActivity.matchesSearch(hay, "cash withdrawal"));
+        assertFalse(HistoryActivity.matchesSearch(hay, "salary"));
+    }
+
     // ---- list filtering -------------------------------------------------------------
 
     @Test public void filterBySearch_keepsMatchesInOrder() {

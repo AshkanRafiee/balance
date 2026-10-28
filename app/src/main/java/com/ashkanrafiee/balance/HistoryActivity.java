@@ -1101,7 +1101,7 @@ public final class HistoryActivity extends Activity {
                             });
                             staging.emit(residual -> {
                                 if (!tagSelection.isEmpty() || !exportResidualMatches(app, residual,
-                                        activeFilter, iran, tokens)) return;
+                                        activeFilter, iran, tokens, lookup)) return;
                                 residuals.accept(residual);
                             }, CsvExport.STREAM_PAGE_SIZE);
                         }
@@ -1260,7 +1260,7 @@ public final class HistoryActivity extends Activity {
     }
 
     private boolean exportResidualMatches(Context context, Residual residual, Filter activeFilter,
-            boolean iran, List<String> tokens) {
+            boolean iran, List<String> tokens, CsvExport.TextLookup lookup) throws Exception {
         if (activeFilter.direction == DIR_DEPOSIT && residual.amount <= 0) return false;
         if (activeFilter.direction == DIR_WITHDRAWAL && residual.amount >= 0) return false;
         CalDate date = calOf(residual.toDate, iran);
@@ -1269,12 +1269,13 @@ public final class HistoryActivity extends Activity {
         if (tokens.isEmpty()) return true;
         boolean fa = LocaleHelper.isPersian(context);
         boolean toman = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(context));
+        String note = lookup.note(BalanceData.residualNoteKey(residual));
         String haystack = residualSearchText(residual,
             BankRules.displayName(context, residual.bank), CurrencyHelper.amount(toman, fa,
                 residual.amount), residual.amount > 0 ? context.getString(R.string.history_deposit)
                 : context.getString(R.string.history_withdrawal), context.getString(R.string.residual_label),
             dateText(date, fa), timeText(residual.toDate, fa),
-            CalDate.monthName(date.month, iran, fa), compactDate(date, fa));
+            CalDate.monthName(date.month, iran, fa), compactDate(date, fa), note);
         return matchesTokens(haystack, tokens);
     }
 
@@ -2876,7 +2877,8 @@ public final class HistoryActivity extends Activity {
         return residualSearchText(r, pass.display(r.bank),
             pass.amount(r.amount), pass.direction(r.amount), pass.residualLabel,
             dateText(d, pass.persian), timeText(r.toDate, pass.persian),
-            monthName(d.month, pass.persian), compactDate(d, pass.persian));
+            monthName(d.month, pass.persian), compactDate(d, pass.persian),
+            pass.notes == null ? null : pass.notes.get(BalanceData.residualNoteKey(r)));
     }
 
     // ====================================================================
@@ -4148,8 +4150,24 @@ public final class HistoryActivity extends Activity {
         wp.setMarginEnd(dp(4));
         wp.topMargin = dp(2);
         cell.addView(why, wp);
-        cell.setContentDescription(getString(R.string.residual_row_cd, signedAmount(r.amount)));
+        String note = residualNote(r);
+        if (note != null && !note.isEmpty()) {
+            addChip(cell, note, false, badgeBg, badgeFg, null, 37);
+        }
+        StringBuilder description = new StringBuilder(
+            getString(R.string.residual_row_cd, signedAmount(r.amount)));
+        if (note != null && !note.isEmpty()) {
+            description.append(' ').append(getString(R.string.row_fact_note, note));
+        }
+        description.append(' ').append(getString(R.string.residual_note_row_hint));
+        cell.setContentDescription(description.toString());
         return cell;
+    }
+
+    /** Returns the note projected with the loaded page, without a metadata read per row. */
+    private String residualNote(Residual r) {
+        HistoryReader.Metadata metadata = pageMetadata.get(BalanceData.residualNoteKey(r));
+        return metadata == null ? null : metadata.note;
     }
 
     /**
@@ -4162,11 +4180,94 @@ public final class HistoryActivity extends Activity {
             dateText(calOfResidual(r.fromDate)),
             dateText(calOfResidual(r.toDate)),
             BankRules.displayName(this, r.bank));
+        String note = residualNote(r);
         android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.residual_detail_title, signedAmount(r.amount)))
             .setMessage(body)
             .setPositiveButton(android.R.string.ok, null)
+            .setNeutralButton(getString(note == null || note.isEmpty()
+                ? R.string.residual_note_add : R.string.residual_note_edit),
+                null)
             .create();
+        dlg.setOnShowListener(d -> {
+            android.widget.Button noteButton =
+                dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL);
+            if (noteButton != null) {
+                noteButton.setOnClickListener(v -> {
+                    dlg.dismiss();
+                    residualNoteDialog(r);
+                });
+            }
+        });
+        showDialog(dlg);
+    }
+
+    /** Note-only editor for an unaccounted amount. Residuals deliberately have no tag editor. */
+    private void residualNoteDialog(final Residual r) {
+        final String key = BalanceData.residualNoteKey(r);
+        final String existing;
+        try {
+            existing = BalanceData.getNote(this, key);
+        } catch (RuntimeException error) {
+            android.util.Log.w("BalanceHistory", "residual note metadata read failed", error);
+            Toast.makeText(this, R.string.note_load_failed, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        final EditText input = new EditText(this);
+        input.setSingleLine(false);
+        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+            | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        input.setHorizontallyScrolling(false);
+        input.setGravity(Gravity.TOP | Gravity.START);
+        input.setHint(getString(R.string.residual_note_hint));
+        input.setTextColor(fg);
+        input.setHintTextColor(muted);
+        input.setText(existing == null ? "" : existing);
+        input.setSelection(input.getText().length());
+
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(dp(20), dp(10), dp(20), 0);
+        wrap.addView(input);
+
+        boolean hasNote = existing != null && !existing.isEmpty();
+        android.app.AlertDialog.Builder dialogBuilder = new android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.residual_note_title, signedAmount(r.amount)))
+            .setView(wrap)
+            .setPositiveButton(getString(R.string.note_save), null)
+            .setNegativeButton(getString(R.string.lock_cancel), null);
+        if (hasNote) dialogBuilder.setNeutralButton(getString(R.string.note_clear), null);
+        android.app.AlertDialog dlg = dialogBuilder.create();
+        dlg.setOnShowListener(d -> {
+            dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                try {
+                    BalanceData.setNote(this, key, input.getText().toString());
+                } catch (RuntimeException error) {
+                    android.util.Log.w("BalanceHistory", "residual note save failed", error);
+                    Toast.makeText(this, R.string.note_save_failed, Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                dlg.dismiss();
+                render();
+            });
+            android.widget.Button clearNote =
+                dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL);
+            if (clearNote != null) {
+                clearNote.setOnClickListener(v -> {
+                    try {
+                        BalanceData.setNote(this, key, null);
+                    } catch (RuntimeException error) {
+                        android.util.Log.w("BalanceHistory", "residual note clear failed", error);
+                        Toast.makeText(this, R.string.note_save_failed, Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    dlg.dismiss();
+                    render();
+                });
+            }
+        });
         showDialog(dlg);
     }
 
@@ -5048,10 +5149,18 @@ public final class HistoryActivity extends Activity {
     }
 
     /** Everything unaccounted money can be found by: the bank, the account, the amount, the
-     *  direction word, the "Unaccounted" label itself, and the date it is placed on. */
+     *  direction word, the "Unaccounted" label, the user's note, and the date it is placed on. */
     static String residualSearchText(Residual r, String bankDisplay, String amountFormatted,
             String directionText, String residualLabel, String dateText, String timeText,
             String monthName, String compactDate) {
+        return residualSearchText(r, bankDisplay, amountFormatted, directionText, residualLabel,
+            dateText, timeText, monthName, compactDate, null);
+    }
+
+    /** Same residual haystack with the note attached to the residual's account slot. */
+    static String residualSearchText(Residual r, String bankDisplay, String amountFormatted,
+            String directionText, String residualLabel, String dateText, String timeText,
+            String monthName, String compactDate, String note) {
         StringBuilder hay = new StringBuilder();
         if (r != null) {
             searchField(hay, r.bank);
@@ -5063,6 +5172,7 @@ public final class HistoryActivity extends Activity {
         searchField(hay, amountFormatted);
         searchField(hay, directionText);
         searchField(hay, residualLabel);
+        searchField(hay, note);
         searchField(hay, dateText);
         searchField(hay, timeText);
         searchField(hay, monthName);

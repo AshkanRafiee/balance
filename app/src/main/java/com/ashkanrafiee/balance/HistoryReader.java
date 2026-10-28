@@ -667,14 +667,16 @@ final class HistoryReader {
             return true;
         }
 
-        boolean matchesResidual(Residual residual) {
+        boolean matchesResidual(Residual residual) throws Exception {
             if (tokens.isEmpty()) return true;
             CalDate date = calendarDate(residual.toDate, request.iran, dateCalendar());
+            String note = metadata.text(MetadataStore.NOTES,
+                BalanceData.residualNoteKey(residual));
             String haystack = HistoryActivity.residualSearchText(residual,
                 BankRules.displayName(context, residual.bank),
                 CurrencyHelper.amount(toman, persian, residual.amount), direction(residual.amount),
                 residualLabel, dateText(date), clock.format(residual.toDate),
-                CalDate.monthName(date.month, request.iran, persian), compactDate(date));
+                CalDate.monthName(date.month, request.iran, persian), compactDate(date), note);
             return HistoryActivity.matchesTokens(haystack, tokens);
         }
 
@@ -922,6 +924,7 @@ final class HistoryReader {
         List<Transaction> transactions = new ArrayList<>();
         List<Residual> residuals = new ArrayList<>();
         List<String> keys = new ArrayList<>();
+        List<String> transactionKeys = new ArrayList<>();
         CalDate date = null;
         for (HistoryTimeline.Entry entry : page.entries) {
             if (date == null) date = calendarDate(entry.date, iran, dateCalendar());
@@ -929,9 +932,12 @@ final class HistoryReader {
             rows.add(row);
             if (entry.transaction != null) {
                 transactions.add(entry.transaction);
-                keys.add(BalanceData.noteKey(entry.transaction));
+                String key = BalanceData.noteKey(entry.transaction);
+                keys.add(key);
+                transactionKeys.add(key);
             } else {
                 residuals.add(entry.residual);
+                keys.add(BalanceData.residualNoteKey(entry.residual));
             }
         }
         // One indexed query per kind for the whole page instead of four store accesses per row.
@@ -939,7 +945,9 @@ final class HistoryReader {
         Map<String, String> reasons = metadata.texts(MetadataStore.REASONS, keys);
         Map<String, String> channels = metadata.texts(MetadataStore.CHANNELS, keys);
         Map<String, String> merchants = metadata.texts(MetadataStore.MERCHANTS, keys);
-        Map<String, List<String>> tags = metadata.tagsFor(keys);
+        // Residuals have notes but never tags. Keep the tag query transaction-only even if a
+        // residual key happens to share the metadata store's shape with a movement key.
+        Map<String, List<String>> tags = metadata.tagsFor(transactionKeys);
         Map<String, Metadata> pageMetadata = new LinkedHashMap<>();
         for (String key : keys) {
             if (!pageMetadata.containsKey(key)) {
