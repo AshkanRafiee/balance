@@ -52,6 +52,19 @@ final class TextNormalizer {
         return out.toString();
     }
 
+    /** Converts only Persian and Arabic-Indic digits, preserving every other code point exactly. */
+    static String asciiDigits(String raw) {
+        StringBuilder out = new StringBuilder(raw.length());
+        for (char c : raw.toCharArray()) {
+            if (c >= '\u06F0' && c <= '\u06F9')
+                out.append((char) ('0' + c - '\u06F0'));
+            else if (c >= '\u0660' && c <= '\u0669')
+                out.append((char) ('0' + c - '\u0660'));
+            else out.append(c);
+        }
+        return out.toString();
+    }
+
     private static boolean isMark(int cp) {
         int type = Character.getType(cp);
         return type == Character.NON_SPACING_MARK

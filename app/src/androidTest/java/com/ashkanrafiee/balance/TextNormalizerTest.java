@@ -27,4 +27,8 @@ public class TextNormalizerTest {
         assertEquals(once, TextNormalizer.normalize(once));
         assertNull(TextNormalizer.normalize(null));
     }
+
+    @Test public void asciiDigits_preservesNonDigitText() {
+        assertEquals("بانك: 12345", TextNormalizer.asciiDigits("بانك: 123\u0664\u06F5"));
+    }
 }
