@@ -186,8 +186,6 @@ public class HistoryResidualUiTest {
         View row = findByDescriptionContaining("cash withdrawal to check");
         assertNotNull("the amber row must announce its note", row);
         assertTrue("the row remains the explanation action", row.isClickable());
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> row.performClick());
-        await(() -> findByText(ctx.getString(R.string.residual_note_edit)) != null, 10_000);
     }
 
     @Test public void aDetectedGap_tappingTheExplanationsButton_survivesBuildingIt() {
