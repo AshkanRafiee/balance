@@ -469,6 +469,24 @@ public class CsvExportTest {
          assertEquals("", cells.get(11));
     }
 
+    @Test public void csv_unaccountedNote_usesResidualKeyAndEscapesSafely() {
+        Residual gap = new Residual("bank_melli", "910251846", DATE_2026, DATE_2026_LATER,
+            -2_000_000L, 2);
+        java.util.Map<String, String> notes = new java.util.HashMap<>();
+        notes.put(BalanceData.residualNoteKey(gap), "=cash, \"late\"");
+
+        List<String> cells = parse(line(CsvExport.csv(ctx, new ArrayList<Transaction>(),
+            Arrays.asList(gap), withNotes(notes)), 1));
+        assertEquals("'=cash, \"late\"", cells.get(8));
+        assertEquals("", cells.get(9));
+        assertEquals("", cells.get(10));
+        assertEquals("", cells.get(11));
+        assertEquals(CsvExport.KIND_UNACCOUNTED, cells.get(12));
+        assertEquals("", cells.get(13));
+        assertTrue(line(CsvExport.csv(ctx, new ArrayList<Transaction>(), Arrays.asList(gap),
+            withNotes(notes)), 1).contains("\"'=cash, \"\"late\"\"\""));
+    }
+
     @Test public void csv_movementAndUnaccounted_interleaveByDate() {
         // The exported file has to read as the timeline the user saw, so the gap lands on its own
         // date rather than being appended after everything else.

@@ -260,6 +260,49 @@ public class HistoryCsvExportTest {
         assertTemporaryFilesRemoved();
     }
 
+    @Test public void residualNoteLookup_writesOnlyTheResidualNoteColumn() throws Exception {
+        Residual residual = new Residual("bank_melli", "account", DATE - 100, DATE, -7L, 1);
+        StringWriter output = new StringWriter();
+        HistoryCsvExport.writeLookup(context, 1,
+            visitor -> {},
+            visitor -> visitor.accept(residual), output, new CsvExport.TextLookup() {
+                @Override public String note(String key) {
+                    assertEquals(BalanceData.residualNoteKey(residual), key);
+                    return "@cash, \"late\"";
+                }
+
+                @Override public String reason(String key) {
+                    fail("residuals must not look up reasons");
+                    return null;
+                }
+
+                @Override public String channel(String key) {
+                    fail("residuals must not look up channels");
+                    return null;
+                }
+
+                @Override public List<String> tags(String key) {
+                    fail("residuals must not look up tags");
+                    return null;
+                }
+
+                @Override public String merchant(String key) {
+                    fail("residuals must not look up merchants");
+                    return null;
+                }
+            });
+
+        List<String> cells = parse(output.toString().split("\n", -1)[1]);
+        assertEquals("'@cash, \"late\"", cells.get(8));
+        assertEquals("", cells.get(9));
+        assertEquals("", cells.get(10));
+        assertEquals("", cells.get(11));
+        assertEquals(CsvExport.KIND_UNACCOUNTED, cells.get(12));
+        assertEquals("", cells.get(13));
+        assertTrue(output.toString().contains("\"'@cash, \"\"late\"\"\""));
+        assertTemporaryFilesRemoved();
+    }
+
     @Test public void sourceFailure_isPropagatedWithoutFlushAndCleansStaging() throws Exception {
         final IOException expected = new IOException("source stopped");
         final boolean[] flushed = {false};

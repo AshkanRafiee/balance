@@ -497,7 +497,8 @@ final class HistoryCsvExport {
                         if (kind == KIND_RESIDUAL) {
                             Residual residual = decodeResidual(slot, date, ordinal, payload);
                             writer.write('\n');
-                            cells.residual(writer, residual);
+                            cells.residual(writer, residual,
+                                text.note(BalanceData.residualNoteKey(residual)));
                         } else if (kind == KIND_MOVEMENT) {
                             Transaction transaction = decodeMovement(slot, date, ordinal, payload);
                             writer.write('\n');

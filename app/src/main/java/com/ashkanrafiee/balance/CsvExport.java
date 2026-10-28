@@ -30,8 +30,8 @@ import org.json.JSONArray;
  * from a matched payment-authorization SMS, and the {@code tags} column carries the user's
  * ordered multi-value labels as a JSON array, and the {@code reason} and {@code channel} columns carry
  * the bank's words. They are separate stores, so a movement that has any combination shows all of them,
- * and none ever stands in for another. An unaccounted row has none — there is no message behind it for
- * any of them to describe.
+ * and none ever stands in for another. An unaccounted row may carry the user's own note, but has no
+ * merchant, reason, channel or tags — there is no message behind it for those fields to describe.
  *
  * <p>The trailing {@code kind} column says what each row actually is. A {@code movement} row came
  * from one bank message; an {@code unaccounted} row is money the bank reported moving for which no
@@ -166,9 +166,15 @@ final class CsvExport {
         }
 
         void residual(Writer writer, Residual residual) throws IOException {
+            residual(writer, residual, null);
+        }
+
+        /** Writes an unaccounted row with its optional user note. The other movement metadata
+         * columns intentionally stay empty: a residual has no source message behind it. */
+        void residual(Writer writer, Residual residual, String note) throws IOException {
             if (writer == null) throw new NullPointerException("writer");
             if (residual == null) throw new NullPointerException("residual");
-            appendRow(writer, residualCells(context, residual, iran, calendar, time, iso));
+            appendRow(writer, residualCells(context, residual, note, iran, calendar, time, iso));
         }
     }
 
@@ -209,7 +215,8 @@ final class CsvExport {
         for (Line l : lines) {
             out.append('\n');
             appendRow(out, l.residual != null
-                ? residualCells(context, l.residual, iran, calendar, time, iso)
+                ? residualCells(context, l.residual, residualNote(text, l.residual), iran,
+                    calendar, time, iso)
                 : cells(context, l.tx, text, iran, calendar, time, iso));
         }
         return out.toString();
@@ -296,9 +303,9 @@ final class CsvExport {
     }
 
     /** The row for unaccounted money. It carries the same amount columns as a movement, because it
-     *  moves the totals the same way; the empty note, reason and channel cells are the honest part,
-     *  since there is no message here for any of them to describe. */
-    private static String[] residualCells(Context context, Residual r, boolean iran,
+     *  moves the totals the same way; only its user note is carried over. Merchant, reason, channel
+     *  and tags remain empty because there is no message here for any of them to describe. */
+    private static String[] residualCells(Context context, Residual r, String note, boolean iran,
             Calendar calendar, SimpleDateFormat time, SimpleDateFormat iso) {
         calendar.setTimeInMillis(r.toDate);
         CalDate local = CalDate.fromGregorian(
@@ -313,13 +320,18 @@ final class CsvExport {
             String.valueOf(r.amount),
             CurrencyHelper.amount(context, r.amount),
             CurrencyHelper.label(context),
-            "",
+            guardFormula(note == null ? "" : note),
             "",
             "",
             "",
             KIND_UNACCOUNTED,
             ""
         };
+    }
+
+    private static String residualNote(Text text, Residual residual) {
+        if (text == null || text.notes == null) return null;
+        return text.notes.get(BalanceData.residualNoteKey(residual));
     }
 
     private static String[] cells(Context context, Transaction t, Text text, boolean iran,
