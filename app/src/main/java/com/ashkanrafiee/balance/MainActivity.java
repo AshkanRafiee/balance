@@ -1123,6 +1123,17 @@ public class MainActivity extends Activity {
         return "balance-backup-" + stamp + ".balance";
     }
 
+    /** Re-checks the session at every backup boundary; a picker or password dialog can outlive the
+     * temporary foreground unlock hold. */
+    private boolean requireBackupUnlocked() {
+        if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) {
+            pendingLockAction = null;
+            if (lockOverlay != null) lockOverlay.showLock();
+            return false;
+        }
+        return true;
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
@@ -1131,25 +1142,19 @@ public class MainActivity extends Activity {
             String password = pendingBackupPassword;
             pendingBackupPassword = null;
             if (resultCode != RESULT_OK || data == null || data.getData() == null || password == null) return;
-            if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) {
-                pendingLockAction = null;
-                if (lockOverlay != null) lockOverlay.showLock();
-                return;
-            }
+            if (!requireBackupUnlocked()) return;
             createBackup(data.getData(), password);
         } else if (requestCode == REQ_PICK_RESTORE) {
             LockManager.cancelUnlockHold();
             if (resultCode == RESULT_OK && data != null && data.getData() != null) {
-                if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) {
+                if (!requireBackupUnlocked()) {
                     // The SAF picker can outlive the temporary unlock hold (LockManager.holdUnlock
                     // lasts only while the app is in the foreground), so the session may be locked
                     // again by the time the pick returns. Never raise a password dialog over the
                     // lock; re-cover the screen and let the user restart the restore after unlocking.
                     pendingLockAction = null;
                     if (lockOverlay != null) lockOverlay.showLock();
-                } else {
-                    askPassword(false, data.getData());
-                }
+                } else askPassword(false, data.getData());
             }
         } else if (requestCode == ONBOARDING_REQUEST && data != null
                 && data.getBooleanExtra(OnboardingActivity.EXTRA_ASKED_SMS, false)) {
@@ -1222,6 +1227,7 @@ public class MainActivity extends Activity {
                     return;
                 }
                 dlg.dismiss();
+                if (!requireBackupUnlocked()) return;
                 if (forBackup) {
                     pendingBackupPassword = value;
                     pickBackupTarget();
@@ -1297,6 +1303,7 @@ public class MainActivity extends Activity {
 
     private void restoreBackup(Uri uri, String password, Set<BackupManager.Section> selection,
             boolean includeDeleted) {
+        if (!requireBackupUnlocked()) return;
         showProgress(getString(R.string.backup_progress_restoring));
         final WorkProgress progress = dialogProgress();
         new Thread(() -> {
@@ -1320,7 +1327,8 @@ public class MainActivity extends Activity {
                     if (err == R.string.backup_error_password) {
                         // Wrong password (or a corrupted backup): let the user retry the
                         // password for the same file instead of forcing a new file pick.
-                        askPassword(false, uri, getString(R.string.backup_error_password));
+                        if (requireBackupUnlocked())
+                            askPassword(false, uri, getString(R.string.backup_error_password));
                     } else {
                         Toast.makeText(MainActivity.this,
                             getString(R.string.backup_restore_failed) + "\n" + getString(err),
