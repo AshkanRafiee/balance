@@ -1003,6 +1003,7 @@ public class HistoryScanTest {
         List<Transaction> legacy = new java.util.ArrayList<>();
         legacy.add(new Transaction("Saman", T + 1000, 200000L, null));
         BalanceData.writeTransactions(ctx, legacy);
+        BalanceData.setNote(ctx, legacy.get(0), "legacy note");
 
         int added = BalanceData.scanHistory(ctx);
 
@@ -1010,6 +1011,8 @@ public class HistoryScanTest {
         List<Transaction> txs = BalanceData.readTransactions(ctx);
         assertEquals(1, txs.size());
         assertNotNull(txs.get(0).sig);
+        assertEquals("legacy note", BalanceData.getNote(ctx, txs.get(0)));
+        assertNull(BalanceData.getNote(ctx, legacy.get(0)));
     }
 
     // ============================================================
@@ -1332,6 +1335,77 @@ public class HistoryScanTest {
         assertEquals(0, BalanceData.scanHistory(ctx));
         assertEquals("queued note", BalanceData.getNote(ctx, late));
         assertNull(BalanceData.getNote(ctx, gap));
+    }
+
+    @Test public void resetKeepingNotes_migratesAResidualNoteWhenTheLateSmsIsAlreadyInTheInbox()
+            throws Exception {
+        long announced = at(2026, 8, 30, 9, 0);
+        seed("TejaratBank", TEJARAT_DEPOSIT, announced);
+        seed("TejaratBank", TEJARAT_WITHDRAWAL, announced + 3600000L);
+        assertEquals(2, BalanceData.scanHistory(ctx));
+        Residual gap = Residual.between(BalanceData.readTransactions(ctx)).get(0);
+        BalanceData.setNote(ctx, gap, "survives reset");
+
+        BalanceData.reset(ctx, false);
+        seed("TejaratBank", TEJARAT_LATE_MOVEMENT, at(2026, 9, 10, 9, 0));
+        assertEquals(3, BalanceData.scanHistory(ctx));
+
+        Transaction late = null;
+        for (Transaction transaction : BalanceData.readTransactions(ctx)) {
+            if (transaction.amount == -2034872000L) late = transaction;
+        }
+        assertNotNull(late);
+        assertEquals("survives reset", BalanceData.getNote(ctx, late));
+        assertNull(BalanceData.getNote(ctx, gap));
+    }
+
+    @Test public void pendingTransactionMetadataMigration_drainsWithoutANewSms() throws Exception {
+        Transaction old = new Transaction("Tejarat", null, T, -100L, "old-sig", "old-content");
+        Transaction replacement = new Transaction("Tejarat", null, T, -100L, 900L,
+            "new-sig", "new-content");
+        BalanceData.writeTransactions(ctx, java.util.Collections.singletonList(old));
+        BalanceData.setNote(ctx, old, "reparsed note");
+        BalanceData.writeTransactions(ctx, java.util.Collections.singletonList(replacement));
+        java.util.Map<String, String> aliases = new java.util.LinkedHashMap<>();
+        aliases.put(BalanceData.noteKey(old), BalanceData.noteKey(replacement));
+        assertTrue(DataGeneration.dataPrefs(ctx).edit()
+            .putString(BalanceData.KEY_PENDING_TRANSACTION_METADATA_MIGRATIONS,
+                BalanceData.encryptStorePayload(BalanceData.serializeTextMap(aliases)))
+            .commit());
+
+        assertEquals(0, BalanceData.scanHistory(ctx));
+        assertEquals("reparsed note", BalanceData.getNote(ctx, replacement));
+        assertNull(BalanceData.getNote(ctx, old));
+    }
+
+    @Test public void pendingTransactionMetadataMigration_drainsLegacyKeyShapes()
+            throws Exception {
+        // Pre-content entries are keyed by their source signature or by the composite
+        // bank/date/amount identity. Neither starts with "c:", and both must still migrate.
+        Transaction signatureOld =
+            new Transaction("Tejarat", null, T, -100L, "legacy-sig", null);
+        Transaction signatureNew =
+            new Transaction("Tejarat", null, T, -100L, 900L, "fresh-sig", "fresh-content");
+        Transaction compositeOld = new Transaction("Mellat", null, T, -200L, (String) null);
+        Transaction compositeNew =
+            new Transaction("Mellat", null, T, -200L, 800L, "composite-sig", "composite-content");
+        BalanceData.writeTransactions(ctx, java.util.Arrays.asList(signatureOld, compositeOld));
+        BalanceData.setNote(ctx, signatureOld, "signature note");
+        BalanceData.setNote(ctx, compositeOld, "composite note");
+        BalanceData.writeTransactions(ctx, java.util.Arrays.asList(signatureNew, compositeNew));
+        java.util.Map<String, String> aliases = new java.util.LinkedHashMap<>();
+        aliases.put(BalanceData.noteKey(signatureOld), BalanceData.noteKey(signatureNew));
+        aliases.put(BalanceData.noteKey(compositeOld), BalanceData.noteKey(compositeNew));
+        assertTrue(DataGeneration.dataPrefs(ctx).edit()
+            .putString(BalanceData.KEY_PENDING_TRANSACTION_METADATA_MIGRATIONS,
+                BalanceData.encryptStorePayload(BalanceData.serializeTextMap(aliases)))
+            .commit());
+
+        assertEquals(0, BalanceData.scanHistory(ctx));
+        assertEquals("signature note", BalanceData.getNote(ctx, signatureNew));
+        assertEquals("composite note", BalanceData.getNote(ctx, compositeNew));
+        assertNull(BalanceData.getNote(ctx, signatureOld));
+        assertNull(BalanceData.getNote(ctx, compositeOld));
     }
 
     private static long at(int y, int mo, int d, int h, int mi) {

@@ -95,6 +95,11 @@ final class BalanceData {
     /** Encrypted residual-note aliases staged before a transaction commit, so a process death cannot
      * leave the note orphaned between the transaction store and metadata store writes. */
     static final String KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS = "pending_residual_note_migrations";
+    /** Encrypted residual brackets retained with notes across reset(false). */
+    static final String KEY_RESIDUAL_NOTE_PROVENANCE = "residual_note_provenance";
+    /** Encrypted aliases for all transaction metadata during a full rebuild. */
+    static final String KEY_PENDING_TRANSACTION_METADATA_MIGRATIONS =
+        "pending_transaction_metadata_migrations";
     /** A source-evidence read failed after movements were saved; retry merchant enrichment even
      * when the inbox has no newer SMS. */
     static final String KEY_MERCHANT_EVIDENCE_PENDING = "merchant_evidence_pending";
@@ -964,7 +969,12 @@ final class BalanceData {
 
     /** Saves (or with a blank input, clears) the note for a residual. */
     static void setNote(Context context, Residual residual, String text) {
-        try { MetadataStore.setNote(context, noteKey(residual), text); }
+        try {
+            boolean keepProvenance = text != null && !text.trim().isEmpty();
+            if (keepProvenance) updateResidualNoteProvenance(context, residual, true);
+            MetadataStore.setNote(context, noteKey(residual), text);
+            if (!keepProvenance) updateResidualNoteProvenance(context, residual, false);
+        }
         catch (Exception e) { throw new IllegalStateException("metadata residual note write failed", e); }
     }
 
@@ -979,62 +989,9 @@ final class BalanceData {
     static void migrateTransactionText(Context context, Map<Transaction, Transaction> replaced) {
         try {
             MetadataStore.migrateTransactionText(context, replaced);
-            return;
         } catch (Exception e) {
-            Log.w(TAG, "metadata transaction migration failed", e);
+            throw new IllegalStateException("metadata transaction migration failed", e);
         }
-        Map<String, String> notes = readNotes(context);
-        if (migrateTextKeys(notes, replaced)) writeNotes(context, notes);
-        Map<String, String> reasons = readReasons(context);
-        if (migrateTextKeys(reasons, replaced)) writeReasons(context, reasons);
-        Map<String, String> channels = readChannels(context);
-        if (migrateTextKeys(channels, replaced)) writeChannels(context, channels);
-        Map<String, String> merchants = readMerchants(context);
-        if (migrateTextKeys(merchants, replaced)) writeMerchants(context, merchants);
-        Map<String, List<String>> tags = readTags(context);
-        if (migrateTagKeys(tags, replaced)) writeTags(context, tags);
-    }
-
-    /** Moves the text of every replaced entry to its replacement's key, in place. Returns whether
-     *  anything moved, so the caller writes the store only when it changed. */
-    private static boolean migrateTextKeys(Map<String, String> text,
-            Map<Transaction, Transaction> replaced) {
-        boolean changed = false;
-        for (Map.Entry<Transaction, Transaction> e : replaced.entrySet()) {
-            String from = noteKey(e.getKey());
-            String to = noteKey(e.getValue());
-            if (from.equals(to)) continue;
-            // The rebuild that produced this map drops the row the text was written on, and no later
-            // scan can recreate an entry under that key, so the text is unreachable either way: it
-            // goes with the row instead of lingering in the store where nothing can read it back. The
-            // destination's own text is the one the user can still see, so that is the one that stays.
-            // Taking the text out counts as a change of the store on its own, or the row would be
-            // dropped and the text kept — two entries where the history holds one.
-            String value = text.remove(from);
-            if (value == null) continue;
-            changed = true;
-            if (text.containsKey(to)) continue;
-            text.put(to, value);
-        }
-        return changed;
-    }
-
-    /** Moves tag assignments to a replacement key while preserving tags from both sides. */
-    private static boolean migrateTagKeys(Map<String, List<String>> tags,
-            Map<Transaction, Transaction> replaced) {
-        boolean changed = false;
-        for (Map.Entry<Transaction, Transaction> e : replaced.entrySet()) {
-            String from = noteKey(e.getKey());
-            String to = noteKey(e.getValue());
-            if (from.equals(to)) continue;
-            List<String> moved = tags.remove(from);
-            if (moved == null) continue;
-            changed = true;
-            List<String> destination = tags.get(to);
-            if (destination == null) tags.put(to, normalizeTags(moved));
-            else if (unionTags(tags, java.util.Collections.singletonMap(to, moved))) changed = true;
-        }
-        return changed;
     }
 
     static boolean write(Context context, LinkedHashMap<String, Bank> map) {
@@ -1182,11 +1139,14 @@ final class BalanceData {
                     .remove(KEY_TRANSACTIONS_MANIFEST).remove(KEY_COMMITMENTS)
                     .remove(KEY_HISTORY_LAST_BALANCE)
                     .remove(KEY_RECENT_MOVEMENTS).remove(KEY_TX_REASONS).remove(KEY_TX_CHANNELS);
-            if (alsoNotes) data.remove(KEY_TX_NOTES).remove(KEY_TX_TAGS);
+            if (alsoNotes) data.remove(KEY_TX_NOTES).remove(KEY_TX_TAGS)
+                .remove(KEY_RESIDUAL_NOTE_PROVENANCE);
             data.remove(KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS);
+            data.remove(KEY_PENDING_TRANSACTION_METADATA_MIGRATIONS);
             if (!data.commit()) throw new IllegalStateException("data reset cleanup failed");
             removeOldTransactionPagesForReset(context);
             DataGeneration.clearRollbackGenerations(context);
+            DataGeneration.clearLegacyRootData(context);
         } catch (Exception e) {
             throw new IllegalStateException("data reset failed", e);
         }
@@ -1790,6 +1750,7 @@ final class BalanceData {
             Map<String, List<Reconcile.Entry>> windows = null;
             List<Residual> notedResiduals = new ArrayList<>();
             List<Transaction> residualCandidates = new ArrayList<>();
+            Map<Transaction, Transaction> metadataReplacements = new LinkedHashMap<>();
             boolean transactionsChanged = full;
             String selection = !full
                 ? "(" + Telephony.Sms.DATE + " > ? OR (" + Telephony.Sms.DATE
@@ -1839,6 +1800,8 @@ final class BalanceData {
                     holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_HISTORY,
                         captureSources(context, sourceRows, HISTORY_RULES_VERSION));
                 if (rows.isEmpty()) {
+                    textChanged |= completePendingTransactionMetadataMigrations(context,
+                        readTransactions(context));
                     textChanged |= completePendingResidualNoteMigrations(context,
                         readTransactions(context));
                     textChanged |= refreshPendingMerchants(context, prefs);
@@ -1870,20 +1833,17 @@ final class BalanceData {
                     return 0;
                 }
                 stored = readTransactions(context);
+                textChanged |= completePendingTransactionMetadataMigrations(context, stored);
                 textChanged |= completePendingResidualNoteMigrations(context, stored);
                 Map<String, String> notes = readNotes(context);
-                boolean hasResidualNotes = false;
+                Map<String, Residual> residualsByKey = new LinkedHashMap<>();
+                residualsByKey.putAll(readResidualNoteProvenance(context));
+                for (Residual residual : Residual.between(stored))
+                    residualsByKey.put(residualNoteKey(residual), residual);
                 for (String key : notes.keySet()) {
-                    if (key != null && key.startsWith("r:")) {
-                        hasResidualNotes = true;
-                        break;
-                    }
-                }
-                if (hasResidualNotes) {
-                    for (Residual residual : Residual.between(stored)) {
-                        if (notes.containsKey(residualNoteKey(residual)))
-                            notedResiduals.add(residual);
-                    }
+                    if (key == null || !key.startsWith("r:") || !notes.containsKey(key)) continue;
+                    Residual residual = residualsByKey.get(key);
+                    if (residual != null) notedResiduals.add(residual);
                 }
                 if (!full) {
                     for (Transaction t : stored) {
@@ -2058,7 +2018,6 @@ final class BalanceData {
                     Set<String> freshSigs = new HashSet<>();
                     Map<String, Integer> freshAtKey = new HashMap<>();
                     Map<String, Transaction> freshBySig = new HashMap<>();
-                    Map<Transaction, Transaction> replaced = new HashMap<>();
                     for (Transaction t : fresh) {
                         if (t.sig != null) {
                             freshSigs.add(t.sig);
@@ -2077,7 +2036,7 @@ final class BalanceData {
                         if (t.sig != null && freshSigs.contains(t.sig)) {
                             identityClaimed.add(t);
                             Transaction f = freshBySig.get(t.sig);
-                            if (f != null) replaced.put(t, f);
+                            if (f != null) metadataReplacements.put(t, f);
                             String key = transactionCompositeKey(t) + "|" + t.date;
                             identityClaimsPerKey.put(key,
                                 identityClaimsPerKey.getOrDefault(key, 0) + 1);
@@ -2131,7 +2090,7 @@ final class BalanceData {
                     // budget pool, so the same replacement is never handed to two entries; a budget
                     // claim takes the same-moment sibling whose amount matches first — the strongest
                     // thing a legacy sig-less entry could distinguish.
-                    Set<Transaction> pairedFresh = new HashSet<>(replaced.values());
+                    Set<Transaction> pairedFresh = new HashSet<>(metadataReplacements.values());
                     pairedFresh.addAll(twinOf.values());
                     Map<String, java.util.ArrayDeque<Transaction>> budgetPool = new HashMap<>();
                     for (Transaction f : fresh) {
@@ -2152,7 +2111,7 @@ final class BalanceData {
                                     if (cand.amount == t.amount) { claim = cand; break; }
                                 if (claim == null) claim = pool.peekFirst();
                                 pool.remove(claim);
-                                replaced.put(t, claim);
+                                metadataReplacements.put(t, claim);
                             }
                             continue;
                         }
@@ -2161,11 +2120,8 @@ final class BalanceData {
                     reorderStoredByChains(rebuilt, chainPosByBank);
                     stored = rebuilt;
                     transactionsChanged = true;
-                    if (!replaced.isEmpty() || !twinOf.isEmpty()) {
-                        replaced.putAll(twinOf);
-                        migrateTransactionText(context, replaced);
-                    }
-                    Set<Transaction> pairedForResidual = new HashSet<>(replaced.values());
+                    metadataReplacements.putAll(twinOf);
+                    Set<Transaction> pairedForResidual = new HashSet<>(metadataReplacements.values());
                     pairedForResidual.addAll(twinOf.values());
                     for (Transaction candidate : fresh) {
                         if (!pairedForResidual.contains(candidate)) residualCandidates.add(candidate);
@@ -2178,6 +2134,8 @@ final class BalanceData {
                     transactionsChanged = !fresh.isEmpty() || !placed.isEmpty();
                     residualCandidates.addAll(fresh);
                 }
+                if (!stageTransactionMetadataMigrations(context, metadataReplacements))
+                    throw new Exception("transaction metadata migration could not be staged");
                 // Authorization messages are not movements. Once the final stored transaction list
                 // is known, attach only uniquely matched merchant evidence from the encrypted source
                 // store. This also handles an OTP and its confirmation arriving in separate scans.
@@ -2211,6 +2169,7 @@ final class BalanceData {
                 completed = false;
                 return added;
             }
+            textChanged |= completePendingTransactionMetadataMigrations(context, stored);
             textChanged |= completePendingResidualNoteMigrations(context, stored);
             if (windows != null && !saveRecentMovements(context, windows)) {
                 failed = true;
@@ -2295,6 +2254,70 @@ final class BalanceData {
         return aliases;
     }
 
+    /** Keeps the old bracket available when reset(false) removes the transactions that proved it. */
+    private static Map<String, Residual> readResidualNoteProvenance(Context context) {
+        Map<String, Residual> out = new LinkedHashMap<>();
+        try {
+            String stored = DataGeneration.dataPrefs(context)
+                .getString(KEY_RESIDUAL_NOTE_PROVENANCE, null);
+            if (stored == null) return out;
+            Map<String, String> encoded = deserializeTextMap(decrypt(stored));
+            for (Map.Entry<String, String> entry : encoded.entrySet()) {
+                if (entry.getKey() == null || !entry.getKey().startsWith("r:")) continue;
+                JSONObject object = new JSONObject(entry.getValue());
+                String bank = object.getString("bank");
+                String account = object.has("account") && !object.isNull("account")
+                    ? object.getString("account") : null;
+                Residual residual = new Residual(bank, account,
+                    object.getLong("from"), object.getLong("to"), object.getLong("amount"),
+                    object.getInt("movements"));
+                if (entry.getKey().equals(residualNoteKey(residual))) out.put(entry.getKey(), residual);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "residual note provenance read failed", e);
+        }
+        return out;
+    }
+
+    private static void updateResidualNoteProvenance(Context context, Residual residual,
+            boolean keep) throws Exception {
+        Map<String, String> encoded = new LinkedHashMap<>();
+        String stored = DataGeneration.dataPrefs(context)
+            .getString(KEY_RESIDUAL_NOTE_PROVENANCE, null);
+        if (stored != null) encoded.putAll(deserializeTextMap(decrypt(stored)));
+        String key = residualNoteKey(residual);
+        if (keep) {
+            JSONObject object = new JSONObject()
+                .put("bank", residual.bank)
+                .put("from", residual.fromDate)
+                .put("to", residual.toDate)
+                .put("amount", residual.amount)
+                .put("movements", residual.movements);
+            if (residual.account != null) object.put("account", residual.account);
+            encoded.put(key, object.toString());
+        } else {
+            encoded.remove(key);
+        }
+        SharedPreferences.Editor editor = DataGeneration.dataPrefs(context).edit();
+        if (encoded.isEmpty()) editor.remove(KEY_RESIDUAL_NOTE_PROVENANCE);
+        else editor.putString(KEY_RESIDUAL_NOTE_PROVENANCE, encrypt(serializeTextMap(encoded)));
+        if (!editor.commit()) throw new Exception("residual note provenance write failed");
+    }
+
+    private static void removeResidualNoteProvenance(Context context, Set<String> keys)
+            throws Exception {
+        if (keys == null || keys.isEmpty()) return;
+        String stored = DataGeneration.dataPrefs(context)
+            .getString(KEY_RESIDUAL_NOTE_PROVENANCE, null);
+        if (stored == null) return;
+        Map<String, String> encoded = deserializeTextMap(decrypt(stored));
+        if (!encoded.keySet().removeAll(keys)) return;
+        SharedPreferences.Editor editor = DataGeneration.dataPrefs(context).edit();
+        if (encoded.isEmpty()) editor.remove(KEY_RESIDUAL_NOTE_PROVENANCE);
+        else editor.putString(KEY_RESIDUAL_NOTE_PROVENANCE, encrypt(serializeTextMap(encoded)));
+        if (!editor.commit()) throw new Exception("residual note provenance cleanup failed");
+    }
+
     /** Verifies the specific old bracket, rather than trusting only that some residual vanished. */
     private static boolean residualBracketCloses(Residual residual, List<Transaction> transactions) {
         Transaction opener = null;
@@ -2335,14 +2358,35 @@ final class BalanceData {
     /** Stages aliases before the transaction commit; the encrypted data preferences survive a crash. */
     private static boolean stageResidualNoteMigrations(Context context,
             Map<String, String> aliases) {
+        return stagePendingMetadataMigrations(context, KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS,
+            aliases, "residual note");
+    }
+
+    private static boolean stageTransactionMetadataMigrations(Context context,
+            Map<Transaction, Transaction> replaced) {
+        if (replaced == null || replaced.isEmpty()) return true;
+        Map<String, String> aliases = new LinkedHashMap<>();
+        for (Map.Entry<Transaction, Transaction> entry : replaced.entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null) continue;
+            String from = noteKey(entry.getKey());
+            String to = noteKey(entry.getValue());
+            if (!from.equals(to)) aliases.put(from, to);
+        }
+        return stagePendingMetadataMigrations(context,
+            KEY_PENDING_TRANSACTION_METADATA_MIGRATIONS, aliases, "transaction metadata");
+    }
+
+    private static boolean stagePendingMetadataMigrations(Context context, String preferenceKey,
+            Map<String, String> aliases, String label) {
+        if (aliases == null || aliases.isEmpty()) return true;
         try {
-            Map<String, String> pending = readPendingResidualNoteMigrations(context);
+            Map<String, String> pending = readPendingMetadataMigrations(context, preferenceKey);
             pending.putAll(aliases);
             String json = serializeTextMap(pending);
             return DataGeneration.dataPrefs(context).edit()
-                .putString(KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS, encrypt(json)).commit();
+                .putString(preferenceKey, encrypt(json)).commit();
         } catch (Exception e) {
-            Log.w(TAG, "resolved residual note staging failed", e);
+            Log.w(TAG, label + " staging failed", e);
             return false;
         }
     }
@@ -2350,7 +2394,19 @@ final class BalanceData {
     /** Applies staged aliases only when every destination transaction is committed. */
     private static boolean completePendingResidualNoteMigrations(Context context,
             List<Transaction> stored) {
-        Map<String, String> pending = readPendingResidualNoteMigrations(context);
+        return completePendingMetadataMigrations(context, KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS,
+            stored, true, "residual note");
+    }
+
+    private static boolean completePendingTransactionMetadataMigrations(Context context,
+            List<Transaction> stored) {
+        return completePendingMetadataMigrations(context,
+            KEY_PENDING_TRANSACTION_METADATA_MIGRATIONS, stored, false, "transaction metadata");
+    }
+
+    private static boolean completePendingMetadataMigrations(Context context, String preferenceKey,
+            List<Transaction> stored, boolean residual, String label) {
+        Map<String, String> pending = readPendingMetadataMigrations(context, preferenceKey);
         if (pending.isEmpty() || stored == null || stored.isEmpty()) return false;
         Set<String> transactionKeys = new HashSet<>();
         for (Transaction transaction : stored) transactionKeys.add(noteKey(transaction));
@@ -2362,47 +2418,52 @@ final class BalanceData {
         try {
             boolean changed = MetadataStore.migrateKeys(context, ready);
             pending.keySet().removeAll(ready.keySet());
-            writePendingResidualNoteMigrations(context, pending);
+            writePendingMetadataMigrations(context, preferenceKey, pending);
+            if (residual) removeResidualNoteProvenance(context, ready.keySet());
             return changed;
         } catch (Exception e) {
             // Leave the encrypted queue intact. The next scan retries after the transaction store
             // is readable; neither the source note nor the destination note is discarded here.
-            Log.w(TAG, "resolved residual note migration failed", e);
+            Log.w(TAG, label + " migration failed", e);
             return false;
         }
     }
 
-    private static Map<String, String> readPendingResidualNoteMigrations(Context context) {
+    private static Map<String, String> readPendingMetadataMigrations(Context context,
+            String preferenceKey) {
         try {
             String stored = DataGeneration.dataPrefs(context)
-                .getString(KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS, null);
+                .getString(preferenceKey, null);
             if (stored == null) return new LinkedHashMap<>();
             String json = decrypt(stored);
             Map<String, String> parsed = deserializeTextMap(json);
             Map<String, String> valid = new LinkedHashMap<>();
+            boolean residual = preferenceKey.equals(KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS);
             for (Map.Entry<String, String> entry : parsed.entrySet()) {
-                if (entry.getKey() != null && entry.getKey().startsWith("r:")
-                        && entry.getValue() != null
-                        && (entry.getValue().startsWith("c:") || entry.getValue().startsWith("t:")))
+                // Destination is always a transaction identity: content digest, source signature,
+                // or the legacy composite key. Source is a residual key only for the residual queue.
+                if (entry.getKey() != null && entry.getValue() != null
+                        && (residual == entry.getKey().startsWith("r:"))
+                        && !entry.getValue().startsWith("r:"))
                     valid.put(entry.getKey(), entry.getValue());
             }
             return valid;
         } catch (Exception e) {
-            Log.w(TAG, "pending residual note read failed", e);
+            Log.w(TAG, "pending metadata migration read failed", e);
             return new LinkedHashMap<>();
         }
     }
 
-    private static void writePendingResidualNoteMigrations(Context context,
+    private static void writePendingMetadataMigrations(Context context, String preferenceKey,
             Map<String, String> pending) throws Exception {
         SharedPreferences.Editor editor = DataGeneration.dataPrefs(context).edit();
         if (pending == null || pending.isEmpty()) {
-            editor.remove(KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS);
+            editor.remove(preferenceKey);
         } else {
-            editor.putString(KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS,
+            editor.putString(preferenceKey,
                 encrypt(serializeTextMap(pending)));
         }
-        if (!editor.commit()) throw new Exception("pending residual note cleanup failed");
+        if (!editor.commit()) throw new Exception("pending metadata migration cleanup failed");
     }
 
     /** Retries a previously failed source-evidence enrichment pass even when no new inbox rows
