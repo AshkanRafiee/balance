@@ -185,6 +185,37 @@ final class DataGeneration {
         }
     }
 
+    /** Removes the old root-layout data left behind when a legacy install was first published into
+     * a generation. Display preferences are intentionally outside this list and remain untouched. */
+    static void clearLegacyRootData(Context input) {
+        synchronized (BalanceData.class) {
+            Context root = rootContext(input);
+            try {
+                if (readManifest(root) == null) return;
+            } catch (Exception invalidManifest) {
+                return;
+            }
+            for (String name : DATABASES) {
+                File database = root.getDatabasePath(name);
+                for (File file : databaseFiles(database)) deleteRequired(file);
+            }
+            root.deleteSharedPreferences(BalanceData.PREFS_DATA);
+            deleteRequired(preferenceFile(root, BalanceData.PREFS_DATA));
+            deleteRequired(new File(preferenceFile(root, BalanceData.PREFS_DATA).getPath() + ".bak"));
+
+            File noBackup = root.getNoBackupFilesDir();
+            deleteRequired(new File(noBackup, "balance_transactions.present"));
+            deleteRequired(new File(noBackup, "balance_sources.present"));
+            File files = root.getFilesDir();
+            File[] children = files.listFiles();
+            if (children == null) throw new IllegalStateException("legacy files directory unreadable");
+            for (File child : children) {
+                if (child.isFile() && child.getName().startsWith(LEGACY_PAGE_PREFIX))
+                    deleteRequired(child);
+            }
+        }
+    }
+
     /** Deletes the published generation, every rollback generation and their preference namespaces. */
     static void clearAllGenerations(Context input) {
         synchronized (BalanceData.class) {
@@ -215,6 +246,11 @@ final class DataGeneration {
             if (!file.delete() && file.exists())
                 throw new IllegalStateException("generation preferences could not be deleted");
         }
+    }
+
+    private static void deleteRequired(File file) {
+        if (file.exists() && !file.delete() && file.exists())
+            throw new IllegalStateException("legacy data could not be deleted");
     }
 
     /** Test isolation seam. */

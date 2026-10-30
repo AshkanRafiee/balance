@@ -411,6 +411,38 @@ public class BackupV2Test {
             DataGeneration.generationNamesForTests(context).size());
     }
 
+    @Test public void legacyRootData_isRemovedByDestructiveCleanup() throws Exception {
+        try (DataGeneration.Stage stage = DataGeneration.beginStage(context)) {
+            stage.publish();
+        }
+        String[] databases = {
+            TransactionStore.DB_NAME, MetadataStore.DB_NAME, CommitmentStore.DB_NAME,
+            SourceStore.DB_NAME
+        };
+        for (String name : databases) {
+            File database = context.getDatabasePath(name);
+            write(database, new byte[]{1});
+            write(new File(database.getPath() + "-wal"), new byte[]{2});
+        }
+        write(new File(context.getNoBackupFilesDir(), "balance_transactions.present"), new byte[]{1});
+        write(new File(context.getNoBackupFilesDir(), "balance_sources.present"), new byte[]{1});
+        write(new File(context.getFilesDir(), "transactions_page_v2_legacy_0"), new byte[]{1});
+        context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit()
+            .putString(BalanceData.KEY_BALANCES, "legacy").commit();
+        File legacyPrefs = new File(new File(context.getApplicationInfo().dataDir, "shared_prefs"),
+            BalanceData.PREFS_DATA + ".xml");
+        assertTrue(legacyPrefs.exists());
+
+        DataGeneration.clearLegacyRootData(context);
+
+        for (String name : databases)
+            assertFalse(context.getDatabasePath(name).exists());
+        assertFalse(new File(context.getNoBackupFilesDir(), "balance_transactions.present").exists());
+        assertFalse(new File(context.getNoBackupFilesDir(), "balance_sources.present").exists());
+        assertFalse(new File(context.getFilesDir(), "transactions_page_v2_legacy_0").exists());
+        assertFalse("legacy data preferences must not survive cleanup", legacyPrefs.exists());
+    }
+
     @Test public void restore_includeDeleted_bringsBackDeletedAndForgetsTombstone()
             throws Exception {
         Commitment commitment = Commitment.create("Back", -75L, Commitment.ONCE,
