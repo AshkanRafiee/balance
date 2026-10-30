@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -1800,10 +1801,17 @@ final class BalanceData {
                     holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_HISTORY,
                         captureSources(context, sourceRows, HISTORY_RULES_VERSION));
                 if (rows.isEmpty()) {
-                    textChanged |= completePendingTransactionMetadataMigrations(context,
-                        readTransactions(context));
-                    textChanged |= completePendingResidualNoteMigrations(context,
-                        readTransactions(context));
+                    // Most no-new-message refreshes have no queued metadata at all. Checking the
+                    // encrypted preference presence first keeps them from reading the whole
+                    // transaction store twice just to discover there is nothing to drain.
+                    if (hasPendingMetadataMigrations(context,
+                            KEY_PENDING_TRANSACTION_METADATA_MIGRATIONS)
+                            || hasPendingMetadataMigrations(context,
+                                KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS)) {
+                        stored = readTransactions(context);
+                        textChanged |= completePendingTransactionMetadataMigrations(context, stored);
+                        textChanged |= completePendingResidualNoteMigrations(context, stored);
+                    }
                     textChanged |= refreshPendingMerchants(context, prefs);
                     if (full) {
                         if (!saveRecentMovements(context, new HashMap<>())
@@ -1836,14 +1844,21 @@ final class BalanceData {
                 textChanged |= completePendingTransactionMetadataMigrations(context, stored);
                 textChanged |= completePendingResidualNoteMigrations(context, stored);
                 Map<String, String> notes = readNotes(context);
-                Map<String, Residual> residualsByKey = new LinkedHashMap<>();
-                residualsByKey.putAll(readResidualNoteProvenance(context));
-                for (Residual residual : Residual.between(stored))
-                    residualsByKey.put(residualNoteKey(residual), residual);
+                Set<String> residualNoteKeys = new LinkedHashSet<>();
                 for (String key : notes.keySet()) {
-                    if (key == null || !key.startsWith("r:") || !notes.containsKey(key)) continue;
-                    Residual residual = residualsByKey.get(key);
-                    if (residual != null) notedResiduals.add(residual);
+                    if (key != null && key.startsWith("r:")) residualNoteKeys.add(key);
+                }
+                // Residual notes are unusual; most scans must not pay for a full bracket walk or a
+                // provenance read just because the feature exists.
+                if (!residualNoteKeys.isEmpty()) {
+                    Map<String, Residual> residualsByKey = new LinkedHashMap<>();
+                    residualsByKey.putAll(readResidualNoteProvenance(context));
+                    for (Residual residual : Residual.between(stored))
+                        residualsByKey.put(residualNoteKey(residual), residual);
+                    for (String key : residualNoteKeys) {
+                        Residual residual = residualsByKey.get(key);
+                        if (residual != null) notedResiduals.add(residual);
+                    }
                 }
                 if (!full) {
                     for (Transaction t : stored) {
@@ -2226,22 +2241,37 @@ final class BalanceData {
         Set<String> remaining = new HashSet<>();
         for (Residual residual : Residual.between(after)) remaining.add(residualNoteKey(residual));
 
+        Map<String, List<Transaction>> freshBySlot = new HashMap<>();
+        for (Transaction transaction : fresh) {
+            if (transaction == null) continue;
+            freshBySlot.computeIfAbsent(storageKey(transaction.bank, transaction.account),
+                ignored -> new ArrayList<>()).add(transaction);
+        }
+        Map<String, List<Transaction>> afterBySlot = new HashMap<>();
+        for (Transaction transaction : after) {
+            if (transaction == null) continue;
+            afterBySlot.computeIfAbsent(storageKey(transaction.bank, transaction.account),
+                ignored -> new ArrayList<>()).add(transaction);
+        }
+
         Map<String, String> candidateDestinations = new LinkedHashMap<>();
         Map<String, List<String>> sourcesByDestination = new HashMap<>();
         for (Residual residual : before) {
             String source = residualNoteKey(residual);
             if (remaining.contains(source)) continue;
+            List<Transaction> freshSlot = freshBySlot.get(residual.key());
+            List<Transaction> afterSlot = afterBySlot.get(residual.key());
+            if (freshSlot == null || afterSlot == null) continue;
             Transaction match = null;
             int candidates = 0;
-            for (Transaction transaction : fresh) {
-                if (!residual.key().equals(storageKey(transaction.bank, transaction.account))) continue;
+            for (Transaction transaction : freshSlot) {
                 if (transaction.date <= residual.fromDate || transaction.date >= residual.toDate) continue;
                 candidates++;
                 match = transaction;
             }
             if (candidates != 1 || match == null || match.balance == null
                     || match.amount != residual.amount
-                    || !residualBracketCloses(residual, after)) continue;
+                    || !residualBracketCloses(residual, afterSlot)) continue;
             String destination = noteKey(match);
             candidateDestinations.put(source, destination);
             sourcesByDestination.computeIfAbsent(destination, ignored -> new ArrayList<>()).add(source);
@@ -2318,17 +2348,17 @@ final class BalanceData {
         if (!editor.commit()) throw new Exception("residual note provenance cleanup failed");
     }
 
-    /** Verifies the specific old bracket, rather than trusting only that some residual vanished. */
-    private static boolean residualBracketCloses(Residual residual, List<Transaction> transactions) {
+    /** Verifies the specific old bracket, rather than trusting only that some residual vanished.
+     *  The caller passes only the account slot the residual belongs to. */
+    private static boolean residualBracketCloses(Residual residual, List<Transaction> slot) {
         Transaction opener = null;
         Transaction closer = null;
         int openers = 0;
         int closers = 0;
         long inside = 0;
         boolean exact = true;
-        for (Transaction transaction : transactions) {
-            if (transaction == null
-                    || !residual.key().equals(storageKey(transaction.bank, transaction.account))) continue;
+        for (Transaction transaction : slot) {
+            if (transaction == null) continue;
             if (transaction.date == residual.fromDate && transaction.balance != null) {
                 openers++;
                 opener = transaction;
@@ -2427,6 +2457,11 @@ final class BalanceData {
             Log.w(TAG, label + " migration failed", e);
             return false;
         }
+    }
+
+    /** Presence check without decrypting or parsing the queue. Empty queues remove their key. */
+    private static boolean hasPendingMetadataMigrations(Context context, String preferenceKey) {
+        return DataGeneration.dataPrefs(context).contains(preferenceKey);
     }
 
     private static Map<String, String> readPendingMetadataMigrations(Context context,
