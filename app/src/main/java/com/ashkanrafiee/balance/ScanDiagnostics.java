@@ -48,7 +48,7 @@ final class ScanDiagnostics {
     /** OTP values must never leave the device through a diagnostics report. The surrounding
      * authorization layout remains shareable so merchant parsing can still be fixed. */
     private static final Pattern OTP_MARKER = Pattern.compile(
-        "(?:رمز|پویا|otp|one[- ]?time|کد\\s*(?:تایید|تأیید)|"
+        "(?:رمز|پویا|otp|passcode|one[- ]?time|کد\\s*(?:تایید|تأیید)|"
             + "(?<![A-Za-z])code(?![A-Za-z]))", Pattern.CASE_INSENSITIVE);
 
     /** One recognized bank and how many of its SMS messages the scan parsed. */
@@ -455,6 +455,7 @@ final class ScanDiagnostics {
             || type == Character.COMBINING_SPACING_MARK
             || type == Character.ENCLOSING_MARK
             || type == Character.FORMAT
+            || type == Character.DASH_PUNCTUATION
             || cp == 0x061C || cp == 0x200C || cp == 0x200D || cp == 0x200E || cp == 0x200F
             || cp == 0xFEFF || (cp >= 0x202A && cp <= 0x202E)
             || (cp >= 0x2066 && cp <= 0x2069);

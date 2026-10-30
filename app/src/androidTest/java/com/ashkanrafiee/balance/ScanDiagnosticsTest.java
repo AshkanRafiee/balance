@@ -345,6 +345,11 @@ public class ScanDiagnosticsTest {
         assertEquals("reference #[redacted] and ＃[redacted]", txt);
     }
 
+    @Test public void senderReport_redactsPasscodeAndDashSeparatedDigits() {
+        String txt = ScanDiagnostics.sanitizeForReport("Your passcode is 12-34");
+        assertEquals("Your passcode is [redacted]", txt);
+    }
+
     @Test public void senderReport_noIssues_omitsTheLine() {
         List<ScanDiagnostics.Message> sel = new ArrayList<>();
         sel.add(new ScanDiagnostics.Message("lay out 1,000 Toman", 1000L));
