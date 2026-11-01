@@ -143,11 +143,26 @@ public class HistoryResidualNoteEditorTest {
             scenario.onActivity(activity -> found[0] = residualRow(activity.getWindow().getDecorView()) != null);
             return found[0];
         }, "the Unaccounted row");
+        scenario.onActivity(activity ->
+            residualRow(activity.getWindow().getDecorView()).performClick());
+        // Dialog's OnShowListener is posted to the main queue. It installs the note button's
+        // custom listener, so clicking in the same UI turn as show() would hit the default button.
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        scenario.onActivity(activity -> lastDialog(activity)
+            .getButton(AlertDialog.BUTTON_NEUTRAL).performClick());
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        await(() -> {
+            final boolean[] visible = {false};
+            scenario.onActivity(activity -> {
+                AlertDialog editor = lastDialog(activity);
+                visible[0] = editor.isShowing() && find(editor.getWindow().getDecorView(),
+                    view -> view instanceof EditText) != null;
+            });
+            return visible[0];
+        }, "the real note editor to open");
         scenario.onActivity(activity -> {
-            residualRow(activity.getWindow().getDecorView()).performClick();
-            lastDialog(activity).getButton(AlertDialog.BUTTON_NEUTRAL).performClick();
-            assertNotNull(find(lastDialog(activity).getWindow().getDecorView(),
-                view -> view instanceof EditText));
+            assertNotNull("the note editor must contain a real editable field",
+                find(lastDialog(activity).getWindow().getDecorView(), view -> view instanceof EditText));
         });
     }
 
