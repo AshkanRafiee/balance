@@ -265,6 +265,22 @@ final class BackupManager {
         writeMetadata(context, json, MetadataStore.MERCHANTS, false);
         json.endObject();
 
+        // Notes kept through a reset may no longer have transactions from which to recover their
+        // old bracket. Carry that context with the note, not with the transaction selection.
+        json.name("residualNoteProvenance").beginArray();
+        for (Map.Entry<String, Residual> entry
+                : BalanceData.readResidualNoteProvenance(context).entrySet()) {
+            if (BalanceData.getNote(context, entry.getKey()) == null) continue;
+            Residual residual = entry.getValue();
+            json.beginObject().name("key").value(entry.getKey())
+                .name("bank").value(residual.bank)
+                .name("from").value(residual.fromDate).name("to").value(residual.toDate)
+                .name("amount").value(residual.amount).name("movements").value(residual.movements);
+            if (residual.account != null) json.name("account").value(residual.account);
+            json.endObject();
+        }
+        json.endArray();
+
         json.name("commitments");
         CommitmentStore.writeJsonRecords(context, json);
 

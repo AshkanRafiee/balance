@@ -58,6 +58,7 @@ final class BackupV2Restore {
     private static final int MERCHANTS = 7;
 
     private static final int SOURCE = 8;
+    private static final int RESIDUAL_NOTE_PROVENANCE = 9;
 
     private static final int SECTION_SCHEMA = 1;
     private static final int SECTION_BALANCES = 1 << 1;
@@ -70,6 +71,8 @@ final class BackupV2Restore {
     private static final int SECTION_COMMITMENT_DELETIONS = 1 << 6;
     /** Numeric producer metadata; optional for framed backups written before version metadata. */
     private static final int SECTION_APP_VERSION = 1 << 7;
+    /** Optional note context added without changing the framed schema or older backup requirements. */
+    private static final int SECTION_RESIDUAL_NOTE_PROVENANCE = 1 << 8;
     private static final int ALL_SECTIONS = SECTION_SCHEMA | SECTION_BALANCES
         | SECTION_TRANSACTIONS | SECTION_METADATA | SECTION_COMMITMENTS;
 
@@ -670,6 +673,12 @@ final class BackupV2Restore {
                     seen |= bit;
                     parseMetadata(json, stage);
                     break;
+                case "residualNoteProvenance":
+                    bit = SECTION_RESIDUAL_NOTE_PROVENANCE;
+                    if ((seen & bit) != 0) throw invalid("duplicate residual note provenance");
+                    seen |= bit;
+                    parseResidualNoteProvenance(json, stage);
+                    break;
                 case "commitments":
                     bit = SECTION_COMMITMENTS;
                     if ((seen & bit) != 0) throw invalid("duplicate commitments section");
@@ -695,7 +704,7 @@ final class BackupV2Restore {
         json.endObject();
         if ((seen & ALL_SECTIONS) != ALL_SECTIONS
                 || (seen & ~(ALL_SECTIONS | SECTION_SOURCES | SECTION_COMMITMENT_DELETIONS
-                    | SECTION_APP_VERSION)) != 0)
+                    | SECTION_APP_VERSION | SECTION_RESIDUAL_NOTE_PROVENANCE)) != 0)
             throw invalid("incomplete backup sections");
     }
 
@@ -887,6 +896,70 @@ final class BackupV2Restore {
         }
         json.endArray();
         return values;
+    }
+
+    private static void parseResidualNoteProvenance(JsonReader json, InputStage stage)
+            throws Exception {
+        json.beginArray();
+        while (json.hasNext()) {
+            String key = null;
+            String bank = null;
+            String account = null;
+            long from = 0;
+            long to = 0;
+            long amount = 0;
+            long movements = 0;
+            int seen = 0;
+            json.beginObject();
+            while (json.hasNext()) {
+                String field = json.nextName();
+                switch (field) {
+                    case "key":
+                        seen = once(seen, 1, "duplicate residual note key");
+                        key = requiredString(json);
+                        break;
+                    case "bank":
+                        seen = once(seen, 1 << 1, "duplicate residual bank");
+                        bank = requiredString(json);
+                        break;
+                    case "from":
+                        seen = once(seen, 1 << 2, "duplicate residual start");
+                        from = exactLong(json);
+                        break;
+                    case "to":
+                        seen = once(seen, 1 << 3, "duplicate residual end");
+                        to = exactLong(json);
+                        break;
+                    case "amount":
+                        seen = once(seen, 1 << 4, "duplicate residual amount");
+                        amount = exactLong(json);
+                        break;
+                    case "movements":
+                        seen = once(seen, 1 << 5, "duplicate residual movement count");
+                        movements = exactLong(json);
+                        break;
+                    case "account":
+                        seen = once(seen, 1 << 6, "duplicate residual account");
+                        account = optionalString(json);
+                        break;
+                    default:
+                        throw invalid("unknown residual note provenance field");
+                }
+            }
+            json.endObject();
+            if ((seen & 0x3f) != 0x3f || from >= to || amount == 0
+                    || movements < 0 || movements > Integer.MAX_VALUE)
+                throw invalid("invalid residual note provenance");
+            requireTransaction(bank, account, from, null, null);
+            Residual residual = new Residual(bank, account, from, to, amount, (int) movements);
+            if (!BalanceData.residualNoteKey(residual).equals(key))
+                throw invalid("residual note key mismatch");
+            JSONObject row = new JSONObject().put("bank", bank).put("from", from)
+                .put("to", to).put("amount", amount).put("movements", movements);
+            if (account != null) row.put("account", account);
+            stage.addMetadata(RESIDUAL_NOTE_PROVENANCE, key, row.toString());
+        }
+        json.endArray();
     }
 
     private static void parseCommitments(JsonReader json, InputStage stage) throws Exception {
@@ -1146,8 +1219,17 @@ final class BackupV2Restore {
             result.transactionsAdded = Math.toIntExact(merged.added);
         }
 
-        if (selection.contains(BackupManager.Section.NOTES))
+        if (selection.contains(BackupManager.Section.NOTES)) {
             mergeMetadata(context, stage, NOTES, MetadataStore.NOTES, false, result);
+            stage.forEach(RESIDUAL_NOTE_PROVENANCE, payload -> {
+                JSONObject row = new JSONObject(payload);
+                Residual residual = new Residual(row.getString("bank"),
+                    row.has("account") ? row.getString("account") : null,
+                    row.getLong("from"), row.getLong("to"), row.getLong("amount"),
+                    row.getInt("movements"));
+                result.metadataChanged |= BalanceData.mergeResidualNoteProvenance(context, residual);
+            });
+        }
         if (selection.contains(BackupManager.Section.REASONS))
             mergeMetadata(context, stage, REASONS, MetadataStore.REASONS, false, result);
         if (selection.contains(BackupManager.Section.CHANNELS))

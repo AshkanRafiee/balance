@@ -141,6 +141,84 @@ public class BackupV2Test {
         }
     }
 
+    @Test public void roundTrip_residualNoteKeepsItsBracketThroughASubsequentReset()
+            throws Exception {
+        Residual gap = saveResidualNote("cash withdrawal");
+        File backup = file("v2-residual-note.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+        BalanceData.reset(context, true);
+
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD);
+        assertEquals(2, BalanceData.readTransactions(context).size());
+        assertResidualNote(gap, "cash withdrawal");
+
+        // A reset must not remove the context needed to carry this note onto an exact late SMS.
+        BalanceData.reset(context, false);
+        assertTrue(BalanceData.readTransactions(context).isEmpty());
+        assertResidualNote(gap, "cash withdrawal");
+    }
+
+    @Test public void roundTrip_backupAfterKeepNotesReset_preservesBracketWithoutTransactions()
+            throws Exception {
+        Residual gap = saveResidualNote("saved before reset");
+        BalanceData.reset(context, false);
+        assertTrue(BalanceData.readTransactions(context).isEmpty());
+        File backup = file("v2-residual-note-after-reset.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+        BalanceData.reset(context, true);
+
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD);
+        assertTrue("provenance must not invent transaction rows",
+            BalanceData.readTransactions(context).isEmpty());
+        assertResidualNote(gap, "saved before reset");
+    }
+
+    @Test public void restore_notesOnlyIncludesResidualBracketWithoutImportingTransactions()
+            throws Exception {
+        Residual gap = saveResidualNote("notes only");
+        File backup = file("v2-residual-note-only.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+        BalanceData.reset(context, true);
+
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD, null,
+            java.util.EnumSet.of(BackupManager.Section.NOTES));
+
+        assertTrue(BalanceData.readTransactions(context).isEmpty());
+        assertResidualNote(gap, "notes only");
+    }
+
+    @Test public void restore_withoutNotesDoesNotImportResidualBracket() throws Exception {
+        Residual gap = saveResidualNote("not selected");
+        File backup = file("v2-residual-note-unselected.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+        BalanceData.reset(context, true);
+        Residual local = new Residual("Mellat", "other-account", T, T + 3_000, -7L, 1);
+        BalanceData.setNote(context, local, "local note");
+
+        java.util.EnumSet<BackupManager.Section> selection = BackupManager.allSections();
+        selection.remove(BackupManager.Section.NOTES);
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD, null, selection);
+
+        assertNull(BalanceData.getNote(context, gap));
+        assertFalse(BalanceData.readResidualNoteProvenance(context).containsKey(gap.noteKey()));
+        assertResidualNote(local, "local note");
+    }
+
+    @Test public void restore_residualNoteAndBracketKeepLocalValues() throws Exception {
+        Residual incoming = saveResidualNote("backup note");
+        File backup = file("v2-residual-note-local-first.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+        BalanceData.reset(context, true);
+        Residual local = new Residual(incoming.bank, incoming.account, incoming.fromDate,
+            incoming.toDate, -700L, 3);
+        assertEquals(incoming.noteKey(), local.noteKey());
+        BalanceData.setNote(context, local, "local note");
+
+        BackupManager.restore(context, Uri.fromFile(backup), PASSWORD);
+
+        assertResidualNote(local, "local note");
+    }
+
     @Test public void restore_isUncappedForCommitmentsAndSettlementEvents() throws Exception {
         List<Commitment> source = new ArrayList<>();
         for (int i = 0; i < 501; i++) {
@@ -534,6 +612,7 @@ public class BackupV2Test {
     }
 
     @Test public void framedPayloadWithoutVersionMetadata_remainsCompatible() throws Exception {
+        Residual local = saveResidualNote("local bracket");
         File old = file("v2-without-producer-version.bin");
         writePayload(old, "{\"schema\":2,\"balances\":[],\"transactions\":[],"
             + "\"metadata\":{\"notes\":[],\"reasons\":[],\"channels\":[],\"tags\":[]},"
@@ -543,6 +622,49 @@ public class BackupV2Test {
             Uri.fromFile(old), PASSWORD);
         assertEquals(0, result.added);
         assertTrue(BalanceData.read(context).isEmpty());
+        assertResidualNote(local, "local bracket");
+    }
+
+    @Test public void invalidResidualProvenanceNeverPublishesPartOfTheRestore() throws Exception {
+        Residual gap = saveResidualNote("live note");
+        File backup = file("v2-residual-note-valid.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+        org.json.JSONObject payload = readPayload(backup);
+        org.json.JSONObject original = payload.getJSONArray("residualNoteProvenance")
+            .getJSONObject(0);
+        payload.put("balances", new org.json.JSONArray().put(new org.json.JSONObject()
+            .put("key", "Incoming").put("name", "Incoming").put("sender", "sender")
+            .put("amount", 123L).put("date", T)));
+        for (int scenario = 0; scenario < 3; scenario++) {
+            org.json.JSONObject row = new org.json.JSONObject(original.toString());
+            org.json.JSONArray provenance = new org.json.JSONArray().put(row);
+            if (scenario == 0) row.put("key", "r:wrong-bracket");
+            else if (scenario == 1) row.put("movements", (long) Integer.MAX_VALUE + 1);
+            else provenance.put(new org.json.JSONObject(row.toString()));
+            payload.put("residualNoteProvenance", provenance);
+            File malformed = file("v2-residual-note-invalid-" + scenario + ".bin");
+            writePayload(malformed, payload.toString());
+            expectRestoreFailure(malformed, "invalid residual provenance " + scenario, PASSWORD);
+            assertResidualNote(gap, "live note");
+            assertEquals(2, BalanceData.readTransactions(context).size());
+            assertFalse(BalanceData.read(context).containsKey("Incoming"));
+        }
+    }
+
+    @Test public void restore_residualProvenanceWithoutANoteIsNotImported() throws Exception {
+        Residual gap = saveResidualNote("removed from backup payload");
+        File backup = file("v2-residual-note-orphan-base.bin");
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+        org.json.JSONObject payload = readPayload(backup);
+        payload.getJSONObject("metadata").put("notes", new org.json.JSONArray());
+        File orphan = file("v2-residual-note-orphan.bin");
+        writePayload(orphan, payload.toString());
+        BalanceData.reset(context, true);
+
+        BackupManager.restore(context, Uri.fromFile(orphan), PASSWORD);
+
+        assertNull(BalanceData.getNote(context, gap));
+        assertTrue(BalanceData.readResidualNoteProvenance(context).isEmpty());
     }
 
     @Test public void largeSourceStore_backupCompletesWithDeterminateProgressAndRoundTrips()
@@ -613,6 +735,31 @@ public class BackupV2Test {
         assertEquals(transaction.content, BalanceData.readTransactions(context).get(0).content);
     }
 
+    private Residual saveResidualNote(String note) {
+        Transaction first = new Transaction("Mellat", "1110000222", T, 1_000L, 1_000L,
+            "residual-open", "residual-open-content");
+        Transaction last = new Transaction("Mellat", "1110000222", T + 3_000, -100L, 500L,
+            "residual-close", "residual-close-content");
+        BalanceData.writeTransactions(context, Arrays.asList(first, last));
+        List<Residual> gaps = Residual.between(BalanceData.readTransactions(context));
+        assertEquals(1, gaps.size());
+        Residual gap = gaps.get(0);
+        BalanceData.setNote(context, gap, note);
+        return gap;
+    }
+
+    private void assertResidualNote(Residual expected, String note) {
+        assertEquals(note, BalanceData.getNote(context, expected));
+        Residual actual = BalanceData.readResidualNoteProvenance(context).get(expected.noteKey());
+        assertNotNull("the old bracket must survive even when its transactions do not", actual);
+        assertEquals(expected.bank, actual.bank);
+        assertEquals(expected.account, actual.account);
+        assertEquals(expected.fromDate, actual.fromDate);
+        assertEquals(expected.toDate, actual.toDate);
+        assertEquals(expected.amount, actual.amount);
+        assertEquals(expected.movements, actual.movements);
+    }
+
     private File file(String name) {
         File file = new File(context.getCacheDir(), name);
         file.delete();
@@ -645,6 +792,16 @@ public class BackupV2Test {
         int count;
         while ((count = reader.read(buffer)) != -1) out.append(buffer, 0, count);
         return out.toString();
+    }
+
+    private static org.json.JSONObject readPayload(File backup) throws Exception {
+        try (FileInputStream raw = new FileInputStream(backup);
+                BackupFrames.AuthenticatedInputStream decrypted = BackupFrames.openInputStream(raw,
+                    PASSWORD.toCharArray());
+                java.io.InputStreamReader reader = new java.io.InputStreamReader(decrypted,
+                    StandardCharsets.UTF_8)) {
+            return new org.json.JSONObject(readAll(reader));
+        }
     }
 
     private static void write(File file, byte[] bytes) throws Exception {
