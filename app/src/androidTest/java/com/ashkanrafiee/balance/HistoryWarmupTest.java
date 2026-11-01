@@ -340,6 +340,185 @@ public class HistoryWarmupTest {
         warmed.close();
     }
 
+    @Test public void remember_reusesBankAndAccountViewsWithIndependentHandles() throws Exception {
+        seedScopes();
+        HistoryWarmup.warmNow(context);
+        HistoryReader.RevisionStamp bankStamp = rememberScope("Mellat", null);
+        HistoryReader.RevisionStamp accountStamp = rememberScope("Mellat", "111");
+        Set<String> files = timelineFiles();
+        for (int open = 0; open < 3; open++) {
+            HistoryReader.Result bank = takeScope("Mellat", null);
+            HistoryReader.Result account = takeScope("Mellat", "111");
+            assertNotNull(bank);
+            assertNotNull(account);
+            try {
+                assertSame(bankStamp, bank.revisionStamp);
+                assertSame(accountStamp, account.revisionStamp);
+                assertEquals(2L, bank.movementCount);
+                assertEquals(1L, account.movementCount);
+                assertTrue("seed pages are not needed for a cache hit", account.requestedDayRows.isEmpty());
+                assertEquals(1, HistoryReader.readPage(context, account, dayKey(), null, false, 8)
+                    .transactions.size());
+                HistoryWarmup.remember(Collections.singleton("Mellat"), Collections.singleton("111"),
+                    HistoryActivity.Filter.ALL, "", Collections.emptyList(),
+                    RegionHelper.isIran(context), context, account);
+            } finally {
+                bank.close();
+                account.close();
+            }
+        }
+        HistoryReader.Result all = takeDefault();
+        assertNotNull("scoped hits must preserve the valid default entry", all);
+        all.close();
+        assertEquals("repeated opens create no new spool files", files, timelineFiles());
+    }
+
+    @Test public void remember_evictsLeastRecentlyUsedOfThreeEntriesAndCleansItsFiles() throws Exception {
+        seedScopes();
+        rememberScope("Mellat", null);
+        Set<String> beforeSecond = timelineFiles();
+        rememberScope(null, "111");
+        Set<String> secondFiles = timelineFiles();
+        secondFiles.removeAll(beforeSecond);
+        assertFalse(secondFiles.isEmpty());
+        rememberScope("Melli", null);
+        assertScopeCount("Mellat", null, 2L); // Makes the first entry newer than the account view.
+        rememberScope(null, "444");
+        assertNull("fourth view evicts the least recently used, not the first inserted",
+            takeScope(null, "111"));
+        assertTrue("evicted owner must delete its disposable files",
+            Collections.disjoint(secondFiles, timelineFiles()));
+        assertScopeCount("Mellat", null, 2L);
+        assertScopeCount("Melli", null, 1L);
+        assertScopeCount(null, "444", 1L);
+
+        HistoryWarmup.warmNow(context, new WorkProgress() {
+            @Override public void stage(int stage) {
+                throw new AssertionError("speculation must not rebuild into a full scoped cache");
+            }
+            @Override public void progress(long done, long total) {}
+        });
+        assertNull("default speculation must not evict a scoped entry", takeDefault());
+        assertScopeCount("Mellat", null, 2L);
+        assertScopeCount("Melli", null, 1L);
+        assertScopeCount(null, "444", 1L);
+    }
+
+    @Test public void invalidate_clearsAllScopedEntriesButKeepsBorrowedTimelineAlive() throws Exception {
+        seedScopes();
+        Set<String> before = timelineFiles();
+        rememberScope("Mellat", "111");
+        Set<String> firstFiles = timelineFiles();
+        rememberScope("Melli", null);
+        rememberScope(null, "444");
+        HistoryReader.Result borrowed = takeScope("Mellat", "111");
+        assertNotNull(borrowed);
+        try {
+            HistoryWarmup.invalidate();
+            assertNull(takeScope("Mellat", "111"));
+            assertNull(takeScope("Melli", null));
+            assertNull(takeScope(null, "444"));
+            assertEquals(firstFiles, timelineFiles());
+            assertEquals(1, HistoryReader.readPage(context, borrowed, dayKey(), null, false, 8)
+                .transactions.size());
+        } finally {
+            borrowed.close();
+        }
+        assertEquals(before, timelineFiles());
+    }
+
+    @Test public void unopenedDefaultWarmup_isEvictedBeforeRecentlyRenderedScopes() throws Exception {
+        seedScopes();
+        rememberScope("Mellat", null);
+        rememberScope("Melli", null);
+        HistoryWarmup.warmNow(context);
+        rememberScope(null, "444");
+        assertNull("speculation is not a recent user access", takeDefault());
+        assertScopeCount("Mellat", null, 2L);
+        assertScopeCount("Melli", null, 1L);
+        assertScopeCount(null, "444", 1L);
+    }
+
+    @Test public void invalidate_fencesRememberWaitingForStoreMonitor() throws Exception {
+        seedScopes();
+        HistoryReader.Result result = readScope("Mellat", "111");
+        boolean iran = RegionHelper.isIran(context);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread remembering = new Thread(() -> {
+            try {
+                HistoryWarmup.remember(Collections.singleton("Mellat"), Collections.singleton("111"),
+                    HistoryActivity.Filter.ALL, "", Collections.emptyList(),
+                    iran, context, result);
+            } catch (Throwable error) {
+                failure.set(error);
+            }
+        }, "test-history-remember");
+        try {
+            synchronized (BalanceData.class) {
+                remembering.start();
+                long deadline = SystemClock.elapsedRealtime() + 15_000;
+                while (remembering.getState() != Thread.State.BLOCKED
+                        && remembering.isAlive() && SystemClock.elapsedRealtime() < deadline) {
+                    Thread.sleep(10);
+                }
+                assertEquals(Thread.State.BLOCKED, remembering.getState());
+                HistoryWarmup.invalidate();
+            }
+            remembering.join(15_000);
+            assertFalse(remembering.isAlive());
+            assertNull(failure.get());
+            assertNull("invalidation must fence an already-started admission", takeScope("Mellat", "111"));
+        } finally {
+            remembering.join(15_000);
+            result.close();
+        }
+    }
+
+    @Test public void remember_rejectsStaleSnapshotWithoutConsumingCallerOwnership() throws Exception {
+        seedScopes();
+        HistoryReader.Result old = readScope("Mellat", "111");
+        try {
+            BalanceData.setNote(context, tx(1L), "changed after the snapshot");
+            HistoryWarmup.remember(Collections.singleton("Mellat"), Collections.singleton("111"),
+                HistoryActivity.Filter.ALL, "", Collections.emptyList(),
+                RegionHelper.isIran(context), context, old);
+            assertNull(takeScope("Mellat", "111"));
+            assertEquals(1, HistoryReader.readPage(context, old, dayKey(), null, false, 8)
+                .transactions.size());
+        } finally {
+            old.close();
+        }
+        rememberScope("Mellat", "111");
+        assertScopeCount("Mellat", "111", 1L);
+    }
+
+    @Test public void searchedViews_invalidateWhenFormattingSettingsChange() throws Exception {
+        seedScopes();
+        HistoryWarmup.warmNow(context);
+        boolean iran = RegionHelper.isIran(context);
+        HistoryReader.Request request = new HistoryReader.Request(iran,
+            HistoryReader.DEFAULT_PAGE_SIZE, "Mellat", (String) null,
+            HistoryActivity.Filter.ALL, "Mellat", Collections.emptyList(),
+            Collections.emptyList(), 0, 8);
+        HistoryReader.Result searched = HistoryReader.summaryWithResiduals(context, request);
+        try {
+            HistoryWarmup.remember(Collections.singleton("Mellat"), null,
+                HistoryActivity.Filter.ALL, "Mellat", Collections.emptyList(), iran, context, searched);
+        } finally {
+            searched.close();
+        }
+        HistoryReader.Result hit = HistoryWarmup.take("Mellat", (String) null,
+            HistoryActivity.Filter.ALL, "Mellat", Collections.emptyList(), iran, context);
+        assertNotNull(hit);
+        hit.close();
+        CurrencyHelper.setCurrency(context, CurrencyHelper.CURRENCY_TOMAN);
+        assertNull(HistoryWarmup.take("Mellat", (String) null, HistoryActivity.Filter.ALL,
+            "Mellat", Collections.emptyList(), iran, context));
+        HistoryReader.Result all = takeDefault();
+        assertNotNull("unsearched summaries do not depend on amount formatting", all);
+        all.close();
+    }
+
     private static void await(CountDownLatch latch) {
         try {
             if (!latch.await(15, TimeUnit.SECONDS)) throw new AssertionError("latch timed out");
@@ -368,6 +547,50 @@ public class HistoryWarmupTest {
             if (warmed == null) Thread.sleep(25);
         }
         return warmed;
+    }
+
+    private HistoryReader.Result readScope(String bank, String account) throws Exception {
+        HistoryReader.Request request = new HistoryReader.Request(RegionHelper.isIran(context),
+            HistoryReader.DEFAULT_PAGE_SIZE, bank, account, HistoryActivity.Filter.ALL, "",
+            Collections.emptyList(), Collections.emptyList(), 0, 8);
+        return HistoryReader.summaryWithResiduals(context, request);
+    }
+
+    private HistoryReader.RevisionStamp rememberScope(String bank, String account) throws Exception {
+        HistoryReader.Result result = readScope(bank, account);
+        try {
+            HistoryWarmup.remember(bank == null ? null : Collections.singleton(bank),
+                account == null ? null : Collections.singleton(account), HistoryActivity.Filter.ALL,
+                "", Collections.emptyList(), RegionHelper.isIran(context), context, result);
+            return result.revisionStamp;
+        } finally {
+            result.close();
+        }
+    }
+
+    private HistoryReader.Result takeScope(String bank, String account) {
+        return HistoryWarmup.take(bank, account, HistoryActivity.Filter.ALL, "",
+            Collections.emptyList(), RegionHelper.isIran(context), context);
+    }
+
+    private void assertScopeCount(String bank, String account, long count) throws Exception {
+        HistoryReader.Result result = takeScope(bank, account);
+        assertNotNull(result);
+        try {
+            assertEquals(count, result.movementCount);
+        } finally {
+            result.close();
+        }
+    }
+
+    private void seedScopes() {
+        Transaction first = tx(1L);
+        List<Transaction> stored = new ArrayList<>();
+        stored.add(first);
+        stored.add(new Transaction("Mellat", "222", first.date, 2L, null, "sig-2", "content-2"));
+        stored.add(new Transaction("Melli", "333", first.date, 3L, null, "sig-3", "content-3"));
+        stored.add(new Transaction("Saderat", "444", first.date, 4L, null, "sig-4", "content-4"));
+        assertTrue(BalanceData.writeTransactions(context, stored));
     }
 
     private void seed() {

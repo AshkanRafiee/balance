@@ -7,8 +7,11 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ScheduledFuture;
@@ -20,8 +23,8 @@ import java.util.concurrent.TimeUnit;
  * history usually finds a ready result instead of paying for a full scan. The cached result is
  * fingerprinted by scope, filters and the revisions of every store it was read from: any write,
  * scan, restore or reset changes a revision and the cache is refused. Each hit gets an independent
- * handle to the immutable result. One entry is retained for at most ten minutes; its encrypted
- * disposable timeline is deleted when the cache and every active screen have released it.
+ * handle to the immutable result. At most three views are retained, each for ten minutes. An
+ * encrypted disposable timeline is deleted when the cache and every active screen release it.
  */
 final class HistoryWarmup {
     private static final String TAG = "HistoryWarmup";
@@ -31,6 +34,7 @@ final class HistoryWarmup {
     /** Dispatch has its own monitor: cache acquisition/cleanup must never delay warm() on UI. */
     private static final Object DISPATCH_LOCK = new Object();
     private static final long RETENTION_MS = 10L * 60 * 1000;
+    private static final int MAX_ENTRIES = 3;
     private static final ScheduledThreadPoolExecutor WORKER = new ScheduledThreadPoolExecutor(2,
         task -> new Thread(() -> {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
@@ -41,10 +45,8 @@ final class HistoryWarmup {
     private static long warmingEpoch;
     private static Context pendingWarm;
     private static volatile long epoch;
-    private static long cachedAt;
-    private static ScheduledFuture<?> expiry;
-    private static Fingerprint cachedKey;
-    private static HistoryReader.Result cached;
+    private static final LinkedHashMap<Fingerprint, Entry> CACHE =
+        new LinkedHashMap<>(MAX_ENTRIES, 0.75f, true);
 
     private HistoryWarmup() {}
 
@@ -81,7 +83,7 @@ final class HistoryWarmup {
     }
 
     /**
-     * Borrows a cached result when it describes exactly the requested default view read from
+     * Borrows a cached result when it describes exactly the requested view read from
      * unchanged stores. The caller owns this handle and must close it. Any mismatch — filters,
      * day rollover or a store write — returns null and the caller runs a fresh pass.
      */
@@ -110,7 +112,7 @@ final class HistoryWarmup {
     static HistoryReader.Result take(Collection<String> banks,
             Collection<String> accounts, HistoryActivity.Filter filter,
             String query, List<String> tags, boolean iran, Context context, boolean rewarm) {
-        HistoryReader.Result discarded = null;
+        List<HistoryReader.Result> discarded = new ArrayList<>();
         HistoryReader.Result out = null;
         // The store monitor always precedes LOCK; warm() never acquires the store monitor.
         synchronized (BalanceData.class) {
@@ -119,16 +121,44 @@ final class HistoryWarmup {
                 RegionHelper.isIran(context));
             Fingerprint wanted = new Fingerprint(banks, accounts, filter, query, tags, iran, current);
             synchronized (LOCK) {
-                if (cached != null && (expired() || !current.equals(cachedKey.stamp))) {
-                    discarded = detachLocked();
-                    epoch++;
-                }
-                if (cached != null && wanted.equals(cachedKey)) out = cached.retain();
+                if (pruneLocked(current, discarded)) epoch++;
+                Entry hit = CACHE.get(wanted);
+                if (hit != null) out = hit.result.retain();
             }
         }
-        close(discarded);
+        closeAll(discarded);
         if (out == null && rewarm) warm(context);
         return out;
+    }
+
+    /**
+     * Remembers a completed render-worker read. Retains independent ownership, never consumes the
+     * caller's result, and admits only an exact current revision/date/calendar snapshot. Requested
+     * day pages are deliberately not part of the key: missing pages can use the retained timeline.
+     */
+    static void remember(Collection<String> banks, Collection<String> accounts,
+            HistoryActivity.Filter filter, String query, List<String> tags,
+            boolean iran, Context context, HistoryReader.Result result) {
+        if (result == null || result.revisionStamp == null) return;
+        long ticket = epoch;
+        List<HistoryReader.Result> discarded = new ArrayList<>();
+        try {
+            synchronized (BalanceData.class) {
+                BalanceData.ensureResetComplete(context);
+                HistoryReader.RevisionStamp current = HistoryReader.RevisionStamp.current(context,
+                    RegionHelper.isIran(context));
+                Fingerprint key = new Fingerprint(banks, accounts, filter, query, tags, iran, current);
+                if (iran != current.iran || !key.matchesStamp(result.revisionStamp)) return;
+                synchronized (LOCK) {
+                    if (ticket != epoch) return;
+                    pruneLocked(current, discarded);
+                    // Re-rendering a hit must not rebuild ownership or extend its fixed TTL.
+                    if (CACHE.get(key) == null) putLocked(key, result.retain(), discarded, false);
+                }
+            }
+        } finally {
+            closeAll(discarded);
+        }
     }
 
     /** Synchronous warm used by tests; the asynchronous {@link #warm} wraps this. */
@@ -145,7 +175,7 @@ final class HistoryWarmup {
 
     private static void warmNow(Context context, long ticket, WorkProgress progress) throws Exception {
         HistoryReader.Result result = null;
-        HistoryReader.Result discarded = null;
+        List<HistoryReader.Result> discarded = new ArrayList<>();
         try {
             BalanceData.ensureResetComplete(context);
             synchronized (BalanceData.class) {
@@ -153,8 +183,11 @@ final class HistoryWarmup {
                 HistoryReader.RevisionStamp current = HistoryReader.RevisionStamp.current(context, iran);
                 synchronized (LOCK) {
                     if (ticket != epoch) return;
-                    if (cached != null && !expired() && current.equals(cachedKey.stamp)) return;
-                    discarded = detachLocked();
+                    pruneLocked(current, discarded);
+                    Fingerprint key = new Fingerprint(null, null, HistoryActivity.Filter.ALL, "",
+                        Collections.emptyList(), iran, current);
+                    // Speculation must not displace a useful scoped view or refresh default LRU.
+                    if (CACHE.containsKey(key) || CACHE.size() == MAX_ENTRIES) return;
                 }
                 CalDate today = CalDate.today(iran);
                 Set<String> days = new LinkedHashSet<>();
@@ -170,54 +203,98 @@ final class HistoryWarmup {
                 // Check date/timezone again: a midnight/configuration change rejects this pass.
                 current = HistoryReader.RevisionStamp.current(context, RegionHelper.isIran(context));
                 synchronized (LOCK) {
-                    if (ticket != epoch || !current.equals(result.revisionStamp)
+                    if (ticket != epoch || !current.sameData(result.revisionStamp)
                             || !today.key().equals(result.revisionStamp.today)) return;
-                    HistoryReader.Result installed = result;
-                    cached = result;
-                    cachedKey = new Fingerprint(null, null, HistoryActivity.Filter.ALL, "",
+                    Fingerprint key = new Fingerprint(null, null, HistoryActivity.Filter.ALL, "",
                         Collections.emptyList(), iran, result.revisionStamp);
-                    cachedAt = android.os.SystemClock.elapsedRealtime();
-                    expiry = WORKER.schedule(() -> expire(installed), RETENTION_MS,
-                        TimeUnit.MILLISECONDS);
+                    putLocked(key, result, discarded, true);
                     result = null;
                 }
             }
         } finally {
             close(result);
-            close(discarded);
+            closeAll(discarded);
         }
         sweepStaleFiles(context);
     }
 
     /** Drops any cached result, e.g. before a test that needs a deterministic cold start. */
     static void invalidate() {
-        HistoryReader.Result discarded;
+        List<HistoryReader.Result> discarded = new ArrayList<>();
         synchronized (LOCK) {
             epoch++;
-            discarded = detachLocked();
+            for (Entry entry : CACHE.values()) discardLocked(entry, discarded);
+            CACHE.clear();
         }
-        close(discarded);
+        closeAll(discarded);
     }
 
-    private static HistoryReader.Result detachLocked() {
-        HistoryReader.Result old = cached;
-        cached = null;
-        cachedKey = null;
-        if (expiry != null) expiry.cancel(false);
-        expiry = null;
-        return old;
+    private static final class Entry {
+        final HistoryReader.Result result;
+        final long createdAt = android.os.SystemClock.elapsedRealtime();
+        ScheduledFuture<?> expiry;
+
+        Entry(HistoryReader.Result result) { this.result = result; }
     }
 
-    private static boolean expired() {
-        return android.os.SystemClock.elapsedRealtime() - cachedAt >= RETENTION_MS;
+    /** Returns whether store/calendar staleness (not merely TTL expiry) was observed. */
+    private static boolean pruneLocked(HistoryReader.RevisionStamp current,
+            List<HistoryReader.Result> discarded) {
+        boolean stale = false;
+        long now = android.os.SystemClock.elapsedRealtime();
+        Iterator<Map.Entry<Fingerprint, Entry>> entries = CACHE.entrySet().iterator();
+        while (entries.hasNext()) {
+            Map.Entry<Fingerprint, Entry> item = entries.next();
+            boolean mismatch = !item.getKey().matchesStamp(current);
+            if (mismatch || now - item.getValue().createdAt >= RETENTION_MS) {
+                stale |= mismatch;
+                entries.remove();
+                discardLocked(item.getValue(), discarded);
+            }
+        }
+        return stale;
     }
 
-    private static void expire(HistoryReader.Result expected) {
-        HistoryReader.Result discarded = null;
+    /** Takes ownership of result; every removed owner is closed outside the cache/store locks. */
+    private static void putLocked(Fingerprint key, HistoryReader.Result result,
+            List<HistoryReader.Result> discarded, boolean speculative) {
+        Entry entry = new Entry(result);
+        Entry old = CACHE.remove(key);
+        if (old != null) discardLocked(old, discarded);
+        if (speculative && !CACHE.isEmpty()) {
+            // A view nobody opened yet is the first eviction candidate, not the most recent use.
+            Map<Fingerprint, Entry> recent = new LinkedHashMap<>(CACHE);
+            CACHE.clear();
+            CACHE.put(key, entry);
+            CACHE.putAll(recent);
+        } else {
+            CACHE.put(key, entry);
+        }
+        if (CACHE.size() > MAX_ENTRIES) {
+            Iterator<Entry> entries = CACHE.values().iterator();
+            Entry eldest = entries.next();
+            entries.remove();
+            discardLocked(eldest, discarded);
+        }
+        entry.expiry = WORKER.schedule(() -> expire(key, entry), RETENTION_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private static void discardLocked(Entry entry, List<HistoryReader.Result> discarded) {
+        if (entry.expiry != null) entry.expiry.cancel(false);
+        discarded.add(entry.result);
+    }
+
+    private static void expire(Fingerprint key, Entry expected) {
+        boolean removed;
         synchronized (LOCK) {
-            if (cached == expected) discarded = detachLocked();
+            // Identity checked without get(): an obsolete timer must not touch newer LRU order.
+            removed = CACHE.remove(key, expected);
         }
-        close(discarded);
+        if (removed) close(expected.result);
+    }
+
+    private static void closeAll(List<HistoryReader.Result> results) {
+        for (HistoryReader.Result result : results) close(result);
     }
 
     private static void close(HistoryReader.Result result) {
@@ -284,6 +361,10 @@ final class HistoryWarmup {
             this.stamp = stamp;
         }
 
+        boolean matchesStamp(HistoryReader.RevisionStamp other) {
+            return query.isEmpty() ? stamp.sameData(other) : stamp.equals(other);
+        }
+
         @Override public boolean equals(Object o) {
             if (!(o instanceof Fingerprint)) return false;
             Fingerprint other = (Fingerprint) o;
@@ -295,11 +376,12 @@ final class HistoryWarmup {
                 && query.equals(other.query)
                 && tags.equals(other.tags)
                 && iran == other.iran
-                && stamp.equals(other.stamp);
+                && matchesStamp(other.stamp);
         }
 
         @Override public int hashCode() {
-            return Objects.hash(banks, accounts, direction, from, to, query, tags, iran, stamp);
+            return Objects.hash(banks, accounts, direction, from, to, query, tags, iran,
+                query.isEmpty() ? stamp.dataHashCode() : stamp.hashCode());
         }
     }
 }

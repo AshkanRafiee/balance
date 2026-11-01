@@ -54,31 +54,65 @@ final class HistoryReader {
         final String today;
         final boolean iran;
         private final TimeZone zone;
+        private final SearchSettings searchSettings;
 
-        RevisionStamp(Context context, boolean iran, CalDate today, TimeZone zone) {
+        RevisionStamp(Context context, boolean iran, CalDate today, TimeZone zone,
+                SearchSettings searchSettings) {
             this.transactions = TransactionStore.revision(context);
             this.metadata = MetadataStore.revision(context);
             this.today = today.key();
             this.iran = iran;
             this.zone = (TimeZone) zone.clone();
+            this.searchSettings = searchSettings;
         }
 
         static RevisionStamp current(Context context, boolean iran) {
-            return new RevisionStamp(context, iran, CalDate.today(iran), TimeZone.getDefault());
+            return new RevisionStamp(context, iran, CalDate.today(iran), TimeZone.getDefault(),
+                new SearchSettings(context));
         }
 
         @Override public boolean equals(Object value) {
             if (!(value instanceof RevisionStamp)) return false;
             RevisionStamp other = (RevisionStamp) value;
-            return iran == other.iran && today.equals(other.today)
+            return sameData(other) && searchSettings.equals(other.searchSettings);
+        }
+
+        /** Unsearched summaries do not depend on the context's translated UI resources. */
+        boolean sameData(RevisionStamp other) {
+            return other != null && iran == other.iran && today.equals(other.today)
                 && zone.getID().equals(other.zone.getID()) && zone.hasSameRules(other.zone)
                 && Objects.equals(transactions, other.transactions)
                 && Objects.equals(metadata, other.metadata);
         }
 
         @Override public int hashCode() {
-            return Objects.hash(transactions, metadata, today, iran, zone.getID());
+            return Objects.hash(dataHashCode(), searchSettings);
         }
+
+        int dataHashCode() { return Objects.hash(transactions, metadata, today, iran, zone.getID()); }
+    }
+
+    /** Search also matches localized labels and formatted amounts, not only stored text. */
+    private static final class SearchSettings {
+        final boolean persian;
+        final String currency;
+        final String locales;
+
+        SearchSettings(Context context) {
+            persian = LocaleHelper.isPersian(context);
+            currency = CurrencyHelper.currency(context);
+            locales = context.getResources().getConfiguration().getLocales().toLanguageTags()
+                + ";" + Locale.getDefault().toLanguageTag();
+        }
+
+        @Override public boolean equals(Object value) {
+            if (!(value instanceof SearchSettings)) return false;
+            SearchSettings other = (SearchSettings) value;
+            return persian == other.persian && Objects.equals(currency, other.currency)
+                && locales.equals(other.locales);
+        }
+
+        @Override public int hashCode() { return Objects.hash(persian, currency, locales); }
     }
 
     /** The immutable scope and page policy for one read. */
@@ -807,6 +841,7 @@ final class HistoryReader {
         final TreeMap<Integer, MutableYear> years = new TreeMap<>(Collections.reverseOrder());
         final CalDate todayDate;
         final TimeZone timeZone;
+        final SearchSettings searchSettings;
         long transactionOrdinal;
         long residualOrdinal;
         long residualCount;
@@ -817,6 +852,7 @@ final class HistoryReader {
             this.timeline = timeline;
             this.todayDate = CalDate.today(request.iran);
             this.timeZone = TimeZone.getDefault();
+            this.searchSettings = new SearchSettings(context);
         }
 
         Accumulator(Context context, Request request) {
@@ -920,7 +956,8 @@ final class HistoryReader {
                 Result result = new Result(reference, residualsComplete, allTime.freeze(), today.freeze(),
                     month.freeze(), year.freeze(), yearResults, dayResults, rowResults, visibleTx,
                     visibleResidual, residualCount, snapshot, request.iran,
-                    reference ? null : new RevisionStamp(context, request.iran, todayDate, timeZone));
+                    reference ? null : new RevisionStamp(context, request.iran, todayDate, timeZone,
+                        searchSettings));
                 transferred = true;
                 return result;
             } finally {
