@@ -1554,6 +1554,7 @@ final class BalanceData {
 
         Map<SourceEvidence, String> balanceReplacements = full
             ? balanceSourceReplacements(context, current, sourceRows) : java.util.Collections.emptyMap();
+        Map<String, Bank> balanceSnapshots = full ? new HashMap<>(current) : java.util.Collections.emptyMap();
         Map<String, List<Reconcile.Entry>> windows = full ? new HashMap<>() : loadRecentMovements(context);
         for (Map.Entry<String, List<Object[]>> e : rowsByKey.entrySet()) {
             String key = e.getKey();
@@ -1602,14 +1603,24 @@ final class BalanceData {
                     SourceEvidence source = replacement.getKey();
                     if (key.equals(storageKey(source.balanceBank, source.balanceAccount))
                             && source.balanceDate == chosen.date && source.balance == chosen.balance) {
-                        changed |= existing == null || existing.date != chosen.date
-                            || existing.amount != chosen.balance || !key.equals(replacement.getValue());
                         superseded = replacement.getValue();
+                        // Proof that account A's snapshot changed into B does not prove that B's
+                        // independently retained snapshot is stale. Only the superseded slot itself
+                        // may bypass the normal date guard.
+                        if (key.equals(superseded))
+                            changed |= existing == null || existing.date != chosen.date
+                                || existing.amount != chosen.balance;
                         break;
                     }
                 }
+                if (superseded != null && !superseded.equals(key)) {
+                    Bank obsoleteSnapshot = balanceSnapshots.get(superseded);
+                    if (obsoleteSnapshot != null && current.get(superseded) == obsoleteSnapshot) {
+                        current.remove(superseded);
+                        if (!changed) matched++;
+                    }
+                }
                 if (changed) {
-                    if (superseded != null && !superseded.equals(key)) current.remove(superseded);
                     matched++;
                     current.put(key, new Bank(bank, chosen.balance, chosen.date,
                         chosenSender != null ? chosenSender : (existing != null ? existing.sender : null),

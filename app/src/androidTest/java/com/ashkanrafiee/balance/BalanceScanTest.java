@@ -225,6 +225,28 @@ public class BalanceScanTest {
         assertEquals(persian(1405, 6, 8, 10, 0), saved.get("Tejarat|" + account).date);
     }
 
+    @Test public void rulesReparse_accountCorrectionKeepsNewerDestinationSnapshot() throws Exception {
+        long arrival = at(2026, 8, 30, 11, 0);
+        seed("TejaratBank", TEJARAT_NEWER_BUT_EARLY, arrival);
+        String destination = "01351234567890";
+        String obsolete = "wrong-account";
+        long retainedDate = persian(1405, 6, 9, 10, 0);
+        LinkedHashMap<String, Bank> old = new LinkedHashMap<>();
+        old.put("Tejarat|" + obsolete, new Bank("Tejarat", 42L, arrival, "TejaratBank", obsolete));
+        old.put("Tejarat|" + destination,
+            new Bank("Tejarat", 99L, retainedDate, "TejaratBank", destination));
+        assertTrue(BalanceData.write(ctx, old));
+        SourceStore.Source source = SourceStore.capture(ctx, "TejaratBank", TEJARAT_NEWER_BUT_EARLY,
+            arrival, BankRules.VERSION);
+        SourceStore.observeBalance(ctx, source, 0, "Tejarat", obsolete, arrival, 42L);
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+        assertEquals(1, saved.size());
+        assertNull(saved.get("Tejarat|" + obsolete));
+        assertEquals(99L, saved.get("Tejarat|" + destination).amount);
+        assertEquals(retainedDate, saved.get("Tejarat|" + destination).date);
+    }
+
     // ============================================================
     // Full-first-scan behaviour
     // ============================================================
