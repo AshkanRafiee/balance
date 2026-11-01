@@ -55,7 +55,7 @@ final class TransactionStore {
      *  multi-megabyte transient allocations. It is not a cap on the number of retained rows. */
     static final int MAX_FIELD_CHARS = 1024 * 1024;
     private static final int DEFAULT_PAGE_SIZE = 256;
-    private static final int DB_VERSION = 2;
+    private static final int DB_VERSION = 3;
     private static final String META = "store_meta";
     private static final String READY = "ready";
     /** Ownership metadata from the original v1 schema; its presence identifies a legacy DB. */
@@ -586,7 +586,7 @@ final class TransactionStore {
 
         ContentValues indexes(Transaction transaction) {
             ContentValues values = new ContentValues();
-            values.put("sig_digest", digest("sig", transaction.sig));
+            values.put("sig_digest", signatureDigest(transaction.sig, transaction.date));
             values.put("content_digest", digest("content", transaction.content));
             values.put("legacy_digest", digest("legacy", legacyIdentity(transaction)));
             return values;
@@ -608,7 +608,7 @@ final class TransactionStore {
             long ordinal = cursor.getLong(0);
             if (ordinal < 0) throw new Exception("invalid transaction ordinal");
             Transaction row = decodePayload(cursor.getString(1), rows, rowIdentity(ordinal));
-            if (!same(digest("sig", row.sig), cursor.getString(2))
+            if (!same(signatureDigest(row.sig, row.date), cursor.getString(2))
                     || !same(digest("content", row.content), cursor.getString(3))
                     || !same(digest("legacy", legacyIdentity(row)), cursor.getString(4)))
                 throw new Exception("transaction index does not match payload");
@@ -673,8 +673,7 @@ final class TransactionStore {
                     }
                 }
             }
-            if (row == null && incoming.sig != null)
-                row = find("sig_digest=?", digest("sig", incoming.sig));
+            if (row == null && incoming.sig != null) row = findSignature(incoming);
             if (row == null) row = find("legacy_digest=?"
                 + (incoming.sig == null ? "" : " AND sig_digest IS NULL"),
                 digest("legacy", legacyIdentity(incoming)));
@@ -686,12 +685,51 @@ final class TransactionStore {
             if (key.startsWith("c:")) { column = "content_digest"; kind = "content"; }
             else if (key.startsWith("s:")) { column = "sig_digest"; kind = "sig"; }
             else return false;
+            String value = key.substring(2);
+            String lookup = digest(kind, value);
+            if ("sig".equals(kind) && value.startsWith("e2:")) {
+                try {
+                    lookup = signatureDigest(value, Long.parseLong(value.substring(value.lastIndexOf(':') + 1)));
+                } catch (NumberFormatException invalid) { return false; }
+            }
             try (Cursor cursor = db.query(TABLE, ROW_COLUMNS, column + "=?",
-                    new String[]{digest(kind, key.substring(2))}, null, null, null)) {
+                    new String[]{lookup}, null, null, null)) {
                 while (cursor.moveToNext())
                     if (key.equals(BalanceData.noteKey(decode(cursor)))) return true;
             }
             return false;
+        }
+
+        String signatureDigest(String signature, long date) {
+            if (signature == null || !signature.startsWith("e2:")) return digest("sig", signature);
+            return familyDigest(signature, Math.floorDiv(date, BalanceData.DUPLICATE_DELIVERY_MS));
+        }
+
+        private String familyDigest(String signature, long bucket) {
+            // Reuse the opaque signature index. The time bucket bounds candidate reads even for a
+            // financial amount/balance pair that recurs for years. Payload validation remains final.
+            return digest("sig", "family\n" + BalanceData.signatureFamily(signature) + "\n" + bucket);
+        }
+
+        private Transaction findSignature(Transaction incoming) throws Exception {
+            if (!incoming.sig.startsWith("e2:"))
+                return find("sig_digest=?", digest("sig", incoming.sig));
+            long bucket = Math.floorDiv(incoming.date, BalanceData.DUPLICATE_DELIVERY_MS);
+            String[] candidates = {familyDigest(incoming.sig, bucket - 1),
+                familyDigest(incoming.sig, bucket), familyDigest(incoming.sig, bucket + 1)};
+            Transaction match = null;
+            boolean ambiguous = false;
+            try (Cursor cursor = db.query(TABLE, ROW_COLUMNS, "sig_digest IN (?,?,?)", candidates,
+                    null, null, "ordinal ASC")) {
+                while (cursor.moveToNext()) {
+                    Transaction candidate = decode(cursor);
+                    if (incoming.sig.equals(candidate.sig)) return candidate;
+                    if (!BalanceData.sameMovement(candidate, incoming)) continue;
+                    if (match != null) ambiguous = true;
+                    else match = candidate;
+                }
+            }
+            return ambiguous ? null : match;
         }
 
         private Transaction find(String where, String digest) throws Exception {
@@ -1008,29 +1046,41 @@ final class TransactionStore {
         }
 
         @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-            if (oldVersion != 1 || newVersion != DB_VERSION)
+            if ((oldVersion != 1 && oldVersion != 2) || newVersion != DB_VERSION)
                 throw new SQLiteException("unsupported transaction database version");
             // SQLiteOpenHelper wraps this whole upgrade in a transaction, including backfill. The
-            // encrypted payload/id/ordinal remain untouched, and failure preserves the v1 schema.
-            db.execSQL("ALTER TABLE " + TABLE + " ADD COLUMN sig_digest TEXT");
-            db.execSQL("ALTER TABLE " + TABLE + " ADD COLUMN content_digest TEXT");
-            db.execSQL("ALTER TABLE " + TABLE + " ADD COLUMN legacy_digest TEXT");
-            createIndexes(db);
+            // encrypted payload/id/ordinal remain untouched, and failure preserves the old schema.
+            if (oldVersion == 1) {
+                db.execSQL("ALTER TABLE " + TABLE + " ADD COLUMN sig_digest TEXT");
+                db.execSQL("ALTER TABLE " + TABLE + " ADD COLUMN content_digest TEXT");
+                db.execSQL("ALTER TABLE " + TABLE + " ADD COLUMN legacy_digest TEXT");
+                createIndexes(db);
+            }
             try {
                 String ready = meta(db, READY);
                 if (ready == null && rowCount(db) == 0) return;
                 if (!"1".equals(ready)) throw new Exception("incomplete legacy transaction store");
-                initialize(db);
+                if (oldVersion == 1) initialize(db);
+                else ensureRowKey(db);
                 Session session = new Session(db);
                 try {
-                    try (Cursor cursor = db.query(TABLE, new String[]{"id", "ordinal", "payload"},
+                    String[] columns = oldVersion == 1 ? new String[]{"id", "ordinal", "payload"}
+                        : new String[]{"id", "ordinal", "payload", "sig_digest", "content_digest", "legacy_digest"};
+                    try (Cursor cursor = db.query(TABLE, columns,
                             null, null, null, null, "ordinal ASC")) {
                         long previous = -1;
                         while (cursor.moveToNext()) {
                             long ordinal = cursor.getLong(1);
                             if (ordinal <= previous) throw new Exception("invalid legacy transaction order");
                             previous = ordinal;
-                            ContentValues values = session.indexes(decodePayload(cursor.getString(2)));
+                            Transaction transaction = decodePayload(cursor.getString(2), session.rows,
+                                rowIdentity(ordinal));
+                            if (oldVersion == 2
+                                    && (!same(session.digest("sig", transaction.sig), cursor.getString(3))
+                                        || !same(session.digest("content", transaction.content), cursor.getString(4))
+                                        || !same(session.digest("legacy", legacyIdentity(transaction)), cursor.getString(5))))
+                                throw new Exception("legacy transaction index does not match payload");
+                            ContentValues values = session.indexes(transaction);
                             if (db.update(TABLE, values, "id=?",
                                     new String[]{Long.toString(cursor.getLong(0))}) != 1)
                                 throw new Exception("transaction index migration failed");

@@ -478,6 +478,106 @@ public class TransactionStoreTest {
         assertEquals(2L, TransactionStore.count(context));
     }
 
+    @Test public void qualifiedFamilyIndexUpgradeFindsRedeliveryAndPreservesCiphertext() throws Exception {
+        String body = "مبلغ 200,000 ریال با کارت 1234 خرید شد، موجودی: 1,000,000 ریال";
+        Transaction local = BalanceData.parseMovement("Pasargad", "b.pasargad", body, 239_950L, false, 0);
+        Transaction duplicate = BalanceData.parseMovement("Pasargad", "b.pasargad",
+            body.replace("1234", "9876"), 240_050L, false, 0);
+        assertTrue(BalanceData.sameMovement(local, duplicate));
+        assertFalse(local.content.equals(duplicate.content));
+        assertFalse(local.sig.equals(duplicate.sig));
+        assertTrue(TransactionStore.replace(context, java.util.Collections.singletonList(local)));
+        String ciphertext = payloadAt(0);
+        String revision = TransactionStore.revision(context);
+        useVersionTwoSignatureIndex(java.util.Collections.singletonList(local));
+
+        List<String> aliases = new ArrayList<>();
+        TransactionStore.MergeResult result = TransactionStore.mergeResult(context,
+            visitor -> visitor.accept(duplicate), (from, to) -> aliases.add(from + "=" + to));
+        assertEquals(0L, result.added);
+        assertEquals(1L, result.aliases);
+        String expected = BalanceData.noteKey(duplicate) + "=" + BalanceData.noteKey(local);
+        assertEquals(java.util.Collections.singletonList(expected), aliases);
+        aliases.clear();
+        TransactionStore.collectAliases(context, visitor -> visitor.accept(duplicate),
+            (from, to) -> aliases.add(from + "=" + to));
+        assertEquals(java.util.Collections.singletonList(expected), aliases);
+        assertEquals(1L, TransactionStore.count(context));
+        assertEquals(ciphertext, payloadAt(0));
+        assertEquals(revision, TransactionStore.revision(context));
+    }
+
+    @Test public void qualifiedFamilyLookupRetainsDistantRecurrencesAndDistinctReferences() throws Exception {
+        String body = "مبلغ 200,000 ریال با کارت 1234 خرید شد، موجودی: 1,000,000 ریال";
+        Transaction local = BalanceData.parseMovement("Pasargad", "b.pasargad", body, 239_950L, false, 0);
+        Transaction distant = BalanceData.parseMovement("Pasargad", "b.pasargad",
+            body.replace("1234", "9876"), 86_640_050L, false, 0);
+        Transaction referenceA = BalanceData.parseMovement("Pasargad", "b.pasargad",
+            body + " شماره پیگیری:111111", 240_050L, false, 0);
+        Transaction referenceB = BalanceData.parseMovement("Pasargad", "b.pasargad",
+            body + " شماره پیگیری:222222", 240_100L, false, 0);
+        assertTrue(TransactionStore.replace(context, java.util.Collections.singletonList(local)));
+        assertEquals(3L, TransactionStore.merge(context, visitor -> {
+            visitor.accept(distant);
+            visitor.accept(referenceA);
+            visitor.accept(referenceB);
+        }));
+        assertEquals(4L, TransactionStore.count(context));
+    }
+
+    @Test public void qualifiedFamilyIndexUpgradeRejectsCorruptOldLookupWithoutReplacingRows() throws Exception {
+        Transaction local = BalanceData.parseMovement("Saman", "500095",
+            "واریز:200,000 مانده:3,000,000", 239_950L, false, 0);
+        assertTrue(TransactionStore.replace(context, java.util.Collections.singletonList(local)));
+        String ciphertext = payloadAt(0);
+        useVersionTwoSignatureIndex(java.util.Collections.singletonList(local));
+        try (SQLiteDatabase db = SQLiteDatabase.openDatabase(
+                context.getDatabasePath(TransactionStore.DB_NAME).getPath(), null,
+                SQLiteDatabase.OPEN_READWRITE)) {
+            ContentValues corrupt = new ContentValues();
+            corrupt.put("sig_digest", "corrupt-index");
+            assertEquals(1, db.update(TransactionStore.TABLE, corrupt, "ordinal=0", null));
+        }
+        boolean failed = false;
+        try { TransactionStore.read(context); }
+        catch (Exception expected) { failed = true; }
+        assertTrue(failed);
+        assertEquals(ciphertext, payloadAt(0));
+        try (SQLiteDatabase db = SQLiteDatabase.openDatabase(
+                context.getDatabasePath(TransactionStore.DB_NAME).getPath(), null,
+                SQLiteDatabase.OPEN_READONLY)) {
+            assertEquals(2, db.getVersion());
+        }
+    }
+
+    /** Recreates only v2's exact-signature index; encrypted rows and wrapped keys stay untouched. */
+    private void useVersionTwoSignatureIndex(List<Transaction> transactions) throws Exception {
+        try (SQLiteDatabase db = SQLiteDatabase.openDatabase(
+                context.getDatabasePath(TransactionStore.DB_NAME).getPath(), null,
+                SQLiteDatabase.OPEN_READWRITE)) {
+            byte[] key;
+            try (android.database.Cursor cursor = db.query("store_meta", new String[]{"value"},
+                    "key=?", new String[]{"index_key"}, null, null, null)) {
+                assertTrue(cursor.moveToFirst());
+                key = android.util.Base64.decode(BalanceData.decryptStorePayload(cursor.getString(0)),
+                    android.util.Base64.NO_WRAP);
+            }
+            try {
+                javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+                mac.init(new javax.crypto.spec.SecretKeySpec(key, "HmacSHA256"));
+                for (int i = 0; i < transactions.size(); i++) {
+                    ContentValues values = new ContentValues();
+                    values.put("sig_digest", android.util.Base64.encodeToString(mac.doFinal(
+                        ("sig\n" + transactions.get(i).sig).getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                        android.util.Base64.NO_WRAP));
+                    assertEquals(1, db.update(TransactionStore.TABLE, values, "ordinal=?",
+                        new String[]{Integer.toString(i)}));
+                }
+                db.setVersion(2);
+            } finally { java.util.Arrays.fill(key, (byte) 0); }
+        }
+    }
+
     private String payloadAt(long ordinal) {
         try (SQLiteDatabase db = SQLiteDatabase.openDatabase(
                 context.getDatabasePath(TransactionStore.DB_NAME).getPath(), null,

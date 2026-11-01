@@ -3001,7 +3001,7 @@ final class BalanceData {
         }
     }
 
-    private static final long DUPLICATE_DELIVERY_MS = 2 * 60_000L;
+    static final long DUPLICATE_DELIVERY_MS = 2 * 60_000L;
     private static final Pattern EVENT_REFERENCE = Pattern.compile(
         "(?:شماره\\s*(?:پیگیری|تراکنش|مرجع)|کد\\s*پیگیری|شناسه\\s*تراکنش|(?i:ref(?:erence)?))\\s*[:：#-]?\\s*([0-9]{3,})");
 
@@ -3019,7 +3019,7 @@ final class BalanceData {
         return "e2:" + base + ":" + (dated ? "d" : "a") + ":" + reference + ":" + date;
     }
 
-    private static String signatureFamily(String sig) {
+    static String signatureFamily(String sig) {
         if (sig == null || !sig.startsWith("e2:")) return sig;
         return sig.substring(0, sig.lastIndexOf(':'));
     }
