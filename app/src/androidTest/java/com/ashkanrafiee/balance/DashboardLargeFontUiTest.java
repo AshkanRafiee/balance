@@ -9,6 +9,7 @@ import android.content.Context;
 import android.graphics.Rect;
 import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
@@ -22,6 +23,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.io.InputStream;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 
@@ -43,6 +45,10 @@ public final class DashboardLargeFontUiTest {
 
     @Before public void setUp() throws Exception {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        // Resources can still reflect the previous configuration while a settings change is
+        // being delivered. Save the actual system setting, not that asynchronous snapshot.
+        originalFontScale = Settings.System.getFloat(context.getContentResolver(),
+            Settings.System.FONT_SCALE, 1f);
         originalBalances = BalanceData.read(context);
         originalExcluded = new HashSet<>(BalanceData.getExcluded(context));
         originalOnboarding = BalanceData.isOnboardingSeen(context);
@@ -53,10 +59,7 @@ public final class DashboardLargeFontUiTest {
         originalCurrency = CurrencyHelper.currency(context);
         originalRegion = RegionHelper.region(context);
         originalStaleDays = BalanceData.getStaleDays(context);
-        originalFontScale = context.getResources().getConfiguration().fontScale;
-
-        shell("settings put system font_scale 2.0");
-        SystemClock.sleep(500);
+        setFontScale(2f);
         LocaleHelper.setLanguage(context, "en");
         CurrencyHelper.setCurrency(context, CurrencyHelper.CURRENCY_TOMAN);
         RegionHelper.setRegion(context, RegionHelper.REGION_INTERNATIONAL);
@@ -75,18 +78,21 @@ public final class DashboardLargeFontUiTest {
     }
 
     @After public void tearDown() throws Exception {
-        if (scenario != null) scenario.close();
-        BalanceData.write(context, originalBalances);
-        BalanceData.setExcluded(context, originalExcluded);
-        BalanceData.setOnboardingSeen(context, originalOnboarding);
-        BalanceData.setShowCommitments(context, originalShowCommitments);
-        BalanceData.setStaleDays(context, originalStaleDays);
-        context.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit()
-            .putBoolean(BalanceData.KEY_HIDDEN, originalHidden).commit();
-        LocaleHelper.setLanguage(context, originalLanguage);
-        CurrencyHelper.setCurrency(context, originalCurrency);
-        RegionHelper.setRegion(context, originalRegion);
-        shell("settings put system font_scale " + originalFontScale);
+        try {
+            if (scenario != null) scenario.close();
+            BalanceData.write(context, originalBalances);
+            BalanceData.setExcluded(context, originalExcluded);
+            BalanceData.setOnboardingSeen(context, originalOnboarding);
+            BalanceData.setShowCommitments(context, originalShowCommitments);
+            BalanceData.setStaleDays(context, originalStaleDays);
+            context.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit()
+                .putBoolean(BalanceData.KEY_HIDDEN, originalHidden).commit();
+            LocaleHelper.setLanguage(context, originalLanguage);
+            CurrencyHelper.setCurrency(context, originalCurrency);
+            RegionHelper.setRegion(context, originalRegion);
+        } finally {
+            setFontScale(originalFontScale);
+        }
     }
 
     @Test public void largeFontBankCardKeepsMetadataInsideItsPillAndCard() {
@@ -125,8 +131,7 @@ public final class DashboardLargeFontUiTest {
     }
 
     @Test public void veryLargeFontStillKeepsTheCardReadable() throws Exception {
-        shell("settings put system font_scale 3.0");
-        SystemClock.sleep(500);
+        setFontScale(3f);
         launch();
         await(() -> findText(currentRoot(), "181 days") != null, 10_000);
         String total = CurrencyHelper.amount(context, 49_842_060_000L);
@@ -175,7 +180,19 @@ public final class DashboardLargeFontUiTest {
     private void shell(String command) throws Exception {
         ParcelFileDescriptor descriptor = InstrumentationRegistry.getInstrumentation()
             .getUiAutomation().executeShellCommand(command);
-        descriptor.close();
+        // Reading to EOF waits for the command; closing immediately can race the next test.
+        try (InputStream input = new ParcelFileDescriptor.AutoCloseInputStream(descriptor)) {
+            byte[] buffer = new byte[256];
+            while (input.read(buffer) != -1) { }
+        }
+    }
+
+    private void setFontScale(float scale) throws Exception {
+        shell("settings put system font_scale " + scale);
+        await(() -> Math.abs(Settings.System.getFloat(context.getContentResolver(),
+                Settings.System.FONT_SCALE, 1f) - scale) < .01f
+            && Math.abs(context.getResources().getConfiguration().fontScale - scale) < .01f,
+            10_000);
     }
 
     private View currentRoot() {
