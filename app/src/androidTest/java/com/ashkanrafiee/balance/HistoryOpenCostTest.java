@@ -42,10 +42,10 @@ import java.util.function.Consumer;
 public class HistoryOpenCostTest {
 
     private Context ctx;
+    private String originalLanguage;
 
     private static final String BANK = "Mellat";
     private static final String ACCOUNT = "111";
-    private static final long DAY = 86400000L;
 
     /** A generous ceiling for a busy year on a loaded emulator, chosen to sit far below the tens of
      *  seconds a batched or cascading open took, and far above what a single pass costs. */
@@ -54,6 +54,8 @@ public class HistoryOpenCostTest {
     @Before public void setUp() {
         finishAnyResumedHistory();
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        originalLanguage = LocaleHelper.currentTag(ctx);
+        LocaleHelper.setLanguage(ctx, "en");
         BalanceData.setExpandAllHistory(ctx, false);
     }
 
@@ -61,36 +63,45 @@ public class HistoryOpenCostTest {
         finishAnyResumedHistory();
         BalanceData.setExpandAllHistory(ctx, false);
         BalanceData.reset(ctx, true);
+        LocaleHelper.setLanguage(ctx, originalLanguage);
     }
 
     /** Movements from the first of this month until today. The first open expands only a bounded
      * recent-day window; older days remain collapsed until the user opens them. */
     private void seedCurrentMonth(int perDay) {
-        Calendar today = Calendar.getInstance();
-        Calendar c = (Calendar) today.clone();
-        c.set(Calendar.DAY_OF_MONTH, 1);
+        boolean iran = RegionHelper.isIran(ctx);
+        CalDate today = CalDate.today(iran);
+        int[] first = CalDate.of(today.year, today.month, 1).toGregorian(iran);
+        Calendar c = Calendar.getInstance();
+        c.set(first[0], first[1] - 1, first[2]);
         c.set(Calendar.HOUR_OF_DAY, 12);
         c.set(Calendar.MINUTE, 0);
         c.set(Calendar.SECOND, 0);
         c.set(Calendar.MILLISECOND, 0);
         List<Transaction> txs = new ArrayList<>();
+        // Always include an older collapsed day, even on day one of either calendar's month.
+        c.add(Calendar.DAY_OF_MONTH, -1);
+        txs.add(new Transaction(BANK, ACCOUNT, c.getTimeInMillis(), 100_000L,
+            "older-month", null));
+        c.add(Calendar.DAY_OF_MONTH, 1);
         int n = 0;
-        for (long day = c.getTimeInMillis(); day <= today.getTimeInMillis(); day += DAY) {
+        for (int day = 1; day <= today.day; day++, c.add(Calendar.DAY_OF_MONTH, 1)) {
             for (int k = 0; k < perDay; k++) {
-                txs.add(new Transaction(BANK, ACCOUNT, day + k * 60_000L,
+                txs.add(new Transaction(BANK, ACCOUNT, c.getTimeInMillis() + k * 60_000L,
                     (k % 2 == 0 ? 1 : -1) * (100_000L + n * 37L), "sig" + (n++), null));
             }
         }
         BalanceData.writeTransactions(ctx, txs);
         seeded = txs.size();
-        int firstRecentDay = Math.max(1, today.get(Calendar.DAY_OF_MONTH) - 6);
+        int firstRecentDay = Math.max(1, today.day - 6);
         expected = 0;
         for (Transaction transaction : txs) {
             Calendar row = Calendar.getInstance();
             row.setTimeInMillis(transaction.date);
-            if (row.get(Calendar.YEAR) == today.get(Calendar.YEAR)
-                    && row.get(Calendar.MONTH) == today.get(Calendar.MONTH)
-                    && row.get(Calendar.DAY_OF_MONTH) >= firstRecentDay) expected++;
+            CalDate date = CalDate.fromGregorian(row.get(Calendar.YEAR),
+                row.get(Calendar.MONTH) + 1, row.get(Calendar.DAY_OF_MONTH), iran);
+            if (date.year == today.year && date.month == today.month
+                    && date.day >= firstRecentDay) expected++;
         }
     }
 
@@ -195,8 +206,9 @@ public class HistoryOpenCostTest {
         int seen = -1, stable = 0;
         while (System.currentTimeMillis() < deadline) {
             int now = expected > 0 ? clockTimes() : viewCount();
-            if (expected > 0 && now >= expected) return;
-            if (now == seen && now > 0) {
+            boolean idle = historyIdle();
+            if (expected > 0 && now >= expected && idle) return;
+            if (now == seen && now > 0 && idle && yearCards() > 0) {
                 if (++stable >= 6) break;
             } else {
                 stable = 0;
@@ -210,6 +222,15 @@ public class HistoryOpenCostTest {
         if (expected > 0) {
             assertEquals("the open month must build all of its rows on open", expected, clockTimes());
         }
+    }
+
+    private boolean historyIdle() {
+        final boolean[] idle = {false};
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            for (Activity activity : resumed())
+                idle[0] = HistoryActivity.idleForTest((HistoryActivity) activity);
+        });
+        return idle[0];
     }
 
     /** Drags the list the length of its content, in steps. */
