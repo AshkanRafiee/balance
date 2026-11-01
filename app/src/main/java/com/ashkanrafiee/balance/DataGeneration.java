@@ -216,6 +216,39 @@ final class DataGeneration {
         }
     }
 
+    /** Repairs only reset-authorized missing stores; preserving notes requires readable metadata. */
+    static void prepareReset(Context input, boolean alsoNotes) {
+        synchronized (BalanceData.class) {
+            try {
+                context(input);
+            } catch (IllegalStateException unavailable) {
+                // Discard-all may abandon an unreadable generation. Keeping notes still requires
+                // an intact selector and metadata, even when another store was already deleted.
+                if (alsoNotes) {
+                    clearAllGenerations(input);
+                } else {
+                    // A previous reset may have stopped after deleting a disposable store but
+                    // before updating its inventory. Validate everything else before repairing
+                    // that inventory, never relaxing ordinary reads or missing-note detection.
+                    Context root = rootContext(input);
+                    Manifest manifest = readManifest(root);
+                    if (manifest == null) throw unavailable;
+                    File directory = generationDirectory(root, manifest.generation);
+                    validatePublishedGeneration(root, directory, manifest.generation,
+                        new HashSet<>(Arrays.asList(TransactionStore.DB_NAME,
+                            CommitmentStore.DB_NAME, SourceStore.DB_NAME)));
+                    try {
+                        writeMarker(directory, marker("ready", manifest.generation,
+                            new File(directory, "databases")));
+                        syncTree(directory);
+                    } catch (Exception failure) {
+                        throw new IllegalStateException("reset inventory recovery failed", failure);
+                    }
+                }
+            }
+        }
+    }
+
     /** Deletes the published generation, every rollback generation and their preference namespaces. */
     static void clearAllGenerations(Context input) {
         synchronized (BalanceData.class) {
@@ -382,6 +415,11 @@ final class DataGeneration {
 
     private static java.util.Set<String> validatePublishedGeneration(Context root, File directory,
             String generation) {
+        return validatePublishedGeneration(root, directory, generation, Collections.emptySet());
+    }
+
+    private static java.util.Set<String> validatePublishedGeneration(Context root, File directory,
+            String generation, java.util.Set<String> resettableMissing) {
         if (!directory.isDirectory())
             throw new IllegalStateException("published data generation is missing");
         File databases = new File(directory, "databases");
@@ -393,7 +431,7 @@ final class DataGeneration {
             String marker = new String(readBytes(new FileInputStream(markerFile(directory)),
                 MAX_MARKER_BYTES), StandardCharsets.UTF_8);
             java.util.Set<String> expectedDatabases = validateMarker(marker, "ready", generation,
-                databases);
+                databases, resettableMissing);
             SharedPreferences prefs = root.getSharedPreferences(prefsName(generation),
                 Context.MODE_PRIVATE);
             File preferencesFile = preferenceFile(root, prefsName(generation));
@@ -418,7 +456,7 @@ final class DataGeneration {
     }
 
     private static java.util.Set<String> validateMarker(String value, String state, String generation,
-            File databases) throws Exception {
+            File databases, java.util.Set<String> resettableMissing) throws Exception {
         String[] lines = value.split("\\n", -1);
         if (lines.length != 5 || !"version=1".equals(lines[0])
                 || !("generation=" + generation).equals(lines[1])
@@ -433,7 +471,8 @@ final class DataGeneration {
         for (String name : names) {
             File database = new File(databases, name);
             if (!allowed.contains(name) || !seen.add(name)
-                    || !database.isFile() || database.length() == 0)
+                    || ((!database.isFile() || database.length() == 0)
+                        && !(resettableMissing.contains(name) && !database.exists())))
                 throw new Exception("published generation database is missing");
         }
         return seen;

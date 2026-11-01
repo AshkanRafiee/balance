@@ -249,10 +249,21 @@ final class CommitmentStore {
                 } finally {
                     db.endTransaction();
                 }
+            } catch (SQLiteException failure) {
+                // Explicit reset must work even when the database cannot be opened. Ordinary
+                // reads still preserve corruption rather than silently replacing user data.
+                context.deleteDatabase(DB_NAME);
+                java.io.File database = context.getDatabasePath(DB_NAME);
+                for (String suffix : new String[]{"", "-wal", "-shm", "-journal"}) {
+                    java.io.File file = new java.io.File(database.getPath() + suffix);
+                    if (file.exists() && !file.delete() && file.exists())
+                        throw new IllegalStateException("commitment reset failed", failure);
+                }
             }
             if (!prefs.edit()
                     .remove(KEY_COMMITMENT_STORE_TOKEN).remove(BalanceData.KEY_COMMITMENTS).commit())
                 throw new IllegalStateException("commitment clear cleanup failed");
+            DataGeneration.refreshMarker(context);
             return true;
         }
     }

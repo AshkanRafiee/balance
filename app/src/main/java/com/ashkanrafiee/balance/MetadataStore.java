@@ -651,11 +651,11 @@ final class MetadataStore {
                     }
                 }
             } catch (Exception e) {
-                // A corrupt metadata database must not brick reset: fall back to deleting the
-                // database files without opening them, mirroring TransactionStore.clearLocked.
-                // Only fall back for database failures; anything else still propagates.
+                // Discard-all reset can recover without opening corrupt metadata. Keeping notes
+                // cannot: preserve the file for recovery rather than silently losing those notes.
                 if (!(e instanceof SQLiteException) && !(e.getCause() instanceof SQLiteException))
                     throw e;
+                if (!alsoNotes) throw e;
                 context.deleteDatabase(DB_NAME);
                 java.io.File database = context.getDatabasePath(DB_NAME);
                 java.io.File[] databaseFiles = {
@@ -679,6 +679,7 @@ final class MetadataStore {
                     .remove(KEY_METADATA_STORE_TOKEN);
             }
             if (!cleanup.commit()) throw new IllegalStateException("metadata reset cleanup failed");
+            DataGeneration.refreshMarker(context);
             return true;
         }
     }
