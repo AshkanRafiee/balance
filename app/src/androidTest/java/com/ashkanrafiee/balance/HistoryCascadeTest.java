@@ -10,6 +10,8 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 
+import androidx.test.core.app.ActivityScenario;
+
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry;
@@ -41,6 +43,7 @@ public class HistoryCascadeTest {
     private Context ctx;
     private String originalTag;
     private String originalCurrency;
+    private ActivityScenario<HistoryActivity> scenario;
 
     private static final String MELLAT = "Mellat";
     private static final String ACCOUNT = "111";
@@ -57,6 +60,7 @@ public class HistoryCascadeTest {
     }
 
     @After public void tearDown() {
+        if (scenario != null) scenario.close();
         LocaleHelper.setLanguage(ctx, originalTag);
         CurrencyHelper.setCurrency(ctx, originalCurrency);
         BalanceData.setExpandAllHistory(ctx, false);
@@ -90,8 +94,14 @@ public class HistoryCascadeTest {
             .putExtra(HistoryActivity.EXTRA_BANK, MELLAT)
             .putExtra(HistoryActivity.EXTRA_ACCOUNT, ACCOUNT)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        InstrumentationRegistry.getInstrumentation().startActivitySync(i);
-        await(() -> findByDescription(ctx.getString(R.string.history_export)) != null, 20_000, "the history screen");
+        scenario = ActivityScenario.launch(i);
+        // The export action is built synchronously, before any history rows exist. Wait for the
+        // actual movement row and settled catch-up, not a header that is present during loading.
+        await(() -> {
+            final boolean[] idle = {false};
+            scenario.onActivity(activity -> idle[0] = HistoryActivity.idleForTest(activity));
+            return idle[0] && clockTimes() > 0;
+        }, 20_000, "today's movement row and the completed history render");
     }
 
     @Test public void todaysMovements_areVisibleWithoutTouchingAnything() {
