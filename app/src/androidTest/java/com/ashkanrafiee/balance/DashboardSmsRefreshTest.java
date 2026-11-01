@@ -194,6 +194,38 @@ public final class DashboardSmsRefreshTest {
         return idle[0];
     }
 
+    @Test public void manualRefreshQueuedDuringAutomaticScan_keepsItsVisibleFollowup()
+            throws Exception {
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        saved.put("Saman", new Bank("Saman", 5_000_000L, System.currentTimeMillis(), SENDER));
+        BalanceData.write(context, saved);
+        CountDownLatch automaticStarted = new CountDownLatch(1);
+        CountDownLatch automaticRelease = new CountDownLatch(1);
+        CountDownLatch manualStarted = new CountDownLatch(1);
+        CountDownLatch manualRelease = new CountDownLatch(1);
+        MainActivity.setRefreshGateForTest(automaticStarted, automaticRelease);
+        try {
+            scenario = ActivityScenario.launch(MainActivity.class);
+            assertTrue(automaticStarted.await(10, TimeUnit.SECONDS));
+            scenario.onActivity(activity -> activity.findViewById(R.id.dashboard_refresh_button)
+                .performClick());
+            MainActivity.setRefreshGateForTest(manualStarted, manualRelease);
+            automaticRelease.countDown();
+            assertTrue("the queued manual scan must run", manualStarted.await(10, TimeUnit.SECONDS));
+            scenario.onActivity(activity -> {
+                assertTrue("the queued manual pass must retain visible-refresh ownership",
+                    findBalanceView(activity.getWindow().getDecorView()).refreshVisible);
+                assertTrue(hasVisibleProgress(activity.getWindow().getDecorView()));
+                assertNotNull(activity.findViewById(R.id.dashboard_bank_list));
+            });
+        } finally {
+            MainActivity.setRefreshGateForTest(null, null);
+            automaticRelease.countDown();
+            manualRelease.countDown();
+        }
+        await(this::dashboardIdle, 45_000);
+    }
+
     private static MainActivity.BalanceView findBalanceView(View view) {
         if (view instanceof MainActivity.BalanceView) return (MainActivity.BalanceView) view;
         if (view instanceof ViewGroup) {

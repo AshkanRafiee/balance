@@ -2311,7 +2311,7 @@ public class MainActivity extends Activity {
         final float fs = getResources().getConfiguration().fontScale;
         Drawable lockIcon;
         boolean hidden, refreshing, refreshAgain, pendingHard, pendingNotes;
-        boolean refreshVisible;
+        boolean refreshVisible, pendingVisible;
         boolean autoHide;
         /** Whether the "balances may be out of date" strip is up. It exists only while saved data is
          *  on screen and SMS access is gone, and it shifts the banks section down by its height, so
@@ -2806,6 +2806,7 @@ public class MainActivity extends Activity {
                 refreshAgain = true;
                 pendingHard |= hard;
                 pendingNotes |= alsoNotes;
+                pendingVisible |= !silent && !hard;
                 if (!silent && !hard) {
                     refreshVisible = true;
                     beginSpin();
@@ -2814,6 +2815,7 @@ public class MainActivity extends Activity {
                 return;
             }
             pendingHard = pendingNotes = false;
+            pendingVisible = false;
             // Cleared here rather than only on the granted path below: a request that arrived while
             // this one was in flight has now been folded into it, so leaving the flag set would make
             // the first refresh after permission is granted run the whole inbox a second time.
@@ -2845,6 +2847,7 @@ public class MainActivity extends Activity {
                             refreshVisible = false;
                             invalidate();
                             if (dashboard != null) dashboard.render();
+                            finishQueuedRefresh(silent);
                         });
                         return;
                     }
@@ -2858,6 +2861,7 @@ public class MainActivity extends Activity {
                             applySaved(!hard && !banks.isEmpty() ? new LinkedHashMap<>(banks)
                                 : new LinkedHashMap<>(), app,
                                 getString(R.string.status_sms_unreadable));
+                            finishQueuedRefresh(silent);
                         });
                         return;
                     }
@@ -2870,6 +2874,7 @@ public class MainActivity extends Activity {
                         applySaved(saved, app, saved.isEmpty()
                             ? getString(R.string.status_permission_needed)
                             : getString(R.string.status_stale_no_permission));
+                        finishQueuedRefresh(silent);
                     });
                 }).start();
                 return;
@@ -2928,7 +2933,7 @@ public class MainActivity extends Activity {
                         if (hard) view.invalidateCommitmentSummary();
                         applySaved(saved, app, buildStatus(count, saved.isEmpty(), statusNoSms, updatedNow));
                         if (hard) toast(R.string.toast_reset_done);
-                        if (refreshAgain) { refreshAgain = false; refresh(pendingHard, pendingNotes, silent); }
+                        finishQueuedRefresh(silent);
                     });
                 } catch (Exception e) {
                     android.util.Log.w("Balance", "refresh failed", e);
@@ -2948,7 +2953,7 @@ public class MainActivity extends Activity {
                             ? new LinkedHashMap<>(banks) : saved2, app,
                             saved2.isEmpty() ? getString(R.string.status_sms_unreadable) : statusLoaded);
                         if (hard) toast(R.string.toast_reset_failed);
-                        if (refreshAgain) { refreshAgain = false; refresh(pendingHard, pendingNotes, silent); }
+                        finishQueuedRefresh(silent);
                     });
                 }
                 if (hard) {
@@ -2963,6 +2968,11 @@ public class MainActivity extends Activity {
                     }
                 }
             }).start();
+        }
+
+        private void finishQueuedRefresh(boolean silent) {
+            if (refreshAgain && !isFinishing() && !isDestroyed())
+                refresh(pendingHard, pendingNotes, silent && !pendingVisible);
         }
 
         private String buildStatus(int count, boolean empty, String noSms, String loaded) {
