@@ -161,7 +161,7 @@ public class HistoryScanTest {
                 body.getBytes(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP);
         exec("am broadcast -n com.ashkanrafiee.smsinject/.SeedReceiver -a com.ashkanrafiee.smsinject.SEED"
                 + " -e sender " + sender + " -e body64 " + b64 + " -e count " + count
-                + " -e base " + base + " -e step 1000");
+                + " -e base " + base + " -e step 100");
         awaitRows(sender, body, count);
     }
 
@@ -402,8 +402,10 @@ public class HistoryScanTest {
         assertEquals(1L, SourceStore.transactionObservationCount(ctx));
     }
 
-    @Test public void largeInboxFullScanIsBounded_andNoNewScanSkipsHistoryRewrite()
+    @Test public void duplicateFloodScansAllMessages_andNoNewScanSkipsHistoryRewrite()
             throws Exception {
+        // Exercise 400 physical SMS, not 400 distinct history events. Keep the delivery flood
+        // within the bounded duplicate window rather than merging real later occurrences.
         String body = DEPOSIT + " bulk";
         seedMany("500095", body, 400, T);
 
@@ -424,7 +426,7 @@ public class HistoryScanTest {
             + "ms no-new=" + noNewMs + "ms", noNewMs < fullMs);
         assertEquals("a no-new refresh must not rewrite encrypted history", revision,
             TransactionStore.revision(ctx));
-        android.util.Log.i("BalancePerf", "largeInbox fullMs=" + fullMs + " noNewMs=" + noNewMs);
+        android.util.Log.i("BalancePerf", "duplicateFlood fullMs=" + fullMs + " noNewMs=" + noNewMs);
     }
 
     @Test public void futureDatedMovement_neverFreezesHistoryScan() throws Exception {
