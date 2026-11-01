@@ -1,4 +1,5 @@
-• Added private notes to amber Unaccounted rows. Notes appear in history, search, CSV exports and encrypted backups.
-• When a delayed SMS identifies one exact missing movement, its note follows that movement; ambiguous matches stay safely unattached.
-• Improved support for Arabic and Persian SMS variants, including additional payment-channel details.
-• Improved SMS diagnostics and strengthened privacy for reports, CSV exports, backups and reset cleanup.
+• Added notes to Unaccounted rows, included in search, CSV and backups. Notes follow an exact delayed-message match.
+• Saved data stays visible during quiet updates, without a refresh animation on every visit.
+• Reduced repeated history processing and improved handling of repeated or corrected bank messages.
+• Improved Persian/Arabic SMS support, diagnostics and privacy for sharing and backups.
+• Fixed reset recovery while preserving notes unless you choose to delete them.
