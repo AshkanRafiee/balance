@@ -4306,7 +4306,7 @@ public final class HistoryActivity extends Activity {
         dlg.setOnShowListener(d -> {
             dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                 try {
-                    BalanceData.setNote(this, key, input.getText().toString());
+                    BalanceData.setNote(this, r, input.getText().toString());
                 } catch (RuntimeException error) {
                     android.util.Log.w("BalanceHistory", "residual note save failed", error);
                     Toast.makeText(this, R.string.note_save_failed, Toast.LENGTH_SHORT).show();
@@ -4320,7 +4320,7 @@ public final class HistoryActivity extends Activity {
             if (clearNote != null) {
                 clearNote.setOnClickListener(v -> {
                     try {
-                        BalanceData.setNote(this, key, null);
+                        BalanceData.setNote(this, r, null);
                     } catch (RuntimeException error) {
                         android.util.Log.w("BalanceHistory", "residual note clear failed", error);
                         Toast.makeText(this, R.string.note_save_failed, Toast.LENGTH_SHORT).show();
