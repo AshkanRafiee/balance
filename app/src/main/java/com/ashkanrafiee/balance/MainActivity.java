@@ -48,6 +48,14 @@ import java.util.List;
 import java.util.Set;
 
 public class MainActivity extends Activity {
+    private static volatile java.util.concurrent.CountDownLatch refreshGateStarted;
+    private static volatile java.util.concurrent.CountDownLatch refreshGateRelease;
+
+    static void setRefreshGateForTest(java.util.concurrent.CountDownLatch started,
+            java.util.concurrent.CountDownLatch release) {
+        refreshGateStarted = started;
+        refreshGateRelease = release;
+    }
     private static final int SMS_REQUEST = 10;
     private static final int ONBOARDING_REQUEST = 12;
     private static final int REQ_CREATE_BACKUP = 20;
@@ -127,16 +135,12 @@ public class MainActivity extends Activity {
     }
 
     /** On a fresh install, open the first-run introduction before asking for anything: it explains
-     *  what the app reads and its privacy model, then requests the SMS permission in context. On every
-     *  later launch the normal flow runs — the permission request or the scan. When the introduction
-     *  finishes — completed or skipped — this activity resumes and {@link #onResume()} picks up the
+     *  what the app reads and its privacy model, then requests the SMS permission in context. When
+     *  the introduction finishes — completed or skipped — {@link #onResume()} picks up the
      *  scan and, unless the introduction already asked, the SMS permission request. */
     private void startOnboardingIfFirstRun() {
         if (!BalanceData.isOnboardingSeen(this)) {
             startActivityForResult(new Intent(this, OnboardingActivity.class), ONBOARDING_REQUEST);
-        } else {
-            requestSms();
-            smsRequested = true;
         }
     }
 
@@ -212,14 +216,14 @@ public class MainActivity extends Activity {
         LockManager.cancelPendingLock();
         // Re-arm commitment reminders from the stored series: edits, a restored backup or a
         // newly granted notification permission all land here before the next due.
-        CommitmentReminders.scheduleAll(this);
+        scheduleReminders();
         if (view != null) {
             view.enforceAutoHide();
             view.invalidateCommitmentSummary();
             // Start the reload now rather than on the first draw, so the fresh summary is
             // usually ready before the card paints; the last summary stays up meanwhile.
             view.ensureCommitmentSummary();
-            view.refresh();
+            view.refreshSilent();
             view.scheduleMonthRefresh();
             HistoryWarmup.warm(this);
             if (dashboard != null) dashboard.render();
@@ -229,7 +233,8 @@ public class MainActivity extends Activity {
         // asking for SMS access; ask now, once, on top of the dashboard.
         if (!smsRequested && BalanceData.isOnboardingSeen(this)) {
             smsRequested = true;
-            requestSms();
+            if (checkSelfPermission(Manifest.permission.READ_SMS)
+                    != PackageManager.PERMISSION_GRANTED) requestSms();
         }
         // The delayed lock may have engaged while we were paused on a ROM that skipped onStop;
         // reflect it now that we are back in the foreground.
@@ -238,6 +243,11 @@ public class MainActivity extends Activity {
             pendingLockAction = null;
             lockOverlay.showLock();
         }
+    }
+
+    private void scheduleReminders() {
+        Context app = getApplicationContext();
+        new Thread(() -> CommitmentReminders.scheduleAll(app), "commitment-reminders").start();
     }
 
     /**
@@ -296,8 +306,12 @@ public class MainActivity extends Activity {
                     .setNegativeButton(android.R.string.cancel, null)
                     .create());
             }
-            view.refresh();
-            registerSmsObserver();
+            // A permission result is an automatic update, not a manual refresh. If the dialog
+            // paused us, the upcoming resume owns the reload instead of launching it twice.
+            if (mainResumed) {
+                view.refreshSilent();
+                registerSmsObserver();
+            }
         }
     }
 
@@ -502,7 +516,7 @@ public class MainActivity extends Activity {
                 int chosen = pos == 1 ? RegionHelper.REGION_INTERNATIONAL : RegionHelper.REGION_IRAN;
                 if (chosen != RegionHelper.region(MainActivity.this)) {
                     RegionHelper.setRegion(MainActivity.this, chosen);
-                    CommitmentReminders.scheduleAll(MainActivity.this);
+                    scheduleReminders();
                     refreshRegionPresentation();
                 }
             }
@@ -1508,6 +1522,7 @@ public class MainActivity extends Activity {
         private final ImageButton refreshButton;
         private final ImageButton lockButton;
         private boolean rtl;
+        private List<Object> renderedContent;
 
         DashboardScreen(Context context) {
             super(context);
@@ -1678,6 +1693,10 @@ public class MainActivity extends Activity {
                 : R.drawable.ic_visibility, view.hidden);
             setButtonIcon(refreshButton, R.drawable.ic_refresh, false);
             setButtonIcon(lockButton, R.drawable.ic_lock, LockManager.isEnabled(MainActivity.this));
+            pull.setRefreshing(view.refreshVisible);
+            List<Object> state = contentState();
+            if (state.equals(renderedContent)) return;
+            renderedContent = state;
             content.removeAllViews();
             content.addView(buildOverviewLabel(), ExpressiveUi.widthMatch(this, 4, 12));
             content.addView(buildHeroCard(), ExpressiveUi.widthMatch(this, 0, 14));
@@ -1687,7 +1706,33 @@ public class MainActivity extends Activity {
                 ExpressiveUi.widthMatch(this, 0, 14));
             content.addView(buildBanksHeader(), ExpressiveUi.widthMatch(this, 4, 8));
             content.addView(buildBanks(), ExpressiveUi.widthMatch(this, 0, 0));
-            pull.setRefreshing(view.refreshing);
+        }
+
+        /** Compare what is actually drawn, not mutable Bank identities or scan activity. */
+        private List<Object> contentState() {
+            List<Object> state = new java.util.ArrayList<>();
+            java.util.Collections.addAll(state, view.hidden, view.status, view.total, view.sortMode,
+                view.smsBanner, view.commitmentsCard, view.banks.isEmpty() && view.refreshing,
+                CurrencyHelper.currency(MainActivity.this), RegionHelper.region(MainActivity.this),
+                new java.util.HashSet<>(view.excluded));
+            if (view.commitmentsCard) {
+                java.util.Collections.addAll(state, commitmentMonthLabel(),
+                    view.commitmentSummaryLoaded, view.commitmentSummaryFailed,
+                    view.commitmentSummaryGood, view.hasCommitments);
+                if (view.commitmentSummary != null) {
+                    CommitmentsActivity.Summary summary = view.commitmentSummary;
+                    java.util.Collections.addAll(state, summary.overduePay, summary.thisMonthPay,
+                        summary.overdueReceive, summary.thisMonthReceive);
+                }
+            }
+            for (java.util.Map.Entry<String, Bank> entry : view.banks.entrySet()) {
+                Bank bank = entry.getValue();
+                java.util.Collections.addAll(state, entry.getKey(), bank.name, bank.account,
+                    bank.sender, bank.amount, bank.date,
+                    BalanceData.isStale(MainActivity.this, bank.date),
+                    BalanceData.staleDays(MainActivity.this, bank.date));
+            }
+            return state;
         }
 
         private void setButtonIcon(ImageButton button, int drawableRes, boolean selected) {
@@ -1832,16 +1877,8 @@ public class MainActivity extends Activity {
                 view.ensureCommitmentSummary();
                 card.addView(ExpressiveUi.label(this, getString(R.string.commitments_loading), 13,
                     ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 8, 0));
-            } else if (view.commitmentSummaryFailed) {
-                card.addView(ExpressiveUi.label(this, getString(R.string.commitments_load_failed), 13,
-                    ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 8, 0));
-                TextView retry = ExpressiveUi.button(this,
-                    getString(R.string.commitments_retry), false);
-                retry.setOnClickListener(v -> {
-                    view.invalidateCommitmentSummary();
-                    view.ensureCommitmentSummary();
-                });
-                card.addView(retry, ExpressiveUi.widthMatch(this, 6, 0));
+            } else if (view.commitmentSummaryFailed && !view.commitmentSummaryGood) {
+                addCommitmentRetry(card);
             } else if (!view.hasCommitments) {
                 card.addView(ExpressiveUi.label(this, getString(R.string.commitments_card_empty), 13,
                     ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 8, 0));
@@ -1858,12 +1895,25 @@ public class MainActivity extends Activity {
                     R.color.accent), new LinearLayout.LayoutParams(0, -2, 1));
                 card.addView(values, ExpressiveUi.widthMatch(this, 12, 0));
             }
+            if (view.commitmentSummaryFailed && view.commitmentSummaryGood)
+                addCommitmentRetry(card);
             card.setClickable(true);
             card.setFocusable(true);
             card.setContentDescription(getString(R.string.dashboard_open_commitments));
             card.setOnClickListener(v -> startActivity(new Intent(MainActivity.this,
                 CommitmentsActivity.class)));
             return card;
+        }
+
+        private void addCommitmentRetry(LinearLayout card) {
+            card.addView(ExpressiveUi.label(this, getString(R.string.commitments_load_failed), 13,
+                ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 8, 0));
+            TextView retry = ExpressiveUi.button(this, getString(R.string.commitments_retry), false);
+            retry.setOnClickListener(v -> {
+                view.invalidateCommitmentSummary();
+                view.ensureCommitmentSummary();
+            });
+            card.addView(retry, ExpressiveUi.widthMatch(this, 6, 0));
         }
 
         private LinearLayout commitmentValue(int labelRes, long amount, int colorRes) {
@@ -2163,6 +2213,13 @@ public class MainActivity extends Activity {
             private final ProgressBar indicator;
             private float downY;
             private boolean pulling;
+            private boolean showingRefresh;
+            private long visibleUntil;
+            private final Runnable hideProgress = this::hideProgressWhenIdle;
+
+            private void hideProgressWhenIdle() {
+                if (!showingRefresh) indicator.setVisibility(View.GONE);
+            }
 
             PullContainer(Context context, ScrollView scrollView) {
                 super(context);
@@ -2178,7 +2235,18 @@ public class MainActivity extends Activity {
             }
 
             void setRefreshing(boolean refreshing) {
-                indicator.setVisibility(refreshing ? View.VISIBLE : View.GONE);
+                removeCallbacks(hideProgress);
+                if (refreshing) {
+                    if (!showingRefresh)
+                        visibleUntil = android.os.SystemClock.uptimeMillis() + 400;
+                    showingRefresh = true;
+                    indicator.setVisibility(View.VISIBLE);
+                } else {
+                    showingRefresh = false;
+                    long remaining = visibleUntil - android.os.SystemClock.uptimeMillis();
+                    if (remaining > 0) postDelayed(hideProgress, remaining);
+                    else indicator.setVisibility(View.GONE);
+                }
             }
 
             @Override public boolean onInterceptTouchEvent(MotionEvent event) {
@@ -2243,6 +2311,7 @@ public class MainActivity extends Activity {
         final float fs = getResources().getConfiguration().fontScale;
         Drawable lockIcon;
         boolean hidden, refreshing, refreshAgain, pendingHard, pendingNotes;
+        boolean refreshVisible;
         boolean autoHide;
         /** Whether the "balances may be out of date" strip is up. It exists only while saved data is
          *  on screen and SMS access is gone, and it shifts the banks section down by its height, so
@@ -2250,6 +2319,7 @@ public class MainActivity extends Activity {
         boolean smsBanner;
         boolean commitmentsCard;
         boolean commitmentSummaryLoaded;
+        boolean commitmentSummaryGood;
         /** A summary load already running; the draw path never starts a second one. */
         boolean commitmentSummaryLoading;
         /** Set while the shown summary may lag the store; the last summary keeps drawing
@@ -2300,6 +2370,8 @@ public class MainActivity extends Activity {
             commitmentSummaryFailed = false;
             commitmentSummaryGen++;
             invalidate();
+            ensureCommitmentSummary();
+            if (dashboard != null) dashboard.render();
             scheduleMonthRefresh();
         };
         final Runnable lockLongProbe = () -> {
@@ -2480,8 +2552,7 @@ public class MainActivity extends Activity {
             invalidate();
         }
 
-        /** Spins the refresh chip for a foreground automatic load, including first install and
-         *  resumes with saved balances. A pull already in progress keeps owning the indicator. */
+        /** Spins for an explicit refresh or a confirmed cold load, never a saved-content resume. */
         void spinForAutoRefresh() {
             if (indicatorVisible) return;
             spinnerRunning = true;
@@ -2591,6 +2662,7 @@ public class MainActivity extends Activity {
             recalcTotal();
             status = statusText;
             refreshing = false;
+            refreshVisible = false;
             updateSmsBanner();
             invalidate();
             if (dashboard != null) dashboard.render();
@@ -2689,6 +2761,7 @@ public class MainActivity extends Activity {
                         commitmentSummary = summary;
                         hasCommitments = any;
                         commitmentSummaryLoaded = true;
+                        commitmentSummaryGood = true;
                         commitmentSummaryStale = false;
                         commitmentSummaryFailed = false;
                         invalidate();
@@ -2733,6 +2806,11 @@ public class MainActivity extends Activity {
                 refreshAgain = true;
                 pendingHard |= hard;
                 pendingNotes |= alsoNotes;
+                if (!silent && !hard) {
+                    refreshVisible = true;
+                    beginSpin();
+                    if (dashboard != null) dashboard.render();
+                }
                 return;
             }
             pendingHard = pendingNotes = false;
@@ -2740,16 +2818,17 @@ public class MainActivity extends Activity {
             // this one was in flight has now been folded into it, so leaving the flag set would make
             // the first refresh after permission is granted run the whole inbox a second time.
             refreshAgain = false;
-            // Foreground refreshes spin the refresh chip even when saved balances remain visible,
-            // so the user can see that the automatic scan is still working. Silent background
-            // updates and hard resets (which already raise their own modal progress) are left alone.
-            if (!silent && !hard) spinForAutoRefresh();
+            // Explicit refreshes own the indicator. Automatic reloads keep usable saved content
+            // quiet; a cold start may show progress once the worker confirms there is no saved data.
+            refreshVisible = !silent && !hard;
+            if (refreshVisible) spinForAutoRefresh();
             if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
                 // Without SMS access the saved store is all that is left, and it is the app's only
                 // remaining record of the user's balances — so show it rather than an empty
                 // dashboard, and let the strip say the numbers are as of their last scan. Read off
                 // the main thread like every other load: it decrypts and parses the whole store.
                 refreshing = true;
+                if (dashboard != null) dashboard.render();
                 if (hard) showProgress(getString(R.string.reset_progress));
                 new Thread(() -> {
                     final Context app = MainActivity.this.getApplicationContext();
@@ -2763,7 +2842,9 @@ public class MainActivity extends Activity {
                             dismissProgress();
                             toast(R.string.toast_reset_failed);
                             refreshing = false;
+                            refreshVisible = false;
                             invalidate();
+                            if (dashboard != null) dashboard.render();
                         });
                         return;
                     }
@@ -2774,7 +2855,8 @@ public class MainActivity extends Activity {
                         android.util.Log.w("Balance", "saved balances unreadable", e);
                         post(() -> {
                             dismissProgress();
-                            applySaved(new LinkedHashMap<>(), app,
+                            applySaved(!hard && !banks.isEmpty() ? new LinkedHashMap<>(banks)
+                                : new LinkedHashMap<>(), app,
                                 getString(R.string.status_sms_unreadable));
                         });
                         return;
@@ -2797,10 +2879,12 @@ public class MainActivity extends Activity {
                 status = getString(R.string.status_refreshing);
                 invalidate();
             }
+            if (dashboard != null) dashboard.render();
             String statusNoSms = getString(R.string.status_no_sms_found);
             String updatedNow = getString(R.string.status_updated_now);
             String statusLoaded = getString(R.string.status_loaded_from_saved);
             final WorkProgress refreshProgress = hard ? dialogProgress() : null;
+            final boolean hydrateInitial = !hard && banks.isEmpty();
             if (hard) showProgress(getString(R.string.reset_progress));
             new Thread(() -> {
                 final Context app = MainActivity.this.getApplicationContext();
@@ -2811,6 +2895,30 @@ public class MainActivity extends Activity {
                         BalanceData.reset(app, alsoNotes);
                     }
                     LinkedHashMap<String, Bank> saved = BalanceData.read(app);
+                    if (hydrateInitial) {
+                        final LinkedHashMap<String, Bank> initial = new LinkedHashMap<>(saved);
+                        post(() -> {
+                            if (isFinishing() || isDestroyed()) return;
+                            if (!initial.isEmpty()) {
+                                banks.putAll(initial);
+                                excluded.clear();
+                                excluded.addAll(BalanceData.getExcluded(app));
+                                recalcTotal();
+                                status = getString(R.string.status_loaded_from_saved);
+                                updateSmsBanner();
+                            } else if (silent) {
+                                refreshVisible = true;
+                                spinForAutoRefresh();
+                            }
+                            if (dashboard != null) dashboard.render();
+                        });
+                    }
+                    java.util.concurrent.CountDownLatch started = refreshGateStarted;
+                    java.util.concurrent.CountDownLatch release = refreshGateRelease;
+                    if (started != null && release != null) {
+                        started.countDown();
+                        release.await();
+                    }
                     int count = BalanceData.scanSms(app, saved, refreshProgress);
                     post(() -> {
                         if (isFinishing() || isDestroyed()) return;
@@ -2824,16 +2932,20 @@ public class MainActivity extends Activity {
                     });
                 } catch (Exception e) {
                     android.util.Log.w("Balance", "refresh failed", e);
+                    LinkedHashMap<String, Bank> fallback = new LinkedHashMap<>();
+                    try {
+                        fallback = BalanceData.read(app);
+                    } catch (Exception unreadable) {
+                        android.util.Log.w("Balance", "saved balances unreadable", unreadable);
+                    }
+                    final LinkedHashMap<String, Bank> saved2 = fallback;
                     post(() -> {
+                        if (isFinishing() || isDestroyed()) return;
                         dismissProgress();
                         if (hard) view.invalidateCommitmentSummary();
-                        LinkedHashMap<String, Bank> saved2 = new LinkedHashMap<>();
-                        try {
-                            saved2 = BalanceData.read(app);
-                        } catch (Exception unreadable) {
-                            android.util.Log.w("Balance", "saved balances unreadable", unreadable);
-                        }
-                        applySaved(saved2, app,
+                        // A transient read failure must not discard already usable balances.
+                        applySaved(saved2.isEmpty() && !hard && !banks.isEmpty()
+                            ? new LinkedHashMap<>(banks) : saved2, app,
                             saved2.isEmpty() ? getString(R.string.status_sms_unreadable) : statusLoaded);
                         if (hard) toast(R.string.toast_reset_failed);
                         if (refreshAgain) { refreshAgain = false; refresh(pendingHard, pendingNotes, silent); }

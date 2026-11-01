@@ -3,6 +3,8 @@ package com.ashkanrafiee.balance;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.fail;
 
 import android.Manifest;
@@ -24,6 +26,9 @@ import org.junit.runner.RunWith;
 import java.io.InputStream;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import androidx.lifecycle.Lifecycle;
 
 /** Verifies that a new SMS updates the visible dashboard without a manual refresh. */
 @RunWith(AndroidJUnit4.class)
@@ -74,6 +79,7 @@ public final class DashboardSmsRefreshTest {
     }
 
     @After public void tearDown() throws Exception {
+        MainActivity.setRefreshGateForTest(null, null);
         if (scenario != null) {
             try {
                 scenario.close();
@@ -113,6 +119,101 @@ public final class DashboardSmsRefreshTest {
         seed(SECOND, base + 2_000L);
         await(() -> bankAmount() == 6_000_000L, 45_000);
         assertEquals(6_000_000L, bankAmount());
+    }
+
+    @Test public void savedBalancesStayVisibleAndQuietDuringLaunchAndUnchangedResume()
+            throws Exception {
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        saved.put("Saman", new Bank("Saman", 5_000_000L, System.currentTimeMillis(), SENDER));
+        BalanceData.write(context, saved);
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        MainActivity.setRefreshGateForTest(started, release);
+        try {
+            scenario = ActivityScenario.launch(MainActivity.class);
+            assertTrue("dashboard must reach the background scan", started.await(10,
+                TimeUnit.SECONDS));
+            await(() -> hasView(R.id.dashboard_bank_list), 20_000);
+            final View[] originalList = {null};
+            scenario.onActivity(activity -> {
+                assertFalse("saved balances must not get an automatic spinner",
+                    hasVisibleProgress(activity.getWindow().getDecorView()));
+            });
+            release.countDown();
+            await(this::dashboardIdle, 45_000);
+            scenario.onActivity(activity ->
+                originalList[0] = activity.findViewById(R.id.dashboard_bank_list));
+            MainActivity.setRefreshGateForTest(null, null);
+            scenario.moveToState(Lifecycle.State.CREATED);
+            scenario.moveToState(Lifecycle.State.RESUMED);
+            await(this::dashboardIdle, 45_000);
+            scenario.onActivity(activity -> {
+                assertSame("unchanged resume must not rebuild the bank tree", originalList[0],
+                    activity.findViewById(R.id.dashboard_bank_list));
+                assertFalse("unchanged resume stays quiet",
+                    hasVisibleProgress(activity.getWindow().getDecorView()));
+            });
+        } finally {
+            MainActivity.setRefreshGateForTest(null, null);
+            release.countDown();
+        }
+    }
+
+    @Test public void explicitRefreshShowsProgressEvenWithSavedBalances() throws Exception {
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        saved.put("Saman", new Bank("Saman", 5_000_000L, System.currentTimeMillis(), SENDER));
+        BalanceData.write(context, saved);
+        scenario = ActivityScenario.launch(MainActivity.class);
+        await(this::dashboardIdle, 45_000);
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        MainActivity.setRefreshGateForTest(started, release);
+        try {
+            scenario.onActivity(activity -> activity.findViewById(R.id.dashboard_refresh_button)
+                .performClick());
+            assertTrue("manual refresh must start the scan", started.await(10, TimeUnit.SECONDS));
+            scenario.onActivity(activity -> {
+                assertNotNull("saved content remains during manual refresh",
+                    activity.findViewById(R.id.dashboard_bank_list));
+                assertTrue("manual refresh must visibly acknowledge the action",
+                    hasVisibleProgress(activity.getWindow().getDecorView()));
+            });
+        } finally {
+            MainActivity.setRefreshGateForTest(null, null);
+            release.countDown();
+        }
+        await(this::dashboardIdle, 45_000);
+    }
+
+    private boolean dashboardIdle() {
+        final boolean[] idle = {false};
+        scenario.onActivity(activity -> {
+            MainActivity.BalanceView view = findBalanceView(activity.getWindow().getDecorView());
+            idle[0] = view != null && !view.refreshing;
+        });
+        return idle[0];
+    }
+
+    private static MainActivity.BalanceView findBalanceView(View view) {
+        if (view instanceof MainActivity.BalanceView) return (MainActivity.BalanceView) view;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                MainActivity.BalanceView found = findBalanceView(group.getChildAt(i));
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private static boolean hasVisibleProgress(View view) {
+        if (view instanceof android.widget.ProgressBar && view.isShown()) return true;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++)
+                if (hasVisibleProgress(group.getChildAt(i))) return true;
+        }
+        return false;
     }
 
     private long bankAmount() {
