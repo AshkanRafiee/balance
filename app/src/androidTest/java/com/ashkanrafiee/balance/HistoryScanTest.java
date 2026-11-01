@@ -1037,6 +1037,20 @@ public class HistoryScanTest {
             BalanceData.readTags(ctx).get(BalanceData.noteKey(first)));
     }
 
+    @Test public void schemaUpgrade_orphanLegacyAnnotationReattachesOnlyToUniqueSource() throws Exception {
+        seed("500095", DEPOSIT, T + 1000);
+        Transaction legacy = new Transaction("Saman", null, T + 1000, 200000L, 3000000L,
+            BalanceData.messageSig("500095", DEPOSIT), BalanceData.contentHash("500095", DEPOSIT));
+        // Models metadata restored without transactions, or a pre-upgrade keep-notes reset.
+        BalanceData.setNote(ctx, legacy, "kept before upgrade");
+        BalanceData.setTags(ctx, legacy, Collections.singletonList("kept"));
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        Transaction saved = BalanceData.readTransactions(ctx).get(0);
+        assertEquals("kept before upgrade", BalanceData.getNote(ctx, saved));
+        assertEquals(Collections.singletonList("kept"), BalanceData.getTags(ctx, saved));
+        assertNull(BalanceData.readNotes(ctx).get(BalanceData.noteKey(legacy)));
+    }
+
     @Test public void contentReparse_correctsNonNullAccountAmountAndDateWithSourceProof() throws Exception {
         long arrival = at(2026, 8, 30, 12, 0);
         seed("TejaratBank", TEJARAT_DEPOSIT, arrival);

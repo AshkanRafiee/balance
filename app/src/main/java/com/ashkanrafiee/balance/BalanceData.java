@@ -2327,7 +2327,7 @@ final class BalanceData {
                     transactionsChanged = !fresh.isEmpty() || !placed.isEmpty();
                     residualCandidates.addAll(fresh);
                 }
-                if (!stageTransactionMetadataMigrations(context, metadataReplacements, stored))
+                if (!stageTransactionMetadataMigrations(context, metadataReplacements, stored, full))
                     throw new Exception("transaction metadata migration could not be staged");
                 // Authorization messages are not movements. Once the final stored transaction list
                 // is known, attach only uniquely matched merchant evidence from the encrypted source
@@ -2584,8 +2584,8 @@ final class BalanceData {
     }
 
     private static boolean stageTransactionMetadataMigrations(Context context,
-            Map<Transaction, Transaction> replaced, List<Transaction> retained) {
-        if (replaced == null || replaced.isEmpty()) return true;
+            Map<Transaction, Transaction> replaced, List<Transaction> retained, boolean full) {
+        if (replaced.isEmpty() && !full) return true;
         Map<String, String> aliases = new LinkedHashMap<>();
         Set<String> ambiguous = new HashSet<>();
         Set<String> retainedKeys = new HashSet<>();
@@ -2598,6 +2598,27 @@ final class BalanceData {
             if (retainedKeys.contains(from)
                     || (aliases.containsKey(from) && !to.equals(aliases.get(from)))) ambiguous.add(from);
             aliases.put(from, to);
+        }
+        if (full) {
+            // A keep-notes reset or metadata-only restore can leave legacy annotations with no old
+            // transaction row to supply a replacement. Reattach only keys with one event candidate.
+            Set<String> metadataKeys = new HashSet<>();
+            try { MetadataStore.forEach(context, 256, row -> metadataKeys.add(row.key)); }
+            catch (Exception e) {
+                Log.w(TAG, "legacy metadata lookup failed", e);
+                return false;
+            }
+            for (Transaction transaction : retained) {
+                if (transaction.sig == null || !transaction.sig.startsWith("e2:")) continue;
+                String legacySig = transaction.sig.substring(3, transaction.sig.indexOf(':', 3));
+                String to = noteKey(transaction);
+                for (String from : new String[]{transaction.content == null ? "" : "c:" + transaction.content,
+                        "s:" + legacySig}) {
+                    if (!metadataKeys.contains(from) || retainedKeys.contains(from)) continue;
+                    if (aliases.containsKey(from) && !to.equals(aliases.get(from))) ambiguous.add(from);
+                    aliases.put(from, to);
+                }
+            }
         }
         // A legacy content key may have annotated several recurring events. Keep it intact and
         // unattached rather than moving the user's annotation to an arbitrary event.
