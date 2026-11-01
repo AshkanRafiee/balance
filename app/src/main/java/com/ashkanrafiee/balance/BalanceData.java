@@ -1845,6 +1845,7 @@ final class BalanceData {
             Map<String, Long> lastBalance = null;
             Map<String, Long> lastBalanceDates = null;
             List<Transaction> fresh = new ArrayList<>();
+            boolean appendOnly = false;
             try (Cursor cursor = context.getContentResolver().query(
                 Telephony.Sms.Inbox.CONTENT_URI,
                 new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE,
@@ -2318,6 +2319,7 @@ final class BalanceData {
                         if (!pairedForResidual.contains(candidate)) residualCandidates.add(candidate);
                     }
                 } else {
+                    appendOnly = placed.isEmpty();
                     for (int i = fresh.size() - 1; i >= 0; i--) {
                         if (placed.contains(fresh.get(i))) continue;
                         stored.add(fresh.get(i));
@@ -2355,7 +2357,20 @@ final class BalanceData {
                 completed = false;
                 return added;
             }
-            if (transactionsChanged && !writeTransactions(context, stored)) {
+            boolean transactionsSaved = true;
+            if (transactionsChanged) {
+                if (appendOnly) {
+                    try {
+                        List<Transaction> appended = new ArrayList<>(fresh);
+                        java.util.Collections.reverse(appended);
+                        TransactionStore.append(context, appended);
+                    } catch (Exception e) {
+                        Log.w(TAG, "transaction append failed", e);
+                        transactionsSaved = false;
+                    }
+                } else transactionsSaved = writeTransactions(context, stored);
+            }
+            if (!transactionsSaved) {
                 failed = true;
                 completed = false;
                 return added;

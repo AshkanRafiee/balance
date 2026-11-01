@@ -415,6 +415,26 @@ public class TransactionStoreTest {
         assertEquals(1L, TransactionStore.read(context).get(0).date);
     }
 
+    @Test public void scannerAppendPreservesExistingCiphertextAndRollsBackOnFailure() throws Exception {
+        Transaction first = new Transaction("Synthetic", 1L, 2L);
+        assertTrue(TransactionStore.replace(context, java.util.Collections.singletonList(first)));
+        String ciphertext = payloadAt(0);
+        TransactionStore.append(context, java.util.Collections.singletonList(
+            new Transaction("Synthetic", 2L, 3L)));
+        assertEquals(ciphertext, payloadAt(0));
+        assertEquals(2L, TransactionStore.count(context));
+        String revision = TransactionStore.revision(context);
+        boolean failed = false;
+        try {
+            TransactionStore.append(context, java.util.Arrays.asList(
+                new Transaction("Synthetic", 3L, 4L), null));
+        } catch (Exception expected) { failed = true; }
+        assertTrue(failed);
+        assertEquals(2L, TransactionStore.count(context));
+        assertEquals(revision, TransactionStore.revision(context));
+        assertEquals(ciphertext, payloadAt(0));
+    }
+
     @Test public void restoreRetainsRecurringIdenticalBodiesAndAliasesLegacyMetadata() throws Exception {
         String body = "واریز:200,000 مانده:3,000,000";
         Transaction first = BalanceData.parseMovement("Saman", "500095", body, 1_000_000L, false, 0);
@@ -456,6 +476,18 @@ public class TransactionStoreTest {
         }, (from, to) -> aliases.add(from + "=" + to));
         assertTrue(aliases.isEmpty());
         assertEquals(2L, TransactionStore.count(context));
+    }
+
+    private String payloadAt(long ordinal) {
+        try (SQLiteDatabase db = SQLiteDatabase.openDatabase(
+                context.getDatabasePath(TransactionStore.DB_NAME).getPath(), null,
+                SQLiteDatabase.OPEN_READONLY);
+                android.database.Cursor cursor = db.query(TransactionStore.TABLE,
+                    new String[]{"payload"}, "ordinal=?", new String[]{Long.toString(ordinal)},
+                    null, null, null)) {
+            assertTrue(cursor.moveToFirst());
+            return cursor.getString(0);
+        }
     }
 
     private static void assertTransactionEquals(Transaction expected, Transaction actual) {

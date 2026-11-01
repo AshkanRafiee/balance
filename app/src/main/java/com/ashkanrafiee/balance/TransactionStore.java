@@ -195,6 +195,23 @@ final class TransactionStore {
         return mergeResult(context, source, null).added;
     }
 
+    /** Scanner-only append after deduplication under BalanceData's lock. Existing rows and their
+     *  ordinals/ciphertexts stay untouched. Chain insertion and full reparses still use replacement.
+     *  Unlike backup merge, this does not need to decode the already-validated history again. */
+    static void append(Context context, List<Transaction> transactions) throws Exception {
+        if (transactions == null) throw new NullPointerException("transactions");
+        if (transactions.isEmpty()) return;
+        access(context, true, true, false, s -> {
+            long next = s.nextOrdinal();
+            for (Transaction transaction : transactions) {
+                s.insert(next, transaction);
+                next = next == Long.MAX_VALUE ? -1 : next + 1;
+            }
+            s.touch();
+            return null;
+        });
+    }
+
     /**
      * Local-first union, indexed by content, signature and legacy bank/date/amount/account identity.
      * Legacy matching applies when either row has no signature; different known signatures are not
