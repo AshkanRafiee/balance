@@ -238,6 +238,15 @@ final class DataGeneration {
                         new HashSet<>(Arrays.asList(TransactionStore.DB_NAME,
                             CommitmentStore.DB_NAME, SourceStore.DB_NAME)));
                     try {
+                        // A truncated disposable store is no more recoverable than a missing one.
+                        // Remove only those validated, reset-authorized files; never metadata.
+                        for (String name : new String[]{TransactionStore.DB_NAME,
+                                CommitmentStore.DB_NAME, SourceStore.DB_NAME}) {
+                            File database = new File(new File(directory, "databases"), name);
+                            if (database.isFile() && database.length() == 0) {
+                                for (File file : databaseFiles(database)) deleteRequired(file);
+                            }
+                        }
                         writeMarker(directory, marker("ready", manifest.generation,
                             new File(directory, "databases")));
                         syncTree(directory);
@@ -472,7 +481,8 @@ final class DataGeneration {
             File database = new File(databases, name);
             if (!allowed.contains(name) || !seen.add(name)
                     || ((!database.isFile() || database.length() == 0)
-                        && !(resettableMissing.contains(name) && !database.exists())))
+                        && !(resettableMissing.contains(name) && (!database.exists()
+                            || (database.isFile() && database.length() == 0)))))
                 throw new Exception("published generation database is missing");
         }
         return seen;

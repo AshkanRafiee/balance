@@ -135,6 +135,44 @@ public class ResetRecoveryTest {
         }
     }
 
+    @Test public void keepNotesRecoversTruncatedDisposableStores() throws Exception {
+        for (String name : new String[]{CommitmentStore.DB_NAME, TransactionStore.DB_NAME,
+                SourceStore.DB_NAME}) {
+            BalanceData.reset(context, true);
+            assertTrue(MetadataStore.setNote(context, "example", "survives reset"));
+            assertTrue(BalanceData.writeTransactions(context, Collections.singletonList(
+                new Transaction("Refah", 100L, 10L))));
+            SourceStore.capture(context, "Refah", "source fixture", 100L, 1);
+            publish();
+            File database = DataGeneration.context(context).getDatabasePath(name);
+            try (FileOutputStream out = new FileOutputStream(database)) {
+                out.getFD().sync();
+            }
+
+            BalanceData.reset(context, false);
+
+            assertEquals("survives reset", MetadataStore.getNote(context, "example"));
+            assertTrue(BalanceData.readTransactions(context).isEmpty());
+            assertTrue(BalanceData.readCommitments(context).isEmpty());
+        }
+    }
+
+    @Test public void keepNotesDoesNotDiscardTruncatedMetadata() throws Exception {
+        assertTrue(MetadataStore.setNote(context, "example", "must not silently disappear"));
+        publish();
+        File database = DataGeneration.context(context).getDatabasePath(MetadataStore.DB_NAME);
+        try (FileOutputStream out = new FileOutputStream(database)) {
+            out.getFD().sync();
+        }
+        try {
+            BalanceData.reset(context, false);
+            fail("truncated notes must not be discarded by keep-notes reset");
+        } catch (IllegalStateException expected) {
+            assertTrue(database.exists());
+            assertEquals(0L, database.length());
+        }
+    }
+
     private void publish() throws Exception {
         synchronized (BalanceData.class) {
             try (DataGeneration.Stage stage = DataGeneration.beginStage(context)) {
