@@ -30,11 +30,9 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Pull-to-refresh on the history screen (instrumented, real UI gesture). A bank movement is seeded
- * into the real SMS inbox while the screen is already open; the screen's automatic SMS observer
- * only ever re-scans the <em>history</em>, never the balances, so a seeded bank can only surface in
- * {@link BalanceData#read} once the pull's own refresh action (scanSms + scanHistory, the same as
- * the dashboard) runs. The gesture is driven with real touch events, so the intercept and the
- * on-release arming are covered end to end.
+ * into the real SMS inbox while the screen is already open. After automatic work settles, each
+ * gesture must start a new scan and visibly acknowledge the manual action, even when the saved
+ * balance is already current. Merely asserting that balance would pass with a no-op pull.
  */
 @RunWith(AndroidJUnit4.class)
 public class HistoryPullRefreshTest {
@@ -84,26 +82,29 @@ public class HistoryPullRefreshTest {
         // The pull starts on a tap-able year card, so the gesture must be intercepted away from the
         // child (onInterceptTouchEvent) without firing the card's tap.
         launchAndSeed();
-        waitUntil(() -> clickableCardCenter()[2] == 1, 20_000);
+        assertTrue("a clickable year card must be rendered",
+            waitUntil(() -> clickableCardCenter()[2] == 1, 20_000));
         pullDownAt(clickableCardCenter()[1], true);
         awaitTejaratBalance();
     }
 
     private void launchAndSeed() throws Exception {
         launch(HistoryActivity.class);
-        waitUntil(() -> isResumed(HistoryActivity.class), 20_000);
-        waitUntil(() -> scrollViewOf() != null, 20_000);
+        assertTrue(waitUntil(() -> isResumed(HistoryActivity.class), 20_000));
+        assertTrue(waitUntil(() -> scrollViewOf() != null, 20_000));
 
         // The movement lands only after the screen is open.
         seed("TejaratBank", TEJARAT_DEPOSIT, System.currentTimeMillis());
         // The history screen now performs its own foreground refresh, including balances, so the
         // seeded bank may already be visible before the manual pull. The pull remains covered below
         // as an explicit second refresh and must stay safe when the automatic pass already settled.
-        waitUntil(() -> readBalances().size() == 1, 45_000);
+        assertTrue(waitUntil(() -> readBalances().size() == 1, 45_000));
+        assertTrue("automatic scan and render must settle before testing a manual refresh",
+            waitUntil(this::historyIdle, 45_000));
     }
 
     private void awaitTejaratBalance() throws Exception {
-        waitUntil(() -> readBalances().size() == 1, 45_000);
+        assertTrue(waitUntil(() -> readBalances().size() == 1, 45_000));
         Bank tejarat = findBank("Tejarat", "01351234567890");
         assertNotNull("pull must scan the SMS inbox and surface the seeded bank", tejarat);
         assertEquals(2_533_435_016L, tejarat.amount);
@@ -128,6 +129,7 @@ public class HistoryPullRefreshTest {
             end = list.getHeight() - 1f;
         }
         final float x = list.getWidth() / 2f;
+        final int scansBefore = scanStarts();
         long t = SystemClock.uptimeMillis();
         dispatch(list, MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, x, start, 0));
         final int steps = 14;
@@ -137,8 +139,42 @@ public class HistoryPullRefreshTest {
                 x, start + (end - start) * i / steps, 0));
         }
         t += 16;
-        dispatch(list, MotionEvent.obtain(t, t, MotionEvent.ACTION_UP, x, end, 0));
+        final MotionEvent up = MotionEvent.obtain(t, t, MotionEvent.ACTION_UP, x, end, 0);
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            list.dispatchTouchEvent(up);
+            up.recycle();
+            assertEquals("releasing the pull must visibly start a manual refresh",
+                ctx.getString(R.string.history_refreshing), list.getContentDescription());
+            assertTrue("a manual pull must start a new scan, not reuse an already current balance",
+                HistoryActivity.scanStartsForTest((HistoryActivity) list.getContext()) > scansBefore);
+        });
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        assertTrue("manual refresh must settle", waitUntil(() -> historyIdle()
+            && list.getContentDescription() == null, 45_000));
+    }
+
+    private boolean historyIdle() {
+        final boolean[] idle = {false};
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            for (Activity activity : ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(Stage.RESUMED)) {
+                if (activity instanceof HistoryActivity)
+                    idle[0] = HistoryActivity.idleForTest((HistoryActivity) activity);
+            }
+        });
+        return idle[0];
+    }
+
+    private int scanStarts() {
+        final int[] starts = {0};
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            for (Activity activity : ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(Stage.RESUMED)) {
+                if (activity instanceof HistoryActivity)
+                    starts[0] = HistoryActivity.scanStartsForTest((HistoryActivity) activity);
+            }
+        });
+        return starts[0];
     }
 
     /** The cell-relative Y of the list's first tap-able row (a year or month card), and whether one

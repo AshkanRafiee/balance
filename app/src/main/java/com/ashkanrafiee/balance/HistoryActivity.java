@@ -236,6 +236,11 @@ public final class HistoryActivity extends Activity {
     /** Bumped on every render request; the finished render applies its result only if it is still
      *  the newest, so a quick filter change never gets overwritten by a stale slower build. */
     private int renderGen;
+    private boolean renderRunning, renderQueued;
+    private boolean historyScanRunning, historyScanAgain;
+    private int historyScanStarts;
+    private String renderedTransactionsRevision, renderedMetadataRevision, renderedState;
+    private String renderingState;
     private static volatile CountDownLatch renderGateStarted;
     private static volatile CountDownLatch renderGateRelease;
 
@@ -243,6 +248,15 @@ public final class HistoryActivity extends Activity {
     static void setRenderGateForTest(CountDownLatch started, CountDownLatch release) {
         renderGateStarted = started;
         renderGateRelease = release;
+    }
+
+    static boolean idleForTest(HistoryActivity activity) {
+        return !activity.historyScanRunning && !activity.renderRunning
+            && !activity.renderQueued && !activity.scanPending;
+    }
+
+    static int scanStartsForTest(HistoryActivity activity) {
+        return activity.historyScanStarts;
     }
 
     /** Test-only view of the dialogs this screen currently shows. Dialog windows live outside
@@ -2400,8 +2414,7 @@ public final class HistoryActivity extends Activity {
     private int historyUiGen;
     private int historyListenerGen;
     private boolean historyResumed;
-    private boolean renderAfterResume;
-    /** The render generation that must finish before the automatic-open refresh indicator settles. */
+    /** The render/validation generation that must finish before the refresh indicator settles. */
     private int automaticRefreshTargetGen = -1;
 
     /** A small bounded set of day pages is kept in the activity heap. The disk timeline retains the rest. */
@@ -2639,29 +2652,22 @@ public final class HistoryActivity extends Activity {
         onHistoryChanged = () -> runOnUiThread(() -> {
             if (listenerGen != historyListenerGen || !historyResumed
                     || isDestroyed() || isFinishing()) return;
-            // The store changed, so the cached picker choices may miss a brand-new bank.
-            scopeChoicesCache = null;
-            invalidateTagNames();
-            render();
+            // Our scan completion requests the same snapshot. Do not decrypt/build it twice.
+            if (!historyScanRunning) render();
         });
         BalanceData.addHistoryListener(onHistoryChanged);
         registerSmsObserver();
-        // Same for anything that happened while the screen was closed (e.g. a dashboard
-        // restore replacing the whole store): the render below reloads the choices after it.
-        scopeChoicesCache = null;
-        invalidateTagNames();
-        if (renderAfterResume || historyResult == null) {
-            renderAfterResume = false;
-            if (scrollView != null) scrollView.beginAutomaticRefresh();
-            render();
-        }
+        // Revision validation happens on the worker; an unchanged resume keeps the tree, pages,
+        // picker caches, expansion and scroll exactly as they were.
+        if (scrollView != null && historyResult == null) scrollView.beginAutomaticRefresh();
+        render();
         // The delayed lock may have engaged while we were paused on a ROM that skipped onStop;
         // reflect it now that we are back in the foreground.
         if (LockManager.isEnabled(this) && LockManager.isSessionLocked()
                 && lockOverlay != null && !lockOverlay.isShowing()) {
             lockOverlay.showLock();
         }
-        // Re-scan in the background (a no-op if a scan is already running) so messages that
+        // Re-scan in the background (coalesced if a scan is already running) so messages that
         // arrived while the screen was closed are reflected as soon as it opens. The generation
         // check is on the UI thread before the raw worker is launched; once launched, the worker
         // owns only an application context and may safely finish headlessly after a pause.
@@ -2671,7 +2677,6 @@ public final class HistoryActivity extends Activity {
     @Override
     protected void onPause() {
         historyResumed = false;
-        renderAfterResume = true;
         renderGen++;
         historyUiGen++;
         historyListenerGen++;
@@ -2693,8 +2698,7 @@ public final class HistoryActivity extends Activity {
         super.onPause();
     }
 
-    /** Re-scans the SMS inbox the moment new bank messages arrive, so the history the user is
-     *  looking at stays current without a refresh control. A scan already in flight is a no-op. */
+    /** Re-scans the SMS inbox when new messages arrive. Bursts during a scan share one follow-up. */
     private void registerSmsObserver() {
         if (smsObserver != null) return;
         if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) return;
@@ -2822,7 +2826,13 @@ public final class HistoryActivity extends Activity {
     private void startHistoryScan(int listenerGen, Context app) {
         if (listenerGen != historyListenerGen || !historyResumed
                 || isDestroyed() || isFinishing()) return;
-        if (scrollView != null) scrollView.beginAutomaticRefresh();
+        if (historyScanRunning) {
+            historyScanAgain = true;
+            return;
+        }
+        historyScanRunning = true;
+        historyScanStarts++;
+        if (scrollView != null && historyResult == null) scrollView.beginAutomaticRefresh();
         new Thread(() -> {
             try {
                 if (checkSelfPermission(Manifest.permission.READ_SMS)
@@ -2840,10 +2850,16 @@ public final class HistoryActivity extends Activity {
                 // that was never scanned before (including a bank/account-filtered launch) cannot
                 // remain on the pre-scan empty state until the user pulls to refresh.
                 runOnUiThread(() -> {
-                    if (listenerGen != historyListenerGen || !historyResumed
-                            || isDestroyed() || isFinishing()) return;
-                    scopeChoicesCache = null;
-                    invalidateTagNames();
+                    historyScanRunning = false;
+                    if (!historyResumed || isDestroyed() || isFinishing()) {
+                        historyScanAgain = false;
+                        return;
+                    }
+                    if (historyScanAgain) {
+                        historyScanAgain = false;
+                        startHistoryScan(historyListenerGen, app);
+                        return;
+                    }
                     automaticRefreshTargetGen = renderGen + 1;
                     render();
                 });
@@ -2889,14 +2905,26 @@ public final class HistoryActivity extends Activity {
      *  from the encrypted snapshot timeline, so expand-all and searches never create a history-sized
      *  view tree or metadata map. */
     private void render() {
-        // onCreate performs the first render before onResume. Thereafter a paused screen must not
-        // start another raw worker from a delayed search callback; onResume will request it again.
+        // A paused screen must not start another worker from a delayed search callback;
+        // onResume validates the snapshot again.
         if (isDestroyed() || isFinishing()) return;
         if (!historyResumed && historyUiGen != 0) {
-            renderAfterResume = true;
+            return;
+        }
+        if (filter.rangePreset != RANGE_CUSTOM)
+            filter = rangePreset(filter, filter.rangePreset, now(), iranCalendar);
+        final String state = renderStateKey();
+        if (renderRunning) {
+            renderQueued = true;
+            // An unchanged scan notification can reuse the running snapshot before its cheap
+            // revision recheck. Only a changed selection/date invalidates that in-flight result.
+            if (!state.equals(renderingState)) renderGen++;
             return;
         }
         final int gen = ++renderGen;
+        renderRunning = true;
+        renderQueued = false;
+        renderingState = state;
         final int uiGen = historyUiGen;
         final Context app = getApplicationContext();
         final Filter f = filter;
@@ -2919,8 +2947,11 @@ public final class HistoryActivity extends Activity {
         final String previousExpansionKey = narrowingExpandedFor;
         final Set<String> savedPreNarrowingDays = preNarrowingDays == null ? null
             : new java.util.LinkedHashSet<>(preNarrowingDays);
-                final boolean expandAll = BalanceData.getExpandAllHistory(this);
+        final boolean expandAll = BalanceData.getExpandAllHistory(this);
         final boolean hadRenderedResult = historyResult != null;
+        final String previousState = renderedState;
+        final String previousTransactions = renderedTransactionsRevision;
+        final String previousMetadata = renderedMetadataRevision;
         final WorkProgress renderProgress = new WorkProgress() {
             @Override public void stage(int stageResId) {
                 setLoadingStage(gen, uiGen, stageResId);
@@ -2939,6 +2970,19 @@ public final class HistoryActivity extends Activity {
         new Thread(() -> {
             HistoryReader.Result result = null;
             try {
+                final String transactionsRevision = TransactionStore.revision(app);
+                final String metadataRevision = MetadataStore.revision(app);
+                if (hadRenderedResult && transactionsRevision != null
+                        && transactionsRevision.equals(previousTransactions)
+                        && sameRevision(metadataRevision, previousMetadata)
+                        && state.equals(previousState)) {
+                    runOnUiThread(() -> {
+                        if (gen == renderGen && !lifecycleStale(uiGen))
+                            finishAutomaticRefreshForRender(gen);
+                        finishRenderWork();
+                    });
+                    return;
+                }
                 CountDownLatch started = renderGateStarted;
                 CountDownLatch release = renderGateRelease;
                 if (started != null && release != null) {
@@ -3007,14 +3051,23 @@ public final class HistoryActivity extends Activity {
                 final Lists lists = listsFromSummary(result, initialPages);
                 final List<Residual> requestedResiduals = residualsFromPages(initialPages);
                 final HistoryReader.Result completed = result;
+                final boolean stableRevision = sameRevision(transactionsRevision,
+                    TransactionStore.revision(app)) && sameRevision(metadataRevision,
+                    MetadataStore.revision(app));
                 runOnUiThread(() -> {
                     if (gen != renderGen || lifecycleStale(uiGen)
                             || isDestroyed() || isFinishing()) {
                         try { completed.close(); } catch (Exception e) {
                             android.util.Log.w("BalanceHistory", "stale timeline cleanup failed", e);
                         }
+                        finishRenderWork();
                         return;
                     }
+                    renderedTransactionsRevision = stableRevision ? transactionsRevision : null;
+                    renderedMetadataRevision = stableRevision ? metadataRevision : null;
+                    renderedState = state;
+                    scopeChoicesCache = null;
+                    invalidateTagNames();
                     HistoryReader.Result old = historyResult;
                     historyResult = completed;
                     if (old != null) {
@@ -3052,6 +3105,7 @@ public final class HistoryActivity extends Activity {
                     }
                     body.setVisibility(View.VISIBLE);
                     finishAutomaticRefreshForRender(gen);
+                    finishRenderWork();
                 });
             } catch (Throwable e) {
                 if (result != null) {
@@ -3069,13 +3123,16 @@ public final class HistoryActivity extends Activity {
                 // no render left to replace it.
                 android.util.Log.w("BalanceHistory", "render failed", e);
                 runOnUiThread(() -> {
-                    if (isDestroyed() || isFinishing()) return;
-                    // Stop the sweep even for a superseded render: the failed worker still means
-                    // this screen is done loading, and leaving it running would keep the main
-                    // thread asking for frames that no render is left to answer. The actual error
-                    // view remains generation-gated below.
+                    if (isDestroyed() || isFinishing()) {
+                        finishRenderWork();
+                        return;
+                    }
+                    // A superseded failure must not stop the newest cold load's placeholders.
+                    if (gen != renderGen || lifecycleStale(uiGen)) {
+                        finishRenderWork();
+                        return;
+                    }
                     stopShimmer();
-                    if (gen != renderGen || lifecycleStale(uiGen)) return;
                     finishAutomaticRefreshForRender(gen);
                     body.setContentDescription(null);
                     // Gone while rebuilding, as in the success path above: one measure instead of
@@ -3086,9 +3143,25 @@ public final class HistoryActivity extends Activity {
                         loadErrorState();
                         body.setVisibility(View.VISIBLE);
                     }
+                    finishRenderWork();
                 });
             }
         }).start();
+    }
+
+    private String renderStateKey() {
+        return narrowingKey(searchQuery == null ? "" : searchQuery.trim(), selectedTags,
+            selectedBanks, selectedAccounts, filter) + "\u0000" + iranCalendar + "\u0000"
+            + BalanceData.getExpandAllHistory(this) + "\u0000" + now().key() + "\u0000"
+            + java.util.TimeZone.getDefault().getID() + "\u0000"
+            + java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) + "\u0000"
+            + CurrencyHelper.currency(this);
+    }
+
+    /** At most one decrypt/aggregate worker, plus the newest pending request. UI thread only. */
+    private void finishRenderWork() {
+        renderRunning = false;
+        if (renderQueued && historyResumed && !isDestroyed() && !isFinishing()) render();
     }
 
     /** Settles an automatic refresh only after the render requested by its scan was accepted. */
@@ -5621,8 +5694,7 @@ public final class HistoryActivity extends Activity {
         final Handler handler = new Handler(Looper.getMainLooper());
         float downY;
         float pullShift, pullFrac, pullFade, spinAngle;
-        boolean pulling, refreshing, refreshAgain;
-        boolean automaticRefreshing, automaticOwnsRefresh;
+        boolean pulling, refreshing;
         boolean indicatorVisible, spinnerRunning, retracting;
         long spinDeadline;
         View indicatorOverlay;
@@ -5792,75 +5864,32 @@ public final class HistoryActivity extends Activity {
             refreshIndicator();
         }
 
-        /** Starts the same visible spinner for an automatic first-open or resume refresh. */
+        /** Only a cold screen without a usable result needs automatic progress. */
         void beginAutomaticRefresh() {
-            automaticRefreshing = true;
+            if (historyResult != null) return;
             if (refreshing) return;
             refreshing = true;
-            automaticOwnsRefresh = true;
             beginSpin();
         }
 
-        /** Ends only the automatic refresh this view started; a user pull may still own the scan. */
+        /** The shared scan/render pipeline also settles manual pulls, including unchanged scans. */
         void finishAutomaticRefresh() {
-            automaticRefreshing = false;
-            if (!automaticOwnsRefresh) return;
-            automaticOwnsRefresh = false;
             refreshing = false;
-            if (refreshAgain) {
-                refreshAgain = false;
-                handler.post(this::refreshAll);
-            }
         }
 
         /** Cancels an automatic indicator when the Activity leaves the foreground. */
         void cancelAutomaticRefresh() {
-            automaticRefreshing = false;
-            if (!automaticOwnsRefresh) return;
-            automaticOwnsRefresh = false;
             refreshing = false;
-            refreshAgain = false;
             retractIndicator();
         }
 
         /** Re-scans the SMS inbox (balances and widget) and then the history in the background,
          *  mirroring the dashboard's refresh so a pull here updates the whole app. A missing SMS
-         *  permission skips straight to a render of the saved store; an in-flight refresh folds a
-         *  second pull into {@link #refreshAgain} instead of stacking another scan. */
+         *  permission leaves the saved store intact; an in-flight refresh coalesces further pulls
+         *  and SMS notifications into one follow-up scan. */
         void refreshAll() {
-            if (checkSelfPermission(Manifest.permission.READ_SMS)
-                    != PackageManager.PERMISSION_GRANTED) {
-                render();
-                return;
-            }
-            if (refreshing) {
-                refreshAgain = true;
-                return;
-            }
             refreshing = true;
-            final int uiGen = historyUiGen;
-            final Context app = getApplicationContext();
-            new Thread(() -> {
-                try {
-                    BalanceData.scanSms(app, BalanceData.read(app));
-                    BalanceWidgetProvider.push(app);
-                    BalanceData.scanHistory(app);
-                } catch (Exception e) {
-                    android.util.Log.w("BalanceHistory", "pull-to-refresh scan failed", e);
-                }
-                runOnUiThread(() -> {
-                    if (isFinishing() || isDestroyed()) return;
-                    refreshing = false;
-                    if (uiGen != historyUiGen || !historyResumed) {
-                        refreshAgain = false;
-                        return;
-                    }
-                    if (refreshAgain) {
-                        refreshAgain = false;
-                        refreshAll();
-                    }
-                });
-            }).start();
+            startHistoryScan(historyListenerGen, getApplicationContext());
         }
 
         /** The pull-to-refresh arrow: a small chip with a circular arrow that follows the finger down

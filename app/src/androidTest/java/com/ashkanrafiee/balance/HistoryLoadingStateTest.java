@@ -2,6 +2,8 @@ package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import android.app.Activity;
@@ -10,6 +12,8 @@ import android.content.Intent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
+import android.widget.ScrollView;
+import androidx.lifecycle.Lifecycle;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -41,6 +45,7 @@ public class HistoryLoadingStateTest {
     private String originalTag;
     private String originalCurrency;
     private androidx.test.core.app.ActivityScenario<HistoryActivity> scenario;
+    private Transaction firstTransaction;
 
     private static final String MELLAT = "Mellat";
     private static final String ACCOUNT = "111";
@@ -72,6 +77,7 @@ public class HistoryLoadingStateTest {
                 (i % 3 == 0 ? 1 : -1) * (100_000L + i), "sig" + i, null));
         }
         BalanceData.writeTransactions(ctx, txs);
+        firstTransaction = txs.get(0);
     }
 
     @Test public void whileItIsStillReading_theScreenShowsPlaceholdersRatherThanBlank()
@@ -130,6 +136,88 @@ public class HistoryLoadingStateTest {
         assertNull("the loading state must not outlive the load",
             findByDescription(ctx.getString(R.string.history_loading)));
         assertTrue("the placeholders must not outlive the load", shimmerBars().isEmpty());
+    }
+
+    @Test public void unchangedResume_keepsHistoryTreeAndScrollWithoutAnotherFullRead()
+            throws Exception {
+        storeEnoughToBeSlowToRead();
+        openHistory();
+        await(this::idle, 60_000, "the initial scan and render to settle");
+        View heading = findByText(ctx.getString(R.string.history_breakdown));
+        assertNotNull(heading);
+        final int[] offset = {0};
+        scenario.onActivity(activity -> {
+            ScrollView scroll = findScroll(activity.getWindow().getDecorView());
+            scroll.scrollTo(0, 100);
+            offset[0] = scroll.getScrollY();
+        });
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        HistoryActivity.setRenderGateForTest(started, release);
+        try {
+            scenario.moveToState(Lifecycle.State.CREATED);
+            scenario.moveToState(Lifecycle.State.RESUMED);
+            await(this::idle, 30_000, "unchanged resume validation");
+            assertEquals("unchanged resume must not decrypt/group the history again", 1L,
+                started.getCount());
+            assertSame("unchanged resume must retain the actual history tree", heading,
+                findByText(ctx.getString(R.string.history_breakdown)));
+            scenario.onActivity(activity -> assertEquals("scroll survives unchanged resume",
+                offset[0], findScroll(activity.getWindow().getDecorView()).getScrollY()));
+            assertNull(findByDescription(ctx.getString(R.string.history_refreshing)));
+        } finally {
+            HistoryActivity.setRenderGateForTest(null, null);
+            release.countDown();
+        }
+    }
+
+    @Test public void metadataChangedWhilePaused_keepsSavedContentDuringQuietReload()
+            throws Exception {
+        storeEnoughToBeSlowToRead();
+        openHistory();
+        await(this::idle, 60_000, "the initial scan and render to settle");
+        View heading = findByText(ctx.getString(R.string.history_breakdown));
+        assertNotNull(heading);
+        scenario.moveToState(Lifecycle.State.CREATED);
+        BalanceData.setNote(ctx, firstTransaction, "saved note after pause");
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        HistoryActivity.setRenderGateForTest(started, release);
+        try {
+            scenario.moveToState(Lifecycle.State.RESUMED);
+            assertTrue("metadata revision must trigger a fresh read", started.await(10,
+                TimeUnit.SECONDS));
+            assertSame("saved history stays usable during the read", heading,
+                findByText(ctx.getString(R.string.history_breakdown)));
+            assertNull("saved history must not revert to placeholders",
+                findByDescription(ctx.getString(R.string.history_loading)));
+            assertNull("saved-content resume must not show an automatic spinner",
+                findByDescription(ctx.getString(R.string.history_refreshing)));
+            release.countDown();
+            await(() -> findByText("saved note after pause") != null, 60_000,
+                "the changed metadata to appear");
+        } finally {
+            HistoryActivity.setRenderGateForTest(null, null);
+            release.countDown();
+        }
+    }
+
+    private boolean idle() {
+        final boolean[] idle = {false};
+        scenario.onActivity(activity -> idle[0] = HistoryActivity.idleForTest(activity));
+        return idle[0];
+    }
+
+    private static ScrollView findScroll(View view) {
+        if (view instanceof ScrollView) return (ScrollView) view;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                ScrollView found = findScroll(group.getChildAt(i));
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 
     private void openHistory() {
