@@ -248,8 +248,9 @@ public final class HistoryActivity extends Activity {
     private static volatile CountDownLatch renderGateStarted;
     private static volatile CountDownLatch renderGateRelease;
     static volatile Runnable summaryReadHookForTest;
-    static volatile Runnable scanHookForTest;
-    static volatile Runnable renderCompletionHookForTest;
+    static volatile java.util.function.Consumer<HistoryActivity> scanHookForTest;
+    private volatile java.util.function.Consumer<Runnable> scanDispatchForTest;
+    private volatile java.util.function.Consumer<Runnable> renderDeliveryForTest;
     static volatile java.util.function.Consumer<Runnable> skeletonSchedulerForTest;
 
     /** Test-only gate for making the loading state deterministic without a large history fixture. */
@@ -277,6 +278,22 @@ public final class HistoryActivity extends Activity {
 
     static int skeletonShowsForTest(HistoryActivity activity) {
         return activity.skeletonShowCount;
+    }
+
+    static void setScanDispatchForTest(HistoryActivity activity,
+            java.util.function.Consumer<Runnable> dispatch) {
+        activity.scanDispatchForTest = dispatch;
+    }
+
+    static void setRenderDeliveryForTest(HistoryActivity activity,
+            java.util.function.Consumer<Runnable> delivery) {
+        activity.renderDeliveryForTest = delivery;
+    }
+
+    private void deliverRender(Runnable completion) {
+        java.util.function.Consumer<Runnable> delivery = renderDeliveryForTest;
+        if (delivery != null) delivery.accept(completion);
+        else runOnUiThread(completion);
     }
 
     /** Test-only view of the dialogs this screen currently shows. Dialog windows live outside
@@ -2854,10 +2871,10 @@ public final class HistoryActivity extends Activity {
         }
         historyScanRunning = true;
         historyScanStarts++;
-        new Thread(() -> {
+        Runnable scan = () -> {
             try {
-                Runnable hook = scanHookForTest;
-                if (hook != null) hook.run();
+                java.util.function.Consumer<HistoryActivity> hook = scanHookForTest;
+                if (hook != null) hook.accept(this);
                 if (checkSelfPermission(Manifest.permission.READ_SMS)
                         == PackageManager.PERMISSION_GRANTED) {
                     java.util.LinkedHashMap<String, Bank> saved = BalanceData.read(app);
@@ -2887,7 +2904,10 @@ public final class HistoryActivity extends Activity {
                     render();
                 });
             }
-        }, "history-scan").start();
+        };
+        java.util.function.Consumer<Runnable> dispatch = scanDispatchForTest;
+        if (dispatch != null) dispatch.accept(scan);
+        else new Thread(scan, "history-scan").start();
     }
 
     /** One movement's searchable text in the current language: what the row shows (bank, time,
@@ -2996,9 +3016,7 @@ public final class HistoryActivity extends Activity {
                         && transactionsRevision.equals(previousTransactions)
                         && sameRevision(metadataRevision, previousMetadata)
                         && state.equals(previousState)) {
-                    Runnable hook = renderCompletionHookForTest;
-                    if (hook != null) hook.run();
-                    runOnUiThread(() -> {
+                    deliverRender(() -> {
                         if (gen == renderGen && !lifecycleStale(uiGen))
                             finishAutomaticRefreshForRender(gen);
                         finishRenderWork();
@@ -3065,9 +3083,7 @@ public final class HistoryActivity extends Activity {
                 final boolean stableRevision = sameRevision(transactionsRevision,
                     TransactionStore.revision(app)) && sameRevision(metadataRevision,
                     MetadataStore.revision(app));
-                Runnable completionHook = renderCompletionHookForTest;
-                if (completionHook != null) completionHook.run();
-                runOnUiThread(() -> {
+                deliverRender(() -> {
                     if (gen != renderGen || lifecycleStale(uiGen)
                             || isDestroyed() || isFinishing()) {
                         try { completed.close(); } catch (Exception e) {
@@ -3145,7 +3161,7 @@ public final class HistoryActivity extends Activity {
                 // an OutOfMemoryError on this thread would otherwise leave it sweeping forever, with
                 // no render left to replace it.
                 android.util.Log.w("BalanceHistory", "render failed", e);
-                runOnUiThread(() -> {
+                deliverRender(() -> {
                     if (isDestroyed() || isFinishing()) {
                         finishRenderWork();
                         return;

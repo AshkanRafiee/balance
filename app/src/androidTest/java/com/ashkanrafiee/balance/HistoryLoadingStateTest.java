@@ -32,7 +32,8 @@ import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * What the history screen shows while it is still reading its history.
@@ -67,7 +68,6 @@ public class HistoryLoadingStateTest {
     @After public void tearDown() {
         HistoryActivity.setRenderGateForTest(null, null);
         HistoryActivity.scanHookForTest = null;
-        HistoryActivity.renderCompletionHookForTest = null;
         HistoryActivity.skeletonSchedulerForTest = null;
         HistoryActivity.summaryReadHookForTest = null;
         if (scenario != null) scenario.close();
@@ -189,11 +189,15 @@ public class HistoryLoadingStateTest {
         BalanceData.reset(ctx, true);
         CountDownLatch scanStarted = new CountDownLatch(1);
         CountDownLatch scanRelease = new CountDownLatch(1);
+        AtomicReference<Throwable> gateFailure = new AtomicReference<>();
         List<Runnable> deadlines = new ArrayList<>();
         HistoryActivity.skeletonSchedulerForTest = deadlines::add;
-        HistoryActivity.scanHookForTest = () -> gate(scanStarted, scanRelease);
+        HistoryActivity.scanHookForTest = activity -> {
+            if (activity.getIntent().getBooleanExtra("loading_scan_gate", false))
+                gate(scanStarted, scanRelease, gateFailure);
+        };
         try {
-            openHistory();
+            openHistory(MELLAT, ACCOUNT, true);
             assertTrue(scanStarted.await(10, TimeUnit.SECONDS));
             await(() -> {
                 final boolean[] idle = {false};
@@ -215,6 +219,7 @@ public class HistoryLoadingStateTest {
             await(this::idle, 60_000, "catch-up and its final render");
             assertNotNull(findByText(ctx.getString(R.string.history_breakdown)));
             assertNull(findByDescription(ctx.getString(R.string.history_loading)));
+            assertNull("the bounded initial-scan gate must be released by the test", gateFailure.get());
         } finally {
             HistoryActivity.skeletonSchedulerForTest = null;
             HistoryActivity.scanHookForTest = null;
@@ -336,52 +341,92 @@ public class HistoryLoadingStateTest {
         storeEnoughToBeSlowToRead();
         openHistory();
         await(this::idle, 60_000, "the initial scan and render to settle");
-        CountDownLatch oldRenderStarted = new CountDownLatch(1);
-        CountDownLatch oldRenderRelease = new CountDownLatch(1);
-        CountDownLatch manualScanStarted = new CountDownLatch(1);
-        CountDownLatch manualScanRelease = new CountDownLatch(1);
-        CountDownLatch manualRenderStarted = new CountDownLatch(1);
-        CountDownLatch manualRenderRelease = new CountDownLatch(1);
-        AtomicInteger resumeValidations = new AtomicInteger();
-        HistoryActivity.renderCompletionHookForTest = () -> {
-            // Resume validates once immediately and once after its automatic scan completes.
-            if (resumeValidations.incrementAndGet() == 2)
-                gate(oldRenderStarted, oldRenderRelease);
-        };
+        final HistoryActivity[] owner = {null};
+        scenario.onActivity(activity -> owner[0] = activity);
+        DeferredWork renders = new DeferredWork(owner[0], false);
+        DeferredWork scans = new DeferredWork(owner[0], true);
         try {
+            scenario.onActivity(activity -> HistoryActivity.setRenderDeliveryForTest(activity, renders));
             scenario.moveToState(Lifecycle.State.CREATED);
             scenario.moveToState(Lifecycle.State.RESUMED);
-            assertTrue("the automatic scan's validation must reach its completion gate",
-                oldRenderStarted.await(10, TimeUnit.SECONDS));
-            HistoryActivity.scanHookForTest = () -> gate(manualScanStarted, manualScanRelease);
+            // Deliver resume's immediate validation, then hold the automatic scan's validation.
+            // No worker waits here, and callbacks from other activities cannot enter this fixture.
+            renders.deliver(renders.take("the immediate resume validation"));
+            Runnable previousValidation = renders.take("the automatic scan's validation");
+            scenario.onActivity(activity -> HistoryActivity.setScanDispatchForTest(activity, scans));
             scenario.onActivity(activity -> pull(findScroll(activity.getWindow().getDecorView())));
-            assertTrue("the manual pull must start its own scan",
-                manualScanStarted.await(10, TimeUnit.SECONDS));
-
-            oldRenderRelease.countDown();
-            await(() -> {
-                final boolean[] idle = {false};
-                scenario.onActivity(activity -> idle[0] = HistoryActivity.renderIdleForTest(activity));
-                return idle[0];
-            }, 10_000, "the previous scan's validation to finish");
+            Runnable manualScan = scans.take("the manual pull's accepted scan");
+            renders.deliver(previousValidation);
             assertManualRefreshActive();
 
-            HistoryActivity.renderCompletionHookForTest =
-                () -> gate(manualRenderStarted, manualRenderRelease);
-            manualScanRelease.countDown();
-            assertTrue("the manual scan must reach its own validation",
-                manualRenderStarted.await(10, TimeUnit.SECONDS));
+            scans.deliver(manualScan);
+            Runnable manualValidation = renders.take("the manual scan's own validation");
             assertManualRefreshActive();
-            manualRenderRelease.countDown();
+            renders.deliver(manualValidation);
             await(this::idle, 30_000, "the manual scan and validation to finish");
             await(() -> findByDescription(ctx.getString(R.string.history_refreshing)) == null,
                 10_000, "the manual refresh indicator to settle");
         } finally {
-            HistoryActivity.scanHookForTest = null;
-            HistoryActivity.renderCompletionHookForTest = null;
-            oldRenderRelease.countDown();
-            manualScanRelease.countDown();
-            manualRenderRelease.countDown();
+            scenario.onActivity(activity -> {
+                HistoryActivity.setScanDispatchForTest(activity, null);
+                HistoryActivity.setRenderDeliveryForTest(activity, null);
+            });
+            renders.close();
+            scans.close();
+            await(this::idle, 30_000, "deferred history work to drain during cleanup");
+        }
+    }
+
+    /** Holds work, not worker threads. Every held callback is delivered even on test failure. */
+    private static final class DeferredWork implements java.util.function.Consumer<Runnable>, AutoCloseable {
+        private final HistoryActivity owner;
+        private final boolean scan;
+        private final LinkedBlockingQueue<Runnable> pending = new LinkedBlockingQueue<>();
+        private final List<Runnable> taken = new ArrayList<>();
+        private boolean closed;
+
+        DeferredWork(HistoryActivity owner, boolean scan) {
+            this.owner = owner;
+            this.scan = scan;
+        }
+
+        @Override public void accept(Runnable work) {
+            synchronized (this) {
+                if (!closed) {
+                    pending.add(work);
+                    return;
+                }
+            }
+            dispatch(work);
+        }
+
+        Runnable take(String what) throws InterruptedException {
+            Runnable work = pending.poll(10, TimeUnit.SECONDS);
+            assertNotNull("timed out waiting for " + what, work);
+            synchronized (this) { taken.add(work); }
+            return work;
+        }
+
+        void deliver(Runnable work) {
+            synchronized (this) { taken.remove(work); }
+            if (scan) dispatch(work);
+            else InstrumentationRegistry.getInstrumentation().runOnMainSync(work);
+        }
+
+        private void dispatch(Runnable work) {
+            if (scan) new Thread(work, "history-test-scan").start();
+            else owner.runOnUiThread(work);
+        }
+
+        @Override public void close() {
+            List<Runnable> remaining;
+            synchronized (this) {
+                closed = true;
+                remaining = new ArrayList<>(taken);
+                taken.clear();
+                pending.drainTo(remaining);
+            }
+            for (Runnable work : remaining) dispatch(work);
         }
     }
 
@@ -395,14 +440,15 @@ public class HistoryLoadingStateTest {
         });
     }
 
-    private static void gate(CountDownLatch started, CountDownLatch release) {
+    private static void gate(CountDownLatch started, CountDownLatch release,
+            AtomicReference<Throwable> failure) {
         started.countDown();
         try {
             if (!release.await(60, TimeUnit.SECONDS))
-                throw new AssertionError("refresh regression gate timed out");
+                failure.compareAndSet(null, new AssertionError("initial scan gate timed out"));
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            throw new AssertionError(interrupted);
+            failure.compareAndSet(null, interrupted);
         }
     }
 
@@ -440,9 +486,14 @@ public class HistoryLoadingStateTest {
     }
 
     private void openHistory(String bank, String account) {
+        openHistory(bank, account, false);
+    }
+
+    private void openHistory(String bank, String account, boolean gateScan) {
         Intent i = new Intent(ctx, HistoryActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         if (bank != null) i.putExtra(HistoryActivity.EXTRA_BANK, bank);
         if (account != null) i.putExtra(HistoryActivity.EXTRA_ACCOUNT, account);
+        if (gateScan) i.putExtra("loading_scan_gate", true);
         scenario = androidx.test.core.app.ActivityScenario.launch(i);
     }
 
