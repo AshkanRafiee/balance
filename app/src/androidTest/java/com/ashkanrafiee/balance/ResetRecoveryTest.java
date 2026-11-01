@@ -26,11 +26,13 @@ public class ResetRecoveryTest {
 
     @Before public void setUp() {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        DataGeneration.clearForTests(context);
         BalanceData.reset(context, true);
     }
 
     @After public void tearDown() {
         BalanceData.reset(context, true);
+        DataGeneration.clearForTests(context);
     }
 
     @Test public void corruptCommitmentsCanBeResetInPublishedGeneration() throws Exception {
