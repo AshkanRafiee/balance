@@ -125,8 +125,32 @@ public class HistoryHeaderAccountTest {
             .putExtra(HistoryActivity.EXTRA_ACCOUNT, account)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         InstrumentationRegistry.getInstrumentation().startActivitySync(i);
-        waitUntil(() -> isResumed(HistoryActivity.class), 20_000);
-        waitUntil(() -> exportButton() != null, 20_000);
+        assertTrue("history must resume", waitUntil(() -> isResumed(HistoryActivity.class), 20_000));
+        assertTrue("history header must complete layout before geometry assertions",
+            waitUntil(() -> headerLaidOut(account), 20_000));
+    }
+
+    private boolean headerLaidOut(String account) {
+        final boolean[] ready = {false};
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            for (Activity activity : ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(Stage.RESUMED)) {
+                if (!(activity instanceof HistoryActivity)) continue;
+                View root = activity.getWindow().getDecorView();
+                View export = findFirst(root, view -> ctx.getString(R.string.history_export)
+                    .equals(view.getContentDescription()));
+                View chip = findFirst(root, view -> view instanceof TextView
+                    && (ctx.getString(R.string.account_label) + " " + account)
+                        .contentEquals(((TextView) view).getText()));
+                ready[0] = laidOut(root) && laidOut(export) && laidOut(chip)
+                    && ((TextView) chip).getLayout() != null;
+            }
+        });
+        return ready[0];
+    }
+
+    private static boolean laidOut(View view) {
+        return view != null && view.isLaidOut() && !view.isLayoutRequested();
     }
 
     /** The export action found by its content description; the header is built before the history
@@ -165,18 +189,24 @@ public class HistoryHeaderAccountTest {
     private void assertOnScreen(View v, String what) throws Exception {
         assertNotNull("export button", v);
         AtomicReference<boolean[]> out = new AtomicReference<>();
+        AtomicReference<String> diagnostics = new AtomicReference<>();
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
             int[] loc = new int[2];
             v.getLocationOnScreen(loc);
             int screenW = v.getResources().getDisplayMetrics().widthPixels;
             int left = loc[0], right = loc[0] + v.getWidth();
+            diagnostics.set("left=" + left + ", right=" + right + ", width=" + v.getWidth()
+                + ", height=" + v.getHeight() + ", screenWidth=" + screenW + ", laidOut="
+                + v.isLaidOut() + ", layoutRequested=" + v.isLayoutRequested() + ", fontScale="
+                + v.getResources().getConfiguration().fontScale);
             out.set(new boolean[]{
                 v.getVisibility() == View.VISIBLE && v.getWidth() > 0
                     && left >= 0 && right <= screenW
                     && right - left <= screenW,
             });
         });
-        assertTrue("export button must stay fully on screen with a " + what, out.get()[0]);
+        assertTrue("export button must stay fully on screen with a " + what + "; "
+            + diagnostics.get(), out.get()[0]);
     }
 
     private static View findFirst(View v, java.util.function.Predicate<View> match) {

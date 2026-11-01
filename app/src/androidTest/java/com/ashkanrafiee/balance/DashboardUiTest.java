@@ -165,7 +165,21 @@ public final class DashboardUiTest {
     @Test public void persianDashboardPlacesBrandOnTheReadingSide() {
         LocaleHelper.setLanguage(context, "fa");
         launch();
-        await(() -> findText(currentRoot(), context.getString(R.string.app_name)) != null, 10_000);
+        await(() -> {
+            final boolean[] ready = {false};
+            scenario.onActivity(activity -> {
+                TextView title = findText(activity.getWindow().getDecorView(),
+                    activity.getString(R.string.app_name));
+                TextView subtitle = findText(activity.getWindow().getDecorView(),
+                    activity.getString(R.string.subtitle_offline_bank_balances));
+                if (title == null || subtitle == null) return;
+                View brand = (View) title.getParent();
+                View header = (View) brand.getParent();
+                ready[0] = laidOut(title) && laidOut(subtitle) && laidOut(brand)
+                    && laidOut(header) && header.getWidth() > 0;
+            });
+            return ready[0];
+        }, 10_000);
         scenario.onActivity(activity -> {
             TextView title = findText(activity.getWindow().getDecorView(),
                 activity.getString(R.string.app_name));
@@ -186,9 +200,21 @@ public final class DashboardUiTest {
             assertEquals(View.LAYOUT_DIRECTION_RTL, brand.getLayoutDirection());
             assertEquals("the title fills the brand width", brand.getWidth(), title.getWidth());
             assertEquals("the subtitle fills the brand width", brand.getWidth(), subtitle.getWidth());
-            assertTrue("the brand remains on the physical right in RTL",
+            assertTrue("the brand remains on the physical right in RTL; brand=" + geometry(brand)
+                    + ", header=" + geometry(header),
                 brand.getLeft() + brand.getWidth() / 2 > header.getWidth() / 2);
         });
+    }
+
+    private static boolean laidOut(View view) {
+        return view.isLaidOut() && !view.isLayoutRequested();
+    }
+
+    private static String geometry(View view) {
+        return "[" + view.getLeft() + "," + view.getTop() + " " + view.getWidth() + "x"
+            + view.getHeight() + ", laidOut=" + view.isLaidOut() + ", layoutRequested="
+            + view.isLayoutRequested() + ", fontScale="
+            + view.getResources().getConfiguration().fontScale + "]";
     }
 
     @Test public void changingCalendarImmediatelyUpdatesCommitmentMonth() {

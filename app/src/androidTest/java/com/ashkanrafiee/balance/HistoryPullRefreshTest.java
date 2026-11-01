@@ -101,6 +101,8 @@ public class HistoryPullRefreshTest {
         assertTrue(waitUntil(() -> readBalances().size() == 1, 45_000));
         assertTrue("automatic scan and render must settle before testing a manual refresh",
             waitUntil(this::historyIdle, 45_000));
+        assertTrue("the refreshed list must complete layout before selecting the gesture origin",
+            waitUntil(this::listLaidOut, 20_000));
     }
 
     private void awaitTejaratBalance() throws Exception {
@@ -177,6 +179,15 @@ public class HistoryPullRefreshTest {
         return starts[0];
     }
 
+    private boolean listLaidOut() {
+        View list = scrollViewOf();
+        if (list == null) return false;
+        final boolean[] ready = {false};
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> ready[0] =
+            list.isLaidOut() && !list.isLayoutRequested() && list.getWidth() > 0 && list.getHeight() > 0);
+        return ready[0];
+    }
+
     /** The cell-relative Y of the list's first tap-able row (a year or month card), and whether one
      *  was found: {x, yInList, found}. Coordinate outside the list bounds fails loudly so a broken
      *  layout never silently tests the wrong path. */
@@ -190,16 +201,19 @@ public class HistoryPullRefreshTest {
                 list = findFirst(a.getWindow().getDecorView(), ScrollView.class);
                 if (list != null) break;
             }
-            if (list == null || list.getHeight() <= 1) return;
+            if (list == null || !list.isLaidOut() || list.isLayoutRequested() || list.getHeight() <= 1) return;
             View card = findClickable(list);
-            if (card == null) return;
+            if (card == null || !card.isLaidOut() || card.isLayoutRequested()) return;
             int[] lc = new int[2], cc = new int[2];
             list.getLocationOnScreen(lc);
             card.getLocationOnScreen(cc);
             int y = cc[1] + card.getHeight() / 2 - lc[1];
             if (y < 1 || y > list.getHeight() - 1) {
                 throw new IllegalStateException("tap-able card sits outside the list (" + y + " of "
-                    + list.getHeight() + "): pull would test the wrong arming path");
+                    + list.getHeight() + "), cardHeight=" + card.getHeight() + ", scrollY="
+                    + list.getScrollY() + ", fontScale="
+                    + list.getResources().getConfiguration().fontScale
+                    + ": pull would test the wrong arming path");
             }
             out[1] = y;
             out[2] = 1;
