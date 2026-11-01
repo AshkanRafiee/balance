@@ -2476,7 +2476,7 @@ final class BalanceData {
     }
 
     /** Keeps the old bracket available when reset(false) removes the transactions that proved it. */
-    private static Map<String, Residual> readResidualNoteProvenance(Context context) {
+    static synchronized Map<String, Residual> readResidualNoteProvenance(Context context) {
         Map<String, Residual> out = new LinkedHashMap<>();
         try {
             String stored = DataGeneration.dataPrefs(context)
@@ -2498,6 +2498,20 @@ final class BalanceData {
             Log.w(TAG, "residual note provenance read failed", e);
         }
         return out;
+    }
+
+    /** Backup union is local-first and never retains a bracket without its selected note. */
+    static synchronized boolean mergeResidualNoteProvenance(Context context, Residual residual)
+            throws Exception {
+        if (residual == null) return false;
+        String key = residualNoteKey(residual);
+        String note = MetadataStore.getNote(context, key);
+        if (note == null || note.trim().isEmpty()) return false;
+        String stored = DataGeneration.dataPrefs(context)
+            .getString(KEY_RESIDUAL_NOTE_PROVENANCE, null);
+        if (stored != null && deserializeTextMap(decrypt(stored)).containsKey(key)) return false;
+        updateResidualNoteProvenance(context, residual, true);
+        return true;
     }
 
     private static void updateResidualNoteProvenance(Context context, Residual residual,
