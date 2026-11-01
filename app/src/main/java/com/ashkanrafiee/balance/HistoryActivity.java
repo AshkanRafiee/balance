@@ -125,6 +125,10 @@ public final class HistoryActivity extends Activity {
     private LinearLayout body;
     /** One-line phase label under the loading skeleton (which stage the worker is in). */
     private TextView loadingStage;
+    private static final long SKELETON_DELAY_MS = 200L;
+    private final Handler loadingHandler = new Handler(Looper.getMainLooper());
+    private Runnable skeletonPending;
+    private int skeletonShowCount;
     private LockOverlay lockOverlay;
     /** Draws the pull-to-refresh chip pinned to the true top of the screen — clear of the hero card
      *  and the rows — while the gesture and its state stay in the list's scroll view. */
@@ -246,6 +250,7 @@ public final class HistoryActivity extends Activity {
     static volatile Runnable summaryReadHookForTest;
     static volatile Runnable scanHookForTest;
     static volatile Runnable renderCompletionHookForTest;
+    static volatile java.util.function.Consumer<Runnable> skeletonSchedulerForTest;
 
     /** Test-only gate for making the loading state deterministic without a large history fixture. */
     static void setRenderGateForTest(CountDownLatch started, CountDownLatch release) {
@@ -268,6 +273,10 @@ public final class HistoryActivity extends Activity {
 
     static boolean refreshRunningForTest(HistoryActivity activity) {
         return activity.scrollView != null && activity.scrollView.refreshing;
+    }
+
+    static int skeletonShowsForTest(HistoryActivity activity) {
+        return activity.skeletonShowCount;
     }
 
     /** Test-only view of the dialogs this screen currently shows. Dialog windows live outside
@@ -717,10 +726,7 @@ public final class HistoryActivity extends Activity {
         scrollView.setVerticalScrollBarEnabled(false);
         scrollView.addView(body, new ScrollView.LayoutParams(-1, -1));
         root.addView(scrollView, new LinearLayout.LayoutParams(-1, 0, 1));
-        // The screen reads and groups its history off the main thread. Showing the shape of what is
-        // coming keeps that from being a blank white page, and a sweep across it says the screen is
-        // working rather than empty.
-        showSkeleton();
+        // The first render delays its cold placeholder so a quick cached open never flashes it.
 
         indicatorOverlay = new PullIndicatorOverlay();
         scrollView.setIndicatorOverlay(indicatorOverlay);
@@ -770,6 +776,7 @@ public final class HistoryActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        cancelSkeleton();
         historyResumed = false;
         historyListenerGen++;
         historyUiGen++;
@@ -2670,7 +2677,6 @@ public final class HistoryActivity extends Activity {
         registerSmsObserver();
         // Revision validation happens on the worker; an unchanged resume keeps the tree, pages,
         // picker caches, expansion and scroll exactly as they were.
-        if (scrollView != null && historyResult == null) scrollView.beginAutomaticRefresh();
         render();
         // The delayed lock may have engaged while we were paused on a ROM that skipped onStop;
         // reflect it now that we are back in the foreground.
@@ -2687,6 +2693,8 @@ public final class HistoryActivity extends Activity {
 
     @Override
     protected void onPause() {
+        cancelSkeleton();
+        stopShimmer();
         historyResumed = false;
         renderGen++;
         historyUiGen++;
@@ -2846,7 +2854,6 @@ public final class HistoryActivity extends Activity {
         }
         historyScanRunning = true;
         historyScanStarts++;
-        if (scrollView != null && historyResult == null) scrollView.beginAutomaticRefresh();
         new Thread(() -> {
             try {
                 Runnable hook = scanHookForTest;
@@ -2935,6 +2942,7 @@ public final class HistoryActivity extends Activity {
             // An unchanged scan notification can reuse the running snapshot before its cheap
             // revision recheck. Only a changed selection/date invalidates that in-flight result.
             if (!state.equals(renderingState)) renderGen++;
+            if (historyResult == null) scheduleSkeleton(renderGen, historyUiGen);
             return;
         }
         final int gen = ++renderGen;
@@ -2976,13 +2984,9 @@ public final class HistoryActivity extends Activity {
             @Override public void progress(long done, long total) {
             }
         };
-        // Replace stale content with the loading shape up front so a slow search or a large
-        // history reads as work in progress (with its current phase underneath) rather than a
-        // frozen screen. The install path below swaps the finished tree back in one frame.
-        // Keep a successful render visible while a refresh is being read. The previous behavior
-        // replaced it with a skeleton before every pass, so a transient database/keystore failure
-        // could turn valid history into the empty state shown below.
-        if (!hadRenderedResult) showSkeleton();
+        // A slow cold load has one loading treatment. Cached opens get a short grace period,
+        // and an already usable result is never replaced by progress during a quiet refresh.
+        if (!hadRenderedResult) scheduleSkeleton(gen, uiGen);
         new Thread(() -> {
             HistoryReader.Result result = null;
             try {
@@ -3072,6 +3076,15 @@ public final class HistoryActivity extends Activity {
                         finishRenderWork();
                         return;
                     }
+                    if (historyResult == null && historyScanRunning && lists.years.isEmpty()) {
+                        // An unscanned empty snapshot is not an empty inbox. Keep cold progress
+                        // until catch-up finishes, including an initially empty bank/account scope.
+                        try { completed.close(); } catch (Exception e) {
+                            android.util.Log.w("BalanceHistory", "initial empty timeline cleanup failed", e);
+                        }
+                        finishRenderWork();
+                        return;
+                    }
                     renderedTransactionsRevision = stableRevision ? transactionsRevision : null;
                     renderedMetadataRevision = stableRevision ? metadataRevision : null;
                     renderedState = state;
@@ -3091,6 +3104,7 @@ public final class HistoryActivity extends Activity {
                     residualCount = completed.residualCount;
                     refreshDates();
                     rebuildFilterBar();
+                    cancelSkeleton();
                     stopShimmer();
                     body.setContentDescription(null);
                     // Build the new tree while the container is gone: every addView on an
@@ -3141,6 +3155,7 @@ public final class HistoryActivity extends Activity {
                         finishRenderWork();
                         return;
                     }
+                    cancelSkeleton();
                     stopShimmer();
                     finishAutomaticRefreshForRender(gen);
                     body.setContentDescription(null);
@@ -3173,7 +3188,7 @@ public final class HistoryActivity extends Activity {
         if (renderQueued && historyResumed && !isDestroyed() && !isFinishing()) render();
     }
 
-    /** Settles an automatic refresh only after the render requested by its scan was accepted. */
+    /** Settles manual feedback only after its scan's render/validation was accepted. */
     private void finishAutomaticRefreshForRender(int gen) {
         if (automaticRefreshTargetGen < 0 || gen < automaticRefreshTargetGen) return;
         automaticRefreshTargetGen = -1;
@@ -3636,6 +3651,28 @@ public final class HistoryActivity extends Activity {
     // Loading
     // -----------------------------------------------------------------------
 
+    private void scheduleSkeleton(int gen, int uiGen) {
+        cancelSkeleton();
+        skeletonPending = new Runnable() {
+            @Override public void run() {
+                if (skeletonPending != this) return;
+                skeletonPending = null;
+                if (gen != renderGen || lifecycleStale(uiGen)
+                        || (!renderRunning && !historyScanRunning) || historyResult != null
+                        || isDestroyed() || isFinishing()) return;
+                showSkeleton();
+            }
+        };
+        java.util.function.Consumer<Runnable> scheduler = skeletonSchedulerForTest;
+        if (scheduler != null) scheduler.accept(skeletonPending);
+        else loadingHandler.postDelayed(skeletonPending, SKELETON_DELAY_MS);
+    }
+
+    private void cancelSkeleton() {
+        if (skeletonPending != null) loadingHandler.removeCallbacks(skeletonPending);
+        skeletonPending = null;
+    }
+
     /**
      * Fills the list with the shape of the history that is on its way.
      *
@@ -3645,6 +3682,7 @@ public final class HistoryActivity extends Activity {
      * arrive, so the whole group is announced as loading instead.
      */
     private void showSkeleton() {
+        skeletonShowCount++;
         stopShimmer();
         body.removeAllViews();
         body.setContentDescription(getString(R.string.history_loading));
@@ -5873,20 +5911,12 @@ public final class HistoryActivity extends Activity {
             refreshIndicator();
         }
 
-        /** Only a cold screen without a usable result needs automatic progress. */
-        void beginAutomaticRefresh() {
-            if (historyResult != null) return;
-            if (refreshing) return;
-            refreshing = true;
-            beginSpin();
-        }
-
         /** The shared scan/render pipeline also settles manual pulls, including unchanged scans. */
         void finishAutomaticRefresh() {
             refreshing = false;
         }
 
-        /** Cancels an automatic indicator when the Activity leaves the foreground. */
+        /** Cancels manual refresh feedback when the Activity leaves the foreground. */
         void cancelAutomaticRefresh() {
             refreshing = false;
             retractIndicator();

@@ -61,12 +61,15 @@ public class HistoryLoadingStateTest {
         LocaleHelper.setLanguage(ctx, "en");
         CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_RIAL);
         finishAnyResumedHistory();
+        HistoryWarmup.invalidate();
     }
 
     @After public void tearDown() {
         HistoryActivity.setRenderGateForTest(null, null);
         HistoryActivity.scanHookForTest = null;
         HistoryActivity.renderCompletionHookForTest = null;
+        HistoryActivity.skeletonSchedulerForTest = null;
+        HistoryActivity.summaryReadHookForTest = null;
         if (scenario != null) scenario.close();
         LocaleHelper.setLanguage(ctx, originalTag);
         CurrencyHelper.setCurrency(ctx, originalCurrency);
@@ -95,8 +98,10 @@ public class HistoryLoadingStateTest {
         try {
             assertTrue("the history render should reach the gate",
                 started.await(10, TimeUnit.SECONDS));
-            assertNotNull("a blank white page is not a loading state",
-                findByDescription(ctx.getString(R.string.history_loading)));
+            await(() -> findByDescription(ctx.getString(R.string.history_loading)) != null,
+                10_000, "the delayed cold-load placeholders");
+            assertNull("cold history uses placeholders, not a second refresh chip",
+                findByDescription(ctx.getString(R.string.history_refreshing)));
 
             final List<View> bars = shimmerBars();
             assertTrue("the placeholders must have something to show", !bars.isEmpty());
@@ -107,25 +112,138 @@ public class HistoryLoadingStateTest {
         }
     }
 
-    @Test public void firstOpenAutomaticRefresh_showsSpinnerUntilHistoryFinishes() throws Exception {
+    @Test public void coldReadUsesDelayedSkeletonWithoutAutomaticChip() throws Exception {
         storeEnoughToBeSlowToRead();
         CountDownLatch started = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
+        List<Runnable> deadlines = new ArrayList<>();
+        HistoryActivity.skeletonSchedulerForTest = deadlines::add;
         HistoryActivity.setRenderGateForTest(started, release);
         openHistory();
         try {
             assertTrue("the first history render should reach the gate",
                 started.await(10, TimeUnit.SECONDS));
-            assertNotNull("automatic history refresh must be visible while the first read runs",
+            assertNull("the cold placeholder must wait for its grace period",
+                findByDescription(ctx.getString(R.string.history_loading)));
+            assertNull("automatic history loads must never start the manual refresh chip",
                 findByDescription(ctx.getString(R.string.history_refreshing)));
+            scenario.onActivity(activity -> {
+                assertTrue("cold loading must schedule a placeholder deadline", !deadlines.isEmpty());
+                deadlines.get(deadlines.size() - 1).run();
+            });
+            assertNotNull("a genuinely slow cold load needs its single loading treatment",
+                findByDescription(ctx.getString(R.string.history_loading)));
+            assertNull(findByDescription(ctx.getString(R.string.history_refreshing)));
             release.countDown();
             await(() -> findByText(ctx.getString(R.string.history_breakdown)) != null,
                 60_000, "the refreshed history to finish rendering");
-            await(() -> findByDescription(ctx.getString(R.string.history_refreshing)) == null,
-                10_000, "the automatic refresh indicator to settle");
+            assertNull(findByDescription(ctx.getString(R.string.history_loading)));
+            assertNull(findByDescription(ctx.getString(R.string.history_refreshing)));
         } finally {
+            HistoryActivity.skeletonSchedulerForTest = null;
             HistoryActivity.setRenderGateForTest(null, null);
             release.countDown();
+        }
+    }
+
+    @Test public void quickWarmFullBankAndAccountOpens_neverFlashLoadingAnimation() {
+        storeEnoughToBeSlowToRead();
+        List<Runnable> deadlines = new ArrayList<>();
+        HistoryActivity.skeletonSchedulerForTest = deadlines::add;
+        try {
+            for (int scope = 0; scope < 3; scope++) {
+                String bank = scope == 0 ? null : MELLAT;
+                String account = scope == 2 ? ACCOUNT : null;
+                openHistory(bank, account);
+                await(this::idle, 60_000, "the scope's cache to be populated");
+                scenario.close();
+                scenario = null;
+                deadlines.clear();
+
+                openHistory(bank, account);
+                await(this::idle, 60_000, "the repeated cached scope to render before its deadline");
+                scenario.onActivity(activity -> {
+                    // Advance every captured grace-period callback after the quick result. A
+                    // canceled or stale callback must not produce even a single shimmer frame.
+                    for (Runnable deadline : new ArrayList<>(deadlines)) deadline.run();
+                    assertEquals("quick cached opens must never show placeholders", 0,
+                        HistoryActivity.skeletonShowsForTest(activity));
+                    assertTrue("automatic opens never own manual refresh feedback",
+                        !HistoryActivity.refreshRunningForTest(activity));
+                });
+                assertNotNull(findByText(ctx.getString(R.string.history_breakdown)));
+                assertNull(findByDescription(ctx.getString(R.string.history_loading)));
+                assertNull(findByDescription(ctx.getString(R.string.history_refreshing)));
+                assertTrue(shimmerBars().isEmpty());
+                scenario.close();
+                scenario = null;
+                deadlines.clear();
+            }
+        } finally {
+            HistoryActivity.skeletonSchedulerForTest = null;
+        }
+    }
+
+    @Test public void initialEmptySnapshot_keepsColdProgressUntilCatchupScanFinishes()
+            throws Exception {
+        BalanceData.reset(ctx, true);
+        CountDownLatch scanStarted = new CountDownLatch(1);
+        CountDownLatch scanRelease = new CountDownLatch(1);
+        List<Runnable> deadlines = new ArrayList<>();
+        HistoryActivity.skeletonSchedulerForTest = deadlines::add;
+        HistoryActivity.scanHookForTest = () -> gate(scanStarted, scanRelease);
+        try {
+            openHistory();
+            assertTrue(scanStarted.await(10, TimeUnit.SECONDS));
+            await(() -> {
+                final boolean[] idle = {false};
+                scenario.onActivity(activity -> idle[0] = HistoryActivity.renderIdleForTest(activity));
+                return idle[0];
+            }, 10_000, "the initial saved-empty read to finish");
+            scenario.onActivity(activity -> {
+                assertTrue(!deadlines.isEmpty());
+                deadlines.get(deadlines.size() - 1).run();
+            });
+            assertNotNull("an in-flight initial import must retain truthful loading feedback",
+                findByDescription(ctx.getString(R.string.history_loading)));
+            assertNull("unscanned emptiness is not a finished empty account",
+                findByText(ctx.getString(R.string.history_empty_account)));
+            assertNull(findByDescription(ctx.getString(R.string.history_refreshing)));
+
+            storeEnoughToBeSlowToRead();
+            scanRelease.countDown();
+            await(this::idle, 60_000, "catch-up and its final render");
+            assertNotNull(findByText(ctx.getString(R.string.history_breakdown)));
+            assertNull(findByDescription(ctx.getString(R.string.history_loading)));
+        } finally {
+            HistoryActivity.skeletonSchedulerForTest = null;
+            HistoryActivity.scanHookForTest = null;
+            scanRelease.countDown();
+        }
+    }
+
+    @Test public void coldPlaceholderDeadlineIsCanceledWhenFirstReadFails() {
+        storeEnoughToBeSlowToRead();
+        List<Runnable> deadlines = new ArrayList<>();
+        HistoryActivity.skeletonSchedulerForTest = deadlines::add;
+        HistoryActivity.summaryReadHookForTest = () -> {
+            throw new IllegalStateException("synthetic history read failure");
+        };
+        try {
+            openHistory();
+            await(this::idle, 60_000, "the failed read and catch-up to settle");
+            assertNotNull("a failed first read must not claim that history is empty",
+                findByText(ctx.getString(R.string.history_load_failed)));
+            scenario.onActivity(activity -> {
+                for (Runnable deadline : new ArrayList<>(deadlines)) deadline.run();
+                assertEquals("a canceled loading deadline must not replace the error", 0,
+                    HistoryActivity.skeletonShowsForTest(activity));
+            });
+            assertNull(findByDescription(ctx.getString(R.string.history_loading)));
+            assertNull(findByDescription(ctx.getString(R.string.history_refreshing)));
+        } finally {
+            HistoryActivity.skeletonSchedulerForTest = null;
+            HistoryActivity.summaryReadHookForTest = null;
         }
     }
 
@@ -318,10 +436,13 @@ public class HistoryLoadingStateTest {
     }
 
     private void openHistory() {
-        Intent i = new Intent(ctx, HistoryActivity.class)
-            .putExtra(HistoryActivity.EXTRA_BANK, MELLAT)
-            .putExtra(HistoryActivity.EXTRA_ACCOUNT, ACCOUNT)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        openHistory(MELLAT, ACCOUNT);
+    }
+
+    private void openHistory(String bank, String account) {
+        Intent i = new Intent(ctx, HistoryActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (bank != null) i.putExtra(HistoryActivity.EXTRA_BANK, bank);
+        if (account != null) i.putExtra(HistoryActivity.EXTRA_ACCOUNT, account);
         scenario = androidx.test.core.app.ActivityScenario.launch(i);
     }
 
