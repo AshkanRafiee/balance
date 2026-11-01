@@ -13,7 +13,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.TreeMap;
 
 /**
@@ -44,6 +46,40 @@ final class HistoryReader {
     private HistoryReader() {}
 
     enum Mode { SUMMARY, RESIDUAL_SUMMARY, REFERENCE }
+
+    /** Captured under BalanceData.class with the snapshot, never relabelled after a store write. */
+    static final class RevisionStamp {
+        final String transactions;
+        final String metadata;
+        final String today;
+        final boolean iran;
+        private final TimeZone zone;
+
+        RevisionStamp(Context context, boolean iran, CalDate today, TimeZone zone) {
+            this.transactions = TransactionStore.revision(context);
+            this.metadata = MetadataStore.revision(context);
+            this.today = today.key();
+            this.iran = iran;
+            this.zone = (TimeZone) zone.clone();
+        }
+
+        static RevisionStamp current(Context context, boolean iran) {
+            return new RevisionStamp(context, iran, CalDate.today(iran), TimeZone.getDefault());
+        }
+
+        @Override public boolean equals(Object value) {
+            if (!(value instanceof RevisionStamp)) return false;
+            RevisionStamp other = (RevisionStamp) value;
+            return iran == other.iran && today.equals(other.today)
+                && zone.getID().equals(other.zone.getID()) && zone.hasSameRules(other.zone)
+                && Objects.equals(transactions, other.transactions)
+                && Objects.equals(metadata, other.metadata);
+        }
+
+        @Override public int hashCode() {
+            return Objects.hash(transactions, metadata, today, iran, zone.getID());
+        }
+    }
 
     /** The immutable scope and page policy for one read. */
     static final class Request {
@@ -128,6 +164,7 @@ final class HistoryReader {
         final boolean residualsComplete;
         final String limitation;
         final boolean iranCalendar;
+        final RevisionStamp revisionStamp;
         /** Count of visible residual rows, including rows outside the currently loaded pages. */
         final long residualCount;
         final boolean hasResiduals;
@@ -169,11 +206,12 @@ final class HistoryReader {
                 List<YearSummary> years, Map<String, DaySummary> daySummaries,
                 Map<String, DayRows> requestedDayRows, List<Transaction> visibleTransactions,
                 List<Residual> visibleResiduals, long residualCount, HistoryTimeline timeline,
-                boolean iranCalendar) {
+                boolean iranCalendar, RevisionStamp revisionStamp) {
             this.reference = reference;
             this.residualsComplete = residualsComplete;
             this.limitation = residualsComplete ? null : SUMMARY_RESIDUAL_LIMITATION;
             this.iranCalendar = iranCalendar;
+            this.revisionStamp = revisionStamp;
             this.residualCount = residualCount;
             this.hasResiduals = residualCount != 0;
             this.allTime = allTime;
@@ -220,10 +258,18 @@ final class HistoryReader {
         }
 
         /** Releases the encrypted disk snapshot held by this result. Safe to call more than once. */
-        void close() throws Exception {
+        synchronized void close() throws Exception {
             HistoryTimeline old = timeline;
             timeline = null;
             if (old != null) old.close();
+        }
+
+        /** Independent ownership of immutable summary data and the same encrypted spool. */
+        synchronized Result retain() {
+            if (timeline == null) throw new IllegalStateException("history result is closed");
+            return new Result(reference, residualsComplete, allTime, today, month, year, years,
+                daySummaries, requestedDayRows, visibleTransactions, visibleResiduals,
+                residualCount, timeline.retain(), iranCalendar, revisionStamp);
         }
     }
 
@@ -760,6 +806,7 @@ final class HistoryReader {
         final MutableStats year = new MutableStats();
         final TreeMap<Integer, MutableYear> years = new TreeMap<>(Collections.reverseOrder());
         final CalDate todayDate;
+        final TimeZone timeZone;
         long transactionOrdinal;
         long residualOrdinal;
         long residualCount;
@@ -769,6 +816,7 @@ final class HistoryReader {
             this.request = request;
             this.timeline = timeline;
             this.todayDate = CalDate.today(request.iran);
+            this.timeZone = TimeZone.getDefault();
         }
 
         Accumulator(Context context, Request request) {
@@ -832,44 +880,52 @@ final class HistoryReader {
                 throws Exception {
             HistoryTimeline snapshot = timeline == null ? null : timeline.finish();
             timeline = null;
-            List<YearSummary> yearResults = new ArrayList<>();
-            LinkedHashMap<String, DaySummary> dayResults = new LinkedHashMap<>();
-            for (MutableYear yearGroup : years.values()) {
-                List<MonthSummary> monthResults = new ArrayList<>();
-                for (MutableMonth monthGroup : yearGroup.months.values()) {
-                    List<DaySummary> dayResultsForMonth = new ArrayList<>();
-                    for (MutableDay dayGroup : monthGroup.days.values()) {
-                        DaySummary day = new DaySummary(dayGroup.date, dayGroup.stats.freeze());
-                        dayResultsForMonth.add(day);
-                        dayResults.put(day.date.key(), day);
+            boolean transferred = false;
+            try {
+                List<YearSummary> yearResults = new ArrayList<>();
+                LinkedHashMap<String, DaySummary> dayResults = new LinkedHashMap<>();
+                for (MutableYear yearGroup : years.values()) {
+                    List<MonthSummary> monthResults = new ArrayList<>();
+                    for (MutableMonth monthGroup : yearGroup.months.values()) {
+                        List<DaySummary> dayResultsForMonth = new ArrayList<>();
+                        for (MutableDay dayGroup : monthGroup.days.values()) {
+                            DaySummary day = new DaySummary(dayGroup.date, dayGroup.stats.freeze());
+                            dayResultsForMonth.add(day);
+                            dayResults.put(day.date.key(), day);
+                        }
+                        monthResults.add(new MonthSummary(monthGroup.year, monthGroup.month,
+                            monthGroup.stats.freeze(), dayResultsForMonth));
                     }
-                    monthResults.add(new MonthSummary(monthGroup.year, monthGroup.month,
-                        monthGroup.stats.freeze(), dayResultsForMonth));
+                    yearResults.add(new YearSummary(yearGroup.year, yearGroup.stats.freeze(), monthResults));
                 }
-                yearResults.add(new YearSummary(yearGroup.year, yearGroup.stats.freeze(), monthResults));
-            }
 
-            LinkedHashMap<String, DayRows> rowResults = new LinkedHashMap<>();
-            if (snapshot != null && !request.requestedDayKeys.isEmpty()) {
-                boolean ownMetadata = sharedMetadata == null;
-                MetadataStore.LookupSession metadata = ownMetadata
-                    ? MetadataStore.LookupSession.open(context) : sharedMetadata;
-                try {
-                    for (String key : request.requestedDayKeys) {
-                        rowResults.put(key, fromPage(metadata, snapshot,
-                            snapshot.firstPage(key, request.maxRowsPerDay), request.iran));
+                LinkedHashMap<String, DayRows> rowResults = new LinkedHashMap<>();
+                if (snapshot != null && !request.requestedDayKeys.isEmpty()) {
+                    boolean ownMetadata = sharedMetadata == null;
+                    MetadataStore.LookupSession metadata = ownMetadata
+                        ? MetadataStore.LookupSession.open(context) : sharedMetadata;
+                    try {
+                        for (String key : request.requestedDayKeys) {
+                            rowResults.put(key, fromPage(metadata, snapshot,
+                                snapshot.firstPage(key, request.maxRowsPerDay), request.iran));
+                        }
+                    } finally {
+                        if (ownMetadata) metadata.close();
                     }
-                } finally {
-                    if (ownMetadata) metadata.close();
                 }
+                List<Transaction> visibleTx = transactions == null ? null
+                    : Collections.unmodifiableList(new ArrayList<>(transactions));
+                List<Residual> visibleResidual = residuals == null ? null
+                    : Collections.unmodifiableList(new ArrayList<>(residuals));
+                Result result = new Result(reference, residualsComplete, allTime.freeze(), today.freeze(),
+                    month.freeze(), year.freeze(), yearResults, dayResults, rowResults, visibleTx,
+                    visibleResidual, residualCount, snapshot, request.iran,
+                    reference ? null : new RevisionStamp(context, request.iran, todayDate, timeZone));
+                transferred = true;
+                return result;
+            } finally {
+                if (!transferred && snapshot != null) snapshot.close();
             }
-            List<Transaction> visibleTx = transactions == null ? null
-                : Collections.unmodifiableList(new ArrayList<>(transactions));
-            List<Residual> visibleResidual = residuals == null ? null
-                : Collections.unmodifiableList(new ArrayList<>(residuals));
-            return new Result(reference, residualsComplete, allTime.freeze(), today.freeze(), month.freeze(),
-                year.freeze(), yearResults, dayResults, rowResults, visibleTx, visibleResidual,
-                residualCount, snapshot, request.iran);
         }
 
         void close() throws Exception {
@@ -890,10 +946,12 @@ final class HistoryReader {
             int pageSize) throws Exception {
         if (metadata == null) throw new NullPointerException("metadata");
         if (result == null) throw new NullPointerException("result");
-        HistoryTimeline snapshot = result.timeline;
-        if (snapshot == null) throw new IllegalStateException("history result is closed");
-        return fromPage(metadata, snapshot, snapshot.firstPage(dayKey, pageSize),
-            result.iranCalendar);
+        synchronized (result) {
+            HistoryTimeline snapshot = result.timeline;
+            if (snapshot == null) throw new IllegalStateException("history result is closed");
+            return fromPage(metadata, snapshot, snapshot.firstPage(dayKey, pageSize),
+                result.iranCalendar);
+        }
     }
 
     static DayRows readPage(Context context, Result result, String dayKey,
@@ -901,19 +959,21 @@ final class HistoryReader {
         if (context == null) throw new NullPointerException("context");
         if (result == null) throw new NullPointerException("result");
         synchronized (BalanceData.class) {
-            HistoryTimeline snapshot = result.timeline;
-            if (snapshot == null) throw new IllegalStateException("history result is closed");
-            HistoryTimeline.Page page;
-            if (cursor == null) {
-                if (previous) throw new IllegalArgumentException("previous page needs a cursor");
-                page = snapshot.firstPage(dayKey, pageSize);
-            } else if (previous) {
-                page = snapshot.previousPage(dayKey, cursor, pageSize);
-            } else {
-                page = snapshot.nextPage(dayKey, cursor, pageSize);
-            }
-            try (MetadataStore.LookupSession metadata = MetadataStore.LookupSession.open(context)) {
-                return fromPage(metadata, snapshot, page, result.iranCalendar);
+            synchronized (result) {
+                HistoryTimeline snapshot = result.timeline;
+                if (snapshot == null) throw new IllegalStateException("history result is closed");
+                HistoryTimeline.Page page;
+                if (cursor == null) {
+                    if (previous) throw new IllegalArgumentException("previous page needs a cursor");
+                    page = snapshot.firstPage(dayKey, pageSize);
+                } else if (previous) {
+                    page = snapshot.previousPage(dayKey, cursor, pageSize);
+                } else {
+                    page = snapshot.nextPage(dayKey, cursor, pageSize);
+                }
+                try (MetadataStore.LookupSession metadata = MetadataStore.LookupSession.open(context)) {
+                    return fromPage(metadata, snapshot, page, result.iranCalendar);
+                }
             }
         }
     }

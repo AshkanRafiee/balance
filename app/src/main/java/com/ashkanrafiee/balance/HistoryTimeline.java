@@ -16,6 +16,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Encrypted, disposable history row timeline.
@@ -27,8 +29,8 @@ import java.util.List;
  * Transactions and residuals have separate encrypted payload identities; the database contains
  * only an opaque day key, ordering columns, type and ciphertext.
  *
- * <p>A snapshot is handed to the caller only after its staging transaction commits. The caller owns
- * it and must close it when a newer history render replaces it.
+ * <p>A snapshot is handed to the caller only after its staging transaction commits. Each retained
+ * handle must be closed; the last close destroys the encrypted spool and its wrapped key.
  */
 final class HistoryTimeline implements AutoCloseable {
     static final int DEFAULT_PAGE_SIZE = 128;
@@ -39,6 +41,18 @@ final class HistoryTimeline implements AutoCloseable {
     private static final String CODEC_DOMAIN = "history-timeline";
     private static final int TRANSACTION = 1;
     private static final int RESIDUAL = 0;
+    private static final Set<String> LIVE_FILES = ConcurrentHashMap.newKeySet();
+
+    /** Age alone cannot identify an orphan: a screen may still own yesterday's snapshot. */
+    static boolean isLiveFile(File file) {
+        String path = file.getPath();
+        if (LIVE_FILES.contains(path)) return true;
+        for (String suffix : new String[]{"-wal", "-shm", "-journal"}) {
+            if (path.endsWith(suffix)
+                    && LIVE_FILES.contains(path.substring(0, path.length() - suffix.length()))) return true;
+        }
+        return false;
+    }
 
     /** The immutable keyset position of a displayed row. */
     static final class CursorKey {
@@ -238,32 +252,55 @@ final class HistoryTimeline implements AutoCloseable {
         }
     }
 
-    private final SQLiteDatabase db;
-    private final EncryptedRowCodec codec;
-    private File databaseFile;
-    private File wrappedKeyFile;
+    private final Shared shared;
     private boolean closed;
+
+    private static final class Shared {
+        final SQLiteDatabase db;
+        final EncryptedRowCodec codec;
+        final File databaseFile;
+        final File wrappedKeyFile;
+        int references = 1;
+
+        Shared(SQLiteDatabase db, EncryptedRowCodec codec, File databaseFile, File wrappedKeyFile) {
+            this.db = db;
+            this.codec = codec;
+            this.databaseFile = databaseFile;
+            this.wrappedKeyFile = wrappedKeyFile;
+            LIVE_FILES.add(databaseFile.getPath());
+            LIVE_FILES.add(wrappedKeyFile.getPath());
+        }
+    }
 
     private HistoryTimeline(SQLiteDatabase db, EncryptedRowCodec codec, File databaseFile,
             File wrappedKeyFile) {
-        this.db = db;
-        this.codec = codec;
-        this.databaseFile = databaseFile;
-        this.wrappedKeyFile = wrappedKeyFile;
+        this.shared = new Shared(db, codec, databaseFile, wrappedKeyFile);
     }
 
-    synchronized Page firstPage(String dayKey, int limit) throws Exception {
-        return page(dayKey, null, false, limit);
+    private HistoryTimeline(Shared shared) { this.shared = shared; }
+
+    HistoryTimeline retain() {
+        synchronized (shared) {
+            checkOpen();
+            if (shared.references == Integer.MAX_VALUE)
+                throw new IllegalStateException("too many timeline handles");
+            shared.references++;
+            return new HistoryTimeline(shared);
+        }
     }
 
-    synchronized Page nextPage(String dayKey, CursorKey after, int limit) throws Exception {
+    Page firstPage(String dayKey, int limit) throws Exception {
+        synchronized (shared) { return page(dayKey, null, false, limit); }
+    }
+
+    Page nextPage(String dayKey, CursorKey after, int limit) throws Exception {
         if (after == null) throw new NullPointerException("after cursor");
-        return page(dayKey, after, false, limit);
+        synchronized (shared) { return page(dayKey, after, false, limit); }
     }
 
-    synchronized Page previousPage(String dayKey, CursorKey before, int limit) throws Exception {
+    Page previousPage(String dayKey, CursorKey before, int limit) throws Exception {
         if (before == null) throw new NullPointerException("before cursor");
-        return page(dayKey, before, true, limit);
+        synchronized (shared) { return page(dayKey, before, true, limit); }
     }
 
     private Page page(String dayKey, CursorKey cursor, boolean before, int limit) throws Exception {
@@ -287,7 +324,7 @@ final class HistoryTimeline implements AutoCloseable {
         List<Entry> entries = new ArrayList<>(limit);
         boolean extra = false;
         String order = before ? "date ASC, tie DESC" : "date DESC, tie ASC";
-        try (Cursor rows = db.query(TABLE, new String[]{"date", "tie", "type", "payload"},
+        try (Cursor rows = shared.db.query(TABLE, new String[]{"date", "tie", "type", "payload"},
                 where, args.toArray(new String[0]), null, null, order,
                 Integer.toString(limit + 1))) {
             while (rows.moveToNext()) {
@@ -318,7 +355,7 @@ final class HistoryTimeline implements AutoCloseable {
 
     private Entry decode(String dayKey, long date, long tie, int type, String payload)
             throws Exception {
-        String plain = codec.decrypt(payload, identity(dayKey, date, tie, type));
+        String plain = shared.codec.decrypt(payload, identity(dayKey, date, tie, type));
         if (type == TRANSACTION) {
             final Transaction[] found = {null};
             TransactionStore.readJson(new StringReader(plain), transaction -> {
@@ -351,22 +388,24 @@ final class HistoryTimeline implements AutoCloseable {
         return "day\n" + dayKey + "\ndate\n" + date + "\ntie\n" + tie + "\ntype\n" + type;
     }
 
-    @Override public synchronized void close() throws Exception {
-        if (closed) return;
-        closed = true;
-        Exception failure = null;
-        try { codec.close(); } catch (Exception e) { failure = e; }
-        try { db.close(); } catch (Exception e) { failure = append(failure, e); }
-        failure = delete(wrappedKeyFile, failure);
-        wrappedKeyFile = null;
-        if (databaseFile != null) {
-            failure = delete(databaseFile, failure);
-            failure = delete(new File(databaseFile.getPath() + "-wal"), failure);
-            failure = delete(new File(databaseFile.getPath() + "-shm"), failure);
-            failure = delete(new File(databaseFile.getPath() + "-journal"), failure);
-            databaseFile = null;
+    @Override public void close() throws Exception {
+        synchronized (shared) {
+            if (closed) return;
+            closed = true;
+            if (--shared.references != 0) return;
+            Exception failure = null;
+            try { shared.codec.close(); } catch (Exception e) { failure = e; }
+            try { shared.db.close(); } catch (Exception e) { failure = append(failure, e); }
+            failure = delete(shared.wrappedKeyFile, failure);
+            File file = shared.databaseFile;
+            failure = delete(file, failure);
+            failure = delete(new File(file.getPath() + "-wal"), failure);
+            failure = delete(new File(file.getPath() + "-shm"), failure);
+            failure = delete(new File(file.getPath() + "-journal"), failure);
+            LIVE_FILES.remove(shared.databaseFile.getPath());
+            LIVE_FILES.remove(shared.wrappedKeyFile.getPath());
+            if (failure != null) throw failure;
         }
-        if (failure != null) throw failure;
     }
 
     private static Exception append(Exception first, Exception next) {
