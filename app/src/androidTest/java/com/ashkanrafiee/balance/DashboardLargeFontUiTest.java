@@ -42,6 +42,7 @@ public final class DashboardLargeFontUiTest {
     private int originalRegion;
     private int originalStaleDays;
     private float originalFontScale;
+    private float requestedFontScale;
 
     @Before public void setUp() throws Exception {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
@@ -168,6 +169,14 @@ public final class DashboardLargeFontUiTest {
 
     private void launch() {
         scenario = ActivityScenario.launch(MainActivity.class);
+        // A locale-wrapped instrumentation context can retain an old configuration. Verify the
+        // actual screen receives the requested size instead of waiting on that cached context.
+        await(() -> {
+            final boolean[] applied = {false};
+            scenario.onActivity(activity -> applied[0] = Math.abs(
+                activity.getResources().getConfiguration().fontScale - requestedFontScale) < .01f);
+            return applied[0];
+        }, 10_000);
     }
 
     private void grantSms() {
@@ -188,10 +197,10 @@ public final class DashboardLargeFontUiTest {
     }
 
     private void setFontScale(float scale) throws Exception {
+        requestedFontScale = scale;
         shell("settings put system font_scale " + scale);
         await(() -> Math.abs(Settings.System.getFloat(context.getContentResolver(),
-                Settings.System.FONT_SCALE, 1f) - scale) < .01f
-            && Math.abs(context.getResources().getConfiguration().fontScale - scale) < .01f,
+                Settings.System.FONT_SCALE, 1f) - scale) < .01f,
             10_000);
     }
 
