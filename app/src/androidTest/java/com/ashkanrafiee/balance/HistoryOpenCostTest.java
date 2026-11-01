@@ -56,10 +56,12 @@ public class HistoryOpenCostTest {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         originalLanguage = LocaleHelper.currentTag(ctx);
         LocaleHelper.setLanguage(ctx, "en");
+        HistoryWarmup.invalidate();
         BalanceData.setExpandAllHistory(ctx, false);
     }
 
     @After public void tearDown() {
+        HistoryActivity.summaryReadHookForTest = null;
         finishAnyResumedHistory();
         BalanceData.setExpandAllHistory(ctx, false);
         BalanceData.reset(ctx, true);
@@ -162,14 +164,20 @@ public class HistoryOpenCostTest {
         // A screen that keeps more views each time it is opened is a screen that is not being
         // rebuilt. Three opens of the same account have to agree.
         seedCurrentMonth(20);
+        AtomicInteger summaryReads = new AtomicInteger();
+        HistoryActivity.summaryReadHookForTest = summaryReads::incrementAndGet;
         openAndAwaitRows();
         int first = viewCount();
+        int initialReads = summaryReads.get();
+        assertTrue("the cold scoped open must read a summary", initialReads > 0);
         for (int i = 0; i < 2; i++) {
             finishAnyResumedHistory();
             Thread.sleep(400);
             openAndAwaitRows();
             int again = viewCount();
             assertEquals("each open must build the same screen, not a larger one", first, again);
+            assertEquals("reopening the same account must reuse its retained summary",
+                initialReads, summaryReads.get());
         }
     }
 

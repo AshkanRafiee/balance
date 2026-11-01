@@ -243,6 +243,7 @@ public final class HistoryActivity extends Activity {
     private String renderingState;
     private static volatile CountDownLatch renderGateStarted;
     private static volatile CountDownLatch renderGateRelease;
+    static volatile Runnable summaryReadHookForTest;
 
     /** Test-only gate for making the loading state deterministic without a large history fixture. */
     static void setRenderGateForTest(CountDownLatch started, CountDownLatch release) {
@@ -2990,63 +2991,52 @@ public final class HistoryActivity extends Activity {
                     release.await();
                 }
 
-                // A dashboard warm-up may already hold exactly this view read from unchanged
-                // stores; taking it skips both the discovery and the fresh pass below. The warm
-                // result only carries the default month's pages, so an expansion reaching beyond
-                // it falls through to the fresh pass instead of showing an open empty day.
-                // Re-warm on a hit so a second open right behind this one usually finds
-                // a ready result too instead of waiting for the next dashboard resume.
-                result = HistoryWarmup.take(banks, accounts, f, query, tagSelection, iran,
-                    app, true);
-                if (result != null
-                        && !result.requestedDayRows.keySet().containsAll(expandedSnapshot)) {
-                    try {
-                        result.close();
-                    } catch (Exception e) {
-                        android.util.Log.w("BalanceHistory", "warmup cleanup failed", e);
+                // A cached default/scoped snapshot retains its complete timeline even when it
+                // lacks an expanded day's rows. Reuse that summary and read only missing pages.
+                synchronized (BalanceData.class) {
+                    result = HistoryWarmup.take(banks, accounts, f, query, tagSelection, iran,
+                        app, true);
+                    if (result == null) {
+                        // One full summary pass; bounded pages come from its encrypted timeline.
+                        HistoryReader.Request planRequest = new HistoryReader.Request(
+                            iran, HistoryReader.DEFAULT_PAGE_SIZE, banks, accounts, f, query,
+                            tagSelection, Collections.emptySet(), 0,
+                            HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
+                        Runnable hook = summaryReadHookForTest;
+                        if (hook != null) hook.run();
+                        result = HistoryReader.summaryWithResiduals(
+                            app, planRequest, renderProgress);
                     }
-                    result = null;
+                    // Remember before releasing the existing store monitor so a speculative
+                    // warm-up can reuse demand's work. The cache retains its own handle.
+                    HistoryWarmup.remember(banks, accounts, f, query, tagSelection, iran, app, result);
                 }
-                java.util.Map<String, HistoryReader.DayRows> initialPages;
-                if (result != null) {
-                    initialPages = result.requestedDayRows;
-                } else {
-                    // One full pass with no day rows. The groups below decide which days need
-                    // pages, and those pages are read back from the same pass's timeline
-                    // snapshot. This used to run a throwaway discovery pass and then repeat the
-                    // entire decrypt for the requested days, so every search paid double.
-                    HistoryReader.Request planRequest = new HistoryReader.Request(
-                        iran, HistoryReader.DEFAULT_PAGE_SIZE, banks, accounts, f, query,
-                        tagSelection, Collections.emptySet(), 0,
-                        HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
-                    result = HistoryReader.summaryWithResiduals(
-                        app, planRequest, renderProgress);
-                    Set<String> requestedDays = plannedExpandedDays(result, expandedSnapshot,
-                        seededSnapshot, expandAll, expansionKey, expansionActive,
-                        previousExpansionKey, savedPreNarrowingDays, iran);
-                    if (requestedDays.size() > MAX_INITIAL_NARROWED_DAY_PAGES) {
-                        // Materialize rows eagerly only for the first window; the remaining days
-                        // keep their summaries and open with their rows on tap. This cap applies
-                        // to expand-all as well as narrowing: building every day of a multi-year
-                        // history at once creates a large non-recycled view tree and can OOM
-                        // low-RAM phones.
-                        requestedDays = new java.util.LinkedHashSet<>(
-                            new ArrayList<>(requestedDays).subList(0,
-                                MAX_INITIAL_NARROWED_DAY_PAGES));
-                    }
-                    java.util.LinkedHashMap<String, HistoryReader.DayRows> pages =
-                        new java.util.LinkedHashMap<>();
-                    // One shared metadata session for the whole seed set: opening one per day
-                    // would multiply store opens by the day count.
+                Set<String> requestedDays = plannedExpandedDays(result, expandedSnapshot,
+                    seededSnapshot, expandAll, expansionKey, expansionActive,
+                    previousExpansionKey, savedPreNarrowingDays, iran);
+                if (requestedDays.size() > MAX_INITIAL_NARROWED_DAY_PAGES) {
+                    // Apply the same bounded page plan to fresh and cached summaries.
+                    requestedDays = new java.util.LinkedHashSet<>(
+                        new ArrayList<>(requestedDays).subList(0,
+                            MAX_INITIAL_NARROWED_DAY_PAGES));
+                }
+                final java.util.Map<String, HistoryReader.DayRows> initialPages =
+                    new java.util.LinkedHashMap<>();
+                Set<String> missingDays = new java.util.LinkedHashSet<>();
+                for (String dayKey : requestedDays) {
+                    HistoryReader.DayRows cached = result.requestedDayRows.get(dayKey);
+                    if (cached != null) initialPages.put(dayKey, cached);
+                    else missingDays.add(dayKey);
+                }
+                if (!missingDays.isEmpty()) {
+                    // One shared metadata session for every missing seed page.
                     try (MetadataStore.LookupSession metadata =
                             MetadataStore.LookupSession.open(app)) {
-                        for (String dayKey : requestedDays) {
-                            // Nonexistent days simply produce empty pages, as before.
-                            pages.put(dayKey, HistoryReader.readPage(metadata, result, dayKey,
+                        for (String dayKey : missingDays) {
+                            initialPages.put(dayKey, HistoryReader.readPage(metadata, result, dayKey,
                                 HistoryReader.DEFAULT_MAX_ROWS_PER_DAY));
                         }
                     }
-                    initialPages = pages;
                 }
                 final Lists lists = listsFromSummary(result, initialPages);
                 final List<Residual> requestedResiduals = residualsFromPages(initialPages);
