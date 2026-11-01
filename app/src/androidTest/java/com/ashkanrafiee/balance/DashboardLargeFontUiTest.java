@@ -6,10 +6,12 @@ import static org.junit.Assert.assertTrue;
 
 import android.Manifest;
 import android.content.Context;
+import android.content.res.Resources;
 import android.graphics.Rect;
 import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
 import android.provider.Settings;
+import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
@@ -26,6 +28,7 @@ import org.junit.runner.RunWith;
 import java.io.InputStream;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.function.Supplier;
 
 /** Dashboard layout coverage at a system font scale where cards must reflow rather than overlap. */
 @RunWith(AndroidJUnit4.class)
@@ -169,14 +172,13 @@ public final class DashboardLargeFontUiTest {
 
     private void launch() {
         scenario = ActivityScenario.launch(MainActivity.class);
-        // A locale-wrapped instrumentation context can retain an old configuration. Verify the
-        // actual screen receives the requested size instead of waiting on that cached context.
-        await(() -> {
-            final boolean[] applied = {false};
-            scenario.onActivity(activity -> applied[0] = Math.abs(
-                activity.getResources().getConfiguration().fontScale - requestedFontScale) < .01f);
-            return applied[0];
-        }, 10_000);
+        scenario.onActivity(activity -> {
+            float actual = activity.getResources().getConfiguration().fontScale;
+            String observed = fontScaleDiagnostics() + ", activity=" + actual;
+            assertEquals("dashboard must render at the requested font scale: " + observed,
+                requestedFontScale, actual, .01f);
+            Log.i("DashboardLargeFontUiTest", observed);
+        });
     }
 
     private void grantSms() {
@@ -198,10 +200,29 @@ public final class DashboardLargeFontUiTest {
 
     private void setFontScale(float scale) throws Exception {
         requestedFontScale = scale;
+        // Initialize the singleton before changing settings so it receives the framework update.
+        Resources.getSystem();
         shell("settings put system font_scale " + scale);
-        await(() -> Math.abs(Settings.System.getFloat(context.getContentResolver(),
-                Settings.System.FONT_SCALE, 1f) - scale) < .01f,
-            10_000);
+        await(() -> {
+            final float[] frameworkScale = {Float.NaN};
+            // The setting is persisted before ActivityThread receives its configuration change.
+            // Waiting on the target context is unsafe: it may have a frozen locale override.
+            // Read on the main thread so configuration application has finished before launch
+            // lets LocaleHelper/ThemeHelper snapshot the activity's base configuration.
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
+                frameworkScale[0] = Resources.getSystem().getConfiguration().fontScale);
+            return Math.abs(Settings.System.getFloat(context.getContentResolver(),
+                    Settings.System.FONT_SCALE, 1f) - scale) < .01f
+                && Math.abs(frameworkScale[0] - scale) < .01f;
+        }, 10_000, () -> "framework font configuration did not settle: " + fontScaleDiagnostics());
+    }
+
+    private String fontScaleDiagnostics() {
+        return "requested=" + requestedFontScale
+            + ", setting=" + Settings.System.getFloat(context.getContentResolver(),
+                Settings.System.FONT_SCALE, 1f)
+            + ", framework=" + Resources.getSystem().getConfiguration().fontScale
+            + ", target=" + context.getResources().getConfiguration().fontScale;
     }
 
     private View currentRoot() {
@@ -217,12 +238,16 @@ public final class DashboardLargeFontUiTest {
     }
 
     private static void await(Check check, long timeoutMs) {
+        await(check, timeoutMs, () -> "dashboard did not settle");
+    }
+
+    private static void await(Check check, long timeoutMs, Supplier<String> failureMessage) {
         long end = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < end) {
             if (check.ok()) return;
             SystemClock.sleep(40);
         }
-        assertTrue("dashboard did not settle", check.ok());
+        assertTrue(failureMessage.get(), check.ok());
     }
 
     private static TextView findText(View view, String value) {
