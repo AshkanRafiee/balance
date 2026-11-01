@@ -193,6 +193,38 @@ public class BalanceScanTest {
             date(tejarat) < at(2026, 8, 31, 9, 0));
     }
 
+    @Test public void rulesReparse_samePhysicalSourceCanCorrectBalanceAndEarlierEventDate() throws Exception {
+        long arrival = at(2026, 8, 30, 11, 0);
+        seed("TejaratBank", TEJARAT_NEWER_BUT_EARLY, arrival);
+        String account = "01351234567890";
+        LinkedHashMap<String, Bank> old = new LinkedHashMap<>();
+        old.put("Tejarat|" + account, new Bank("Tejarat", 42L, arrival, "TejaratBank", account));
+        assertTrue(BalanceData.write(ctx, old));
+        SourceStore.Source source = SourceStore.capture(ctx, "TejaratBank", TEJARAT_NEWER_BUT_EARLY,
+            arrival, BankRules.VERSION);
+        SourceStore.observeBalance(ctx, source, 0, "Tejarat", account, arrival, 42L);
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+        assertEquals(1, saved.size());
+        Bank corrected = saved.get("Tejarat|" + account);
+        assertEquals(2533435016L, corrected.amount);
+        assertEquals(persian(1405, 6, 8, 10, 0), corrected.date);
+    }
+
+    @Test public void rulesReparse_withoutSameSourceProofPreservesNewerDeletedBalance() throws Exception {
+        long arrival = at(2026, 8, 31, 11, 0);
+        seed("TejaratBank", TEJARAT_OLDER_BUT_LATE, arrival);
+        String account = "01351234567890";
+        LinkedHashMap<String, Bank> old = new LinkedHashMap<>();
+        old.put("Tejarat|" + account, new Bank("Tejarat", 42L,
+            persian(1405, 6, 8, 10, 0), "TejaratBank", account));
+        assertTrue(BalanceData.write(ctx, old));
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(0, BalanceData.scanSms(ctx, saved));
+        assertEquals(42L, saved.get("Tejarat|" + account).amount);
+        assertEquals(persian(1405, 6, 8, 10, 0), saved.get("Tejarat|" + account).date);
+    }
+
     // ============================================================
     // Full-first-scan behaviour
     // ============================================================

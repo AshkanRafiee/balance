@@ -415,6 +415,49 @@ public class TransactionStoreTest {
         assertEquals(1L, TransactionStore.read(context).get(0).date);
     }
 
+    @Test public void restoreRetainsRecurringIdenticalBodiesAndAliasesLegacyMetadata() throws Exception {
+        String body = "واریز:200,000 مانده:3,000,000";
+        Transaction first = BalanceData.parseMovement("Saman", "500095", body, 1_000_000L, false, 0);
+        Transaction later = BalanceData.parseMovement("Saman", "500095", body, 90_000_000L, false, 0);
+        assertTrue(TransactionStore.replace(context, java.util.Collections.singletonList(first)));
+        assertEquals(1L, TransactionStore.merge(context, visitor -> visitor.accept(later)));
+        assertEquals(2L, TransactionStore.count(context));
+        assertFalse(BalanceData.noteKey(first).equals(BalanceData.noteKey(later)));
+
+        Transaction legacy = new Transaction(first.bank, first.account, first.date, first.amount,
+            first.balance, BalanceData.messageSig("500095", body, first.account), first.content);
+        List<String> aliases = new ArrayList<>();
+        assertEquals(0L, TransactionStore.merge(context, visitor -> visitor.accept(legacy),
+            (from, to) -> aliases.add(from + "=" + to)));
+        assertEquals(java.util.Collections.singletonList(
+            BalanceData.noteKey(legacy) + "=" + BalanceData.noteKey(first)), aliases);
+    }
+
+    @Test public void restoreAmbiguousLegacyContentMetadataHasNoGuessedAlias() throws Exception {
+        String body = "واریز:200,000 مانده:3,000,000";
+        Transaction first = BalanceData.parseMovement("Saman", "500095", body, 1_000_000L, false, 0);
+        Transaction later = BalanceData.parseMovement("Saman", "500095", body, 90_000_000L, false, 0);
+        assertTrue(TransactionStore.replace(context, java.util.Arrays.asList(first, later)));
+        Transaction oldFirst = new Transaction(first.bank, first.account, first.date, first.amount,
+            first.balance, "old-shared-signature", first.content);
+        Transaction oldLater = new Transaction(later.bank, later.account, later.date, later.amount,
+            later.balance, "old-shared-signature", later.content);
+        List<String> aliases = new ArrayList<>();
+        TransactionStore.MergeResult result = TransactionStore.mergeResult(context, visitor -> {
+            visitor.accept(oldFirst);
+            visitor.accept(oldLater);
+        }, (from, to) -> aliases.add(from + "=" + to));
+        assertEquals(0L, result.added);
+        assertEquals(0L, result.aliases);
+        assertTrue(aliases.isEmpty());
+        TransactionStore.collectAliases(context, visitor -> {
+            visitor.accept(oldFirst);
+            visitor.accept(oldLater);
+        }, (from, to) -> aliases.add(from + "=" + to));
+        assertTrue(aliases.isEmpty());
+        assertEquals(2L, TransactionStore.count(context));
+    }
+
     private static void assertTransactionEquals(Transaction expected, Transaction actual) {
         assertEquals(expected.bank, actual.bank);
         assertEquals(expected.account, actual.account);

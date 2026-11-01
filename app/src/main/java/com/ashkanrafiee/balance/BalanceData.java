@@ -91,7 +91,7 @@ final class BalanceData {
      *  cannot prove a missing message. Tracked beside {@link #KEY_HISTORY_RULES_VERSION} rather than
      *  folded into it, so a schema change never masquerades as a change of parsing rules. */
     static final String KEY_HISTORY_SCHEMA = "history_schema";
-    static final int HISTORY_SCHEMA = 1;
+    static final int HISTORY_SCHEMA = 2;
     static final String KEY_HISTORY_LAST_BALANCE = "history_last_balance";
     /** Encrypted residual-note aliases staged before a transaction commit, so a process death cannot
      * leave the note orphaned between the transaction store and metadata store writes. */
@@ -532,11 +532,10 @@ final class BalanceData {
     // Transaction notes
     // ====================================================================
 
-    /** The identity a note is stored under: the parse-independent content digest when the entry has one
-     *  (so the note follows the same physical SMS however parsing rules evolve), else the dedup
-     *  identity of legacy entries written before content digests existed. Never derived from the
-     *  amount or the resulting balance, so changing a note cannot alter any dedup fingerprint. */
+    /** New rows annotate a qualified event, not a body that can recur. Legacy content keys remain
+     *  readable; full reparses migrate notes/tags only across unambiguous source replacements. */
     static String noteKey(Transaction t) {
+        if (t.sig != null && t.sig.startsWith("e2:")) return txIdentityKey(t);
         return t.content != null ? "c:" + t.content : txIdentityKey(t);
     }
 
@@ -1111,6 +1110,8 @@ final class BalanceData {
 
     /** Performs the idempotent cleanup and clears the marker only after every step commits. */
     private static void completeReset(Context context, boolean alsoNotes) {
+        HistoryWarmup.invalidate();
+        DataGeneration.prepareReset(context, alsoNotes);
         try {
             if (!CommitmentStore.clear(context))
                 throw new IllegalStateException("commitment reset returned false");
@@ -1551,7 +1552,9 @@ final class BalanceData {
             if (!splitBanks.isEmpty()) current.keySet().removeIf(splitBanks::contains);
         }
 
-        Map<String, List<Reconcile.Entry>> windows = loadRecentMovements(context);
+        Map<SourceEvidence, String> balanceReplacements = full
+            ? balanceSourceReplacements(context, current, sourceRows) : java.util.Collections.emptyMap();
+        Map<String, List<Reconcile.Entry>> windows = full ? new HashMap<>() : loadRecentMovements(context);
         for (Map.Entry<String, List<Object[]>> e : rowsByKey.entrySet()) {
             String key = e.getKey();
             String bank = bankOfKey(key);
@@ -1567,7 +1570,8 @@ final class BalanceData {
             Reconcile.Entry chosen = null;
             String chosenSender = null;
             boolean chainTrusted = chain != null && !chain.isEmpty()
-                && isChainMovement(chain, bank, (String) newestArr[0], (String) newestArr[1]);
+                && isChainMovement(chain, bank, (String) newestArr[0], (String) newestArr[1],
+                    (Long) newestArr[2]);
             if (chainTrusted) {
                 Reconcile.Entry last = chain.get(chain.size() - 1);
                 chosen = last;
@@ -1590,7 +1594,22 @@ final class BalanceData {
                 boolean changed = existing == null || chosen.date > existing.date
                     || (!full && chosen.date == existing.date
                         && (Long) newestArr[2] == chosen.date);
+                // A rules reparse may correct the same physical source to an earlier date or a
+                // different amount/account. Only prior observations proving the saved snapshot came
+                // from this source can override the normal no-regression rule.
+                String superseded = null;
+                for (Map.Entry<SourceEvidence, String> replacement : balanceReplacements.entrySet()) {
+                    SourceEvidence source = replacement.getKey();
+                    if (key.equals(storageKey(source.balanceBank, source.balanceAccount))
+                            && source.balanceDate == chosen.date && source.balance == chosen.balance) {
+                        changed |= existing == null || existing.date != chosen.date
+                            || existing.amount != chosen.balance || !key.equals(replacement.getValue());
+                        superseded = replacement.getValue();
+                        break;
+                    }
+                }
                 if (changed) {
+                    if (superseded != null && !superseded.equals(key)) current.remove(superseded);
                     matched++;
                     current.put(key, new Bank(bank, chosen.balance, chosen.date,
                         chosenSender != null ? chosenSender : (existing != null ? existing.sender : null),
@@ -1643,6 +1662,71 @@ final class BalanceData {
             this.body = body;
             this.arrival = arrival;
         }
+    }
+
+    private static String physicalMessageKey(String sender, String body, long arrival) {
+        return contentHash(sender, body) + "|" + arrival;
+    }
+
+    private static Map<SourceEvidence, String> balanceSourceReplacements(Context context,
+            Map<String, Bank> current, List<SourceEvidence> inbox) {
+        Map<SourceEvidence, String> replacements = new HashMap<>();
+        Map<String, Set<Long>> possibleSources = new HashMap<>();
+        Map<String, SourceEvidence> byPhysical = new HashMap<>();
+        for (SourceEvidence source : inbox)
+            byPhysical.put(physicalMessageKey(source.sender, source.body, source.arrival), source);
+        try {
+            SourceStore.forEachSourceWithObservations(context, 256, (source, transactions, balances) -> {
+                SourceEvidence present = byPhysical.get(physicalMessageKey(source.sender,
+                    source.rawBody, source.arrivalTime));
+                for (SourceStore.BalanceObservation old : balances) {
+                    String key = storageKey(old.bank, old.account);
+                    Bank saved = current.get(key);
+                    if (saved != null && saved.date == old.date && saved.amount == old.balance) {
+                        possibleSources.computeIfAbsent(key, ignored -> new HashSet<>()).add(source.id);
+                        if (present != null && present.balance != null) replacements.put(present, key);
+                    }
+                }
+            });
+            replacements.entrySet().removeIf(entry -> possibleSources.get(entry.getValue()).size() != 1);
+        } catch (Exception e) {
+            // No evidence means no permission to roll a saved balance back.
+            replacements.clear();
+            Log.w(TAG, "balance source reparse lookup failed", e);
+        }
+        return replacements;
+    }
+
+    private static Map<String, List<Transaction>> priorTransactionParses(Context context,
+            List<SourceEvidence> inbox) {
+        Set<String> present = new HashSet<>();
+        for (SourceEvidence source : inbox)
+            present.add(physicalMessageKey(source.sender, source.body, source.arrival));
+        Map<String, List<Transaction>> prior = new HashMap<>();
+        try {
+            SourceStore.forEachSourceWithObservations(context, 256, (source, transactions, balances) -> {
+                String key = physicalMessageKey(source.sender, source.rawBody, source.arrivalTime);
+                if (!present.contains(key)) return;
+                for (SourceStore.TransactionObservation observation : transactions)
+                    prior.computeIfAbsent(key, ignored -> new ArrayList<>()).add(observation.transaction);
+            });
+        } catch (Exception e) {
+            prior.clear();
+            Log.w(TAG, "transaction source reparse lookup failed", e);
+        }
+        return prior;
+    }
+
+    private static boolean wasObserved(Transaction old, List<Transaction> observations) {
+        if (observations == null) return false;
+        for (Transaction observed : observations) {
+            if (old.bank.equals(observed.bank) && old.date == observed.date && old.amount == observed.amount
+                    && java.util.Objects.equals(old.account, observed.account)
+                    && java.util.Objects.equals(old.balance, observed.balance)
+                    && java.util.Objects.equals(old.sig, observed.sig)
+                    && java.util.Objects.equals(old.content, observed.content)) return true;
+        }
+        return false;
     }
 
     /** Best-effort evidence capture; source failures must not block the core stores or watermarks. */
@@ -1736,8 +1820,8 @@ final class BalanceData {
             // the current rules and the history is rebuilt from those parses (see below) — so dedup
             // against what the old rules stored would only skip the very reprocessing this full scan
             // exists to do.
-            Set<String> seenSigs = new HashSet<>();
-            Set<String> seenLegacy = new HashSet<>();
+            Map<String, List<Transaction>> seenMovements = new HashMap<>();
+            Map<String, Transaction> seenLegacy = new HashMap<>();
             long newest = 0;
             long newestRaw = 0;
             long newestId = 0;
@@ -1759,6 +1843,7 @@ final class BalanceData {
             String[] args = selection != null ? new String[]{Long.toString(cursorDate),
                 Long.toString(cursorDate), Long.toString(cursorId)} : null;
             Map<String, Long> lastBalance = null;
+            Map<String, Long> lastBalanceDates = null;
             List<Transaction> fresh = new ArrayList<>();
             try (Cursor cursor = context.getContentResolver().query(
                 Telephony.Sms.Inbox.CONTENT_URI,
@@ -1841,6 +1926,9 @@ final class BalanceData {
                     return 0;
                 }
                 stored = readTransactions(context);
+                Map<String, List<Transaction>> priorParses = full
+                    ? priorTransactionParses(context, sourceRows) : java.util.Collections.emptyMap();
+                Map<Transaction, List<Transaction>> priorOfFresh = new HashMap<>();
                 textChanged |= completePendingTransactionMetadataMigrations(context, stored);
                 textChanged |= completePendingResidualNoteMigrations(context, stored);
                 Map<String, String> notes = readNotes(context);
@@ -1862,8 +1950,8 @@ final class BalanceData {
                 }
                 if (!full) {
                     for (Transaction t : stored) {
-                        if (t.sig != null) seenSigs.add(t.sig);
-                        else seenLegacy.add(legacyEntryKey(t));
+                        if (t.sig != null) indexMovement(seenMovements, t);
+                        else seenLegacy.put(legacyEntryKey(t), t);
                     }
                 }
                 // Oldest first, so the balance-delta fallback chain below follows time. On a full scan
@@ -1871,6 +1959,25 @@ final class BalanceData {
                 // from the last balance persisted by the previous scan.
                 rows.sort((a, b) -> Long.compare((Long) a[3], (Long) b[3]));
                 lastBalance = full ? new HashMap<>() : loadLastBalances(context);
+                lastBalanceDates = full ? new HashMap<>() : loadLastBalanceDates(context);
+                if (!full) {
+                    // Pre-date-cache installations can recover a conservative lower bound from
+                    // retained transactions. New snapshots persist their own date in the same value.
+                    Map<String, Long> recoveredDates = new HashMap<>();
+                    for (Transaction old : stored) {
+                        String key = transactionCompositeKey(old);
+                        if (!lastBalanceDates.containsKey(key) && old.balance != null) {
+                            recoveredDates.put(key, Math.max(old.date,
+                                recoveredDates.getOrDefault(key, Long.MIN_VALUE)));
+                        }
+                    }
+                    lastBalanceDates.putAll(recoveredDates);
+                }
+                Map<String, List<Transaction>> replayByContent = new HashMap<>();
+                if (!full) for (Transaction old : stored) {
+                    if (old.content != null)
+                        replayByContent.computeIfAbsent(old.content, ignored -> new ArrayList<>()).add(old);
+                }
 
                 // Group this scan's rows by bank, merge each bank's movements into its recent-window,
                 // and reconcile the balance chains, so a fee and its transfer that arrived in the wrong
@@ -1879,7 +1986,7 @@ final class BalanceData {
                 for (Object[] row : rows) {
                     rowsByBank.computeIfAbsent(rowCompositeKey(row), k -> new ArrayList<>()).add(row);
                 }
-                windows = loadRecentMovements(context);
+                windows = full ? new HashMap<>() : loadRecentMovements(context);
                 Map<String, Map<String, Integer>> chainPosByBank = new LinkedHashMap<>();
                 Map<String, List<Reconcile.Entry>> chainByBank = new LinkedHashMap<>();
                 for (Map.Entry<String, List<Object[]>> e : rowsByBank.entrySet()) {
@@ -1913,9 +2020,32 @@ final class BalanceData {
                     String body = (String) row[2];
                     long date = (Long) row[3];
                     String key = rowCompositeKey(row);
+                    long balanceDate = date;
+                    List<Reconcile.Entry> rowChain = chainByBank.get(key);
+                    if (rowChain != null && isChainMovement(rowChain, bank, sender, body, date)) {
+                        // Reconciled order may intentionally run against delivery time. Give members
+                        // the cluster's newest time so its true tail can update the seed in that order.
+                        for (Reconcile.Entry member : rowChain)
+                            if (dateDistance(member.date, date) <= RECENT_WINDOW_MS)
+                                balanceDate = Math.max(balanceDate, member.date);
+                    }
                     Long last = lastBalance.get(key);
+                    Long seedDate = lastBalanceDates.get(key);
+                    boolean canDelta = last != null && (seedDate == null || date >= seedDate);
                     Transaction t = parseMovement(bank, sender, body, date,
-                        last != null, last != null ? last : 0);
+                        canDelta, last != null ? last : 0);
+                    if (t == null) {
+                        // A previously committed delta movement can parse to zero against its own
+                        // saved balance on retry. Recover that exact source's retained movement so
+                        // reasons/channels and source observations can still complete.
+                        List<Transaction> replay = replayByContent.get(contentHash(sender, body));
+                        if (replay != null) for (Transaction old : replay) {
+                            if (bank.equals(old.bank) && dateDistance(old.date, date) <= DUPLICATE_DELIVERY_MS) {
+                                t = old;
+                                break;
+                            }
+                        }
+                    }
                     if (t != null) {
                         // Keep the parser's result tied to its physical source even when the core
                         // history deduplicates this movement against an earlier delivery. The source
@@ -1926,32 +2056,20 @@ final class BalanceData {
                         // an OTP prompt (which parse to no movement at all) can never attach a reason
                         // to anything. It is collected under the note key and stored beside the notes
                         // after the transactions, so a user note is never what gets written here.
-                        // The message fingerprint is the primary identity: it folds sender + movement
-                        // amount + resulting balance (falling back to the normalized body), so it is
-                        // independent of time. A bank sending the same SMS twice is one transaction even
-                        // if the copies differ in timestamp or reference number, while two genuine
-                        // movements of the same value — whose messages report different resulting
-                        // balances — stay distinct. The legacy bank|date|amount triple is only consulted
-                        // for entries saved before fingerprints existed. On an incremental scan this
-                        // dedup runs against the stored history; on a full scan the stored history is
-                        // not consulted (the inbox is the source of truth being re-processed), so this
-                        // only collapses the scan's own duplicates via the addedSigs set.
+                        // Keep short-window redeliveries local-first, but always finish metadata and
+                        // balance processing. A retry after the transaction commit must repair the
+                        // remaining stores rather than skipping them with the duplicate row.
                         String legacyKey = legacyEntryKey(t);
-                        if (seenLegacy.contains(legacyKey)) continue;
-                        String sig = t.sig;
-                        if (sig != null) {
-                            if (seenSigs.contains(sig)) continue;
-                            seenSigs.add(sig);
-                            addedSigs.add(sig);
-                        } else if (seenSigs.contains(legacyKey)) {
-                            continue;
-                        }
+                        Transaction duplicate = findMovement(seenMovements, t);
+                        if (duplicate == null) duplicate = seenLegacy.get(legacyKey);
+                        boolean keep = duplicate == null;
+                        if (duplicate != null) t = duplicate;
                         // Remember the account-free fingerprint of every fresh account-bearing parse.
                         // When rules start recognizing an account, a full re-scan re-parses a
                         // still-present message with the account while its account-less twin (stored
                         // under the older rules) keeps an account-free fingerprint; the twin is
                         // reconciled against this in the rebuild below.
-                        if (t.account != null && t.sig != null) {
+                        if (keep && t.account != null && t.sig != null) {
                             String accountFree = messageSig(sender, body, null);
                             if (accountFree != null) freeByFresh.put(t, accountFree);
                         }
@@ -1968,14 +2086,24 @@ final class BalanceData {
                         // recorded only where the movement above was kept, in a store of its own.
                         String channel = BankRules.extractChannel(bank, body);
                         if (channel != null) detectedChannels.put(noteKey(t), channel);
-                        fresh.add(t);
-                        added++;
+                        if (keep) {
+                            SourceEvidence evidence = (SourceEvidence) row[4];
+                            priorOfFresh.put(t, priorParses.get(physicalMessageKey(sender, body,
+                                evidence.arrival)));
+                            indexMovement(seenMovements, t);
+                            if (t.sig != null) addedSigs.add(t.sig);
+                            fresh.add(t);
+                            added++;
+                        }
                     }
                     // Remember the last stated balance per bank so the next movement can be measured
                     // against it, across scans. OTP messages and balance-less prompts return -1 here
                     // and leave the chain untouched.
                     long bal = extract(body);
-                    if (bal >= 0) lastBalance.put(key, bal);
+                    if (bal >= 0 && (seedDate == null || balanceDate >= seedDate)) {
+                        lastBalance.put(key, bal);
+                        lastBalanceDates.put(key, balanceDate);
+                    }
                 }
                 boolean sourcesCaptured = captureSources(context, sourceRows, HISTORY_RULES_VERSION);
                 holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_HISTORY, sourcesCaptured);
@@ -1994,9 +2122,13 @@ final class BalanceData {
                     // OUTSIDE the chain was recorded this scan and superseded it (a delta-derived
                     // balance that moved on past the pair).
                     Reconcile.Entry last = chain.get(chain.size() - 1);
+                    long chainNewest = last.date;
+                    for (Reconcile.Entry member : chain) chainNewest = Math.max(chainNewest, member.date);
                     if (last.sig != null && !addedSigs.contains(last.sig)
-                            && !hasFreshOutsideChain(txs, chain)) {
+                            && !hasFreshOutsideChain(txs, chain)
+                            && chainNewest >= lastBalanceDates.getOrDefault(key, Long.MIN_VALUE)) {
                         lastBalance.put(key, last.balance);
+                        lastBalanceDates.put(key, chainNewest);
                     }
                     // Place freshly scanned chain members next to their already-stored siblings when
                     // part of the pair was recorded earlier (split scans). Only chain members are ever
@@ -2030,13 +2162,22 @@ final class BalanceData {
                 // the append order earlier versions produced. Chain placements above already wrote
                 // their entries at the correct position relative to their stored siblings.
                 if (full) {
-                    Set<String> freshSigs = new HashSet<>();
                     Map<String, Integer> freshAtKey = new HashMap<>();
                     Map<String, Transaction> freshBySig = new HashMap<>();
+                    Map<String, List<Transaction>> freshByLegacySig = new HashMap<>();
+                    Map<String, List<Transaction>> storedByContent = new HashMap<>();
+                    for (Transaction old : stored) {
+                        if (old.content != null)
+                            storedByContent.computeIfAbsent(old.bank + "|" + old.content,
+                                ignored -> new ArrayList<>()).add(old);
+                    }
                     for (Transaction t : fresh) {
                         if (t.sig != null) {
-                            freshSigs.add(t.sig);
                             freshBySig.putIfAbsent(t.sig, t);
+                            if (t.sig.startsWith("e2:")) {
+                                String legacy = t.sig.substring(3, t.sig.indexOf(':', 3));
+                                freshByLegacySig.computeIfAbsent(legacy, ignored -> new ArrayList<>()).add(t);
+                            }
                         }
                         String key = transactionCompositeKey(t) + "|" + t.date;
                         freshAtKey.put(key, freshAtKey.getOrDefault(key, 0) + 1);
@@ -2047,12 +2188,44 @@ final class BalanceData {
                     // for another entry's fingerprint.
                     Set<Transaction> identityClaimed = new HashSet<>();
                     Map<String, Integer> identityClaimsPerKey = new HashMap<>();
+                    // Source text is independent of parsed amount, account and event date. Claim it
+                    // first, one-to-one and nearest first, so corrections to any of those fields do
+                    // not leave the previous parse behind as a supposedly deleted-message orphan.
+                    // Repeated clockless bodies can occur on different days: never claim all of them.
+                    for (Transaction f : fresh) {
+                        if (f.content == null) continue;
+                        List<Transaction> candidates = storedByContent.get(f.bank + "|" + f.content);
+                        Transaction best = null;
+                        if (candidates != null) for (Transaction old : candidates) {
+                            if (identityClaimed.contains(old)) continue;
+                            if (dateDistance(old.date, f.date) > DUPLICATE_DELIVERY_MS
+                                    && !wasObserved(old, priorOfFresh.get(f))) continue;
+                            if (best == null || dateDistance(old.date, f.date) < dateDistance(best.date, f.date))
+                                best = old;
+                        }
+                        if (best != null) {
+                            identityClaimed.add(best);
+                            metadataReplacements.put(best, f);
+                            String key = transactionCompositeKey(f) + "|" + f.date;
+                            identityClaimsPerKey.put(key, identityClaimsPerKey.getOrDefault(key, 0) + 1);
+                        }
+                    }
                     for (Transaction t : stored) {
-                        if (t.sig != null && freshSigs.contains(t.sig)) {
+                        if (identityClaimed.contains(t)) continue;
+                        Transaction f = t.sig == null ? null : freshBySig.get(t.sig);
+                        if (f == null && t.sig != null && !t.sig.startsWith("e2:")) {
+                            List<Transaction> candidates = freshByLegacySig.get(t.sig);
+                            if (candidates != null) for (Transaction candidate : candidates) {
+                                if (!java.util.Objects.equals(t.account, candidate.account)
+                                        || dateDistance(t.date, candidate.date) > DUPLICATE_DELIVERY_MS) continue;
+                                if (f != null) { f = null; break; }
+                                f = candidate;
+                            }
+                        }
+                        if (f != null) {
                             identityClaimed.add(t);
-                            Transaction f = freshBySig.get(t.sig);
-                            if (f != null) metadataReplacements.put(t, f);
-                            String key = transactionCompositeKey(t) + "|" + t.date;
+                            metadataReplacements.put(t, f);
+                            String key = transactionCompositeKey(f) + "|" + f.date;
                             identityClaimsPerKey.put(key,
                                 identityClaimsPerKey.getOrDefault(key, 0) + 1);
                         }
@@ -2087,6 +2260,7 @@ final class BalanceData {
                             byAmount.putIfAbsent(f.bank + "|" + f.date + "|" + f.amount, f);
                         }
                         for (Transaction s : stored) {
+                            if (identityClaimed.contains(s)) continue;
                             if (s.account != null) continue;
                             Transaction f = null;
                             if (s.content != null)
@@ -2122,11 +2296,13 @@ final class BalanceData {
                             java.util.ArrayDeque<Transaction> pool = budgetPool.get(key);
                             if (pool != null && !pool.isEmpty()) {
                                 Transaction claim = null;
+                                int amountMatches = 0;
                                 for (Transaction cand : pool)
-                                    if (cand.amount == t.amount) { claim = cand; break; }
+                                    if (cand.amount == t.amount) { claim = cand; amountMatches++; }
+                                boolean unambiguous = amountMatches == 1 || pool.size() == 1;
                                 if (claim == null) claim = pool.peekFirst();
                                 pool.remove(claim);
-                                metadataReplacements.put(t, claim);
+                                if (unambiguous) metadataReplacements.put(t, claim);
                             }
                             continue;
                         }
@@ -2149,7 +2325,7 @@ final class BalanceData {
                     transactionsChanged = !fresh.isEmpty() || !placed.isEmpty();
                     residualCandidates.addAll(fresh);
                 }
-                if (!stageTransactionMetadataMigrations(context, metadataReplacements))
+                if (!stageTransactionMetadataMigrations(context, metadataReplacements, stored))
                     throw new Exception("transaction metadata migration could not be staged");
                 // Authorization messages are not movements. Once the final stored transaction list
                 // is known, attach only uniquely matched merchant evidence from the encrypted source
@@ -2191,7 +2367,7 @@ final class BalanceData {
                 completed = false;
                 return added;
             }
-            if (!saveLastBalances(context, lastBalance)) {
+            if (!saveLastBalances(context, lastBalance, lastBalanceDates)) {
                 failed = true;
                 completed = false;
                 return added;
@@ -2393,15 +2569,24 @@ final class BalanceData {
     }
 
     private static boolean stageTransactionMetadataMigrations(Context context,
-            Map<Transaction, Transaction> replaced) {
+            Map<Transaction, Transaction> replaced, List<Transaction> retained) {
         if (replaced == null || replaced.isEmpty()) return true;
         Map<String, String> aliases = new LinkedHashMap<>();
+        Set<String> ambiguous = new HashSet<>();
+        Set<String> retainedKeys = new HashSet<>();
+        for (Transaction transaction : retained) retainedKeys.add(noteKey(transaction));
         for (Map.Entry<Transaction, Transaction> entry : replaced.entrySet()) {
             if (entry.getKey() == null || entry.getValue() == null) continue;
             String from = noteKey(entry.getKey());
             String to = noteKey(entry.getValue());
-            if (!from.equals(to)) aliases.put(from, to);
+            if (from.equals(to)) continue;
+            if (retainedKeys.contains(from)
+                    || (aliases.containsKey(from) && !to.equals(aliases.get(from)))) ambiguous.add(from);
+            aliases.put(from, to);
         }
+        // A legacy content key may have annotated several recurring events. Keep it intact and
+        // unattached rather than moving the user's annotation to an arbitrary event.
+        aliases.keySet().removeAll(ambiguous);
         return stagePendingMetadataMigrations(context,
             KEY_PENDING_TRANSACTION_METADATA_MIGRATIONS, aliases, "transaction metadata");
     }
@@ -2707,24 +2892,8 @@ final class BalanceData {
         }
     }
 
-    /** A deterministic fingerprint of a money-movement message. Two copies of the same movement (a
-     *  mistaken double delivery, possibly with different timestamps or reference numbers) must hash
-     *  alike, while two genuinely distinct movements of the same value — which move the account
-     *  balance between them — must not collide.
-     *
-     *  <p>A bank message reports both the moved amount and the resulting balance, so the fingerprint
-     *  folds {@code sender + signed amount + resulting balance}. That is content-derived but ignores
-     *  the volatile metadata (timestamps, transaction/reference numbers) that makes duplicate copies
-     *  no longer textually identical. Only completed movements carry a resulting balance; the OTP
-     *  rejection and the balance-required rule in {@link #extractTransaction} keep prompts out of
-     *  history entirely. Messages without a stated balance fall back to the whole normalized body.
-     *
-     *  <p>Consequence: two messages whose content is identical (same sender, same amount text, same
-     *  resulting balance) are ONE transaction no matter how far apart their timestamps are. That
-     *  collapses the same-event double deliveries banks commonly send, at the cost of merging two
-     *  genuinely different movements whenever they report an identical balance. If a transaction ever
-     *  looks missing or doubled in support reports, this fingerprint and the (bank, date) replacement
-     *  key used by the full re-scan in {@link #scanHistory} are the two places that decide it. */
+    /** Legacy amount/balance fingerprint. Retained for migration and double-delivery candidates;
+     *  this is not an event identity. New movements qualify it with time and reliable references. */
     static String messageSig(String sender, String body) {
         return messageSig(sender, body, null);
     }
@@ -2757,6 +2926,64 @@ final class BalanceData {
         } catch (Exception e) {
             return fold;
         }
+    }
+
+    private static final long DUPLICATE_DELIVERY_MS = 2 * 60_000L;
+    private static final Pattern EVENT_REFERENCE = Pattern.compile(
+        "(?:شماره\\s*(?:پیگیری|تراکنش|مرجع)|کد\\s*پیگیری|شناسه\\s*تراکنش|(?i:ref(?:erence)?))\\s*[:：#-]?\\s*([0-9]{3,})");
+
+    /** Stated dates distinguish events exactly. Clockless copies may be duplicate deliveries only
+     *  within two minutes; an amount/balance pair is never a lifetime identity. Card numbers are not
+     *  references: documented double deliveries can carry different card text. */
+    private static String movementSig(String bank, String sender, String body, String account,
+            long date) {
+        String base = messageSig(sender, body, account);
+        if (base == null) return null;
+        boolean dated = date < Long.MAX_VALUE && MessageDate.eventTime(body, date + 1,
+            BankRules.calendar(bank)) == date;
+        Matcher ref = EVENT_REFERENCE.matcher(normalizeLetters(digits(body)));
+        String reference = ref.find() ? ref.group(1) : "";
+        return "e2:" + base + ":" + (dated ? "d" : "a") + ":" + reference + ":" + date;
+    }
+
+    private static String signatureFamily(String sig) {
+        if (sig == null || !sig.startsWith("e2:")) return sig;
+        return sig.substring(0, sig.lastIndexOf(':'));
+    }
+
+    static long dateDistance(long a, long b) {
+        try {
+            long difference = Math.subtractExact(a, b);
+            return difference == Long.MIN_VALUE ? Long.MAX_VALUE : Math.abs(difference);
+        } catch (ArithmeticException overflow) { return Long.MAX_VALUE; }
+    }
+
+    static boolean sameMovement(Transaction a, Transaction b) {
+        if (!a.bank.equals(b.bank) || !java.util.Objects.equals(a.account, b.account)) return false;
+        if (a.sig == null || b.sig == null) return legacyEntryKey(a).equals(legacyEntryKey(b));
+        return sameMovementSig(a.sig, a.date, b.sig, b.date);
+    }
+
+    private static boolean sameMovementSig(String a, long aDate, String b, long bDate) {
+        if (a == null || b == null) return false;
+        if (a.equals(b)) return true;
+        if (!signatureFamily(a).equals(signatureFamily(b))) return false;
+        // Only the new qualified signatures support bounded delivery matching. Old signatures remain
+        // readable/importable, and are replaced by source-content claims during the schema reparse.
+        return a.startsWith("e2:") && a.contains(":a:")
+            && dateDistance(aDate, bDate) <= DUPLICATE_DELIVERY_MS;
+    }
+
+    private static Transaction findMovement(Map<String, List<Transaction>> byFamily, Transaction t) {
+        List<Transaction> candidates = byFamily.get(signatureFamily(t.sig));
+        if (candidates != null)
+            for (Transaction candidate : candidates) if (sameMovement(candidate, t)) return candidate;
+        return null;
+    }
+
+    private static void indexMovement(Map<String, List<Transaction>> byFamily, Transaction t) {
+        if (t.sig != null)
+            byFamily.computeIfAbsent(signatureFamily(t.sig), ignored -> new ArrayList<>()).add(t);
     }
 
     /** A parse-independent digest of the message text itself (sender + normalized body), unlike
@@ -3006,7 +3233,7 @@ final class BalanceData {
         // The balance the message reported travels with the movement, so the history can prove a
         // missing message later without ever touching the inbox again (see Residual).
         return new Transaction(bank, account, date, txn,
-            stated < 0 ? null : stated, messageSig(sender, body, account), contentHash(sender, body));
+            stated < 0 ? null : stated, movementSig(bank, sender, body, account, date), contentHash(sender, body));
     }
 
     /** The last number captured by the given pattern in the string, or null if it matched nothing. */
@@ -3044,10 +3271,8 @@ final class BalanceData {
     private static List<Reconcile.Entry> mergedForWindow(List<Reconcile.Entry> window,
             List<Object[]> rows, Map<String, String> sigSender, String bank) {
         List<Reconcile.Entry> merged = new ArrayList<>();
-        Set<String> sigs = new HashSet<>();
         if (window != null) {
             merged.addAll(window);
-            for (Reconcile.Entry en : window) if (en.sig != null) sigs.add(en.sig);
         }
         for (Object[] row : rows) {
             String sender = (String) row[0];
@@ -3055,9 +3280,14 @@ final class BalanceData {
             Long txn = extractTransaction(body);
             long bal = extract(body);
             if (txn == null || bal < 0) continue;
-            String sig = messageSig(sender, body,
-                bank == null ? null : BankRules.extractAccount(bank, body));
-            if (sig == null || !sigs.add(sig)) continue;
+            long date = (Long) row[2];
+            String sig = movementSig(bank, sender, body,
+                bank == null ? null : BankRules.extractAccount(bank, body), date);
+            boolean duplicate = false;
+            for (Reconcile.Entry en : merged) {
+                if (sameMovementSig(en.sig, en.date, sig, date)) { duplicate = true; break; }
+            }
+            if (sig == null || duplicate) continue;
             if (sigSender != null) sigSender.put(sig, sender);
             merged.add(new Reconcile.Entry((Long) row[2], txn, bal, sig));
         }
@@ -3145,11 +3375,12 @@ final class BalanceData {
      *  (and what {@link #scanSms} grouped the row under), so a bank that states account numbers in its
      *  messages is chain-matched correctly instead of falling back to arrival order. */
     private static boolean isChainMovement(List<Reconcile.Entry> chain, String bank,
-            String sender, String body) {
+            String sender, String body, long date) {
         if (body == null || extractTransaction(body) == null) return false;
-        String sig = messageSig(sender, body, BankRules.extractAccount(bank, body));
+        String sig = movementSig(bank, sender, body, BankRules.extractAccount(bank, body), date);
         if (sig == null) return false;
-        for (Reconcile.Entry en : chain) if (sig.equals(en.sig)) return true;
+        for (Reconcile.Entry en : chain)
+            if (sameMovementSig(sig, date, en.sig, en.date)) return true;
         return false;
     }
 
@@ -3186,8 +3417,21 @@ final class BalanceData {
     private static Integer chainPosOfRow(Map<String, Integer> pos, Object[] row) {
         String body = (String) row[2];
         if (body == null || extractTransaction(body) == null) return null;
-        String sig = messageSig((String) row[1], body, BankRules.extractAccount((String) row[0], body));
-        return sig == null ? null : pos.get(sig);
+        String bank = (String) row[0];
+        long date = (Long) row[3];
+        String sig = movementSig(bank, (String) row[1], body, BankRules.extractAccount(bank, body), date);
+        if (sig == null) return null;
+        Integer exact = pos.get(sig);
+        if (exact != null) return exact;
+        for (Map.Entry<String, Integer> entry : pos.entrySet()) {
+            String candidate = entry.getKey();
+            if (!candidate.startsWith("e2:")) continue;
+            try {
+                long candidateDate = Long.parseLong(candidate.substring(candidate.lastIndexOf(':') + 1));
+                if (sameMovementSig(sig, date, candidate, candidateDate)) return entry.getValue();
+            } catch (NumberFormatException ignored) { /* old/crafted signatures do not chain */ }
+        }
+        return null;
     }
 
     /** Whether any entry of a bank-account slot's reconciled chain was already saved to the stored
@@ -3358,7 +3602,8 @@ final class BalanceData {
             Iterator<String> it = obj.keys();
             while (it.hasNext()) {
                 String b = it.next();
-                map.put(b, obj.getLong(b));
+                JSONObject entry = obj.optJSONObject(b);
+                map.put(b, entry == null ? obj.getLong(b) : entry.getLong("b"));
             }
             if (legacy) saveLastBalances(context, map);
         } catch (Exception e) {
@@ -3368,9 +3613,34 @@ final class BalanceData {
     }
 
     private static boolean saveLastBalances(Context context, Map<String, Long> map) {
+        return saveLastBalances(context, map, java.util.Collections.emptyMap());
+    }
+
+    private static Map<String, Long> loadLastBalanceDates(Context context) {
+        Map<String, Long> dates = new HashMap<>();
+        try {
+            String raw = DataGeneration.dataPrefs(context).getString(KEY_HISTORY_LAST_BALANCE, null);
+            if (raw == null) return dates;
+            JSONObject object = new JSONObject(raw.startsWith("{") ? raw : decrypt(raw));
+            Iterator<String> keys = object.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                JSONObject entry = object.optJSONObject(key);
+                if (entry != null && entry.has("d")) dates.put(key, entry.getLong("d"));
+            }
+        } catch (Exception e) { Log.w(TAG, "loadLastBalanceDates failed", e); }
+        return dates;
+    }
+
+    private static boolean saveLastBalances(Context context, Map<String, Long> map,
+            Map<String, Long> dates) {
         try {
             JSONObject obj = new JSONObject();
-            for (Map.Entry<String, Long> e : map.entrySet()) obj.put(e.getKey(), e.getValue().longValue());
+            for (Map.Entry<String, Long> e : map.entrySet()) {
+                Long date = dates.get(e.getKey());
+                obj.put(e.getKey(), date == null ? e.getValue().longValue()
+                    : new JSONObject().put("b", e.getValue().longValue()).put("d", date));
+            }
             if (map.isEmpty()) {
                 return DataGeneration.dataPrefs(context).edit()
                     .remove(KEY_HISTORY_LAST_BALANCE).commit();

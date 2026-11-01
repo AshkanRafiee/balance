@@ -941,6 +941,167 @@ public class HistoryScanTest {
     // Exact-duplicate messages are one entry
     // ============================================================
 
+    @Test public void recurringIdenticalBody_keepsSeparateEventsAndAnnotationsAcrossRescan() throws Exception {
+        seed("500095", DEPOSIT, T);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        Transaction first = BalanceData.readTransactions(ctx).get(0);
+        BalanceData.setNote(ctx, first, "first occurrence");
+        BalanceData.setTags(ctx, first, Collections.singletonList("first"));
+        seed("500095", DEPOSIT, T + 86_400_000L);
+        awaitRows("500095", DEPOSIT, 2);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        List<Transaction> saved = BalanceData.readTransactions(ctx);
+        assertEquals(2, saved.size());
+        Transaction later = saved.get(1);
+        assertFalse(BalanceData.noteKey(first).equals(BalanceData.noteKey(later)));
+        assertNull(BalanceData.getNote(ctx, later));
+        assertTrue(BalanceData.getTags(ctx, later).isEmpty());
+        prefs().edit().putInt(BalanceData.KEY_HISTORY_SCHEMA, 1).commit();
+        BalanceData.scanHistory(ctx);
+        assertEquals(2, BalanceData.readTransactions(ctx).size());
+        assertEquals("first occurrence", BalanceData.getNote(ctx, first));
+        assertEquals(Collections.singletonList("first"), BalanceData.getTags(ctx, first));
+    }
+
+    @Test public void reliableEventTimesAndReferences_doNotCollapseRepeatedBalances() throws Exception {
+        long arrival = at(2026, 8, 30, 12, 0);
+        seed("TejaratBank", TEJARAT_DEPOSIT, arrival);
+        seed("TejaratBank", TEJARAT_DEPOSIT.replace("00:08", "00:09"), arrival + 1000);
+        seed("500095", DEPOSIT + " شماره پیگیری:123456", arrival + 2000);
+        seed("500095", DEPOSIT + " شماره پیگیری:654321", arrival + 3000);
+        assertEquals(4, BalanceData.scanHistory(ctx));
+        assertEquals(4, BalanceData.readTransactions(ctx).size());
+    }
+
+    @Test public void schemaUpgrade_migratesLegacyNotesAndTagsButKeepsDeletedMessage() throws Exception {
+        seed("500095", DEPOSIT, T + 1000);
+        Transaction present = new Transaction("Saman", null, T + 1000, 200000L, 3000000L,
+            BalanceData.messageSig("500095", DEPOSIT), BalanceData.contentHash("500095", DEPOSIT));
+        Transaction deleted = new Transaction("Saman", null, T - 86_400_000L, 200000L, 3000000L,
+            present.sig, present.content);
+        BalanceData.writeTransactions(ctx, java.util.Arrays.asList(present, deleted));
+        // The old content identity could annotate both events. It must not be guessed onto the
+        // surviving source's new identity, or removed from the deleted-message row.
+        BalanceData.setNote(ctx, deleted, "legacy shared note");
+        BalanceData.setTags(ctx, deleted, Collections.singletonList("legacy"));
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        List<Transaction> saved = BalanceData.readTransactions(ctx);
+        assertEquals(2, saved.size());
+        Transaction reparsed = saved.get(0);
+        assertTrue(reparsed.sig.startsWith("e2:"));
+        assertNull(BalanceData.getNote(ctx, reparsed));
+        assertTrue(BalanceData.getTags(ctx, reparsed).isEmpty());
+        assertEquals("legacy shared note", BalanceData.getNote(ctx, deleted));
+        assertEquals(Collections.singletonList("legacy"), BalanceData.getTags(ctx, deleted));
+    }
+
+    @Test public void schemaUpgrade_uniqueLegacyMetadataFollowsItsEvent() throws Exception {
+        seed("500095", DEPOSIT, T + 1000);
+        Transaction legacy = new Transaction("Saman", null, T + 1000, 200000L, 3000000L,
+            BalanceData.messageSig("500095", DEPOSIT), BalanceData.contentHash("500095", DEPOSIT));
+        BalanceData.writeTransactions(ctx, Collections.singletonList(legacy));
+        BalanceData.setNote(ctx, legacy, "legacy note");
+        BalanceData.setTags(ctx, legacy, Collections.singletonList("legacy tag"));
+        prefs().edit().putLong(BalanceData.KEY_HISTORY_THROUGH, T + 1000)
+            .putInt(BalanceData.KEY_HISTORY_RULES_VERSION, BalanceData.HISTORY_RULES_VERSION)
+            .putInt(BalanceData.KEY_HISTORY_SCHEMA, 1).commit();
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        List<Transaction> saved = BalanceData.readTransactions(ctx);
+        assertEquals(1, saved.size());
+        assertEquals("legacy note", BalanceData.getNote(ctx, saved.get(0)));
+        assertEquals(Collections.singletonList("legacy tag"), BalanceData.getTags(ctx, saved.get(0)));
+        assertNull(BalanceData.readNotes(ctx).get(BalanceData.noteKey(legacy)));
+    }
+
+    @Test public void schemaUpgrade_ambiguousSharedAnnotationStaysUnattached() throws Exception {
+        seed("500095", DEPOSIT, T);
+        seed("500095", DEPOSIT, T + 86_400_000L);
+        awaitRows("500095", DEPOSIT, 2);
+        String signature = BalanceData.messageSig("500095", DEPOSIT);
+        String content = BalanceData.contentHash("500095", DEPOSIT);
+        Transaction first = new Transaction("Saman", null, T, 200000L, 3000000L, signature, content);
+        Transaction later = new Transaction("Saman", null, T + 86_400_000L, 200000L, 3000000L,
+            signature, content);
+        BalanceData.writeTransactions(ctx, java.util.Arrays.asList(first, later));
+        BalanceData.setNote(ctx, first, "uncertain event");
+        BalanceData.setTags(ctx, first, Collections.singletonList("uncertain"));
+        assertEquals(2, BalanceData.scanHistory(ctx));
+        List<Transaction> saved = BalanceData.readTransactions(ctx);
+        assertEquals(2, saved.size());
+        for (Transaction transaction : saved) {
+            assertNull(BalanceData.getNote(ctx, transaction));
+            assertTrue(BalanceData.getTags(ctx, transaction).isEmpty());
+        }
+        assertEquals("uncertain event", BalanceData.readNotes(ctx).get(BalanceData.noteKey(first)));
+        assertEquals(Collections.singletonList("uncertain"),
+            BalanceData.readTags(ctx).get(BalanceData.noteKey(first)));
+    }
+
+    @Test public void contentReparse_correctsNonNullAccountAmountAndDateWithSourceProof() throws Exception {
+        long arrival = at(2026, 8, 30, 12, 0);
+        seed("TejaratBank", TEJARAT_DEPOSIT, arrival);
+        Transaction old = new Transaction("Tejarat", "wrong-account", arrival - 1000, -42L, 2533435016L,
+            "old-parser-signature", BalanceData.contentHash("TejaratBank", TEJARAT_DEPOSIT));
+        BalanceData.writeTransactions(ctx, Collections.singletonList(old));
+        BalanceData.setNote(ctx, old, "corrected source");
+        BalanceData.setTags(ctx, old, Collections.singletonList("keep"));
+        SourceStore.Source source = SourceStore.capture(ctx, "TejaratBank", TEJARAT_DEPOSIT,
+            arrival, BankRules.VERSION);
+        SourceStore.observeTransaction(ctx, source, 0, old);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        List<Transaction> saved = BalanceData.readTransactions(ctx);
+        assertEquals(1, saved.size());
+        assertEquals("01351234567890", saved.get(0).account);
+        assertEquals(805000000L, saved.get(0).amount);
+        assertEquals(persian(1405, 6, 6, 0, 8), saved.get(0).date);
+        assertEquals("corrected source", BalanceData.getNote(ctx, saved.get(0)));
+        assertEquals(Collections.singletonList("keep"), BalanceData.getTags(ctx, saved.get(0)));
+    }
+
+    @Test public void replayRepairsSourcedReasonEvenWhenTransactionAlreadyCommitted() throws Exception {
+        seed(BluMessages.SENDER, BluMessages.TOPUP, T + 1000);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        Transaction saved = BalanceData.readTransactions(ctx).get(0);
+        String reason = BalanceData.readReasons(ctx).get(BalanceData.noteKey(saved));
+        assertNotNull(reason);
+        BalanceData.writeReasons(ctx, Collections.emptyMap());
+        prefs().edit().putLong(BalanceData.KEY_HISTORY_THROUGH, T)
+            .putLong(BalanceData.KEY_HISTORY_RAW_THROUGH, T)
+            .putLong(BalanceData.KEY_HISTORY_ID, 0).commit();
+        assertEquals(0, BalanceData.scanHistory(ctx));
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
+        assertEquals(reason, BalanceData.readReasons(ctx).get(BalanceData.noteKey(saved)));
+    }
+
+    @Test public void lateDatedMovement_doesNotRegressNextClocklessDeltaSeed() throws Exception {
+        seed("TejaratBank", TEJARAT_DEPOSIT.replace("1405/06/06", "1405/06/08"),
+            at(2026, 8, 30, 11, 0));
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        seed("TejaratBank", TEJARAT_WITHDRAWAL, at(2026, 8, 31, 9, 0));
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        seed("TejaratBank", "حساب: 01351234567890\nبرداشت انجام شد\nمانده: 2,532,435,016 ریال",
+            at(2026, 8, 31, 10, 0));
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        List<Transaction> saved = BalanceData.readTransactions(ctx);
+        assertEquals(3, saved.size());
+        assertEquals(-1000000L, saved.get(2).amount);
+    }
+
+    @Test public void replayRepairsMissingBalanceSeedAfterTransactionCommit() throws Exception {
+        seed("+9815560001", MELLAT_TRANSFER, T + 1000);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        DataGeneration.dataPrefs(ctx).edit().remove(BalanceData.KEY_HISTORY_LAST_BALANCE).commit();
+        prefs().edit().putLong(BalanceData.KEY_HISTORY_THROUGH, T)
+            .putLong(BalanceData.KEY_HISTORY_RAW_THROUGH, T)
+            .putLong(BalanceData.KEY_HISTORY_ID, 0).commit();
+        assertEquals(0, BalanceData.scanHistory(ctx));
+        seed("+9815560001", MELLAT_DELTA, T + 2000);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        List<Transaction> saved = BalanceData.readTransactions(ctx);
+        assertEquals(2, saved.size());
+        assertEquals(-5000000L, saved.get(1).amount);
+    }
+
     @Test public void exactDuplicateMessage_deliveredTwice_countsOnce() throws Exception {
         seed("500095", DEPOSIT + " \u0645\u0627\u0644 A", T + 1000);
         seed("500095", DEPOSIT + " \u0645\u0627\u0644 A", T + 1100);

@@ -26,6 +26,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -214,6 +218,8 @@ final class TransactionStore {
             final long[] next = {s.nextOrdinal()};
             final long[] added = {0};
             final long[] aliasCount = {0};
+            Map<String, String> pendingAliases = new LinkedHashMap<>();
+            Set<String> ambiguousAliases = new HashSet<>();
             consume(source, incoming -> {
                 requireTransaction(incoming);
                 Transaction existing = s.find(incoming);
@@ -226,11 +232,15 @@ final class TransactionStore {
                     String from = BalanceData.noteKey(incoming);
                     String to = BalanceData.noteKey(existing);
                     if (!from.equals(to)) {
-                        aliasCount[0]++;
-                        if (aliases != null) aliases.accept(from, to);
+                        collectAlias(pendingAliases, ambiguousAliases, from, to);
                     }
                 }
             });
+            for (Map.Entry<String, String> alias : pendingAliases.entrySet()) {
+                if (ambiguousAliases.contains(alias.getKey()) || s.hasMetadataKey(alias.getKey())) continue;
+                aliasCount[0]++;
+                if (aliases != null) aliases.accept(alias.getKey(), alias.getValue());
+            }
             if (added[0] != 0) s.touch();
             return new MergeResult(added[0], aliasCount[0]);
         });
@@ -256,16 +266,27 @@ final class TransactionStore {
         access(context, false, true, false, s -> {
             if (s == null) return null;
             s.visit(DEFAULT_PAGE_SIZE, transaction -> {});
+            Map<String, String> pendingAliases = new LinkedHashMap<>();
+            Set<String> ambiguousAliases = new HashSet<>();
             consume(source, incoming -> {
                 requireTransaction(incoming);
                 Transaction existing = s.find(incoming);
                 if (existing == null) return;
                 String from = BalanceData.noteKey(incoming);
                 String to = BalanceData.noteKey(existing);
-                if (!from.equals(to)) aliases.accept(from, to);
+                if (!from.equals(to)) collectAlias(pendingAliases, ambiguousAliases, from, to);
             });
+            for (Map.Entry<String, String> alias : pendingAliases.entrySet())
+                if (!ambiguousAliases.contains(alias.getKey()) && !s.hasMetadataKey(alias.getKey()))
+                    aliases.accept(alias.getKey(), alias.getValue());
             return null;
         });
+    }
+
+    private static void collectAlias(Map<String, String> aliases, Set<String> ambiguous,
+            String from, String to) {
+        String previous = aliases.put(from, to);
+        if (previous != null && !previous.equals(to)) ambiguous.add(from);
     }
 
     /** Current store revision for cache validation; null when absent or unreadable. Read-only:
@@ -616,14 +637,44 @@ final class TransactionStore {
         }
 
         Transaction find(Transaction incoming) throws Exception {
-            Transaction row = incoming.content == null ? null
-                : find("content_digest=?", digest("content", incoming.content));
+            Transaction row = null;
+            if (incoming.content != null) {
+                try (Cursor cursor = db.query(TABLE, ROW_COLUMNS, "content_digest=?",
+                        new String[]{digest("content", incoming.content)}, null, null, "ordinal ASC")) {
+                    while (cursor.moveToNext()) {
+                        Transaction candidate = decode(cursor);
+                        // Identical clockless text can recur long after the original event. Preserve
+                        // content-based parser migration for legacy rows, but never erase the event
+                        // qualification of two new scanner identities during backup restore.
+                        boolean qualified = (candidate.sig != null && candidate.sig.startsWith("e2:"))
+                            || (incoming.sig != null && incoming.sig.startsWith("e2:"));
+                        if (!qualified || (candidate.bank.equals(incoming.bank)
+                                && BalanceData.dateDistance(candidate.date, incoming.date) <= 2 * 60_000L)) {
+                            row = candidate;
+                            break;
+                        }
+                    }
+                }
+            }
             if (row == null && incoming.sig != null)
                 row = find("sig_digest=?", digest("sig", incoming.sig));
             if (row == null) row = find("legacy_digest=?"
                 + (incoming.sig == null ? "" : " AND sig_digest IS NULL"),
                 digest("legacy", legacyIdentity(incoming)));
             return row;
+        }
+
+        boolean hasMetadataKey(String key) throws Exception {
+            String column, kind;
+            if (key.startsWith("c:")) { column = "content_digest"; kind = "content"; }
+            else if (key.startsWith("s:")) { column = "sig_digest"; kind = "sig"; }
+            else return false;
+            try (Cursor cursor = db.query(TABLE, ROW_COLUMNS, column + "=?",
+                    new String[]{digest(kind, key.substring(2))}, null, null, null)) {
+                while (cursor.moveToNext())
+                    if (key.equals(BalanceData.noteKey(decode(cursor)))) return true;
+            }
+            return false;
         }
 
         private Transaction find(String where, String digest) throws Exception {
