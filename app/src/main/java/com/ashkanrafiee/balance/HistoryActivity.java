@@ -244,6 +244,8 @@ public final class HistoryActivity extends Activity {
     private static volatile CountDownLatch renderGateStarted;
     private static volatile CountDownLatch renderGateRelease;
     static volatile Runnable summaryReadHookForTest;
+    static volatile Runnable scanHookForTest;
+    static volatile Runnable renderCompletionHookForTest;
 
     /** Test-only gate for making the loading state deterministic without a large history fixture. */
     static void setRenderGateForTest(CountDownLatch started, CountDownLatch release) {
@@ -258,6 +260,14 @@ public final class HistoryActivity extends Activity {
 
     static int scanStartsForTest(HistoryActivity activity) {
         return activity.historyScanStarts;
+    }
+
+    static boolean renderIdleForTest(HistoryActivity activity) {
+        return !activity.renderRunning && !activity.renderQueued;
+    }
+
+    static boolean refreshRunningForTest(HistoryActivity activity) {
+        return activity.scrollView != null && activity.scrollView.refreshing;
     }
 
     /** Test-only view of the dialogs this screen currently shows. Dialog windows live outside
@@ -2827,6 +2837,9 @@ public final class HistoryActivity extends Activity {
     private void startHistoryScan(int listenerGen, Context app) {
         if (listenerGen != historyListenerGen || !historyResumed
                 || isDestroyed() || isFinishing()) return;
+        // A previous scan's pending render must not settle feedback owned by this request,
+        // including a request folded into the running scan's follow-up.
+        automaticRefreshTargetGen = -1;
         if (historyScanRunning) {
             historyScanAgain = true;
             return;
@@ -2836,6 +2849,8 @@ public final class HistoryActivity extends Activity {
         if (scrollView != null && historyResult == null) scrollView.beginAutomaticRefresh();
         new Thread(() -> {
             try {
+                Runnable hook = scanHookForTest;
+                if (hook != null) hook.run();
                 if (checkSelfPermission(Manifest.permission.READ_SMS)
                         == PackageManager.PERMISSION_GRANTED) {
                     java.util.LinkedHashMap<String, Bank> saved = BalanceData.read(app);
@@ -2977,6 +2992,8 @@ public final class HistoryActivity extends Activity {
                         && transactionsRevision.equals(previousTransactions)
                         && sameRevision(metadataRevision, previousMetadata)
                         && state.equals(previousState)) {
+                    Runnable hook = renderCompletionHookForTest;
+                    if (hook != null) hook.run();
                     runOnUiThread(() -> {
                         if (gen == renderGen && !lifecycleStale(uiGen))
                             finishAutomaticRefreshForRender(gen);
@@ -3044,6 +3061,8 @@ public final class HistoryActivity extends Activity {
                 final boolean stableRevision = sameRevision(transactionsRevision,
                     TransactionStore.revision(app)) && sameRevision(metadataRevision,
                     MetadataStore.revision(app));
+                Runnable completionHook = renderCompletionHookForTest;
+                if (completionHook != null) completionHook.run();
                 runOnUiThread(() -> {
                     if (gen != renderGen || lifecycleStale(uiGen)
                             || isDestroyed() || isFinishing()) {

@@ -9,6 +9,8 @@ import static org.junit.Assert.assertTrue;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.os.SystemClock;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
@@ -30,6 +32,7 @@ import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * What the history screen shows while it is still reading its history.
@@ -62,6 +65,8 @@ public class HistoryLoadingStateTest {
 
     @After public void tearDown() {
         HistoryActivity.setRenderGateForTest(null, null);
+        HistoryActivity.scanHookForTest = null;
+        HistoryActivity.renderCompletionHookForTest = null;
         if (scenario != null) scenario.close();
         LocaleHelper.setLanguage(ctx, originalTag);
         CurrencyHelper.setCurrency(ctx, originalCurrency);
@@ -206,6 +211,98 @@ public class HistoryLoadingStateTest {
         final boolean[] idle = {false};
         scenario.onActivity(activity -> idle[0] = HistoryActivity.idleForTest(activity));
         return idle[0];
+    }
+
+    @Test public void manualPullDuringPreviousScanValidation_keepsFeedbackUntilItsOwnValidation()
+            throws Exception {
+        storeEnoughToBeSlowToRead();
+        openHistory();
+        await(this::idle, 60_000, "the initial scan and render to settle");
+        CountDownLatch oldRenderStarted = new CountDownLatch(1);
+        CountDownLatch oldRenderRelease = new CountDownLatch(1);
+        CountDownLatch manualScanStarted = new CountDownLatch(1);
+        CountDownLatch manualScanRelease = new CountDownLatch(1);
+        CountDownLatch manualRenderStarted = new CountDownLatch(1);
+        CountDownLatch manualRenderRelease = new CountDownLatch(1);
+        AtomicInteger resumeValidations = new AtomicInteger();
+        HistoryActivity.renderCompletionHookForTest = () -> {
+            // Resume validates once immediately and once after its automatic scan completes.
+            if (resumeValidations.incrementAndGet() == 2)
+                gate(oldRenderStarted, oldRenderRelease);
+        };
+        try {
+            scenario.moveToState(Lifecycle.State.CREATED);
+            scenario.moveToState(Lifecycle.State.RESUMED);
+            assertTrue("the automatic scan's validation must reach its completion gate",
+                oldRenderStarted.await(10, TimeUnit.SECONDS));
+            HistoryActivity.scanHookForTest = () -> gate(manualScanStarted, manualScanRelease);
+            scenario.onActivity(activity -> pull(findScroll(activity.getWindow().getDecorView())));
+            assertTrue("the manual pull must start its own scan",
+                manualScanStarted.await(10, TimeUnit.SECONDS));
+
+            oldRenderRelease.countDown();
+            await(() -> {
+                final boolean[] idle = {false};
+                scenario.onActivity(activity -> idle[0] = HistoryActivity.renderIdleForTest(activity));
+                return idle[0];
+            }, 10_000, "the previous scan's validation to finish");
+            assertManualRefreshActive();
+
+            HistoryActivity.renderCompletionHookForTest =
+                () -> gate(manualRenderStarted, manualRenderRelease);
+            manualScanRelease.countDown();
+            assertTrue("the manual scan must reach its own validation",
+                manualRenderStarted.await(10, TimeUnit.SECONDS));
+            assertManualRefreshActive();
+            manualRenderRelease.countDown();
+            await(this::idle, 30_000, "the manual scan and validation to finish");
+            await(() -> findByDescription(ctx.getString(R.string.history_refreshing)) == null,
+                10_000, "the manual refresh indicator to settle");
+        } finally {
+            HistoryActivity.scanHookForTest = null;
+            HistoryActivity.renderCompletionHookForTest = null;
+            oldRenderRelease.countDown();
+            manualScanRelease.countDown();
+            manualRenderRelease.countDown();
+        }
+    }
+
+    private void assertManualRefreshActive() {
+        scenario.onActivity(activity -> {
+            assertTrue("an older render must not settle the new manual refresh",
+                HistoryActivity.refreshRunningForTest(activity));
+            assertEquals("manual feedback stays visible until its own validation finishes",
+                ctx.getString(R.string.history_refreshing),
+                findScroll(activity.getWindow().getDecorView()).getContentDescription());
+        });
+    }
+
+    private static void gate(CountDownLatch started, CountDownLatch release) {
+        started.countDown();
+        try {
+            if (!release.await(60, TimeUnit.SECONDS))
+                throw new AssertionError("refresh regression gate timed out");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(interrupted);
+        }
+    }
+
+    private static void pull(ScrollView scroll) {
+        scroll.scrollTo(0, 0);
+        float start = 1f;
+        float end = start + 130 * scroll.getResources().getDisplayMetrics().density;
+        assertTrue("the list must have enough room for a real pull", end < scroll.getHeight());
+        float x = scroll.getWidth() / 2f;
+        long down = SystemClock.uptimeMillis();
+        for (int step = 0; step <= 15; step++) {
+            int action = step == 0 ? MotionEvent.ACTION_DOWN
+                : step == 15 ? MotionEvent.ACTION_UP : MotionEvent.ACTION_MOVE;
+            MotionEvent event = MotionEvent.obtain(down, down + step * 16L, action,
+                x, start + (end - start) * step / 15f, 0);
+            scroll.dispatchTouchEvent(event);
+            event.recycle();
+        }
     }
 
     private static ScrollView findScroll(View view) {
