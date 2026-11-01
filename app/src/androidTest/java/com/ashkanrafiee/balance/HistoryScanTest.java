@@ -1170,6 +1170,29 @@ public class HistoryScanTest {
         assertEquals(1, BalanceData.readTransactions(ctx).size());
     }
 
+    @Test public void rulesReparse_deletedCanonicalDeliveryKeepsOneEventAndItsAnnotations() throws Exception {
+        String firstBody = "مبلغ 200,000 ریال با کارت 1234 خرید شد، موجودی: 1,000,000 ریال";
+        String secondBody = firstBody.replace("1234", "9876");
+        seed("b.pasargad", firstBody, T + 1000);
+        seed("b.pasargad", secondBody, T + 1100);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        Transaction canonical = BalanceData.readTransactions(ctx).get(0);
+        assertEquals(T + 1000, canonical.date);
+        BalanceData.setNote(ctx, canonical, "one purchase");
+        BalanceData.setTags(ctx, canonical, Collections.singletonList("purchase"));
+        clearInbox();
+        seed("b.pasargad", secondBody, T + 1100);
+        prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
+            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        List<Transaction> saved = BalanceData.readTransactions(ctx);
+        assertEquals(1, saved.size());
+        assertEquals(T + 1100, saved.get(0).date);
+        assertEquals("one purchase", BalanceData.getNote(ctx, saved.get(0)));
+        assertEquals(Collections.singletonList("purchase"), BalanceData.getTags(ctx, saved.get(0)));
+        assertNull(BalanceData.readNotes(ctx).get(BalanceData.noteKey(canonical)));
+    }
+
     @Test public void legacySiglessEntries_areMigratedOnUpgradeRescan() throws Exception {
         // History written by the previous version had no fingerprints. A full upgrade re-scan rebuilds
         // from the messages still in the inbox, so the legacy entry is replaced by the fingerprinted

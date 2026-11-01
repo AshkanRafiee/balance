@@ -2176,6 +2176,7 @@ final class BalanceData {
                 if (full) {
                     Map<String, Integer> freshAtKey = new HashMap<>();
                     Map<String, Transaction> freshBySig = new HashMap<>();
+                    Map<String, List<Transaction>> freshByFamily = new HashMap<>();
                     Map<String, List<Transaction>> freshByLegacySig = new HashMap<>();
                     Map<String, List<Transaction>> storedByContent = new HashMap<>();
                     for (Transaction old : stored) {
@@ -2184,6 +2185,7 @@ final class BalanceData {
                                 ignored -> new ArrayList<>()).add(old);
                     }
                     for (Transaction t : fresh) {
+                        indexMovement(freshByFamily, t);
                         if (t.sig != null) {
                             freshBySig.putIfAbsent(t.sig, t);
                             if (t.sig.startsWith("e2:")) {
@@ -2225,6 +2227,16 @@ final class BalanceData {
                     for (Transaction t : stored) {
                         if (identityClaimed.contains(t)) continue;
                         Transaction f = t.sig == null ? null : freshBySig.get(t.sig);
+                        if (f == null && t.sig != null && t.sig.startsWith("e2:")) {
+                            List<Transaction> candidates = freshByFamily.get(signatureFamily(t.sig));
+                            if (candidates != null) for (Transaction candidate : candidates) {
+                                if (!sameMovement(t, candidate)) continue;
+                                // A removed delivery can sit between two real occurrences. Only a
+                                // unique bounded match may inherit its row and annotations.
+                                if (f != null) { f = null; break; }
+                                f = candidate;
+                            }
+                        }
                         if (f == null && t.sig != null && !t.sig.startsWith("e2:")) {
                             List<Transaction> candidates = freshByLegacySig.get(t.sig);
                             if (candidates != null) for (Transaction candidate : candidates) {
