@@ -29,11 +29,45 @@ public class TransactionStoreTest {
 
     @Before public void setUp() {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        BalanceData.reset(context, true);
+        resetRootFixture();
     }
 
     @After public void tearDown() {
         BalanceData.reset(context, true);
+    }
+
+    private void resetRootFixture() {
+        synchronized (BalanceData.class) {
+            // These schema/corruption fixtures deliberately edit legacy root paths directly. Pin
+            // their setup to that layout even when run after a generation-producing test; resetting
+            // a selected generation alone does not redirect root-path edits to its database.
+            DataGeneration.clearForTests(context);
+            BalanceData.reset(context, true);
+        }
+    }
+
+    @Test public void rootFixtureIsolatedAfterGenerationProducingTests() throws Exception {
+        synchronized (BalanceData.class) {
+            try (DataGeneration.Stage stage = DataGeneration.beginStage(context)) {
+                TransactionStore.replace(stage.context(), java.util.Collections.singletonList(
+                    new Transaction("Synthetic", 1L, 2L)));
+                stage.publish();
+            }
+        }
+        assertFalse(context.getDatabasePath(TransactionStore.DB_NAME).equals(
+            DataGeneration.context(context).getDatabasePath(TransactionStore.DB_NAME)));
+
+        resetRootFixture();
+
+        assertEquals(context.getDatabasePath(TransactionStore.DB_NAME),
+            DataGeneration.context(context).getDatabasePath(TransactionStore.DB_NAME));
+        assertNull(TransactionStore.read(context));
+        Transaction legacy = new Transaction("Synthetic", 3L, 4L);
+        assertTrue(context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit()
+            .putString(BalanceData.KEY_TRANSACTIONS,
+                BalanceData.serializeTransactions(java.util.Collections.singletonList(legacy))).commit());
+        assertTransactionEquals(legacy, TransactionStore.read(context).get(0));
+        assertTrue(context.getDatabasePath(TransactionStore.DB_NAME).isFile());
     }
 
     @Test public void freshReadDoesNotCreateAnIncompleteStore() throws Exception {
