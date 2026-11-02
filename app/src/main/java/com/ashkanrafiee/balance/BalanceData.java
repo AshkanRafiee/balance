@@ -1775,14 +1775,6 @@ final class BalanceData {
         return prior;
     }
 
-    private static boolean wasObserved(Transaction old, List<Transaction> observations) {
-        if (observations == null) return false;
-        for (Transaction observed : observations) {
-            if (sameParse(old, observed)) return true;
-        }
-        return false;
-    }
-
     private static boolean sameParse(Transaction old, Transaction observed) {
         return old.bank.equals(observed.bank) && old.date == observed.date && old.amount == observed.amount
             && java.util.Objects.equals(old.account, observed.account)
@@ -1815,6 +1807,67 @@ final class BalanceData {
             if (entry.getValue().size() == 1) out.put(entry.getKey(), entry.getValue().iterator().next());
         }
         return out;
+    }
+
+    /** Body/time-family similarity is weaker than source proof or an exact qualified identity.
+     *  After those anchors are claimed, require a unique remaining match in both directions.
+     *  In particular, a midpoint redelivery cannot bridge two distinct retained occurrences. */
+    private static Map<Transaction, Transaction> unambiguousReparseReplacements(
+            List<Transaction> stored, List<Transaction> fresh, Set<Transaction> claimed,
+            Set<Transaction> pairedFresh) {
+        Map<String, List<Transaction>> byContent = new HashMap<>();
+        Map<String, List<Transaction>> byFamily = new HashMap<>();
+        Map<String, List<Transaction>> byLegacySig = new HashMap<>();
+        for (Transaction transaction : fresh) {
+            if (pairedFresh.contains(transaction)) continue;
+            if (transaction.content != null)
+                byContent.computeIfAbsent(transaction.bank + "|" + transaction.content,
+                    ignored -> new ArrayList<>()).add(transaction);
+            indexMovement(byFamily, transaction);
+            if (transaction.sig != null && transaction.sig.startsWith("e2:")) {
+                String legacy = transaction.sig.substring(3, transaction.sig.indexOf(':', 3));
+                byLegacySig.computeIfAbsent(legacy, ignored -> new ArrayList<>()).add(transaction);
+            }
+        }
+        Map<Transaction, Set<Transaction>> candidates = new LinkedHashMap<>();
+        Map<Transaction, Transaction> firstSource = new HashMap<>();
+        Set<Transaction> ambiguousSources = new HashSet<>();
+        for (Transaction old : stored) {
+            if (claimed.contains(old)) continue;
+            Set<Transaction> matches = new LinkedHashSet<>();
+            List<Transaction> contentMatches = old.content == null ? null
+                : byContent.get(old.bank + "|" + old.content);
+            if (contentMatches != null) for (Transaction candidate : contentMatches)
+                if (dateDistance(old.date, candidate.date) <= DUPLICATE_DELIVERY_MS)
+                    matches.add(candidate);
+            if (old.sig != null && old.sig.startsWith("e2:")) {
+                List<Transaction> familyMatches = byFamily.get(signatureFamily(old.sig));
+                if (familyMatches != null) for (Transaction candidate : familyMatches)
+                    if (sameMovement(old, candidate)) matches.add(candidate);
+            } else if (old.sig != null) {
+                List<Transaction> legacyMatches = byLegacySig.get(old.sig);
+                if (legacyMatches != null) for (Transaction candidate : legacyMatches)
+                    if (old.bank.equals(candidate.bank)
+                            && java.util.Objects.equals(old.account, candidate.account)
+                            && dateDistance(old.date, candidate.date) <= DUPLICATE_DELIVERY_MS)
+                        matches.add(candidate);
+            }
+            if (matches.isEmpty()) continue;
+            candidates.put(old, matches);
+            for (Transaction candidate : matches) {
+                Transaction previous = firstSource.putIfAbsent(candidate, old);
+                if (previous != null && !sameParse(previous, old)) ambiguousSources.add(candidate);
+            }
+        }
+        Map<Transaction, Transaction> replacements = new LinkedHashMap<>();
+        for (Map.Entry<Transaction, Set<Transaction>> entry : candidates.entrySet()) {
+            if (entry.getValue().size() != 1) continue;
+            Transaction candidate = entry.getValue().iterator().next();
+            // Only identical retained parses are duplicate copies. Legacy annotation keys can
+            // legitimately be shared by distinct occurrences and cannot establish event identity.
+            if (!ambiguousSources.contains(candidate)) replacements.put(entry.getKey(), candidate);
+        }
+        return replacements;
     }
 
     /** Best-effort evidence capture; source failures must not block the core stores or watermarks. */
@@ -2253,23 +2306,8 @@ final class BalanceData {
                 if (full) {
                     Map<String, Integer> freshAtKey = new HashMap<>();
                     Map<String, Transaction> freshBySig = new HashMap<>();
-                    Map<String, List<Transaction>> freshByFamily = new HashMap<>();
-                    Map<String, List<Transaction>> freshByLegacySig = new HashMap<>();
-                    Map<String, List<Transaction>> storedByContent = new HashMap<>();
-                    for (Transaction old : stored) {
-                        if (old.content != null)
-                            storedByContent.computeIfAbsent(old.bank + "|" + old.content,
-                                ignored -> new ArrayList<>()).add(old);
-                    }
                     for (Transaction t : fresh) {
-                        indexMovement(freshByFamily, t);
-                        if (t.sig != null) {
-                            freshBySig.putIfAbsent(t.sig, t);
-                            if (t.sig.startsWith("e2:")) {
-                                String legacy = t.sig.substring(3, t.sig.indexOf(':', 3));
-                                freshByLegacySig.computeIfAbsent(legacy, ignored -> new ArrayList<>()).add(t);
-                            }
-                        }
+                        if (t.sig != null) freshBySig.putIfAbsent(t.sig, t);
                         String key = transactionCompositeKey(t) + "|" + t.date;
                         freshAtKey.put(key, freshAtKey.getOrDefault(key, 0) + 1);
                     }
@@ -2281,7 +2319,6 @@ final class BalanceData {
                     Map<String, Integer> identityClaimsPerKey = new HashMap<>();
                     Map<Transaction, Transaction> observedReplacements =
                         observedTransactionReplacements(stored, priorOfFresh);
-                    Set<Transaction> sourceMatchedFresh = new HashSet<>(observedReplacements.values());
                     for (Map.Entry<Transaction, Transaction> replacement : observedReplacements.entrySet()) {
                         identityClaimed.add(replacement.getKey());
                         metadataReplacements.put(replacement.getKey(), replacement.getValue());
@@ -2289,51 +2326,10 @@ final class BalanceData {
                         String key = transactionCompositeKey(f) + "|" + f.date;
                         identityClaimsPerKey.put(key, identityClaimsPerKey.getOrDefault(key, 0) + 1);
                     }
-                    // Source text is independent of parsed amount, account and event date. Claim it
-                    // first, one-to-one and nearest first, so corrections to any of those fields do
-                    // not leave the previous parse behind as a supposedly deleted-message orphan.
-                    // Repeated clockless bodies can occur on different days: never claim all of them.
-                    for (Transaction f : fresh) {
-                        if (sourceMatchedFresh.contains(f)) continue;
-                        if (f.content == null) continue;
-                        List<Transaction> candidates = storedByContent.get(f.bank + "|" + f.content);
-                        Transaction best = null;
-                        if (candidates != null) for (Transaction old : candidates) {
-                            if (identityClaimed.contains(old)) continue;
-                            if (dateDistance(old.date, f.date) > DUPLICATE_DELIVERY_MS
-                                    && !wasObserved(old, priorOfFresh.get(f))) continue;
-                            if (best == null || dateDistance(old.date, f.date) < dateDistance(best.date, f.date))
-                                best = old;
-                        }
-                        if (best != null) {
-                            identityClaimed.add(best);
-                            metadataReplacements.put(best, f);
-                            String key = transactionCompositeKey(f) + "|" + f.date;
-                            identityClaimsPerKey.put(key, identityClaimsPerKey.getOrDefault(key, 0) + 1);
-                        }
-                    }
+                    // Exact identities anchor their own events before any weaker body/time match.
                     for (Transaction t : stored) {
                         if (identityClaimed.contains(t)) continue;
                         Transaction f = t.sig == null ? null : freshBySig.get(t.sig);
-                        if (f == null && t.sig != null && t.sig.startsWith("e2:")) {
-                            List<Transaction> candidates = freshByFamily.get(signatureFamily(t.sig));
-                            if (candidates != null) for (Transaction candidate : candidates) {
-                                if (!sameMovement(t, candidate)) continue;
-                                // A removed delivery can sit between two real occurrences. Only a
-                                // unique bounded match may inherit its row and annotations.
-                                if (f != null) { f = null; break; }
-                                f = candidate;
-                            }
-                        }
-                        if (f == null && t.sig != null && !t.sig.startsWith("e2:")) {
-                            List<Transaction> candidates = freshByLegacySig.get(t.sig);
-                            if (candidates != null) for (Transaction candidate : candidates) {
-                                if (!java.util.Objects.equals(t.account, candidate.account)
-                                        || dateDistance(t.date, candidate.date) > DUPLICATE_DELIVERY_MS) continue;
-                                if (f != null) { f = null; break; }
-                                f = candidate;
-                            }
-                        }
                         if (f != null) {
                             identityClaimed.add(t);
                             metadataReplacements.put(t, f);
@@ -2341,6 +2337,15 @@ final class BalanceData {
                             identityClaimsPerKey.put(key,
                                 identityClaimsPerKey.getOrDefault(key, 0) + 1);
                         }
+                    }
+                    Map<Transaction, Transaction> fallbackReplacements = unambiguousReparseReplacements(
+                        stored, fresh, identityClaimed, new HashSet<>(metadataReplacements.values()));
+                    for (Map.Entry<Transaction, Transaction> replacement : fallbackReplacements.entrySet()) {
+                        identityClaimed.add(replacement.getKey());
+                        metadataReplacements.put(replacement.getKey(), replacement.getValue());
+                        Transaction f = replacement.getValue();
+                        String key = transactionCompositeKey(f) + "|" + f.date;
+                        identityClaimsPerKey.put(key, identityClaimsPerKey.getOrDefault(key, 0) + 1);
                     }
                     Map<String, Integer> budget = new HashMap<>();
                     for (Map.Entry<String, Integer> e : freshAtKey.entrySet()) {
