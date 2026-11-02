@@ -290,7 +290,7 @@
     <string name="commitments_unit_days">Days</string>
     <string name="commitments_unit_weeks">Weeks</string>
     <string name="commitments_notifications_off">Reminders need notification permission — allow it in Settings to get them.</string>
-    <string name="commitments_exact_note">Exact timing is off — reminders may arrive late. Tap to allow.</string>
+    <string name="commitments_exact_note">Exact reminder alarms are off. Tap to allow. Android may still delay delivery.</string>
 
     <string name="scan_diag_title">Scan diagnostics</string>
     <string name="scan_diag_reading">Reading SMS on this device…</string>

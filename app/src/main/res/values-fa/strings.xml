@@ -273,7 +273,7 @@
     <string name="commitments_unit_days">روز</string>
     <string name="commitments_unit_weeks">هفته</string>
     <string name="commitments_notifications_off">یادآور به مجوز اعلان نیاز دارد — برای دریافت آن را در تنظیمات بدهید.</string>
-    <string name="commitments_exact_note">زمان‌بندی دقیق خاموش است — یادآور ممکن است دیر برسد. برای اجازه بزنید.</string>
+    <string name="commitments_exact_note">هشدار دقیق یادآور خاموش است. برای اجازه بزنید؛ اندروید همچنان ممکن است نمایش آن را به تأخیر بیندازد.</string>
 
     <string name="scan_diag_title">تشخیص اسکن پیامک</string>
     <string name="scan_diag_reading">در حال خواندن پیامک‌های این دستگاه…</string>

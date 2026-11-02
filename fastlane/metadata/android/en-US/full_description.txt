@@ -20,7 +20,7 @@ Features:
 - Bank-stated movement reasons and channels appear in your language when present, and stay separate from your note
 - Payment merchants read from authorization SMS: when a purchase message names a merchant and uniquely matches a completed withdrawal, the history shows it as sourced payment information. An OTP alone never creates or confirms a transaction, and ambiguous matches stay unattached
 - Private notes on any history row, including amber Unaccounted rows, and tags on movements: add your own words and labels, with notes following their row into filters, CSV exports and encrypted backups. When a delayed SMS exactly identifies the missing movement, its note follows the real transaction; ambiguous matches remain unattached
-- Optional commitments card for recurring payments or receipts, with separate totals and reminders
+- Track recurring payments and receipts with separate totals and optional reminders; Android may delay them
 - CSV export of exactly what the history shows at that moment, through the system file picker, with notes on movements or Unaccounted rows, movement tags, and the bank's reason, channel and matched merchant
 - Password-encrypted backup and restore of balances, history, notes, tags, commitments, bank facts and recognized SMS source samples
 - Optional in-app lock with PIN, password or fingerprint, covering the app, the widget and screenshots/recents
