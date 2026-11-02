@@ -174,6 +174,110 @@ public class HistoryResidualNoteEditorTest {
         assertNull(BalanceData.getNote(context, gap));
     }
 
+    @Test public void residualEditorOpenDoesNotBlockUiWhileStoreIsBusy_andLoadsSavedNote()
+            throws Exception {
+        Residual gap = seedGapAndOpen();
+        BalanceData.setNote(context, gap, NOTE);
+        AlertDialog detail = openResidualDetail();
+        try (StoreBlock ignored = new StoreBlock()) {
+            clickOpenWithoutBlockingUi(detail);
+        }
+        awaitEditor();
+        scenario.onActivity(activity -> {
+            AlertDialog editor = lastDialog(activity);
+            assertTrue(editor.isShowing());
+            assertEquals("opening asynchronously must load the current saved note", NOTE,
+                editorInput(editor).getText().toString());
+            android.widget.Button clear = editor.getButton(AlertDialog.BUTTON_NEUTRAL);
+            assertNotNull("a loaded existing note must still offer Clear", clear);
+            assertEquals("the existing-note Clear action must be visible", View.VISIBLE,
+                clear.getVisibility());
+            assertTrue("the existing-note Clear action must be usable", clear.isEnabled());
+        });
+    }
+
+    @Test public void cancelWhileOpeningWaitsForStore_doesNotOpenAnEditorLater() throws Exception {
+        seedGapAndOpen();
+        AlertDialog detail = openResidualDetail();
+        try (StoreBlock ignored = new StoreBlock()) {
+            clickOpenWithoutBlockingUi(detail);
+            scenario.onActivity(activity -> lastDialog(activity)
+                .getButton(AlertDialog.BUTTON_NEGATIVE).performClick());
+        }
+        await(this::idle, "the canceled editor load to finish");
+        assertNoDialogs();
+    }
+
+    @Test public void backWhileOpeningWaitsForStore_doesNotOpenAnEditorLater() throws Exception {
+        seedGapAndOpen();
+        AlertDialog detail = openResidualDetail();
+        try (StoreBlock ignored = new StoreBlock()) {
+            clickOpenWithoutBlockingUi(detail);
+            scenario.onActivity(activity -> lastDialog(activity).cancel());
+        }
+        await(this::idle, "the canceled editor load to finish");
+        assertNoDialogs();
+    }
+
+    @Test public void pauseWhileOpeningWaitsForStore_discardsTheOldCompletion() throws Exception {
+        seedGapAndOpen();
+        AlertDialog detail = openResidualDetail();
+        try (StoreBlock ignored = new StoreBlock()) {
+            clickOpenWithoutBlockingUi(detail);
+            scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED);
+        }
+        scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED);
+        await(this::idle, "the resumed screen and canceled editor load");
+        assertNoDialogs();
+    }
+
+    @Test public void lockBeforeOpeningAcquiresStore_doesNotRevealTheNote() throws Exception {
+        Residual gap = seedGapAndOpen();
+        BalanceData.setNote(context, gap, NOTE);
+        AlertDialog detail = openResidualDetail();
+        boolean originallyLocked = LockManager.isSessionLocked();
+        try {
+            try (StoreBlock ignored = new StoreBlock()) {
+                clickOpenWithoutBlockingUi(detail);
+                LockManager.lockSession();
+            }
+            await(this::idle, "the locked editor load to finish");
+            assertNoDialogs();
+            assertEquals("a canceled read must not change the saved note", NOTE,
+                BalanceData.getNote(context, gap));
+        } finally {
+            if (originallyLocked) LockManager.lockSession();
+            else LockManager.unlockSession();
+        }
+    }
+
+    @Test public void failedEditorLoad_doesNotShowAnEmptyEditorAndCanBeRetried() throws Exception {
+        Residual gap = seedGapAndOpen();
+        BalanceData.setNote(context, gap, NOTE);
+        SharedPreferences prefs = DataGeneration.dataPrefs(context);
+        String owner = prefs.getString(MetadataStore.KEY_METADATA_STORE_TOKEN, null);
+        assertNotNull(owner);
+        try {
+            assertTrue(prefs.edit().putString(MetadataStore.KEY_METADATA_STORE_TOKEN,
+                "wrong-owner-editor-load-fixture").commit());
+            AlertDialog detail = openResidualDetail();
+            scenario.onActivity(activity -> detail.getButton(AlertDialog.BUTTON_NEUTRAL).performClick());
+            await(this::idle, "the failed editor load to finish");
+            assertNoDialogs();
+        } finally {
+            assertTrue(prefs.edit().putString(MetadataStore.KEY_METADATA_STORE_TOKEN, owner).commit());
+        }
+        openEditor();
+        scenario.onActivity(activity -> assertEquals(NOTE, editorInput(lastDialog(activity))
+            .getText().toString()));
+        assertEquals(NOTE, BalanceData.getNote(context, gap));
+    }
+
+    private void assertNoDialogs() {
+        scenario.onActivity(activity -> assertTrue("an obsolete/failed load must not open an editor",
+            HistoryActivity.shownDialogsForTest(activity).isEmpty()));
+    }
+
     @Test public void residualSaveDoesNotBlockUiWhileStoreIsBusy_andCapturesSubmittedText()
             throws Exception {
         Residual gap = seedGapAndOpen();
@@ -292,6 +396,26 @@ public class HistoryResidualNoteEditorTest {
         if (failure.get() != null) throw new AssertionError(failure.get());
     }
 
+    private static void clickOpenWithoutBlockingUi(AlertDialog detail) throws Exception {
+        CountDownLatch returnedToQueue = new CountDownLatch(1);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+        main.post(() -> {
+            try {
+                detail.getButton(AlertDialog.BUTTON_NEUTRAL).performClick();
+            } catch (Throwable error) {
+                failure.set(error);
+            } finally {
+                // A separate main-loop turn proves opening did not merely post another UI-blocking
+                // metadata read. The enclosing StoreBlock releases the monitor even on failure.
+                main.post(returnedToQueue::countDown);
+            }
+        });
+        assertTrue("Add/Edit Note must return to the UI queue while the store is busy",
+            returnedToQueue.await(2, TimeUnit.SECONDS));
+        if (failure.get() != null) throw new AssertionError(failure.get());
+    }
+
     private static final class StoreBlock implements AutoCloseable {
         final CountDownLatch release = new CountDownLatch(1);
         final Thread holder;
@@ -345,6 +469,13 @@ public class HistoryResidualNoteEditorTest {
     }
 
     private void openEditor() throws Exception {
+        AlertDialog detail = openResidualDetail();
+        scenario.onActivity(activity -> detail.getButton(AlertDialog.BUTTON_NEUTRAL).performClick());
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        awaitEditor();
+    }
+
+    private AlertDialog openResidualDetail() throws Exception {
         await(() -> {
             final boolean[] found = {false};
             scenario.onActivity(activity -> found[0] = residualRow(activity.getWindow().getDecorView()) != null);
@@ -355,12 +486,16 @@ public class HistoryResidualNoteEditorTest {
         // Dialog's OnShowListener is posted to the main queue. It installs the note button's
         // custom listener, so clicking in the same UI turn as show() would hit the default button.
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
-        scenario.onActivity(activity -> lastDialog(activity)
-            .getButton(AlertDialog.BUTTON_NEUTRAL).performClick());
-        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        AtomicReference<AlertDialog> detail = new AtomicReference<>();
+        scenario.onActivity(activity -> detail.set(lastDialog(activity)));
+        return detail.get();
+    }
+
+    private void awaitEditor() throws Exception {
         await(() -> {
             final boolean[] visible = {false};
             scenario.onActivity(activity -> {
+                if (HistoryActivity.shownDialogsForTest(activity).isEmpty()) return;
                 AlertDialog editor = lastDialog(activity);
                 visible[0] = editor.isShowing() && find(editor.getWindow().getDecorView(),
                     view -> view instanceof EditText) != null;
@@ -405,7 +540,8 @@ public class HistoryResidualNoteEditorTest {
     private boolean idle() {
         final boolean[] idle = {false};
         scenario.onActivity(activity -> idle[0] = HistoryActivity.idleForTest(activity)
-            && HistoryActivity.residualNoteSaveIdleForTest(activity));
+            && HistoryActivity.residualNoteSaveIdleForTest(activity)
+            && HistoryActivity.residualNoteLoadIdleForTest(activity));
         return idle[0];
     }
 

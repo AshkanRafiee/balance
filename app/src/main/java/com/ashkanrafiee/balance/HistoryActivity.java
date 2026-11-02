@@ -4384,6 +4384,7 @@ public final class HistoryActivity extends Activity {
 
     /** UI-thread count, including canceled workers that have not delivered completion yet. */
     private int residualNoteSaves;
+    private int residualNoteLoads;
     /** Immediate pause/destruction fence; dialog dismissal callbacks themselves are posted. */
     private volatile int residualNoteUiEpoch;
 
@@ -4391,18 +4392,70 @@ public final class HistoryActivity extends Activity {
         return activity.residualNoteSaves == 0;
     }
 
-    /** Note-only editor for an unaccounted amount. Residuals deliberately have no tag editor. */
-    private void residualNoteDialog(final Residual r) {
-        final String key = BalanceData.residualNoteKey(r);
-        final String existing;
-        try {
-            existing = BalanceData.getNote(this, key);
-        } catch (RuntimeException error) {
-            android.util.Log.w("BalanceHistory", "residual note metadata read failed", error);
-            Toast.makeText(this, R.string.note_load_failed, Toast.LENGTH_SHORT).show();
-            return;
-        }
+    static boolean residualNoteLoadIdleForTest(HistoryActivity activity) {
+        return activity.residualNoteLoads == 0;
+    }
 
+    /** Opening a note must not wait for a scan/restore's store monitor on the UI thread either. */
+    private void residualNoteDialog(final Residual r) {
+        if (!historyResumed || isDestroyed() || isFinishing() || LockManager.isSessionLocked()) return;
+        final String key = BalanceData.residualNoteKey(r);
+        final int uiGen = historyUiGen;
+        final int editorEpoch = residualNoteUiEpoch;
+        final Context app = getApplicationContext();
+        java.util.concurrent.atomic.AtomicBoolean active = new java.util.concurrent.atomic.AtomicBoolean(true);
+        android.app.AlertDialog loading = new android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.residual_note_title, signedAmount(r.amount)))
+            .setMessage(R.string.history_loading)
+            .setNegativeButton(R.string.lock_cancel, (dialog, which) -> active.set(false))
+            .create();
+        showDialog(loading);
+        loading.setOnCancelListener(dialog -> active.set(false));
+        loading.getWindow().getDecorView().addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View view) { }
+            @Override public void onViewDetachedFromWindow(View view) { active.set(false); }
+        });
+        loading.setOnDismissListener(dialog -> {
+            active.set(false);
+            activeDialogs.remove(loading);
+        });
+        residualNoteLoads++;
+        new Thread(() -> {
+            String note = null;
+            boolean read = false;
+            RuntimeException failure = null;
+            try {
+                synchronized (BalanceData.class) {
+                    if (active.get() && editorEpoch == residualNoteUiEpoch
+                            && !LockManager.isSessionLocked()) {
+                        note = BalanceData.getNote(app, key);
+                        read = true;
+                    }
+                }
+            } catch (RuntimeException error) {
+                failure = error;
+                android.util.Log.w("BalanceHistory", "residual note metadata read failed", error);
+            }
+            final String existing = note;
+            final boolean loaded = read;
+            final RuntimeException error = failure;
+            runOnUiThread(() -> {
+                residualNoteLoads--;
+                if (uiGen != historyUiGen || editorEpoch != residualNoteUiEpoch
+                        || !historyResumed || !active.get() || !loading.isShowing()
+                        || isDestroyed() || isFinishing()) return;
+                active.set(false);
+                loading.dismiss();
+                if (LockManager.isSessionLocked()) return;
+                if (loaded) showResidualNoteEditor(r, existing);
+                else if (error != null)
+                    Toast.makeText(this, R.string.note_load_failed, Toast.LENGTH_SHORT).show();
+            });
+        }, "residual-note-load").start();
+    }
+
+    /** Note-only editor for an unaccounted amount. Residuals deliberately have no tag editor. */
+    private void showResidualNoteEditor(final Residual r, String existing) {
         final EditText input = new EditText(this);
         input.setSingleLine(false);
         input.setInputType(android.text.InputType.TYPE_CLASS_TEXT
