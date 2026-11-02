@@ -12,6 +12,8 @@ import android.app.NotificationManager;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.SharedPreferences;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.service.notification.StatusBarNotification;
 
@@ -24,6 +26,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import java.util.ArrayList;
+import java.lang.reflect.Proxy;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.HashSet;
@@ -33,6 +36,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Reminder projections are bounded, current, cancellable and free of locked system effects. */
 @RunWith(AndroidJUnit4.class)
@@ -357,6 +361,200 @@ public class CommitmentReminderPlanningTest {
 
         CommitmentReminders.fireNow(context, definition.id, new CommitmentReminderJobs.Token());
         assertNotNull(notification(definition.id));
+    }
+
+    @Test public void scheduledStateDiskFlushDoesNotBlockUiSuppressionReset() throws Exception {
+        assertUiResetDoesNotWaitForDisk(false);
+    }
+
+    @Test public void deliveryStateDiskFlushDoesNotBlockOrOverwriteUiSuppressionReset()
+            throws Exception {
+        assertUiResetDoesNotWaitForDisk(true);
+    }
+
+    private void assertUiResetDoesNotWaitForDisk(boolean deliver) throws Exception {
+        Commitment definition = Commitment.create("Disk wait", -500, Commitment.ONCE,
+            inDays(deliver ? -1 : 5), null, true, 0);
+        CommitmentStore.upsert(context, definition);
+        reminderPrefs().edit().putStringSet("fired_due", Collections.singleton(
+            definition.id + "|" + inDays(-2))).commit();
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        AtomicBoolean first = new AtomicBoolean(true);
+        Context blocked = interceptedReminderState(editor -> {
+            if (first.getAndSet(false)) {
+                entered.countDown();
+                if (!release.await(10, TimeUnit.SECONDS))
+                    throw new AssertionError("test did not release the disk flush");
+            }
+            return editor.commit();
+        });
+        AtomicReference<Throwable> workerFailure = new AtomicReference<>();
+        AtomicReference<Throwable> uiFailure = new AtomicReference<>();
+        Thread worker = new Thread(() -> {
+            try {
+                CommitmentReminders.fireNow(blocked, definition.id,
+                    new CommitmentReminderJobs.Token());
+            } catch (Throwable failure) { workerFailure.set(failure); }
+        });
+        CountDownLatch uiReturned = new CountDownLatch(1);
+        try {
+            worker.start();
+            assertTrue("worker must reach its durable flush", entered.await(5, TimeUnit.SECONDS));
+            // Mirror settlement's state change before its UI-side suppression reset.
+            CommitmentStore.settle(context, definition.id, definition.start);
+            new Handler(Looper.getMainLooper()).post(() -> {
+                try { CommitmentReminders.resetFired(context, definition.id); }
+                catch (Throwable failure) { uiFailure.set(failure); }
+                finally { uiReturned.countDown(); }
+            });
+            assertTrue("UI reset must not wait for worker disk I/O",
+                uiReturned.await(2, TimeUnit.SECONDS));
+            assertNull(uiFailure.get());
+            assertTrue(reminderPrefs().getStringSet("fired_due", Collections.emptySet()).isEmpty());
+        } finally {
+            release.countDown();
+            worker.join(5000);
+        }
+        assertFalse(worker.isAlive());
+        assertNull(workerFailure.get());
+        assertTrue("the older worker flush cannot overwrite the newer UI reset",
+            reminderPrefs().getStringSet("fired_due", Collections.emptySet()).isEmpty());
+    }
+
+    @Test public void failedDeliveryStateFlushPropagatesAndCanBeRetried() throws Exception {
+        Commitment definition = Commitment.create("Flush retry", -500, Commitment.ONCE,
+            inDays(-1), null, true, 0);
+        CommitmentStore.upsert(context, definition);
+        AtomicBoolean first = new AtomicBoolean(true);
+        Context failing = interceptedReminderState(editor ->
+            first.getAndSet(false) ? false : editor.commit());
+        try {
+            CommitmentReminders.fireNow(failing, definition.id, new CommitmentReminderJobs.Token());
+            fail("a failed durable flush must remain a failed dispatcher request");
+        } catch (IllegalStateException expected) { }
+        assertNotNull(notification(definition.id));
+        assertTrue(reminderPrefs().getStringSet("fired_due", Collections.emptySet())
+            .contains(definition.id + "|" + definition.start));
+
+        CommitmentReminders.fireNow(context, definition.id, new CommitmentReminderJobs.Token());
+
+        assertEquals("retry must preserve successful delivery suppression", 1,
+            reminderPrefs().getStringSet("fired_due", Collections.emptySet()).size());
+        assertFalse(CommitmentReminders.scheduledIds(context).contains(definition.id));
+    }
+
+    @Test public void failedScheduledStateFlushPropagatesAndCanBeRetried() throws Exception {
+        Commitment definition = Commitment.create("Alarm flush retry", -500, Commitment.ONCE,
+            inDays(5), null, true, 0);
+        CommitmentStore.upsert(context, definition);
+        Context failing = interceptedReminderState(editor -> false);
+        try {
+            CommitmentReminders.fireNow(failing, definition.id, new CommitmentReminderJobs.Token());
+            fail("an alarm-state flush failure must propagate for native retry");
+        } catch (IllegalStateException expected) { }
+
+        CommitmentReminders.fireNow(context, definition.id, new CommitmentReminderJobs.Token());
+
+        assertTrue(CommitmentReminders.scheduledIds(context).contains(definition.id));
+        assertNull(notification(definition.id));
+    }
+
+    @Test public void resetHookRemovesOnlyReminderNotificationsWhileAdmissionIsBlocked()
+            throws Exception {
+        Commitment definition = Commitment.create("Reset private data", -500, Commitment.ONCE,
+            inDays(-1), null, true, 0);
+        CommitmentStore.upsert(context, definition);
+        CommitmentReminders.fireNow(context, definition.id, new CommitmentReminderJobs.Token());
+        assertNotNull(notification(definition.id));
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        manager.notify("unrelated-test", 91, new Notification.Builder(context,
+            CommitmentReminders.CHANNEL_ID).setSmallIcon(R.drawable.ic_balance_monochrome)
+                .setContentTitle(context.getString(R.string.app_name)).build());
+        CommitmentStore.clear(context);
+        CountDownLatch admission = new CountDownLatch(1), release = new CountDownLatch(1);
+        CommitmentReminderJobs.awaitJournalForTest();
+        CommitmentReminderJobs.setSchedulerForTest(context, new CommitmentReminderJobs.Scheduler() {
+            @Override public boolean pending(Context ctx, int jobId) { return false; }
+            @Override public boolean enqueue(Context ctx, int jobId) {
+                admission.countDown();
+                try {
+                    if (!release.await(10, TimeUnit.SECONDS))
+                        throw new AssertionError("test did not release native admission");
+                } catch (InterruptedException failure) { throw new AssertionError(failure); }
+                return true;
+            }
+            @Override public void retry(Context ctx, long delay) { }
+            @Override public void cancel(Context ctx) { }
+        });
+        CountingContext counted = new CountingContext(context);
+        AtomicReference<Throwable> hookFailure = new AtomicReference<>();
+        CountDownLatch returned = new CountDownLatch(1);
+        try {
+            CommitmentReminderJobs.requestPlan(context);
+            assertTrue(admission.await(5, TimeUnit.SECONDS));
+            new Handler(Looper.getMainLooper()).post(() -> {
+                try { CommitmentReminders.afterReset(counted); }
+                catch (Throwable failure) { hookFailure.set(failure); }
+                finally { returned.countDown(); }
+            });
+            assertTrue("reset privacy cleanup cannot wait for job admission",
+                returned.await(2, TimeUnit.SECONDS));
+            assertNull(hookFailure.get());
+            assertNull(notification(definition.id));
+            assertEquals("reset cleanup must never read the financial store", 0,
+                counted.dataPreferenceReads);
+            boolean unrelatedPresent = false;
+            for (StatusBarNotification shown : manager.getActiveNotifications())
+                if ("unrelated-test".equals(shown.getTag())) unrelatedPresent = true;
+            assertTrue("unrelated app notifications must be preserved", unrelatedPresent);
+        } finally {
+            release.countDown();
+            CommitmentJobIsolationListener.restore(context);
+            manager.cancel("unrelated-test", 91);
+        }
+    }
+
+    @Test public void resetHookServiceFailureDoesNotCrashOrSkipPlanning() throws Exception {
+        CountingContext unavailable = new CountingContext(context) {
+            @Override public Object getSystemService(String name) {
+                if (NOTIFICATION_SERVICE.equals(name))
+                    throw new IllegalStateException("notification service unavailable");
+                return super.getSystemService(name);
+            }
+        };
+
+        CommitmentReminders.afterReset(unavailable);
+        CommitmentReminderJobs.awaitJournalForTest();
+
+        assertEquals(0, unavailable.dataPreferenceReads);
+        assertTrue(context.getSharedPreferences("commitment_reminder_jobs", Context.MODE_PRIVATE)
+            .getBoolean("plan", false));
+    }
+
+    private interface CommitInterceptor {
+        boolean commit(SharedPreferences.Editor editor) throws Exception;
+    }
+
+    private Context interceptedReminderState(CommitInterceptor interceptor) {
+        SharedPreferences actual = reminderPrefs();
+        SharedPreferences wrapped = (SharedPreferences) Proxy.newProxyInstance(
+            SharedPreferences.class.getClassLoader(), new Class<?>[] {SharedPreferences.class},
+            (proxy, method, args) -> {
+                if (!"edit".equals(method.getName())) return method.invoke(actual, args);
+                SharedPreferences.Editor editor = actual.edit();
+                return Proxy.newProxyInstance(SharedPreferences.Editor.class.getClassLoader(),
+                    new Class<?>[] {SharedPreferences.Editor.class}, (editorProxy, editMethod, values) -> {
+                        if ("commit".equals(editMethod.getName())) return interceptor.commit(editor);
+                        Object result = editMethod.invoke(editor, values);
+                        return result == editor ? editorProxy : result;
+                    });
+            });
+        return new CountingContext(context) {
+            @Override public SharedPreferences getSharedPreferences(String name, int mode) {
+                return "commitment_reminders".equals(name) ? wrapped
+                    : super.getSharedPreferences(name, mode);
+            }
+        };
     }
 
     private SharedPreferences reminderPrefs() {

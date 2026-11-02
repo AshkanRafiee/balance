@@ -10,6 +10,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
+import android.service.notification.StatusBarNotification;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -82,6 +83,23 @@ final class CommitmentReminders {
         CommitmentReminderJobs.requestPlan(context);
     }
 
+    /** Remove reset data from the notification surface without waiting for a background plan. */
+    static void afterReset(Context context) {
+        try {
+            NotificationManager manager = context.getSystemService(NotificationManager.class);
+            if (manager != null) {
+                for (StatusBarNotification shown : manager.getActiveNotifications()) {
+                    String tag = shown.getTag();
+                    if (tag == null || !tag.startsWith("commitment:")) continue;
+                    try { manager.cancel(tag, shown.getId()); }
+                    catch (RuntimeException unavailable) { /* Continue cleaning the other reminders. */ }
+                }
+            }
+        } catch (RuntimeException unavailable) { /* Reset must still complete if the service fails. */ }
+        try { CommitmentReminderJobs.requestPlan(context); }
+        catch (RuntimeException unavailable) { /* Boot/app-open can repair the alarm state. */ }
+    }
+
     static final class PlanPage {
         final boolean more;
         final long cursor;
@@ -149,14 +167,17 @@ final class CommitmentReminders {
     /** Cancels every armed alarm and clears the armed-id snapshot. */
     private static void cancelAllLocked(Context context, AlarmManager alarms,
             SharedPreferences prefs) {
+        Set<String> ids;
         synchronized (STATE_LOCK) {
-            Set<String> ids = copySet(prefs, KEY_SCHEDULED);
+            ids = copySet(prefs, KEY_SCHEDULED);
             for (String shown : copySet(prefs, KEY_SHOWN)) {
                 int split = shown.lastIndexOf('|');
                 if (split >= 0) ids.add(shown.substring(0, split));
             }
-            for (String id : ids)
-                cancelScheduled(context, alarms, id, new CommitmentReminderJobs.Token());
+        }
+        for (String id : ids)
+            cancelScheduled(context, alarms, id, new CommitmentReminderJobs.Token());
+        synchronized (STATE_LOCK) {
             prefs.edit().putStringSet(KEY_SCHEDULED, new HashSet<String>()).apply();
         }
     }
@@ -337,9 +358,9 @@ final class CommitmentReminders {
                 if (armed) scheduled.add(id);
                 else scheduled.remove(id);
                 token.check();
-                if (!prefs.edit().putStringSet(KEY_SCHEDULED, scheduled).commit())
-                    throw new IllegalStateException("reminder state persistence failed");
+                prefs.edit().putStringSet(KEY_SCHEDULED, scheduled).apply();
             }
+            flushState(prefs, "reminder state persistence failed");
         }
     }
 
@@ -459,11 +480,18 @@ final class CommitmentReminders {
             fired.add(firedKey(id, due));
             if (due < Commitment.startOfDay(System.currentTimeMillis())) overdue.add(id);
             else overdue.remove(id);
-            if (!prefs.edit().putStringSet(KEY_FIRED, fired)
-                    .putStringSet(KEY_OVERDUE_FIRED, overdue)
-                    .putStringSet(KEY_SHOWN, shown).commit())
-                throw new IllegalStateException("reminder delivery persistence failed");
+            prefs.edit().putStringSet(KEY_FIRED, fired)
+                .putStringSet(KEY_OVERDUE_FIRED, overdue)
+                .putStringSet(KEY_SHOWN, shown).apply();
         }
+        flushState(prefs, "reminder delivery persistence failed");
+    }
+
+    /** apply() publishes ordered memory state before releasing STATE_LOCK. A synchronous empty
+     * commit then flushes that state (and any newer UI reset), without making resetFired wait for
+     * disk. Never move this commit into STATE_LOCK: settlement actions also acquire that lock. */
+    private static void flushState(SharedPreferences prefs, String failure) {
+        if (!prefs.edit().commit()) throw new IllegalStateException(failure);
     }
 
     private static Set<String> copySet(SharedPreferences prefs, String key) {
