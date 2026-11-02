@@ -73,6 +73,7 @@ final class CommitmentStore {
     private CommitmentStore() {}
 
     interface DefinitionVisitor { void accept(Commitment definition) throws Exception; }
+    interface DefinitionWork<T> { T apply(Commitment definition) throws Exception; }
     interface SettlementVisitor { void accept(Settlement settlement) throws Exception; }
     interface Transaction<T> { T run(Editor editor) throws Exception; }
     private interface Work<T> { T run(Session session) throws Exception; }
@@ -177,6 +178,19 @@ final class CommitmentStore {
         return access(context, true, s -> {
             Definition found = s.find(id, true);
             return found == null ? null : found.value;
+        });
+    }
+
+    /** Projects one definition while its lazy settlement reads share the active store session.
+     * Returns null without invoking the callback when the id is absent. Keep the callback to
+     * computation, without reentering public store APIs; perform alarm/notification side effects
+     * only after this method returns and releases the database and BalanceData monitor. */
+    static <T> T withDefinition(Context context, String id, DefinitionWork<T> work) throws Exception {
+        requireId(id);
+        if (work == null) throw new NullPointerException("work");
+        return access(context, true, s -> {
+            Definition found = s.find(id, true);
+            return found == null ? null : work.apply(found.value);
         });
     }
 
