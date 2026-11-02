@@ -467,12 +467,21 @@ final class CommitmentStore {
         });
     }
 
-    /** Streams definitions and every explicit settlement mark without building one large JSON row. */
+    /** Streams definitions and every explicit settlement mark in one bounded-memory session. */
     static void writeJsonRecords(Context context, JsonWriter writer) throws Exception {
         if (writer == null) throw new NullPointerException("writer");
-        writer.beginArray();
-        forEachDefinition(context, PAGE_SIZE, definition -> writeJsonRecord(writer, definition));
-        writer.endArray();
+        access(context, true, s -> {
+            writer.beginArray();
+            // Keep lazy settlement reads on this session instead of reopening the database and
+            // unwrapping both keys for every iterator revision check.
+            try (Cursor cursor = s.db.query(DEFINITIONS, new String[]{"id", "lookup", "payload"},
+                    null, null, null, null, "id ASC")) {
+                while (cursor.moveToNext())
+                    writeJsonRecord(writer, s.decodeDefinition(cursor, true).value);
+            }
+            writer.endArray();
+            return null;
+        });
     }
 
     /** Streams the ids of explicitly deleted definitions, oldest tombstone first. */
