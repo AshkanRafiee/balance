@@ -173,6 +173,31 @@ public class CommitmentReminderJobsTest {
         assertFalse(drain(PLAN, work));
     }
 
+    @Test public void fireArrivingDuringPageRunsBeforeRemainingPlanningPages() throws Exception {
+        CommitmentReminderJobs.requestPlan(context);
+        journal();
+        RecordingWork work = new RecordingWork() {
+            @Override public CommitmentReminders.PlanPage page(Context ctx, long cursor,
+                    Set<String> wanted, boolean deliver, CommitmentReminderJobs.Token token)
+                    throws Exception {
+                cursors.add(cursor);
+                if (cursors.size() == 1) {
+                    CommitmentReminderJobs.requestFire(ctx, "opaque-mid-page");
+                    journal();
+                    assertTrue("current bounded page may finish first", fired.isEmpty());
+                    return new CommitmentReminders.PlanPage(true, 42, new HashSet<>());
+                }
+                assertEquals("new delivery must precede the next page",
+                    Collections.singletonList("opaque-mid-page"), fired);
+                return new CommitmentReminders.PlanPage(cursors.size() == 2, 84, new HashSet<>());
+            }
+        };
+        assertFalse(drain(PLAN, work));
+        assertEquals(Arrays.asList(-1L, 42L, 84L), work.cursors);
+        assertEquals(1, work.finishes);
+        assertTrue(request().empty());
+    }
+
     @Test public void staleIdAcknowledgmentCannotRemoveNewRequestForSameId() throws Exception {
         CommitmentReminderJobs.requestFire(context, "opaque-a");
         journal();
@@ -297,6 +322,31 @@ public class CommitmentReminderJobsTest {
         assertEquals(2, scheduler.count(FIRE));
         assertEquals(sequence, prefs().getLong("sequence", 0));
         assertTrue(request().ids.containsKey("opaque-a"));
+    }
+
+    @Test public void removedNativeJobsAreRepairedWithoutRequiringProcessRestart() throws Exception {
+        CommitmentReminderJobs.requestPlan(context);
+        CommitmentReminderJobs.requestFire(context, "opaque-a");
+        journal();
+        assertEquals(1, scheduler.count(PLAN));
+        assertEquals(1, scheduler.count(FIRE));
+
+        scheduler.finished(FIRE); // Simulate native removal without an onStopJob callback.
+        CommitmentReminderJobs.requestFire(context, "opaque-b");
+        journal();
+        assertEquals(2, scheduler.count(FIRE));
+        assertEquals(1, scheduler.count(PLAN));
+        assertTrue(request().ids.keySet().containsAll(Arrays.asList("opaque-a", "opaque-b")));
+
+        scheduler.finished(PLAN);
+        long sequence = prefs().getLong("sequence", 0);
+        CommitmentReminderJobs.retry(context);
+        journal();
+        assertEquals(2, scheduler.count(PLAN));
+        assertEquals("an existing delivery job must not be replaced", 2, scheduler.count(FIRE));
+        assertEquals(sequence, prefs().getLong("sequence", 0));
+        assertTrue(scheduler.pending(context, PLAN));
+        assertTrue(scheduler.pending(context, FIRE));
     }
 
     @Test public void workerFailureLeavesSpecificGenerationForNativeRetry() throws Exception {

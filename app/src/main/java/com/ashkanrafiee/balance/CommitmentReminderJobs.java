@@ -284,7 +284,12 @@ final class CommitmentReminderJobs {
     }
 
     private static boolean isAdmitted(Context context, int jobId) {
-        if (initialized.add(jobId) && scheduler.pending(context, jobId)) admitted.add(jobId);
+        // Android can remove an accepted job while this process survives. Validate positive
+        // admission on every request/repair, without consuming another enqueue quota entry.
+        if (initialized.add(jobId) || admitted.contains(jobId)) {
+            if (scheduler.pending(context, jobId)) admitted.add(jobId);
+            else admitted.remove(jobId);
+        }
         return admitted.contains(jobId);
     }
 
