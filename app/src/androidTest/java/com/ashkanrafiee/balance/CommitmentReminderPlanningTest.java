@@ -220,6 +220,21 @@ public class CommitmentReminderPlanningTest {
         assertNull(notification(definition.id));
     }
 
+    @Test public void fullResetRemovesDeliveredFinancialNotificationBeforeQueuedReplanning()
+            throws Exception {
+        Commitment definition = Commitment.create("Reset privacy fixture", -500,
+            Commitment.ONCE, inDays(-1), null, true, 0);
+        CommitmentStore.upsert(context, definition);
+        CommitmentReminders.fireNow(context, definition.id, new CommitmentReminderJobs.Token());
+        assertNotNull(notification(definition.id));
+
+        BalanceData.reset(new CountingContext(context), true);
+
+        assertNull("reset must not wait for background job admission to hide deleted data",
+            notification(definition.id));
+        assertTrue(BalanceData.readCommitments(context).isEmpty());
+    }
+
     @Test public void deletedDeliveredReminderIsCancelledEvenWithoutAnotherAlarm() throws Exception {
         Commitment definition = Commitment.create("Deleted", -500, Commitment.ONCE,
             inDays(-1), null, true, 0);

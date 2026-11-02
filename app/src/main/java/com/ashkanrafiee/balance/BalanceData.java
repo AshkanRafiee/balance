@@ -1106,7 +1106,7 @@ final class BalanceData {
             }
             completeReset(context, effectiveAlsoNotes);
         }
-        CommitmentReminders.scheduleAll(context);
+        CommitmentReminders.afterReset(context);
     }
 
     /** Makes every user-visible data projection wait for an interrupted reset to finish. A

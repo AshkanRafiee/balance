@@ -246,8 +246,7 @@ public class MainActivity extends Activity {
     }
 
     private void scheduleReminders() {
-        Context app = getApplicationContext();
-        new Thread(() -> CommitmentReminders.scheduleAll(app), "commitment-reminders").start();
+        CommitmentReminders.scheduleAll(getApplicationContext());
     }
 
     /**
