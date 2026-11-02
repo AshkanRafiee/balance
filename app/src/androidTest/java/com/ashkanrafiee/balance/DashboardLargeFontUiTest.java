@@ -114,6 +114,7 @@ public final class DashboardLargeFontUiTest {
         launch(2f);
         await(() -> findText(currentRoot(), "181 days") != null, 10_000);
         scenario.onActivity(activity -> {
+            assertActivityFontScale(activity, 2f);
             ViewGroup list = (ViewGroup) activity.findViewById(R.id.dashboard_bank_list);
             assertNotNull(list);
             View card = list.getChildAt(0);
@@ -137,6 +138,7 @@ public final class DashboardLargeFontUiTest {
         String total = CurrencyHelper.amount(context, 49_842_060_000L);
         await(() -> findText(currentRoot(), total) != null, 10_000);
         scenario.onActivity(activity -> {
+            assertActivityFontScale(activity, 2f);
             TextView amount = findText(activity.getWindow().getDecorView(), total);
             assertNotNull(amount);
             assertEquals("the total must not split at a comma", 1, amount.getLineCount());
@@ -151,6 +153,7 @@ public final class DashboardLargeFontUiTest {
         String total = CurrencyHelper.amount(context, 49_842_060_000L);
         await(() -> findText(currentRoot(), total) != null, 10_000);
         scenario.onActivity(activity -> {
+            assertActivityFontScale(activity, 3f);
             ViewGroup list = (ViewGroup) activity.findViewById(R.id.dashboard_bank_list);
             View card = list.getChildAt(0);
             TextView stale = findText(card, "181 days");
@@ -182,13 +185,15 @@ public final class DashboardLargeFontUiTest {
 
     private void launch(float expectedFontScale) {
         scenario = ActivityScenario.launch(MainActivity.class);
-        scenario.onActivity(activity -> {
-            float actual = activity.getResources().getConfiguration().fontScale;
-            String observed = fontScaleDiagnostics() + ", activity=" + actual;
-            assertEquals("dashboard must render at the requested font scale: " + observed,
-                expectedFontScale, actual, .01f);
-            Log.i("DashboardLargeFontUiTest", observed);
-        });
+        scenario.onActivity(activity -> assertActivityFontScale(activity, expectedFontScale));
+    }
+
+    private void assertActivityFontScale(MainActivity activity, float expectedFontScale) {
+        float actual = activity.getResources().getConfiguration().fontScale;
+        String observed = fontScaleDiagnostics() + ", activity=" + actual;
+        assertEquals("dashboard must render at the requested font scale: " + observed,
+            expectedFontScale, actual, .01f);
+        Log.i("DashboardLargeFontUiTest", observed);
     }
 
     private void grantSms() {
@@ -239,8 +244,13 @@ public final class DashboardLargeFontUiTest {
         // Initialize the singleton before changing settings so it receives the framework update.
         Resources.getSystem();
         String command = "settings --user current put system font_scale " + scale;
-        String output = shell(command);
-        await(() -> {
+        StringBuilder outputs = new StringBuilder();
+        int writes = 1;
+        outputs.append("attempt 1: ").append(shell(command));
+        long deadline = SystemClock.elapsedRealtime() + 10_000L;
+        long nextWrite = SystemClock.elapsedRealtime() + 250L;
+        long stableSince = -1;
+        do {
             final float[] frameworkScale = {Float.NaN};
             // The setting is persisted before ActivityThread receives its configuration change.
             // Waiting on the target context is unsafe: it may have a frozen locale override.
@@ -248,11 +258,35 @@ public final class DashboardLargeFontUiTest {
             // lets LocaleHelper/ThemeHelper snapshot the activity's base configuration.
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
                 frameworkScale[0] = Resources.getSystem().getConfiguration().fontScale);
-            return Math.abs(Settings.System.getFloat(context.getContentResolver(),
-                    Settings.System.FONT_SCALE, 1f) - scale) < .01f
-                && Math.abs(frameworkScale[0] - scale) < .01f;
-        }, 10_000, () -> "framework font configuration did not settle: " + fontScaleDiagnostics()
-            + ", command=" + command + ", output=" + output);
+            float setting = Settings.System.getFloat(context.getContentResolver(),
+                Settings.System.FONT_SCALE, 1f);
+            long now = SystemClock.elapsedRealtime();
+            boolean settingMatches = Math.abs(setting - scale) < .01f;
+            if (settingMatches && Math.abs(frameworkScale[0] - scale) < .01f) {
+                if (stableSince < 0) stableSince = now;
+                if (now - stableSince >= 500L) {
+                    Log.i("DashboardLargeFontUiTest", "font configuration settled: "
+                        + fontScaleDiagnostics() + ", writes=" + writes + ", outputs=" + outputs);
+                    return;
+                }
+            } else {
+                stableSince = -1;
+                // ActivityTaskManager posts persistent configuration write-back asynchronously.
+                // A previous test's restore can therefore overwrite this write even after its
+                // framework notification arrived. Reassert only this requested value, and only
+                // when provider readback differs; never cycle through intermediate font sizes.
+                if (!settingMatches && writes < 4 && now >= nextWrite) {
+                    outputs.append("\nattempt ").append(++writes).append(" after setting=")
+                        .append(setting).append(", framework=").append(frameworkScale[0])
+                        .append(": ").append(shell(command));
+                    nextWrite = SystemClock.elapsedRealtime() + 250L;
+                }
+            }
+            SystemClock.sleep(40);
+        } while (SystemClock.elapsedRealtime() < deadline);
+        throw new AssertionError("framework font configuration did not settle: "
+            + fontScaleDiagnostics() + ", command=" + command + ", writes=" + writes
+            + ", outputs=" + outputs);
     }
 
     private String fontScaleDiagnostics() {
