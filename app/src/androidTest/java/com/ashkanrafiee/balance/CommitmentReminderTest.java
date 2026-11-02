@@ -17,6 +17,8 @@ import org.junit.runner.RunWith;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 /** The reminder bookkeeping: arming, cancelling and firing without touching a view. */
 @RunWith(AndroidJUnit4.class)
@@ -26,6 +28,7 @@ public class CommitmentReminderTest {
 
     @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        CommitmentReminders.cancelAllForTest(ctx);
         CommitmentStore.clear(ctx);
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear()
             .commit();
@@ -34,6 +37,7 @@ public class CommitmentReminderTest {
     }
 
     @After public void tearDown() throws Exception {
+        CommitmentReminders.cancelAllForTest(ctx);
         CommitmentStore.clear(ctx);
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear()
             .commit();
@@ -48,38 +52,38 @@ public class CommitmentReminderTest {
         return c.getTimeInMillis();
     }
 
-    @Test public void scheduleAll_armsRemindingAndSkipsQuiet() {
+    @Test public void scheduleAll_armsRemindingAndSkipsQuiet() throws Exception {
         List<Commitment> commitments = new ArrayList<>();
         commitments.add(Commitment.create("rent", -5000, Commitment.MONTHLY, inDays(5), null,
             true, 86400000L));
         commitments.add(Commitment.create("quiet", -5000, Commitment.MONTHLY, inDays(5), null,
             false, 0));
-        BalanceData.writeCommitments(ctx, commitments);
-        CommitmentReminders.scheduleAll(ctx);
+        CommitmentStore.replace(ctx, commitments);
+        plan();
         List<String> armed = CommitmentReminders.scheduledIds(ctx);
         assertEquals(1, armed.size());
         assertEquals(commitments.get(0).id, armed.get(0));
     }
 
-    @Test public void scheduleAll_cancelsDeletedAndSettled() {
+    @Test public void scheduleAll_cancelsDeletedAndSettled() throws Exception {
         List<Commitment> commitments = new ArrayList<>();
         commitments.add(Commitment.create("rent", -5000, Commitment.MONTHLY, inDays(5), null,
             true, 86400000L));
-        BalanceData.writeCommitments(ctx, commitments);
-        CommitmentReminders.scheduleAll(ctx);
+        CommitmentStore.replace(ctx, commitments);
+        plan();
         assertEquals(1, CommitmentReminders.scheduledIds(ctx).size());
-        BalanceData.writeCommitments(ctx, new ArrayList<Commitment>());
-        CommitmentReminders.scheduleAll(ctx);
+        CommitmentStore.replace(ctx, new ArrayList<Commitment>());
+        plan();
         assertTrue(CommitmentReminders.scheduledIds(ctx).isEmpty());
     }
 
-    @Test public void fire_unknownIdIsANoOpThatCleansUp() {
+    @Test public void fire_unknownIdIsANoOpThatCleansUp() throws Exception {
         List<Commitment> commitments = new ArrayList<>();
         commitments.add(Commitment.create("rent", -5000, Commitment.MONTHLY, inDays(5), null,
             true, 86400000L));
-        BalanceData.writeCommitments(ctx, commitments);
-        CommitmentReminders.scheduleAll(ctx);
-        CommitmentReminders.fire(ctx, "no-such-commitment");
+        CommitmentStore.replace(ctx, commitments);
+        plan();
+        CommitmentReminders.fireNow(ctx, "no-such-commitment", new CommitmentReminderJobs.Token());
         assertEquals(1, CommitmentReminders.scheduledIds(ctx).size());
     }
 
@@ -87,7 +91,7 @@ public class CommitmentReminderTest {
         CommitmentReminders.ensureChannel(ctx);
     }
 
-    @Test public void cancelAllForTest_clearsArmedRemindersAndRearmsOnNextSchedule() {
+    @Test public void cancelAllForTest_clearsArmedRemindersAndRearmsOnNextSchedule() throws Exception {
         // Covers the notifications-unavailable branch of scheduleAll (cancel everything,
         // then re-arm on the next pass) without simulating unavailable notifications:
         // revoking the permission kills the app process by design, taking the in-process
@@ -95,14 +99,14 @@ public class CommitmentReminderTest {
         // delete/recreate, so neither can be used and restored inside one run.
         Commitment c = Commitment.create("rent", -5000, Commitment.ONCE, inDays(5), null,
             true, 0);
-        BalanceData.writeCommitments(ctx, java.util.Collections.singletonList(c));
-        CommitmentReminders.scheduleAll(ctx);
+        CommitmentStore.replace(ctx, java.util.Collections.singletonList(c));
+        plan();
         assertTrue("a reminder must arm while notifications are available",
             CommitmentReminders.scheduledIds(ctx).contains(c.id));
         CommitmentReminders.cancelAllForTest(ctx);
         assertTrue("cancelling must leave no armed reminders",
             CommitmentReminders.scheduledIds(ctx).isEmpty());
-        CommitmentReminders.scheduleAll(ctx);
+        plan();
         assertTrue("the next schedule must rearm the reminder",
             CommitmentReminders.scheduledIds(ctx).contains(c.id));
     }
@@ -123,5 +127,20 @@ public class CommitmentReminderTest {
         assertTrue(loanDetail.contains(CurrencyHelper.display(ctx, -9000)));
         assertFalse("same-time dues must stay distinguishable", rentTitle.equals(loanTitle)
             && rentDetail.equals(loanDetail));
+    }
+
+    /** Exercise the worker core synchronously; public requests deliberately do not drain jobs. */
+    private void plan() throws Exception {
+        CommitmentReminderJobs.Token token = new CommitmentReminderJobs.Token();
+        long cursor = -1;
+        Set<String> wanted = new HashSet<>();
+        while (true) {
+            CommitmentReminders.PlanPage page = CommitmentReminders.planPage(ctx, cursor,
+                wanted, false, token);
+            wanted = page.wanted;
+            cursor = page.cursor;
+            if (!page.more) break;
+        }
+        CommitmentReminders.finishPlan(ctx, wanted, token);
     }
 }
