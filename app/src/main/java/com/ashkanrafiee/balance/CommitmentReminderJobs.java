@@ -276,8 +276,9 @@ final class CommitmentReminderJobs {
     private static void ensureScheduled(Context context) {
         Request request = new Request(prefs(context));
         if (!request.ids.isEmpty() || prefs(context).getBoolean("deliver", false)) {
-            if (!isAdmitted(context, FALLBACK_JOB_ID)
-                    && !ensureLane(context, DELIVERY_JOB_ID, false))
+            // A fallback may remain pending through Doze after expedited quota recovers. Retry
+            // expedited admission after its cooldown without replacing/cancelling that fallback.
+            if (!ensureLane(context, DELIVERY_JOB_ID, false))
                 ensureLane(context, FALLBACK_JOB_ID, true);
         }
         if (request.plan) ensureLane(context, JOB_ID, true);

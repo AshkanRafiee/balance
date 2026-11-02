@@ -284,6 +284,43 @@ public class CommitmentReminderJobsTest {
         assertTrue(request().empty());
     }
 
+    @Test public void recoveredExpeditedQuotaRestoresUrgencyWhileRegularFallbackRemainsPending()
+            throws Exception {
+        scheduler.rejected.add(FIRE);
+        CommitmentReminderJobs.requestFire(context, "opaque-a");
+        journal();
+        assertEquals(1, scheduler.count(FIRE));
+        assertEquals(1, scheduler.count(FALLBACK));
+        assertTrue(scheduler.pending(context, FALLBACK));
+
+        scheduler.rejected.remove(FIRE);
+        CommitmentReminderJobs.requestFire(context, "opaque-b");
+        journal();
+        assertEquals("quota recovery must still respect the admission cooldown", 1,
+            scheduler.count(FIRE));
+        assertEquals(1, scheduler.count(FALLBACK));
+
+        prefs().edit().remove("retry_after:" + FIRE).commit();
+        CommitmentReminderJobs.requestFire(context, "opaque-c");
+        journal();
+        assertEquals(2, scheduler.count(FIRE));
+        assertEquals("the pending fallback must not be replaced", 1, scheduler.count(FALLBACK));
+        assertTrue(scheduler.pending(context, FIRE));
+        assertTrue(scheduler.pending(context, FALLBACK));
+
+        CommitmentReminderJobs.requestFire(context, "opaque-d");
+        journal();
+        assertEquals("accepted expedited work must still coalesce", 2, scheduler.count(FIRE));
+        RecordingWork work = new RecordingWork();
+        assertFalse(drain(FIRE, work));
+        assertEquals(new HashSet<>(Arrays.asList("opaque-a", "opaque-b", "opaque-c", "opaque-d")),
+            new HashSet<>(work.fired));
+        assertFalse(drain(FALLBACK, work));
+        assertEquals("the surviving fallback must not replay acknowledged delivery", 4,
+            work.fired.size());
+        assertTrue(request().empty());
+    }
+
     @Test public void bothRejectionsRetainRequestsAndUseBoundedAlarmBackoff() throws Exception {
         scheduler.rejected.add(FIRE);
         scheduler.rejected.add(FALLBACK);
