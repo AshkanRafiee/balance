@@ -52,9 +52,14 @@ final class CommitmentReminders {
 
     /** Creates the notification channel on first use; a no-op everywhere it already exists. */
     static void ensureChannel(Context context) {
+        ensureChannel(context, null);
+    }
+
+    private static void ensureChannel(Context context, CommitmentReminderJobs.Token token) {
         NotificationManager manager =
             (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager == null || manager.getNotificationChannel(CHANNEL_ID) != null) return;
+        if (token != null) token.check();
         manager.createNotificationChannel(new NotificationChannel(CHANNEL_ID,
             context.getString(R.string.commitments_channel), NotificationManager.IMPORTANCE_DEFAULT));
     }
@@ -117,30 +122,27 @@ final class CommitmentReminders {
         return new PlanPage(page.hasMore, page.nextId, wanted);
     }
 
-    /** Called only after the dispatcher validates this plan's generation. */
+    /** Revalidate disappearing owners: another job/write can run after generation validation. */
     static void finishPlan(Context context, Set<String> wanted,
             CommitmentReminderJobs.Token token) throws Exception {
+        Set<String> cleanup;
         synchronized (SCHEDULE_LOCK) {
             token.check();
             SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-            AlarmManager alarms = context.getSystemService(AlarmManager.class);
-            if (alarms == null) throw new IllegalStateException("alarm service unavailable");
-            Set<String> previous = copySet(prefs, KEY_SCHEDULED);
-            Set<String> cleanup = new HashSet<>(previous);
+            cleanup = copySet(prefs, KEY_SCHEDULED);
             for (String shown : copySet(prefs, KEY_SHOWN)) {
                 int split = shown.lastIndexOf('|');
                 if (split >= 0) cleanup.add(shown.substring(0, split));
             }
-            for (String id : cleanup) {
-                token.check();
-                if (!wanted.contains(id)) {
-                    cancelScheduled(context, alarms, id, token);
-                    previous.remove(id);
-                }
-            }
+        }
+        for (String id : cleanup) {
             token.check();
-            if (!prefs.edit().putStringSet(KEY_SCHEDULED, previous).commit())
-                throw new IllegalStateException("reminder state persistence failed");
+            if (wanted.contains(id)) continue;
+            Projection current = project(context, id, token);
+            if (!notificationsAvailable(context))
+                current = new Projection(current.definition, null, null, false, true,
+                    current.revision);
+            applyPlan(context, id, current, token);
         }
     }
 
@@ -173,17 +175,23 @@ final class CommitmentReminders {
         }
     }
 
-    private static void arm(AlarmManager alarms, Context context, String id, long trigger) {
+    private static void arm(AlarmManager alarms, Context context, String id, long trigger,
+            CommitmentReminderJobs.Token token) {
+        boolean exact = canScheduleExact(context);
+        token.check();
+        PendingIntent operation = alarm(context, id);
+        token.check();
         try {
-            if (canScheduleExact(context)) {
+            if (exact) {
                 alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger,
-                    alarm(context, id));
+                    operation);
             } else {
                 alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger,
-                    alarm(context, id));
+                    operation);
             }
         } catch (SecurityException exactPermissionChanged) {
-            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger, alarm(context, id));
+            token.check();
+            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger, operation);
         }
     }
 
@@ -274,7 +282,6 @@ final class CommitmentReminders {
             token.check();
             BalanceData.ensureResetComplete(context);
             token.check();
-            String revision = CommitmentStore.revision(context);
             result = CommitmentStore.withDefinition(context, id, c -> {
                 token.check();
                 Long due = reminderDue(c, cal, now, fired, overdueFired, token);
@@ -287,10 +294,14 @@ final class CommitmentReminders {
                     c.remind, c.remindBeforeMs);
                 token.check();
                 return new Projection(detached, due, trigger, !c.remind,
-                    cancelNotice, revision);
+                    cancelNotice, null);
             });
-            if (result == null) result = new Projection(null, null, null, true, true, revision);
             token.check();
+            String revision = CommitmentStore.revision(context);
+            if (revision == null) throw new IllegalStateException("commitment revision unavailable");
+            result = result == null ? new Projection(null, null, null, true, true, revision)
+                : new Projection(result.definition, result.due, result.trigger,
+                    result.clearOverdue, result.cancelNotice, revision);
         }
         token.check();
         return result;
@@ -319,8 +330,8 @@ final class CommitmentReminders {
             if (projection.clearOverdue) clearOverdueFired(context, id);
             validate(context, projection, token);
             boolean armed = projection.trigger != null;
-            if (armed) arm(alarms, context, id, projection.trigger);
-            else alarms.cancel(alarm(context, id));
+            if (armed) arm(alarms, context, id, projection.trigger, token);
+            else cancelAlarm(context, alarms, id, token);
             synchronized (STATE_LOCK) {
                 Set<String> scheduled = copySet(prefs, KEY_SCHEDULED);
                 if (armed) scheduled.add(id);
@@ -411,9 +422,16 @@ final class CommitmentReminders {
 
     private static void cancelScheduled(Context context, AlarmManager alarms, String id,
             CommitmentReminderJobs.Token token) {
-        token.check();
-        alarms.cancel(alarm(context, id));
+        cancelAlarm(context, alarms, id, token);
         cancelNotification(context, id, token);
+    }
+
+    private static void cancelAlarm(Context context, AlarmManager alarms, String id,
+            CommitmentReminderJobs.Token token) {
+        token.check();
+        PendingIntent operation = alarm(context, id);
+        token.check();
+        alarms.cancel(operation);
     }
 
     private static void cancelNotification(Context context, String id,
@@ -473,12 +491,13 @@ final class CommitmentReminders {
         token.check();
         if (!notificationsAvailable(context)) return false;
         token.check();
-        ensureChannel(context);
+        ensureChannel(context, token);
         NotificationManager manager =
             (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager == null) throw new IllegalStateException("notification service unavailable");
         Intent open = new Intent(context, CommitmentsActivity.class);
         open.setData(Uri.parse("balance://commitment/" + Uri.encode(c.id)));
+        token.check();
         PendingIntent tap = PendingIntent.getActivity(context, c.id.hashCode(), open,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         // Name every reminder: same-time dues used to post identical lines, distinguishable
