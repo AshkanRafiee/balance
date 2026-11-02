@@ -2,15 +2,18 @@ package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.os.SystemClock;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.widget.TextView;
 
+import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry;
@@ -36,6 +39,7 @@ public class HistoryCountUiTest {
     private Context ctx;
     private String originalTag;
     private String originalCurrency;
+    private ActivityScenario<HistoryActivity> scenario;
 
     private static final String MELLAT = "Mellat";
     private static final String ONE = "111";
@@ -53,12 +57,16 @@ public class HistoryCountUiTest {
     }
 
     @After public void tearDown() {
-        LocaleHelper.setLanguage(ctx, originalTag);
-        CurrencyHelper.setCurrency(ctx, originalCurrency);
-        BalanceData.reset(ctx, true);
+        try {
+            if (scenario != null) scenario.close();
+        } finally {
+            LocaleHelper.setLanguage(ctx, originalTag);
+            CurrencyHelper.setCurrency(ctx, originalCurrency);
+            BalanceData.reset(ctx, true);
+        }
     }
 
-    /** Three movements on one account and five on another, all inside the last two weeks. */
+    /** Three movements on one account and five on another, spanning five days. */
     private void storeTwoAccounts() {
         List<Transaction> txs = new ArrayList<>();
         for (int i = 0; i < 3; i++) {
@@ -67,7 +75,7 @@ public class HistoryCountUiTest {
         for (int i = 0; i < 5; i++) {
             txs.add(new Transaction(MELLAT, TWO, BASE - i * DAY, 20_000_000L + i, "b" + i, null));
         }
-        BalanceData.writeTransactions(ctx, txs);
+        assertTrue(BalanceData.writeTransactions(ctx, txs));
     }
 
     private void launch(String account) {
@@ -77,8 +85,17 @@ public class HistoryCountUiTest {
              .putExtra(HistoryActivity.EXTRA_ACCOUNT, account);
         }
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        InstrumentationRegistry.getInstrumentation().startActivitySync(i);
-        await(() -> findByDescription(ctx.getString(R.string.history_export)) != null, 20_000);
+        scenario = ActivityScenario.launch(i);
+        // The export button belongs to the synchronous header, not the asynchronous result.
+        // Require the accepted breakdown, but leave its actual count to each assertion below.
+        await(() -> {
+            boolean[] ready = {false};
+            scenario.onActivity(activity -> ready[0] = HistoryActivity.idleForTest(activity)
+                && find(activity.getWindow().getDecorView(), view -> view instanceof TextView
+                    && ctx.getString(R.string.history_breakdown)
+                        .contentEquals(((TextView) view).getText())) != null);
+            return ready[0];
+        }, 20_000);
     }
 
     @Test public void theScreen_saysHowManyMovementsItIsShowing() {
@@ -106,8 +123,8 @@ public class HistoryCountUiTest {
     }
 
     @Test public void theCount_saysTransactionInTheSingular() {
-        BalanceData.writeTransactions(ctx, new ArrayList<>(Arrays.asList(
-            new Transaction(MELLAT, ONE, BASE, 10_000_000L, "only", null))));
+        assertTrue(BalanceData.writeTransactions(ctx, new ArrayList<>(Arrays.asList(
+            new Transaction(MELLAT, ONE, BASE, 10_000_000L, "only", null)))));
         launch(ONE);
         assertNotNull(findCountInHeading(counted(1)));
     }
@@ -151,18 +168,6 @@ public class HistoryCountUiTest {
         }
     }
 
-    private static View findByDescription(String want) {
-        final List<View> hits = new ArrayList<>();
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            for (Activity a : resumed()) {
-                View hit = find(a.getWindow().getDecorView(),
-                    v -> want.equals(v.getContentDescription()));
-                if (hit != null) hits.add(hit);
-            }
-        });
-        return hits.isEmpty() ? null : hits.get(0);
-    }
-
     private static View find(View v, java.util.function.Predicate<View> m) {
         if (m.test(v)) return v;
         if (v instanceof ViewGroup) {
@@ -201,14 +206,15 @@ public class HistoryCountUiTest {
     }
 
     private static void await(Callable<Boolean> done, long timeoutMs) {
-        long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline) {
-            try { if (done.call()) return; } catch (Exception ignored) { }
-            try { Thread.sleep(150); } catch (InterruptedException e) {
+        long deadline = SystemClock.elapsedRealtime() + timeoutMs;
+        while (SystemClock.elapsedRealtime() < deadline) {
+            try { if (done.call()) return; }
+            catch (Exception e) { throw new AssertionError("history readiness check failed", e); }
+            try { Thread.sleep(25); } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
             }
         }
-        throw new AssertionError("timed out waiting for the history screen");
+        throw new AssertionError("timed out waiting for the accepted history breakdown");
     }
 }

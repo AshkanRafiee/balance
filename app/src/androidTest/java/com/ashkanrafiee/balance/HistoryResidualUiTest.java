@@ -6,6 +6,7 @@ import static org.junit.Assert.assertTrue;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.os.SystemClock;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
@@ -22,6 +23,7 @@ import org.junit.runner.RunWith;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Calendar;
 import java.util.List;
 import java.util.concurrent.Callable;
 
@@ -40,12 +42,17 @@ public class HistoryResidualUiTest {
 
     private static final String MELLAT = "Mellat";
     private static final String ACCOUNT = "111";
-    /** The two statements sit in the last moments of the current day, because that is the day the
+    /** The two statements sit inside the current day, because that is the day the
      *  screen opens by itself: the unaccounted row lives inside an open day, and a stored day in some
-     *  other month would need expanding first. A second apart is enough for the balances to prove the
-     *  gap, and a statement per second keeps both inside today right up to midnight. */
-    private static long now() {
-        return System.currentTimeMillis();
+     *  other month would need expanding first. Noon keeps both statements on the same civil day
+     *  even when this fixture runs just after midnight or at a calendar boundary. */
+    private static long todayNoon() {
+        Calendar date = Calendar.getInstance();
+        date.set(Calendar.HOUR_OF_DAY, 12);
+        date.set(Calendar.MINUTE, 0);
+        date.set(Calendar.SECOND, 0);
+        date.set(Calendar.MILLISECOND, 0);
+        return date.getTimeInMillis();
     }
 
     @Before public void setUp() {
@@ -58,26 +65,31 @@ public class HistoryResidualUiTest {
     }
 
     @After public void tearDown() {
-        if (scenario != null) scenario.close();
-        LocaleHelper.setLanguage(ctx, originalTag);
-        CurrencyHelper.setCurrency(ctx, originalCurrency);
-        BalanceData.reset(ctx, true);
+        try {
+            if (scenario != null) scenario.close();
+        } finally {
+            LocaleHelper.setLanguage(ctx, originalTag);
+            CurrencyHelper.setCurrency(ctx, originalCurrency);
+            BalanceData.reset(ctx, true);
+        }
     }
 
     private androidx.test.core.app.ActivityScenario<HistoryActivity> scenario;
 
     /** Two statements whose balances prove a 2,000,000 rial withdrawal that never arrived. */
     private void storeAGap() {
-        BalanceData.writeTransactions(ctx, new ArrayList<>(Arrays.asList(
-            new Transaction(MELLAT, ACCOUNT, now() - 2_000L, -30_000_000L, 290_000_000L, "a", null),
-            new Transaction(MELLAT, ACCOUNT, now() - 1_000L, -5_000_000L, 283_000_000L, "b", null))));
+        long base = todayNoon();
+        assertTrue(BalanceData.writeTransactions(ctx, new ArrayList<>(Arrays.asList(
+            new Transaction(MELLAT, ACCOUNT, base - 2_000L, -30_000_000L, 290_000_000L, "a", null),
+            new Transaction(MELLAT, ACCOUNT, base - 1_000L, -5_000_000L, 283_000_000L, "b", null)))));
     }
 
     /** Statements that agree with the movements we hold, so nothing should be flagged. */
     private void storeNoGap() {
-        BalanceData.writeTransactions(ctx, new ArrayList<>(Arrays.asList(
-            new Transaction(MELLAT, ACCOUNT, now() - 2_000L, -30_000_000L, 290_000_000L, "a", null),
-            new Transaction(MELLAT, ACCOUNT, now() - 1_000L, -7_000_000L, 283_000_000L, "b", null))));
+        long base = todayNoon();
+        assertTrue(BalanceData.writeTransactions(ctx, new ArrayList<>(Arrays.asList(
+            new Transaction(MELLAT, ACCOUNT, base - 2_000L, -30_000_000L, 290_000_000L, "a", null),
+            new Transaction(MELLAT, ACCOUNT, base - 1_000L, -7_000_000L, 283_000_000L, "b", null)))));
     }
 
     private void launch() {
@@ -86,9 +98,26 @@ public class HistoryResidualUiTest {
             .putExtra(HistoryActivity.EXTRA_ACCOUNT, ACCOUNT)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         scenario = androidx.test.core.app.ActivityScenario.launch(i);
-        // The screen builds itself off the main thread, so wait for the export action, which only
-        // exists once the history header is in place.
-        await(() -> findByDescription(ctx.getString(R.string.history_export)) != null, 20_000);
+        awaitMovementRows();
+    }
+
+    private void awaitMovementRows() {
+        // The export header is synchronous. Wait for settled catch-up and both actual movement
+        // rows' account labels: an absence assertion must not pass against the empty cold body.
+        await(() -> {
+            boolean[] ready = {false};
+            scenario.onActivity(activity -> {
+                List<TextView> labels = new ArrayList<>();
+                collect(activity.getWindow().getDecorView(), labels);
+                String accountLabel = activity.getString(R.string.account_label) + " " + ACCOUNT;
+                int movements = 0;
+                for (TextView label : labels) {
+                    if (accountLabel.equals(Digits.ascii(label.getText().toString()))) movements++;
+                }
+                ready[0] = HistoryActivity.idleForTest(activity) && movements == 2;
+            });
+            return ready[0];
+        }, 20_000);
     }
 
     // -----------------------------------------------------------------------
@@ -154,6 +183,7 @@ public class HistoryResidualUiTest {
             .putExtra(HistoryActivity.EXTRA_ACCOUNT, ACCOUNT)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         scenario = androidx.test.core.app.ActivityScenario.launch(i);
+        awaitMovementRows();
         await(() -> findByText("؟") != null, 20_000);
         await(() -> findByText("?") != null, 20_000);
         TextView headingAsk = findByText("؟");
@@ -323,10 +353,11 @@ public class HistoryResidualUiTest {
     }
 
     private static void await(Callable<Boolean> done, long timeoutMs) {
-        long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline) {
-            try { if (done.call()) return; } catch (Exception ignored) { }
-            try { Thread.sleep(150); } catch (InterruptedException e) {
+        long deadline = SystemClock.elapsedRealtime() + timeoutMs;
+        while (SystemClock.elapsedRealtime() < deadline) {
+            try { if (done.call()) return; }
+            catch (Exception e) { throw new AssertionError("history readiness check failed", e); }
+            try { Thread.sleep(25); } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
             }
