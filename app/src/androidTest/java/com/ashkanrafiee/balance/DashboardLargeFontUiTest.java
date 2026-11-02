@@ -8,6 +8,7 @@ import android.Manifest;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Rect;
+import android.os.Build;
 import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
 import android.provider.Settings;
@@ -22,10 +23,15 @@ import androidx.test.platform.app.InstrumentationRegistry;
 
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestName;
 import org.junit.runner.RunWith;
 
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.function.Supplier;
@@ -33,6 +39,8 @@ import java.util.function.Supplier;
 /** Dashboard layout coverage at a system font scale where cards must reflow rather than overlap. */
 @RunWith(AndroidJUnit4.class)
 public final class DashboardLargeFontUiTest {
+    @Rule public final TestName testName = new TestName();
+
     private Context context;
     private ActivityScenario<MainActivity> scenario;
     private LinkedHashMap<String, Bank> originalBalances;
@@ -63,7 +71,10 @@ public final class DashboardLargeFontUiTest {
         originalCurrency = CurrencyHelper.currency(context);
         originalRegion = RegionHelper.region(context);
         originalStaleDays = BalanceData.getStaleDays(context);
-        setFontScale(2f);
+        // Apply only the size this test exercises; do not enqueue an intermediate 2x change
+        // immediately before the 3x test's configuration change.
+        setFontScale("veryLargeFontStillKeepsTheCardReadable".equals(testName.getMethodName())
+            ? 3f : 2f);
         LocaleHelper.setLanguage(context, "en");
         CurrencyHelper.setCurrency(context, CurrencyHelper.CURRENCY_TOMAN);
         RegionHelper.setRegion(context, RegionHelper.REGION_INTERNATIONAL);
@@ -100,7 +111,7 @@ public final class DashboardLargeFontUiTest {
     }
 
     @Test public void largeFontBankCardKeepsMetadataInsideItsPillAndCard() {
-        launch();
+        launch(2f);
         await(() -> findText(currentRoot(), "181 days") != null, 10_000);
         scenario.onActivity(activity -> {
             ViewGroup list = (ViewGroup) activity.findViewById(R.id.dashboard_bank_list);
@@ -122,7 +133,7 @@ public final class DashboardLargeFontUiTest {
     }
 
     @Test public void largeFontLongTotalStaysOnOneReadableLine() {
-        launch();
+        launch(2f);
         String total = CurrencyHelper.amount(context, 49_842_060_000L);
         await(() -> findText(currentRoot(), total) != null, 10_000);
         scenario.onActivity(activity -> {
@@ -134,9 +145,8 @@ public final class DashboardLargeFontUiTest {
         });
     }
 
-    @Test public void veryLargeFontStillKeepsTheCardReadable() throws Exception {
-        setFontScale(3f);
-        launch();
+    @Test public void veryLargeFontStillKeepsTheCardReadable() {
+        launch(3f);
         await(() -> findText(currentRoot(), "181 days") != null, 10_000);
         String total = CurrencyHelper.amount(context, 49_842_060_000L);
         await(() -> findText(currentRoot(), total) != null, 10_000);
@@ -170,13 +180,13 @@ public final class DashboardLargeFontUiTest {
         });
     }
 
-    private void launch() {
+    private void launch(float expectedFontScale) {
         scenario = ActivityScenario.launch(MainActivity.class);
         scenario.onActivity(activity -> {
             float actual = activity.getResources().getConfiguration().fontScale;
             String observed = fontScaleDiagnostics() + ", activity=" + actual;
             assertEquals("dashboard must render at the requested font scale: " + observed,
-                requestedFontScale, actual, .01f);
+                expectedFontScale, actual, .01f);
             Log.i("DashboardLargeFontUiTest", observed);
         });
     }
@@ -188,21 +198,48 @@ public final class DashboardLargeFontUiTest {
         } catch (Exception ignored) { }
     }
 
-    private void shell(String command) throws Exception {
-        ParcelFileDescriptor descriptor = InstrumentationRegistry.getInstrumentation()
-            .getUiAutomation().executeShellCommand(command);
-        // Reading to EOF waits for the command; closing immediately can race the next test.
-        try (InputStream input = new ParcelFileDescriptor.AutoCloseInputStream(descriptor)) {
-            byte[] buffer = new byte[256];
-            while (input.read(buffer) != -1) { }
+    private String shell(String command) throws Exception {
+        ParcelFileDescriptor descriptor;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // UiAutomation executes a command directly, not through a shell. Supply the script
+            // on stdin so redirection and $? work without relying on command-line quoting.
+            ParcelFileDescriptor[] pipes = InstrumentationRegistry.getInstrumentation()
+                .getUiAutomation().executeShellCommandRw("sh");
+            descriptor = pipes[0];
+            try (OutputStream input = new ParcelFileDescriptor.AutoCloseOutputStream(pipes[1])) {
+                // Capture a provider-side readback too: a later timeout can then distinguish
+                // a failed write from a successful write that was subsequently overwritten.
+                input.write((command + " 2>&1\nstatus=$?\n"
+                    + "settings --user current get system font_scale 2>&1\necho exit=$status\n")
+                    .getBytes(StandardCharsets.UTF_8));
+            }
+        } else {
+            // Older UiAutomation exposes stdout only; the setting/configuration assertions below
+            // still verify that the command actually took effect.
+            descriptor = InstrumentationRegistry.getInstrumentation()
+                .getUiAutomation().executeShellCommand(command);
         }
+        String output;
+        // Drain through EOF, including the completion marker rather than discarding command errors.
+        try (InputStream input = new ParcelFileDescriptor.AutoCloseInputStream(descriptor);
+                ByteArrayOutputStream captured = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[256];
+            int count;
+            while ((count = input.read(buffer)) != -1) captured.write(buffer, 0, count);
+            output = new String(captured.toByteArray(), StandardCharsets.UTF_8);
+        }
+        assertTrue("font command failed: " + command + "\n" + output,
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                ? output.endsWith("exit=0\n") : output.isEmpty());
+        return output;
     }
 
     private void setFontScale(float scale) throws Exception {
         requestedFontScale = scale;
         // Initialize the singleton before changing settings so it receives the framework update.
         Resources.getSystem();
-        shell("settings put system font_scale " + scale);
+        String command = "settings --user current put system font_scale " + scale;
+        String output = shell(command);
         await(() -> {
             final float[] frameworkScale = {Float.NaN};
             // The setting is persisted before ActivityThread receives its configuration change.
@@ -214,7 +251,8 @@ public final class DashboardLargeFontUiTest {
             return Math.abs(Settings.System.getFloat(context.getContentResolver(),
                     Settings.System.FONT_SCALE, 1f) - scale) < .01f
                 && Math.abs(frameworkScale[0] - scale) < .01f;
-        }, 10_000, () -> "framework font configuration did not settle: " + fontScaleDiagnostics());
+        }, 10_000, () -> "framework font configuration did not settle: " + fontScaleDiagnostics()
+            + ", command=" + command + ", output=" + output);
     }
 
     private String fontScaleDiagnostics() {
