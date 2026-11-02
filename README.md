@@ -2,7 +2,7 @@
 
 Balance is a small, offline-first Android app that reads supported bank SMS messages locally and shows the latest balance for each recognized bank — broken out per account number when the bank states one — plus the combined total.
 
-The current release is designed for users in Iran. It recognizes Iranian banks and the Persian SMS formats used by those banks. A Region setting in the footer switches the app's calendar between the Persian (Jalali) calendar (Iran — the default) and the Gregorian calendar (International), with localized month and weekday names for both; the same menu picks the currency shown next to amounts — Toman by default — plus Rial as stored or any custom currency you type. Only Toman divides the rial figure by ten (the familiar toman amount); every other currency shows the raw number under its own label.
+Balance currently supports Iranian banks and their Persian SMS formats only. Banks in other countries are not supported yet. A Region setting in the footer switches the app's calendar between the Persian (Jalali) calendar (Iran — the default) and the Gregorian calendar (International), with localized month and weekday names for both; the same menu picks the currency shown next to amounts — Toman by default — plus Rial as stored or any custom currency you type. Only Toman divides the rial figure by ten (the familiar toman amount); every other currency shows the raw number under its own label.
 
 ## Features
 

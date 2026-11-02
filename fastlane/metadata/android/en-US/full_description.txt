@@ -1,6 +1,6 @@
 Balance reads bank SMS on your phone and shows the latest balance for supported banks — split per account when stated — plus the total. No account, cloud, analytics or internet permission: parsing is on-device and stored data is encrypted. Balance does not upload or send it; Report, sharing, CSV export and backup only hand selected data to the app or location you choose.
 
-Currently built for users in Iran, with Iranian banks and their Persian message formats.
+Currently supports Iranian banks only. Banks in other countries are not supported yet.
 
 Features:
 - A first-run introduction explaining what is read and why; skippable, and re-openable from About
