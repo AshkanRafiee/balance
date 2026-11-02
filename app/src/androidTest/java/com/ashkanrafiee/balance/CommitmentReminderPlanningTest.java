@@ -261,6 +261,24 @@ public class CommitmentReminderPlanningTest {
         assertFalse(CommitmentReminders.scheduledIds(context).contains(definition.id));
     }
 
+    @Test public void manyDefinitionsDoNotEvictEachOthersDeliverySuppression() throws Exception {
+        Set<String> fired = new HashSet<>();
+        long due = inDays(-1);
+        for (int i = 0; i < 8192; i++) fired.add("other-" + i + "|" + due);
+        reminderPrefs().edit().putStringSet("fired_due", fired).commit();
+        Commitment definition = Commitment.create("Another owner", -500, Commitment.ONCE,
+            due, null, true, 0);
+        CommitmentStore.upsert(context, definition);
+
+        CommitmentReminders.fireNow(context, definition.id, new CommitmentReminderJobs.Token());
+
+        Set<String> actual = reminderPrefs().getStringSet("fired_due", Collections.emptySet());
+        assertEquals("the obsolete 500-definition limit must not drop other owners' tokens",
+            8193, actual.size());
+        assertTrue(actual.containsAll(fired));
+        assertTrue(actual.contains(definition.id + "|" + due));
+    }
+
     @Test public void stopWhileWaitingForDataMonitorDoesNoDatabaseWorkAfterAcquisition()
             throws Exception {
         CountingContext counted = new CountingContext(context);
