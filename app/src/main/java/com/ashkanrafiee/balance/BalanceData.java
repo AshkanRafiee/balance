@@ -968,14 +968,60 @@ final class BalanceData {
     }
 
     /** Saves (or with a blank input, clears) the note for a residual. */
-    static void setNote(Context context, Residual residual, String text) {
+    static synchronized void setNote(Context context, Residual residual, String text) {
         try {
+            ensureResetComplete(context);
+            String key = noteKey(residual);
+            // A stale editor is a new decision about this residual, not permission for an older
+            // queued alias to move the newly typed text (or clear a real movement's own note).
+            Map<String, String> pending = readPendingMetadataMigrations(context,
+                KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS);
+            if (pending.remove(key) != null)
+                writePendingMetadataMigrations(context, KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS, pending);
             boolean keepProvenance = text != null && !text.trim().isEmpty();
+            List<Transaction> slot = new ArrayList<>();
+            String destination = null;
+            if (keepProvenance) {
+                TransactionStore.forEach(context, 256, transaction -> {
+                    if (residual.key().equals(transactionCompositeKey(transaction))
+                            && transaction.date >= residual.fromDate && transaction.date <= residual.toDate)
+                        slot.add(transaction);
+                });
+                destination = resolvedEditedResidualDestination(residual, slot);
+                // Do not discard new words or replace an independently edited real movement note.
+                // A conflicting note remains safely attached to the old residual identity.
+                if (destination != null && MetadataStore.getNote(context, destination) != null)
+                    destination = null;
+            }
             if (keepProvenance) updateResidualNoteProvenance(context, residual, true);
-            MetadataStore.setNote(context, noteKey(residual), text);
+            MetadataStore.setNote(context, key, text);
             if (!keepProvenance) updateResidualNoteProvenance(context, residual, false);
+            if (destination != null) {
+                if (!stageResidualNoteMigrations(context, java.util.Collections.singletonMap(key, destination)))
+                    throw new Exception("resolved residual note migration could not be staged");
+                completePendingResidualNoteMigrations(context, slot);
+            }
         }
         catch (Exception e) { throw new IllegalStateException("metadata residual note write failed", e); }
+    }
+
+    /** An editor can outlive the residual it opened. Without a fresh-scan candidate list, require
+     *  exactly one additional movement in the old bracket and exactly one matching amount. */
+    private static String resolvedEditedResidualDestination(Residual residual, List<Transaction> slot) {
+        long movements = 0;
+        Transaction candidate = null;
+        for (Transaction transaction : slot) {
+            if (transaction.date <= residual.fromDate || transaction.date > residual.toDate) continue;
+            movements++;
+            if (transaction.date < residual.toDate && transaction.amount == residual.amount
+                    && transaction.balance != null) {
+                if (candidate != null) return null;
+                candidate = transaction;
+            }
+        }
+        if (candidate == null || movements != (long) residual.movements + 1
+                || !residualBracketCloses(residual, slot)) return null;
+        return noteKey(candidate);
     }
 
     /** Moves the text attached to a movement that a full-history rebuild would orphan: when a stored
@@ -2632,8 +2678,12 @@ final class BalanceData {
         int closers = 0;
         long inside = 0;
         boolean exact = true;
+        Set<Long> statementDates = new HashSet<>();
         for (Transaction transaction : slot) {
             if (transaction == null) continue;
+            if (transaction.balance != null && transaction.date >= residual.fromDate
+                    && transaction.date <= residual.toDate && !statementDates.add(transaction.date))
+                return false;
             if (transaction.date == residual.fromDate && transaction.balance != null) {
                 openers++;
                 opener = transaction;
@@ -2654,10 +2704,18 @@ final class BalanceData {
         }
         if (openers != 1 || closers != 1 || !exact) return false;
         try {
-            return Math.subtractExact(Math.subtractExact(closer.balance, opener.balance), inside) == 0;
+            if (Math.subtractExact(Math.subtractExact(closer.balance, opener.balance), inside) != 0)
+                return false;
         } catch (ArithmeticException overflow) {
             return false;
         }
+        // Aggregate closure alone is not proof: an inconsistent intermediate balance can split
+        // the old gap into opposite residuals whose sum is zero. Every statement must fit.
+        for (Residual remaining : Residual.between(slot)) {
+            if (remaining.fromDate < residual.toDate && remaining.toDate > residual.fromDate)
+                return false;
+        }
+        return true;
     }
 
     /** Stages aliases before the transaction commit; the encrypted data preferences survive a crash. */

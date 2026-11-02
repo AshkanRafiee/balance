@@ -1125,6 +1125,23 @@ public class HistoryScanTest {
         assertEquals(1, BalanceData.readTransactions(ctx).size());
     }
 
+    @Test public void lateMovementWithInconsistentBalance_doesNotInheritResidualNote() throws Exception {
+        seed("TejaratBank", TEJARAT_DEPOSIT, at(2026, 8, 30, 9, 0));
+        seed("TejaratBank", TEJARAT_WITHDRAWAL, at(2026, 8, 30, 10, 0));
+        assertEquals(2, BalanceData.scanHistory(ctx));
+        Residual gap = Residual.between(BalanceData.readTransactions(ctx)).get(0);
+        BalanceData.setNote(ctx, gap, "the original missing withdrawal");
+        seed("TejaratBank", TEJARAT_LATE_MOVEMENT.replace("498,563,016", "700,000,000"),
+            at(2026, 9, 10, 9, 0));
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        List<Transaction> saved = BalanceData.readTransactions(ctx);
+        assertEquals("a bad intermediate balance leaves opposite gaps, not a proven closure", 2,
+            Residual.between(saved).size());
+        for (Transaction transaction : saved)
+            if (transaction.amount == gap.amount) assertNull(BalanceData.getNote(ctx, transaction));
+        assertEquals("the original missing withdrawal", BalanceData.getNote(ctx, gap));
+    }
+
     @Test public void fullReparse_unrelatedQualifiedOrphanAtSameTimestampKeepsItsOwnAnnotations()
             throws Exception {
         String deletedBody = "واریز: 999,999 ریال\nمانده: 1,500,000 ریال";

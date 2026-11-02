@@ -115,6 +115,46 @@ public class HistoryResidualNoteEditorTest {
             DataGeneration.dataPrefs(context).contains(BalanceData.KEY_RESIDUAL_NOTE_PROVENANCE));
     }
 
+    @Test public void editorSavedAfterDelayedMovementResolvesGap_followsTheUniqueMovement()
+            throws Exception {
+        Residual gap = seedGapAndOpen();
+        openEditor();
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        final AlertDialog[] opened = {null};
+        scenario.onActivity(activity -> {
+            opened[0] = lastDialog(activity);
+            ((EditText) find(opened[0].getWindow().getDecorView(), view -> view instanceof EditText))
+                .setText(NOTE);
+        });
+
+        seed(message("برداشت", "2,034,872,000", "498,563,016", "07", "12:00"),
+            at(2026, 9, 10, 9));
+        // Either our call or the SMS observer may read the message first. Assert committed state,
+        // not which worker added it, and finish the quiet refresh before saving the old editor.
+        BalanceData.scanHistory(context);
+        await(this::idle, "the resolving scan and render to finish while the editor is open");
+        List<Transaction> transactions = BalanceData.readTransactions(context);
+        assertEquals(3, transactions.size());
+        assertTrue(Residual.between(transactions).isEmpty());
+        Transaction recovered = null;
+        for (Transaction transaction : transactions)
+            if (transaction.amount == -2_034_872_000L) recovered = transaction;
+        assertNotNull(recovered);
+
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        scenario.onActivity(activity -> {
+            AlertDialog editor = lastDialog(activity);
+            assertTrue("the same editor must remain open after its row disappears", editor == opened[0]);
+            assertTrue(editor.isShowing());
+            editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+            assertFalse("the installed Save handler must dismiss the editor", editor.isShowing());
+        });
+        await(this::idle, "the note save to render");
+        assertEquals(0, BalanceData.scanHistory(context));
+        assertEquals(NOTE, BalanceData.getNote(context, recovered));
+        assertNull(BalanceData.getNote(context, gap));
+    }
+
     private Residual seedGapAndOpen() throws Exception {
         seed(message("واریز", "805,000,000", "2,533,435,016", "06", "00:08"),
             at(2026, 8, 30, 9));
