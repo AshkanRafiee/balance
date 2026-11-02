@@ -175,6 +175,58 @@ public class ResetRecoveryTest {
         }
     }
 
+    @Test public void publishedGenerationRecoversAtomicMarkerBackup() throws Exception {
+        assertTrue(MetadataStore.setNote(context, "example", "survives interrupted marker write"));
+        publish();
+        File marker = publishedMarker();
+        // Android 8 AtomicFile moves the old base file to .bak before creating its replacement.
+        // A killed process can leave only this last committed marker behind.
+        assertTrue(marker.renameTo(new File(marker.getPath() + ".bak")));
+
+        assertEquals("survives interrupted marker write", MetadataStore.getNote(context, "example"));
+        assertTrue(marker.isFile());
+        assertFalse(new File(marker.getPath() + ".bak").exists());
+    }
+
+    @Test public void keepNotesRecoversAtomicMarkerBackupAfterInterruptedWrite() throws Exception {
+        assertTrue(MetadataStore.setNote(context, "example", "must survive"));
+        publish();
+        File marker = publishedMarker();
+        assertTrue(marker.renameTo(new File(marker.getPath() + ".bak")));
+        corrupt(marker);
+        context.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit()
+            .putBoolean(BalanceData.KEY_RESET_IN_PROGRESS, true)
+            .putBoolean(BalanceData.KEY_RESET_ALSO_NOTES, false).commit();
+
+        BalanceData.reset(context, false);
+
+        assertEquals("must survive", MetadataStore.getNote(context, "example"));
+        assertTrue(BalanceData.readTransactions(context).isEmpty());
+        assertTrue(BalanceData.readCommitments(context).isEmpty());
+        assertFalse(new File(marker.getPath() + ".bak").exists());
+    }
+
+    @Test public void corruptMarkerWithoutBackupStillBlocksKeepNotesReset() throws Exception {
+        assertTrue(MetadataStore.setNote(context, "example", "must not silently disappear"));
+        publish();
+        Context active = DataGeneration.context(context);
+        File metadata = active.getDatabasePath(MetadataStore.DB_NAME);
+        corrupt(publishedMarker());
+
+        try {
+            BalanceData.reset(context, false);
+            fail("an invalid marker without a committed backup must still be rejected");
+        } catch (IllegalStateException expected) {
+            assertTrue("the preserved metadata must remain available for recovery", metadata.isFile());
+            assertTrue(DataGeneration.manifestFileForTests(context).isFile());
+        }
+    }
+
+    private File publishedMarker() {
+        return new File(DataGeneration.context(context).getFilesDir().getParentFile(),
+            "generation.marker");
+    }
+
     private void publish() throws Exception {
         synchronized (BalanceData.class) {
             try (DataGeneration.Stage stage = DataGeneration.beginStage(context)) {

@@ -437,7 +437,7 @@ final class DataGeneration {
         if (!databases.isDirectory() || !files.isDirectory() || !noBackup.isDirectory())
             throw new IllegalStateException("published data generation is incomplete");
         try {
-            String marker = new String(readBytes(new FileInputStream(markerFile(directory)),
+            String marker = new String(readBytes(new AtomicFile(markerFile(directory)).openRead(),
                 MAX_MARKER_BYTES), StandardCharsets.UTF_8);
             java.util.Set<String> expectedDatabases = validateMarker(marker, "ready", generation,
                 databases, resettableMissing);
