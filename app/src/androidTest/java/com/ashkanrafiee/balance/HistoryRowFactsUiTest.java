@@ -98,9 +98,28 @@ public class HistoryRowFactsUiTest {
             .putExtra(HistoryActivity.EXTRA_ACCOUNT, ACCOUNT)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         scenario = androidx.test.core.app.ActivityScenario.launch(i);
-        // The screen builds itself off the main thread, so wait for the export action, which only
-        // exists once the history header is in place.
-        await(() -> findByDescription(stringsIn.getString(R.string.history_export)) != null, 20_000);
+        // Export belongs to the synchronous header, not the asynchronous history result. It can
+        // already exist while the body is still blank or showing its delayed cold placeholder.
+        // Wait for the accepted row after catch-up/validation, without depending on the reason,
+        // channel or note whose presentation each test must independently assert below.
+        await(() -> {
+            final boolean[] ready = {false};
+            scenario.onActivity(activity -> {
+                if (!HistoryActivity.idleForTest(activity)) return;
+                View root = activity.getWindow().getDecorView();
+                View row = find(root, view -> {
+                    CharSequence description = view.getContentDescription();
+                    return view.isClickable() && description != null
+                        && Digits.ascii(description.toString()).contains(ACCOUNT)
+                        && description.toString().contains(stringsIn.getString(R.string.history_withdrawal));
+                });
+                ready[0] = row != null && row.isAttachedToWindow() && row.getWidth() > 0 && row.getHeight() > 0
+                    && find(root, view -> view.getContentDescription() != null
+                        && stringsIn.getString(R.string.history_export)
+                            .contentEquals(view.getContentDescription())) != null;
+            });
+            return ready[0];
+        }, 20_000);
     }
 
     @Test public void aMovementWithAReason_showsTheCaptionAndSpeaksIt() {
@@ -321,6 +340,6 @@ public class HistoryRowFactsUiTest {
                 break;
             }
         }
-        throw new AssertionError("timed out waiting for the history screen");
+        throw new AssertionError("timed out waiting for the settled history movement row");
     }
 }
