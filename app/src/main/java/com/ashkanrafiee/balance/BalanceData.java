@@ -1731,13 +1731,43 @@ final class BalanceData {
     private static boolean wasObserved(Transaction old, List<Transaction> observations) {
         if (observations == null) return false;
         for (Transaction observed : observations) {
-            if (old.bank.equals(observed.bank) && old.date == observed.date && old.amount == observed.amount
-                    && java.util.Objects.equals(old.account, observed.account)
-                    && java.util.Objects.equals(old.balance, observed.balance)
-                    && java.util.Objects.equals(old.sig, observed.sig)
-                    && java.util.Objects.equals(old.content, observed.content)) return true;
+            if (sameParse(old, observed)) return true;
         }
         return false;
+    }
+
+    private static boolean sameParse(Transaction old, Transaction observed) {
+        return old.bank.equals(observed.bank) && old.date == observed.date && old.amount == observed.amount
+            && java.util.Objects.equals(old.account, observed.account)
+            && java.util.Objects.equals(old.balance, observed.balance)
+            && java.util.Objects.equals(old.sig, observed.sig)
+            && java.util.Objects.equals(old.content, observed.content);
+    }
+
+    /** Physical-source observations survive parser normalization changes to both digest and date.
+     *  A retained parse observed for competing fresh events is ambiguous and cannot be claimed. */
+    private static Map<Transaction, Transaction> observedTransactionReplacements(List<Transaction> stored,
+            Map<Transaction, List<Transaction>> priorOfFresh) {
+        Map<String, List<Transaction>> storedByMoment = new HashMap<>();
+        for (Transaction old : stored)
+            storedByMoment.computeIfAbsent(legacyEntryKey(old), ignored -> new ArrayList<>()).add(old);
+        Map<Transaction, Set<Transaction>> claims = new LinkedHashMap<>();
+        for (Map.Entry<Transaction, List<Transaction>> entry : priorOfFresh.entrySet()) {
+            if (entry.getValue() == null) continue;
+            for (Transaction observed : entry.getValue()) {
+                List<Transaction> candidates = storedByMoment.get(legacyEntryKey(observed));
+                if (candidates == null) continue;
+                for (Transaction old : candidates) {
+                    if (sameParse(old, observed))
+                        claims.computeIfAbsent(old, ignored -> new HashSet<>()).add(entry.getKey());
+                }
+            }
+        }
+        Map<Transaction, Transaction> out = new LinkedHashMap<>();
+        for (Map.Entry<Transaction, Set<Transaction>> entry : claims.entrySet()) {
+            if (entry.getValue().size() == 1) out.put(entry.getKey(), entry.getValue().iterator().next());
+        }
+        return out;
     }
 
     /** Best-effort evidence capture; source failures must not block the core stores or watermarks. */
@@ -2202,11 +2232,22 @@ final class BalanceData {
                     // for another entry's fingerprint.
                     Set<Transaction> identityClaimed = new HashSet<>();
                     Map<String, Integer> identityClaimsPerKey = new HashMap<>();
+                    Map<Transaction, Transaction> observedReplacements =
+                        observedTransactionReplacements(stored, priorOfFresh);
+                    Set<Transaction> sourceMatchedFresh = new HashSet<>(observedReplacements.values());
+                    for (Map.Entry<Transaction, Transaction> replacement : observedReplacements.entrySet()) {
+                        identityClaimed.add(replacement.getKey());
+                        metadataReplacements.put(replacement.getKey(), replacement.getValue());
+                        Transaction f = replacement.getValue();
+                        String key = transactionCompositeKey(f) + "|" + f.date;
+                        identityClaimsPerKey.put(key, identityClaimsPerKey.getOrDefault(key, 0) + 1);
+                    }
                     // Source text is independent of parsed amount, account and event date. Claim it
                     // first, one-to-one and nearest first, so corrections to any of those fields do
                     // not leave the previous parse behind as a supposedly deleted-message orphan.
                     // Repeated clockless bodies can occur on different days: never claim all of them.
                     for (Transaction f : fresh) {
+                        if (sourceMatchedFresh.contains(f)) continue;
                         if (f.content == null) continue;
                         List<Transaction> candidates = storedByContent.get(f.bank + "|" + f.content);
                         Transaction best = null;
@@ -2313,6 +2354,12 @@ final class BalanceData {
                     }
                     for (Transaction t : stored) {
                         if (identityClaimed.contains(t) || accountTwins.contains(t)) continue;
+                        // Qualified events have their own identity. A coincident timestamp is not
+                        // evidence that an unrelated inbox row replaces a deleted source's event.
+                        if (t.sig != null && t.sig.startsWith("e2:")) {
+                            rebuilt.add(t);
+                            continue;
+                        }
                         String key = transactionCompositeKey(t) + "|" + t.date;
                         Integer left = budget.get(key);
                         if (left != null && left > 0) {
@@ -2647,7 +2694,9 @@ final class BalanceData {
             }
             for (Transaction transaction : retained) {
                 if (transaction.sig == null || !transaction.sig.startsWith("e2:")) continue;
-                String legacySig = transaction.sig.substring(3, transaction.sig.indexOf(':', 3));
+                int separator = transaction.sig.indexOf(':', 3);
+                if (separator < 0) continue; // Imported opaque signatures have no legacy alias.
+                String legacySig = transaction.sig.substring(3, separator);
                 String to = noteKey(transaction);
                 for (String from : new String[]{transaction.content == null ? "" : "c:" + transaction.content,
                         "s:" + legacySig}) {

@@ -1074,6 +1074,116 @@ public class HistoryScanTest {
         assertEquals(Collections.singletonList("keep"), BalanceData.getTags(ctx, saved.get(0)));
     }
 
+    @Test public void normalizationUpgrade_legacyDigestAndDateAreReplacedUsingSourceProof()
+            throws Exception {
+        Calendar day = Calendar.getInstance();
+        day.add(Calendar.DAY_OF_MONTH, -1);
+        int year = day.get(Calendar.YEAR);
+        int month = day.get(Calendar.MONTH) + 1;
+        int date = day.get(Calendar.DAY_OF_MONTH);
+        String body = DEPOSIT + "\n" + String.format(Locale.US,
+            "%04d/%02d/%02d 12\uFF1A30", year, month, date);
+        long arrival = at(year, month, date, 13, 0);
+        long midnight = at(year, month, date, 0, 0);
+        long correctedDate = at(year, month, date, 12, 30);
+        // v1.21.0 recognized the full Gregorian date but not this fullwidth clock colon,
+        // so the saved parse was midnight. Its content hash did not apply NFKC either.
+        assertFalse(java.util.regex.Pattern.compile(
+            "(?<![0-9])([0-9]{1,2}):([0-9]{2})(?::([0-9]{2}))?(?![0-9])")
+            .matcher(body).find());
+        String oldContent = v121ContentHash("500095", body);
+        String oldSignature = v121Digest("500095|200000|3000000");
+        assertEquals(oldSignature, BalanceData.messageSig("500095", body));
+        assertFalse(oldContent.equals(BalanceData.contentHash("500095", body)));
+        assertEquals(correctedDate, MessageDate.eventTime(body, arrival, BankRules.calendar("Saman")));
+        seed("500095", body, arrival);
+
+        Transaction old = new Transaction("Saman", null, midnight, 200000L, 3000000L,
+            oldSignature, oldContent);
+        assertTrue(BalanceData.writeTransactions(ctx, Collections.singletonList(old)));
+        BalanceData.setNote(ctx, old, "before normalization upgrade");
+        BalanceData.setTags(ctx, old, Collections.singletonList("keep"));
+        SourceStore.Source source = SourceStore.capture(ctx, "500095", body, arrival, 0);
+        assertNotNull(source);
+        assertTrue(SourceStore.observeTransaction(ctx, source, 0, old));
+        assertEquals(1L, SourceStore.transactionObservationCount(ctx));
+        prefs().edit().putInt(BalanceData.KEY_HISTORY_SCHEMA, 1)
+            .remove(BalanceData.KEY_HISTORY_RULES_VERSION).commit();
+
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        List<Transaction> saved = BalanceData.readTransactions(ctx);
+        assertEquals("a changed digest must not hide the old physical-source observation", 1, saved.size());
+        Transaction corrected = saved.get(0);
+        assertEquals(correctedDate, corrected.date);
+        assertEquals(200000L, corrected.amount);
+        assertEquals("before normalization upgrade", BalanceData.getNote(ctx, corrected));
+        assertEquals(Collections.singletonList("keep"), BalanceData.getTags(ctx, corrected));
+        assertNull(BalanceData.readNotes(ctx).get(BalanceData.noteKey(old)));
+        assertTrue(BalanceData.readTags(ctx).getOrDefault(BalanceData.noteKey(old),
+            Collections.emptyList()).isEmpty());
+        assertEquals(0, BalanceData.scanHistory(ctx));
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
+    }
+
+    @Test public void fullReparse_unrelatedQualifiedOrphanAtSameTimestampKeepsItsOwnAnnotations()
+            throws Exception {
+        String deletedBody = "واریز: 999,999 ریال\nمانده: 1,500,000 ریال";
+        Transaction orphan = BalanceData.parseMovement("Saman", "500095", deletedBody, T, false, 0);
+        assertNotNull(orphan);
+        assertTrue("use a real qualified event signature, not an abbreviated fixture",
+            orphan.sig.startsWith("e2:"));
+        assertTrue(BalanceData.writeTransactions(ctx, Collections.singletonList(orphan)));
+        BalanceData.setNote(ctx, orphan, "belongs only to the deleted message");
+        BalanceData.setTags(ctx, orphan, Collections.singletonList("retained"));
+        // Only the unrelated message is present. A common bank/account/date is not source proof.
+        seed("500095", DEPOSIT, T);
+        prefs().edit().remove(BalanceData.KEY_HISTORY_RULES_VERSION).commit();
+        assertEquals(1, BalanceData.scanHistory(ctx));
+
+        List<Transaction> saved = BalanceData.readTransactions(ctx);
+        assertEquals("the same-timestamp budget must not replace a known different event", 2, saved.size());
+        Transaction present = null;
+        Transaction retained = null;
+        for (Transaction transaction : saved) {
+            if (orphan.sig.equals(transaction.sig)) retained = transaction;
+            if (transaction.amount == 200000L) present = transaction;
+        }
+        assertNotNull(retained);
+        assertNotNull(present);
+        assertEquals("belongs only to the deleted message", BalanceData.getNote(ctx, retained));
+        assertEquals(Collections.singletonList("retained"), BalanceData.getTags(ctx, retained));
+        assertNull("an unrelated fresh event must not inherit the orphan's note",
+            BalanceData.getNote(ctx, present));
+        assertTrue(BalanceData.getTags(ctx, present).isEmpty());
+        assertEquals(0, BalanceData.scanHistory(ctx));
+        assertEquals(2, BalanceData.readTransactions(ctx).size());
+    }
+
+    /** v1.21.0 contentHash normalization, independent of today's parser normalization rules. */
+    private static String v121ContentHash(String sender, String body) throws Exception {
+        String raw = body.replace("\u066C", ",").replace("\u060C", ",");
+        StringBuilder normalized = new StringBuilder(raw.length());
+        for (char c : raw.toCharArray()) {
+            if (c >= '\u06F0' && c <= '\u06F9') normalized.append((char) ('0' + c - '\u06F0'));
+            else if (c >= '\u0660' && c <= '\u0669') normalized.append((char) ('0' + c - '\u0660'));
+            else if (c == '\u064A' || c == '\u06CC') normalized.append('\u06CC');
+            else if (c == '\u0643') normalized.append('\u06A9');
+            else normalized.append(c);
+        }
+        return v121Digest(sender + "|" + normalized.toString().trim().replaceAll("\\s+", " "));
+    }
+
+    private static String v121Digest(String value) throws Exception {
+        byte[] hash = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        StringBuilder out = new StringBuilder(32);
+        for (int i = 0; i < 16; i++) {
+            int b = hash[i] & 0xFF;
+            out.append(Character.forDigit(b >>> 4, 16)).append(Character.forDigit(b & 0xF, 16));
+        }
+        return out.toString();
+    }
+
     @Test public void replayRepairsSourcedReasonEvenWhenTransactionAlreadyCommitted() throws Exception {
         seed(BluMessages.SENDER, BluMessages.TOPUP, T + 1000);
         assertEquals(1, BalanceData.scanHistory(ctx));
