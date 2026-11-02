@@ -2807,14 +2807,37 @@ final class BalanceData {
         if (pending.isEmpty() || stored == null || stored.isEmpty()) return false;
         Set<String> transactionKeys = new HashSet<>();
         for (Transaction transaction : stored) transactionKeys.add(noteKey(transaction));
-        Map<String, String> ready = new LinkedHashMap<>();
-        for (Map.Entry<String, String> entry : pending.entrySet()) {
-            if (transactionKeys.contains(entry.getValue())) ready.put(entry.getKey(), entry.getValue());
-        }
-        if (ready.isEmpty()) return false;
         try {
+            Map<String, String> ready = new LinkedHashMap<>();
+            Set<String> conflicted = new HashSet<>();
+            Map<String, String> sourceNotes = new HashMap<>();
+            Map<String, Integer> sourcesPerDestination = new HashMap<>();
+            if (residual) {
+                for (Map.Entry<String, String> entry : pending.entrySet()) {
+                    if (!transactionKeys.contains(entry.getValue())) continue;
+                    String note = MetadataStore.getNote(context, entry.getKey());
+                    sourceNotes.put(entry.getKey(), note);
+                    if (note != null) sourcesPerDestination.merge(entry.getValue(), 1, Integer::sum);
+                }
+            }
+            for (Map.Entry<String, String> entry : pending.entrySet()) {
+                if (!transactionKeys.contains(entry.getValue())) continue;
+                // A retry can run long after its source text was committed. Keep conflicting
+                // residual words and provenance unattached instead of letting local-first metadata
+                // migration preserve the target while silently deleting the source. A missing
+                // source is an already-completed move and may safely finish queue cleanup.
+                if (residual && sourceNotes.get(entry.getKey()) != null
+                        && (sourcesPerDestination.get(entry.getValue()) > 1
+                            || MetadataStore.getNote(context, entry.getValue()) != null)) {
+                    conflicted.add(entry.getKey());
+                } else ready.put(entry.getKey(), entry.getValue());
+            }
+            if (ready.isEmpty() && conflicted.isEmpty()) return false;
             boolean changed = MetadataStore.migrateKeys(context, ready);
             pending.keySet().removeAll(ready.keySet());
+            // Retire the route, not its saved source. Clearing the target later must not cause an
+            // old conflict to reappear unexpectedly or leave a permanently retried queue behind.
+            pending.keySet().removeAll(conflicted);
             writePendingMetadataMigrations(context, preferenceKey, pending);
             if (residual) removeResidualNoteProvenance(context, ready.keySet());
             return changed;

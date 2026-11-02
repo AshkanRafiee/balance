@@ -154,6 +154,82 @@ public class ResidualEditorResolutionTest {
             .contains(BalanceData.KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS));
     }
 
+    @Test public void conflictedRetry_keepsBothNotesAndResidualProvenance() throws Exception {
+        BalanceData.setNote(context, gap, NOTE);
+        write(opener, missing, closer);
+        queueAlias();
+        // The original editor already saved its source text and retry route. Before that route
+        // can finish, a separate edit gives the real movement its own independently written note.
+        BalanceData.setNote(context, missing, "independent movement note");
+        retryAliases();
+        assertEquals("independent movement note", BalanceData.getNote(context, missing));
+        assertEquals("a retry must not discard the residual's different saved words", NOTE,
+            BalanceData.getNote(context, gap));
+        assertTrue(BalanceData.readResidualNoteProvenance(context).containsKey(gap.noteKey()));
+        assertFalse("a conflicted alias must not unexpectedly reattach on a later edit",
+            DataGeneration.dataPrefs(context).contains(BalanceData.KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS));
+
+        BalanceData.setNote(context, missing, null);
+        retryAliases();
+        assertNull(BalanceData.getNote(context, missing));
+        assertEquals(NOTE, BalanceData.getNote(context, gap));
+    }
+
+    @Test public void retryAfterMetadataAlreadyMoved_cleansOnlyTheCompletedRoute() throws Exception {
+        BalanceData.setNote(context, gap, NOTE);
+        write(opener, missing, closer);
+        queueAlias();
+        // Simulates a process dying after the atomic metadata migration but before queue cleanup.
+        MetadataStore.migrateKeys(context, java.util.Collections.singletonMap(
+            gap.noteKey(), BalanceData.noteKey(missing)));
+        assertNull(BalanceData.getNote(context, gap));
+        assertEquals(NOTE, BalanceData.getNote(context, missing));
+        retryAliases();
+        assertEquals(NOTE, BalanceData.getNote(context, missing));
+        assertNull(BalanceData.getNote(context, gap));
+        assertFalse(BalanceData.readResidualNoteProvenance(context).containsKey(gap.noteKey()));
+        assertFalse(DataGeneration.dataPrefs(context)
+            .contains(BalanceData.KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS));
+    }
+
+    @Test public void competingResidualRetryRoutes_keepBothSourcesUnattached() throws Exception {
+        BalanceData.setNote(context, gap, NOTE);
+        Residual other = new Residual(gap.bank, gap.account, gap.fromDate - 1, gap.toDate,
+            gap.amount, gap.movements);
+        BalanceData.setNote(context, other, "a different original bracket");
+        write(opener, missing, closer);
+        JSONObject pending = new JSONObject().put(gap.noteKey(), BalanceData.noteKey(missing))
+            .put(other.noteKey(), BalanceData.noteKey(missing));
+        assertTrue(DataGeneration.dataPrefs(context).edit().putString(
+            BalanceData.KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS,
+            BalanceData.encryptStorePayload(pending.toString())).commit());
+        retryAliases();
+        assertNull(BalanceData.getNote(context, missing));
+        assertEquals(NOTE, BalanceData.getNote(context, gap));
+        assertEquals("a different original bracket", BalanceData.getNote(context, other));
+        assertTrue(BalanceData.readResidualNoteProvenance(context).containsKey(gap.noteKey()));
+        assertTrue(BalanceData.readResidualNoteProvenance(context).containsKey(other.noteKey()));
+        assertFalse(DataGeneration.dataPrefs(context)
+            .contains(BalanceData.KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS));
+    }
+
+    private void queueAlias() throws Exception {
+        JSONObject pending = new JSONObject().put(gap.noteKey(), BalanceData.noteKey(missing));
+        assertTrue(DataGeneration.dataPrefs(context).edit().putString(
+            BalanceData.KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS,
+            BalanceData.encryptStorePayload(pending.toString())).commit());
+    }
+
+    private void retryAliases() throws Exception {
+        java.lang.reflect.Method retry = BalanceData.class.getDeclaredMethod(
+            "completePendingResidualNoteMigrations", Context.class, List.class);
+        retry.setAccessible(true);
+        // Production scan/setter callers own this monitor across the metadata read and migration.
+        synchronized (BalanceData.class) {
+            retry.invoke(null, context, Arrays.asList(opener, missing, closer));
+        }
+    }
+
     private void write(Transaction... transactions) {
         assertTrue(BalanceData.writeTransactions(context, Arrays.asList(transactions)));
     }
