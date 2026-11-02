@@ -2378,7 +2378,8 @@ final class BalanceData {
                                 f = byDigest.remove(s.bank + "|" + s.date + "|" + s.content);
                             if (f == null && s.sig != null)
                                 f = byContent.remove(s.bank + "|" + s.date + "|" + s.sig);
-                            if (f == null)
+                            // Only legacy account-less parses lacked a qualified event identity.
+                            if (f == null && (s.sig == null || !s.sig.startsWith("e2:")))
                                 f = byAmount.remove(s.bank + "|" + s.date + "|" + s.amount);
                             if (f != null) {
                                 accountTwins.add(s);

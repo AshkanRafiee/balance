@@ -1176,6 +1176,30 @@ public class HistoryScanTest {
         assertEquals(2, BalanceData.readTransactions(ctx).size());
     }
 
+    @Test public void fullReparse_accountDiscoveryDoesNotClaimAnUnrelatedQualifiedEventByAmount()
+            throws Exception {
+        String deletedBody = "واریز:200,000 ریال\nمانده:1,500,000 ریال";
+        Transaction orphan = BalanceData.parseMovement("Tejarat", "TejaratBank", deletedBody,
+            T, false, 0);
+        assertNotNull(orphan);
+        assertNull(orphan.account);
+        assertTrue(orphan.sig.startsWith("e2:"));
+        assertTrue(BalanceData.writeTransactions(ctx, Collections.singletonList(orphan)));
+        BalanceData.setNote(ctx, orphan, "not the newly recognized account");
+        seed("TejaratBank", "حساب:01351234567890\nواریز:200,000 ریال\nمانده:3,000,000 ریال", T);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        List<Transaction> saved = BalanceData.readTransactions(ctx);
+        assertEquals("account discovery still needs identity evidence for a qualified event", 2, saved.size());
+        for (Transaction transaction : saved) {
+            if (transaction.account == null)
+                assertEquals("not the newly recognized account", BalanceData.getNote(ctx, transaction));
+            else {
+                assertEquals("01351234567890", transaction.account);
+                assertNull(BalanceData.getNote(ctx, transaction));
+            }
+        }
+    }
+
     /** v1.21.0 contentHash normalization, independent of today's parser normalization rules. */
     private static String v121ContentHash(String sender, String body) throws Exception {
         String raw = body.replace("\u066C", ",").replace("\u060C", ",");
