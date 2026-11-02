@@ -9,6 +9,7 @@ import android.content.Intent;
 import android.os.SystemClock;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -102,13 +103,17 @@ public class HistoryResidualUiTest {
     }
 
     private void awaitMovementRows() {
-        // The export header is synchronous. Wait for settled catch-up and both actual movement
-        // rows' account labels: an absence assertion must not pass against the empty cold body.
+        // The export header is synchronous and repeats this account label. Count only inside
+        // the scroll container, where the two labels belong to actual movement rows, so neither
+        // a header nor an empty cold body can satisfy an absence assertion's readiness check.
         await(() -> {
             boolean[] ready = {false};
             scenario.onActivity(activity -> {
+                View content = find(activity.getWindow().getDecorView(),
+                    view -> view instanceof ScrollView);
+                if (content == null) return;
                 List<TextView> labels = new ArrayList<>();
-                collect(activity.getWindow().getDecorView(), labels);
+                collect(content, labels);
                 String accountLabel = activity.getString(R.string.account_label) + " " + ACCOUNT;
                 int movements = 0;
                 for (TextView label : labels) {
