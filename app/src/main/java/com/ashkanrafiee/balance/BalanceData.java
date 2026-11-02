@@ -994,13 +994,14 @@ final class BalanceData {
                     destination = null;
             }
             if (keepProvenance) updateResidualNoteProvenance(context, residual, true);
+            // Persist the retry route before the note write: a process death after the metadata
+            // commit must not leave new words stranded with no fresh SMS to trigger resolution.
+            if (destination != null && !stageResidualNoteMigrations(context,
+                    java.util.Collections.singletonMap(key, destination)))
+                throw new Exception("resolved residual note migration could not be staged");
             MetadataStore.setNote(context, key, text);
             if (!keepProvenance) updateResidualNoteProvenance(context, residual, false);
-            if (destination != null) {
-                if (!stageResidualNoteMigrations(context, java.util.Collections.singletonMap(key, destination)))
-                    throw new Exception("resolved residual note migration could not be staged");
-                completePendingResidualNoteMigrations(context, slot);
-            }
+            if (destination != null) completePendingResidualNoteMigrations(context, slot);
         }
         catch (Exception e) { throw new IllegalStateException("metadata residual note write failed", e); }
     }
