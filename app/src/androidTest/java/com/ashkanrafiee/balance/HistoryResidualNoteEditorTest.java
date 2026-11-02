@@ -11,6 +11,7 @@ import android.Manifest;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.provider.Telephony;
 import android.view.View;
 import android.view.ViewGroup;
@@ -45,14 +46,22 @@ public class HistoryResidualNoteEditorTest {
     private ActivityScenario<HistoryActivity> scenario;
     private String originalLanguage, originalCurrency;
     private boolean originalExpandAll;
+    private boolean hadExpandMigration, originalExpandMigration;
 
     @Before public void setUp() throws Exception {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         originalLanguage = LocaleHelper.currentTag(context);
         originalCurrency = CurrencyHelper.currency(context);
         originalExpandAll = BalanceData.getExpandAllHistory(context);
+        SharedPreferences prefs = context.getSharedPreferences(BalanceData.PREFS_PREF,
+            Context.MODE_PRIVATE);
+        hadExpandMigration = prefs.contains(BalanceData.KEY_EXPAND_ALL_DEBUG_MIGRATED);
+        originalExpandMigration = prefs.getBoolean(BalanceData.KEY_EXPAND_ALL_DEBUG_MIGRATED, false);
         LocaleHelper.setLanguage(context, "en");
         CurrencyHelper.setCurrency(context, CurrencyHelper.CURRENCY_RIAL);
+        // Apply the one-time migration before choosing this fixture's explicit debug preference.
+        // A preceding scan test may have cleared the marker, as on a genuine first history open.
+        BalanceData.migrateExpandAllToDebugMenu(context);
         BalanceData.setExpandAllHistory(context, true);
         InstrumentationRegistry.getInstrumentation().getUiAutomation()
             .grantRuntimePermission(context.getPackageName(), Manifest.permission.READ_SMS);
@@ -70,6 +79,12 @@ public class HistoryResidualNoteEditorTest {
         LocaleHelper.setLanguage(context, originalLanguage);
         CurrencyHelper.setCurrency(context, originalCurrency);
         BalanceData.setExpandAllHistory(context, originalExpandAll);
+        SharedPreferences.Editor restore = context.getSharedPreferences(BalanceData.PREFS_PREF,
+            Context.MODE_PRIVATE).edit();
+        if (hadExpandMigration)
+            restore.putBoolean(BalanceData.KEY_EXPAND_ALL_DEBUG_MIGRATED, originalExpandMigration);
+        else restore.remove(BalanceData.KEY_EXPAND_ALL_DEBUG_MIGRATED);
+        assertTrue(restore.commit());
     }
 
     @Test public void editorNoteFollowsExactDelayedMovementAfterKeepNotesReset() throws Exception {
