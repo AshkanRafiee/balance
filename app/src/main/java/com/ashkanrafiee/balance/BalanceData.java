@@ -3441,6 +3441,34 @@ final class BalanceData {
     // Recent-movements window and balance-chain reconciliation
     // ============================================================
 
+    /** Exact identities and nearest accepted delivery times per clockless signature family.
+     *  A full scan can contain years of distinct movements before pruneWindow runs; searching
+     *  that entire list per SMS makes even a background refresh quadratic. Only accepted entries
+     *  enter this index, so a discarded duplicate never extends the canonical delivery's window. */
+    private static final class MovementWindowIndex {
+        private final Set<String> signatures = new HashSet<>();
+        private final Map<String, java.util.NavigableSet<Long>> deliveries = new HashMap<>();
+
+        void add(Reconcile.Entry entry) {
+            if (entry.sig == null) return;
+            signatures.add(entry.sig);
+            if (entry.sig.startsWith("e2:") && entry.sig.contains(":a:"))
+                deliveries.computeIfAbsent(signatureFamily(entry.sig), ignored -> new java.util.TreeSet<>())
+                    .add(entry.date);
+        }
+
+        boolean contains(String signature, long date) {
+            if (signatures.contains(signature)) return true;
+            java.util.NavigableSet<Long> dates = deliveries.get(signatureFamily(signature));
+            if (dates == null) return false;
+            Long before = dates.floor(date);
+            Long after = dates.ceiling(date);
+            // Nearest neighbors are sufficient, and dateDistance avoids overflow at long bounds.
+            return (before != null && dateDistance(before, date) <= DUPLICATE_DELIVERY_MS)
+                || (after != null && dateDistance(after, date) <= DUPLICATE_DELIVERY_MS);
+        }
+    }
+
     /** Adds the movement rows of this scan (messages with a transaction amount and a stated balance)
      *  to the bank's recent-movements window, deduped by message fingerprint, and returns the merged
      *  list. {@code sigSender} is populated with the sender of each newly added movement so balance
@@ -3451,8 +3479,10 @@ final class BalanceData {
     private static List<Reconcile.Entry> mergedForWindow(List<Reconcile.Entry> window,
             List<Object[]> rows, Map<String, String> sigSender, String bank) {
         List<Reconcile.Entry> merged = new ArrayList<>();
+        MovementWindowIndex index = new MovementWindowIndex();
         if (window != null) {
             merged.addAll(window);
+            for (Reconcile.Entry entry : window) index.add(entry);
         }
         for (Object[] row : rows) {
             String sender = (String) row[0];
@@ -3463,13 +3493,11 @@ final class BalanceData {
             long date = (Long) row[2];
             String sig = movementSig(bank, sender, body,
                 bank == null ? null : BankRules.extractAccount(bank, body), date);
-            boolean duplicate = false;
-            for (Reconcile.Entry en : merged) {
-                if (sameMovementSig(en.sig, en.date, sig, date)) { duplicate = true; break; }
-            }
-            if (sig == null || duplicate) continue;
+            if (sig == null || index.contains(sig, date)) continue;
             if (sigSender != null) sigSender.put(sig, sender);
-            merged.add(new Reconcile.Entry((Long) row[2], txn, bal, sig));
+            Reconcile.Entry entry = new Reconcile.Entry(date, txn, bal, sig);
+            merged.add(entry);
+            index.add(entry);
         }
         return merged;
     }
