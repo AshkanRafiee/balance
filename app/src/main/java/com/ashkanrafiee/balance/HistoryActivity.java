@@ -31,6 +31,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.view.inputmethod.EditorInfo;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
@@ -639,6 +640,7 @@ public final class HistoryActivity extends Activity {
         LargeScreenOrientation.apply(this);
         // The task may have been restored straight into history without the dashboard running.
         BalanceData.migrateExpandAllToDebugMenu(this);
+        iranCalendar = RegionHelper.isIran(this);
         if (state != null) {
             java.util.ArrayList<String> y = state.getStringArrayList(KEY_EXPANDED_YEARS);
             java.util.ArrayList<String> m = state.getStringArrayList(KEY_EXPANDED_MONTHS);
@@ -705,7 +707,6 @@ public final class HistoryActivity extends Activity {
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
         getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(bg));
-        iranCalendar = RegionHelper.isIran(this);
         refreshDates();
 
         LinearLayout root = new LinearLayout(this);
@@ -757,11 +758,7 @@ public final class HistoryActivity extends Activity {
         lockOverlay.setVisibility(View.GONE);
 
         updateSecureFlag();
-        if (pendingScroll > 0) {
-            int offset = pendingScroll;
-            scrollView.post(() -> scrollView.scrollTo(0, offset));
-            pendingScroll = 0;
-        }
+        if (pendingScroll > 0) pendingScrollState = renderStateKey();
     }
 
     @Override
@@ -794,6 +791,7 @@ public final class HistoryActivity extends Activity {
     @Override
     protected void onDestroy() {
         cancelSkeleton();
+        cancelPendingScroll();
         historyResumed = false;
         historyListenerGen++;
         historyUiGen++;
@@ -2054,6 +2052,7 @@ public final class HistoryActivity extends Activity {
             @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) { }
             @Override public void onTextChanged(CharSequence s, int st, int b, int c) { }
             @Override public void afterTextChanged(Editable s) {
+                cancelPendingScroll();
                 // One pause, one pass: restart the wait on every keystroke and render only once
                 // the typing rests, however fast it goes. The text is copied now — the Editable
                 // is the live field, and by the time the wait ends it may already say more.
@@ -2468,6 +2467,43 @@ public final class HistoryActivity extends Activity {
 
     /** Scroll offset pending restore until the rebuilt list is laid out. */
     private int pendingScroll;
+    private String pendingScrollState;
+    private ViewTreeObserver.OnPreDrawListener scrollRestoreListener;
+
+    /** Only accepted content may consume the offset; an empty body or skeleton has no real range. */
+    private void restoreScrollAfterLayout(int gen, int uiGen) {
+        if (pendingScroll <= 0) return;
+        removeScrollRestoreListener();
+        scrollRestoreListener = () -> {
+            removeScrollRestoreListener();
+            if (gen != renderGen || lifecycleStale(uiGen) || !historyResumed
+                    || isDestroyed() || isFinishing()) return true;
+            if (!renderStateKey().equals(pendingScrollState)) {
+                cancelPendingScroll();
+                return true;
+            }
+            int offset = pendingScroll;
+            cancelPendingScroll();
+            scrollView.scrollTo(0, offset);
+            return true;
+        };
+        scrollView.getViewTreeObserver().addOnPreDrawListener(scrollRestoreListener);
+        scrollView.invalidate();
+    }
+
+    private void removeScrollRestoreListener() {
+        if (scrollRestoreListener == null) return;
+        if (scrollView != null && scrollView.getViewTreeObserver().isAlive())
+            scrollView.getViewTreeObserver().removeOnPreDrawListener(scrollRestoreListener);
+        scrollRestoreListener = null;
+    }
+
+    /** A new scroll, search or filter selection owns the position instead of recreation. */
+    private void cancelPendingScroll() {
+        pendingScroll = 0;
+        pendingScrollState = null;
+        removeScrollRestoreListener();
+    }
 
     /** Expands the current year, current month and its days once per screen, so the freshest
      *  history is visible without any interaction without undoing later collapses. When the debug
@@ -2610,7 +2646,8 @@ public final class HistoryActivity extends Activity {
         outState.putStringArrayList(KEY_EXPANDED_MONTHS, cappedList(expandedMonths, 200));
         outState.putStringArrayList(KEY_EXPANDED_DAYS, cappedList(expandedDays, 200));
         outState.putBoolean(KEY_EXPANDED_SEEDED, expandedSeeded);
-        if (scrollView != null) outState.putInt(KEY_SCROLL_Y, scrollView.getScrollY());
+        if (scrollView != null) outState.putInt(KEY_SCROLL_Y,
+            pendingScroll > 0 ? pendingScroll : scrollView.getScrollY());
         outState.putInt(KEY_FILTER_DIRECTION, filter.direction);
         outState.putInt(KEY_FILTER_RANGE, filter.rangePreset);
         outState.putStringArrayList(KEY_FILTER_TAGS, new java.util.ArrayList<>(selectedTags));
@@ -2711,6 +2748,8 @@ public final class HistoryActivity extends Activity {
     @Override
     protected void onPause() {
         cancelSkeleton();
+        // Keep the offset, but no callback from this UI generation may apply it after a pause.
+        removeScrollRestoreListener();
         stopShimmer();
         historyResumed = false;
         renderGen++;
@@ -2957,6 +2996,7 @@ public final class HistoryActivity extends Activity {
         if (filter.rangePreset != RANGE_CUSTOM)
             filter = rangePreset(filter, filter.rangePreset, now(), iranCalendar);
         final String state = renderStateKey();
+        if (pendingScroll > 0 && !state.equals(pendingScrollState)) cancelPendingScroll();
         if (renderRunning) {
             renderQueued = true;
             // An unchanged scan notification can reuse the running snapshot before its cheap
@@ -3017,8 +3057,10 @@ public final class HistoryActivity extends Activity {
                         && sameRevision(metadataRevision, previousMetadata)
                         && state.equals(previousState)) {
                     deliverRender(() -> {
-                        if (gen == renderGen && !lifecycleStale(uiGen))
+                        if (gen == renderGen && !lifecycleStale(uiGen)) {
+                            restoreScrollAfterLayout(gen, uiGen);
                             finishAutomaticRefreshForRender(gen);
+                        }
                         finishRenderWork();
                     });
                     return;
@@ -3143,6 +3185,7 @@ public final class HistoryActivity extends Activity {
                         renderYears(body, allYears);
                     }
                     body.setVisibility(View.VISIBLE);
+                    restoreScrollAfterLayout(gen, uiGen);
                     finishAutomaticRefreshForRender(gen);
                     finishRenderWork();
                 });
@@ -5764,6 +5807,18 @@ public final class HistoryActivity extends Activity {
 
         PullRefreshScrollView(Context c) {
             super(c);
+        }
+
+        @Override public boolean dispatchTouchEvent(MotionEvent event) {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) cancelPendingScroll();
+            return super.dispatchTouchEvent(event);
+        }
+
+        @Override protected void onScrollChanged(int x, int y, int oldX, int oldY) {
+            // Also covers keyboard, accessibility and mouse-wheel scrolling. The restoration
+            // itself clears pendingScroll before scrolling, so it cannot cancel a later owner.
+            if (y != oldY) cancelPendingScroll();
+            super.onScrollChanged(x, y, oldX, oldY);
         }
 
         /** Tells the covering chip overlay — the thing that actually paints the indicator now — to
