@@ -98,13 +98,33 @@ public class ResidualEditorResolutionTest {
     }
 
     @Test public void ambiguousStatementOrder_keepsNoteUnattached() {
-        Transaction first = movement(missing.date, -500, 500L, "same-time-first");
-        Transaction second = movement(missing.date, 0, 500L, "same-time-second");
-        write(opener, first, second, closer);
+        // A retained legacy movement lacked its balance. Enriching it and adding the missing
+        // movement at the same instant adds just one row, but cannot prove statement order.
+        Transaction legacy = movement(missing.date, 100, null, "known");
+        Transaction end = movement(TO, -100, 500L, "end");
+        gap = Residual.between(Arrays.asList(opener, legacy, end)).get(0);
+        assertEquals(-500L, gap.amount);
+        Transaction enriched = movement(missing.date, 100, 600L, "known");
+        write(opener, missing, enriched, end);
         BalanceData.setNote(context, gap, NOTE);
         assertEquals(NOTE, BalanceData.getNote(context, gap));
-        assertNull(BalanceData.getNote(context, first));
-        assertNull(BalanceData.getNote(context, second));
+        assertNull(BalanceData.getNote(context, missing));
+        assertNull(BalanceData.getNote(context, enriched));
+    }
+
+    @Test public void matchingAmountsOnTwoStatements_doNotIdentifyWhichMovementWasMissing() {
+        Transaction legacy = movement(FROM + 60_000L, -500, null, "known");
+        Transaction end = movement(TO, -100, -100L, "end");
+        gap = Residual.between(Arrays.asList(opener, legacy, end)).get(0);
+        assertEquals(-500L, gap.amount);
+        Transaction enriched = movement(legacy.date, -500, 500L, "known");
+        Transaction delayed = movement(FROM + 120_000L, -500, 0L, "delayed");
+        write(opener, enriched, delayed, end);
+        assertTrue(Residual.between(Arrays.asList(opener, enriched, delayed, end)).isEmpty());
+        BalanceData.setNote(context, gap, NOTE);
+        assertEquals(NOTE, BalanceData.getNote(context, gap));
+        assertNull(BalanceData.getNote(context, enriched));
+        assertNull(BalanceData.getNote(context, delayed));
     }
 
     @Test public void realMovementNote_isNotOverwrittenOrUsedToDiscardNewWords() {
