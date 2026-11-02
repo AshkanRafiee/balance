@@ -611,6 +611,7 @@ public final class HistoryActivity extends Activity {
 
     /** Drops every dialog window before the activity can be covered by the lock or destroyed. */
     private void dismissDialogs() {
+        residualNoteUiEpoch++;
         // Invalidate progress posts before dismissing windows. Neither operation ends the worker.
         exportUiGen++;
         for (android.app.AlertDialog dialog : new ArrayList<>(activeDialogs)) {
@@ -4381,6 +4382,15 @@ public final class HistoryActivity extends Activity {
         showDialog(dlg);
     }
 
+    /** UI-thread count, including canceled workers that have not delivered completion yet. */
+    private int residualNoteSaves;
+    /** Immediate pause/destruction fence; dialog dismissal callbacks themselves are posted. */
+    private volatile int residualNoteUiEpoch;
+
+    static boolean residualNoteSaveIdleForTest(HistoryActivity activity) {
+        return activity.residualNoteSaves == 0;
+    }
+
     /** Note-only editor for an unaccounted amount. Residuals deliberately have no tag editor. */
     private void residualNoteDialog(final Residual r) {
         final String key = BalanceData.residualNoteKey(r);
@@ -4419,35 +4429,89 @@ public final class HistoryActivity extends Activity {
             .setNegativeButton(getString(R.string.lock_cancel), null);
         if (hasNote) dialogBuilder.setNeutralButton(getString(R.string.note_clear), null);
         android.app.AlertDialog dlg = dialogBuilder.create();
+        java.util.concurrent.atomic.AtomicBoolean active = new java.util.concurrent.atomic.AtomicBoolean(true);
+        java.util.concurrent.atomic.AtomicBoolean saving = new java.util.concurrent.atomic.AtomicBoolean();
         dlg.setOnShowListener(d -> {
-            dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-                try {
-                    BalanceData.setNote(this, r, input.getText().toString());
-                } catch (RuntimeException error) {
-                    android.util.Log.w("BalanceHistory", "residual note save failed", error);
-                    Toast.makeText(this, R.string.note_save_failed, Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                dlg.dismiss();
-                render();
-            });
+            dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v ->
+                saveResidualNote(dlg, input, r, input.getText().toString(), active, saving));
             android.widget.Button clearNote =
                 dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL);
             if (clearNote != null) {
-                clearNote.setOnClickListener(v -> {
-                    try {
-                        BalanceData.setNote(this, r, null);
-                    } catch (RuntimeException error) {
-                        android.util.Log.w("BalanceHistory", "residual note clear failed", error);
-                        Toast.makeText(this, R.string.note_save_failed, Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    dlg.dismiss();
-                    render();
-                });
+                clearNote.setOnClickListener(v -> saveResidualNote(dlg, input, r, null, active, saving));
             }
+            dlg.getButton(android.app.AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> {
+                active.set(false);
+                dlg.dismiss();
+            });
         });
         showDialog(dlg);
+        // Back/outside cancellation detaches the window before its posted dismissal callback.
+        dlg.getWindow().getDecorView().addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View view) { }
+            @Override public void onViewDetachedFromWindow(View view) { active.set(false); }
+        });
+        dlg.setOnDismissListener(d -> {
+            active.set(false);
+            activeDialogs.remove(dlg);
+        });
+    }
+
+    /** Revalidation may decrypt a large history and wait behind a scan. Never do it on the UI
+     *  thread. A canceled/paused editor cannot commit a queued write after obtaining the store lock. */
+    private void saveResidualNote(android.app.AlertDialog dialog, EditText input, Residual residual,
+            String text, java.util.concurrent.atomic.AtomicBoolean active,
+            java.util.concurrent.atomic.AtomicBoolean saving) {
+        if (!active.get() || saving.getAndSet(true)) return;
+        setResidualEditorEnabled(dialog, input, false);
+        residualNoteSaves++;
+        int uiGen = historyUiGen;
+        int editorEpoch = residualNoteUiEpoch;
+        Context app = getApplicationContext();
+        new Thread(() -> {
+            boolean saved = false;
+            RuntimeException failure = null;
+            try {
+                synchronized (BalanceData.class) {
+                    if (active.get() && editorEpoch == residualNoteUiEpoch
+                            && !LockManager.isSessionLocked()) {
+                        BalanceData.setNote(app, residual, text);
+                        saved = true;
+                    }
+                }
+            } catch (RuntimeException error) {
+                failure = error;
+                android.util.Log.w("BalanceHistory", "residual note write failed", error);
+            }
+            final boolean completed = saved;
+            final RuntimeException error = failure;
+            runOnUiThread(() -> {
+                residualNoteSaves--;
+                saving.set(false);
+                if (uiGen != historyUiGen || !historyResumed || !active.get()
+                        || isDestroyed() || isFinishing()) return;
+                if (LockManager.isSessionLocked()) {
+                    dialog.dismiss();
+                    if (lockOverlay != null && LockManager.isEnabled(this)) lockOverlay.showLock();
+                    return;
+                }
+                if (completed) {
+                    dialog.dismiss();
+                    render();
+                } else {
+                    setResidualEditorEnabled(dialog, input, true);
+                    if (error != null)
+                        Toast.makeText(this, R.string.note_save_failed, Toast.LENGTH_SHORT).show();
+                }
+            });
+        }, "residual-note-save").start();
+    }
+
+    private static void setResidualEditorEnabled(android.app.AlertDialog dialog, EditText input,
+            boolean enabled) {
+        input.setEnabled(enabled);
+        dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setEnabled(enabled);
+        android.widget.Button clear = dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL);
+        if (clear != null) clear.setEnabled(enabled);
     }
 
     /**

@@ -31,6 +31,9 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Calendar;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 
 /** Real note-editor coverage. These fixtures require an isolated emulator SMS inbox. */
@@ -147,12 +150,161 @@ public class HistoryResidualNoteEditorTest {
             assertTrue("the same editor must remain open after its row disappears", editor == opened[0]);
             assertTrue(editor.isShowing());
             editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
-            assertFalse("the installed Save handler must dismiss the editor", editor.isShowing());
         });
         await(this::idle, "the note save to render");
+        scenario.onActivity(activity -> assertFalse("a successful worker save must dismiss its editor",
+            opened[0].isShowing()));
         assertEquals(0, BalanceData.scanHistory(context));
         assertEquals(NOTE, BalanceData.getNote(context, recovered));
         assertNull(BalanceData.getNote(context, gap));
+    }
+
+    @Test public void residualSaveDoesNotBlockUiWhileStoreIsBusy_andCapturesSubmittedText()
+            throws Exception {
+        Residual gap = seedGapAndOpen();
+        AlertDialog editor = editorReadyForSave();
+        try (StoreBlock ignored = new StoreBlock()) {
+            clickSaveWithoutBlockingUi(editor);
+            scenario.onActivity(activity -> {
+                assertFalse(editor.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled());
+                assertFalse(editorInput(editor).isEnabled());
+                // Even a programmatic edit after submission cannot change the worker's snapshot.
+                editorInput(editor).setText("not the submitted note");
+                editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+            });
+        }
+        await(this::idle, "the background note save to finish");
+        assertEquals(NOTE, BalanceData.getNote(context, gap));
+        scenario.onActivity(activity -> assertFalse(editor.isShowing()));
+    }
+
+    @Test public void cancelWhileSaveWaitsForStore_doesNotCommitQueuedText() throws Exception {
+        Residual gap = seedGapAndOpen();
+        AlertDialog editor = editorReadyForSave();
+        try (StoreBlock ignored = new StoreBlock()) {
+            clickSaveWithoutBlockingUi(editor);
+            scenario.onActivity(activity -> editor.getButton(AlertDialog.BUTTON_NEGATIVE).performClick());
+        }
+        await(this::idle, "the canceled note worker to finish");
+        assertNull(BalanceData.getNote(context, gap));
+    }
+
+    @Test public void pauseWhileSaveWaitsForStore_cancelsQueuedWriteAndStaleCompletion()
+            throws Exception {
+        Residual gap = seedGapAndOpen();
+        AlertDialog editor = editorReadyForSave();
+        try (StoreBlock ignored = new StoreBlock()) {
+            clickSaveWithoutBlockingUi(editor);
+            scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED);
+        }
+        scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED);
+        await(this::idle, "the resumed history and canceled note worker to settle");
+        assertNull(BalanceData.getNote(context, gap));
+        scenario.onActivity(activity -> assertTrue("completion must not reopen a paused editor",
+            HistoryActivity.shownDialogsForTest(activity).isEmpty()));
+    }
+
+    @Test public void lockBeforeQueuedSaveAcquiresStore_preventsCommit() throws Exception {
+        Residual gap = seedGapAndOpen();
+        AlertDialog editor = editorReadyForSave();
+        boolean originallyLocked = LockManager.isSessionLocked();
+        try {
+            try (StoreBlock ignored = new StoreBlock()) {
+                clickSaveWithoutBlockingUi(editor);
+                LockManager.lockSession();
+            }
+            await(this::idle, "the locked note worker to finish");
+            assertNull(BalanceData.getNote(context, gap));
+            scenario.onActivity(activity -> assertFalse(editor.isShowing()));
+        } finally {
+            if (originallyLocked) LockManager.lockSession();
+            else LockManager.unlockSession();
+        }
+    }
+
+    @Test public void failedBackgroundSave_keepsTypedTextAndAllowsRetry() throws Exception {
+        Residual gap = seedGapAndOpen();
+        AlertDialog editor = editorReadyForSave();
+        assertTrue(DataGeneration.dataPrefs(context).edit().putString(
+            BalanceData.KEY_RESIDUAL_NOTE_PROVENANCE, "invalid encrypted test fixture").commit());
+        scenario.onActivity(activity -> editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick());
+        await(this::idle, "the failed background note save");
+        scenario.onActivity(activity -> {
+            assertTrue(editor.isShowing());
+            assertTrue(editor.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled());
+            assertTrue(editorInput(editor).isEnabled());
+            assertEquals(NOTE, editorInput(editor).getText().toString());
+        });
+        assertTrue(DataGeneration.dataPrefs(context).edit()
+            .remove(BalanceData.KEY_RESIDUAL_NOTE_PROVENANCE).commit());
+        scenario.onActivity(activity -> editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick());
+        await(this::idle, "the retried background note save");
+        assertEquals(NOTE, BalanceData.getNote(context, gap));
+        scenario.onActivity(activity -> assertFalse(editor.isShowing()));
+    }
+
+    private AlertDialog editorReadyForSave() throws Exception {
+        openEditor();
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        final AlertDialog[] editor = {null};
+        scenario.onActivity(activity -> {
+            editor[0] = lastDialog(activity);
+            editorInput(editor[0]).setText(NOTE);
+        });
+        return editor[0];
+    }
+
+    private static EditText editorInput(AlertDialog editor) {
+        return (EditText) find(editor.getWindow().getDecorView(), view -> view instanceof EditText);
+    }
+
+    private static void clickSaveWithoutBlockingUi(AlertDialog editor) throws Exception {
+        CountDownLatch clicked = new CountDownLatch(1);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+            try {
+                editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+                assertTrue("a queued save leaves its editor visible until completion", editor.isShowing());
+            } catch (Throwable error) {
+                failure.set(error);
+            } finally {
+                clicked.countDown();
+            }
+        });
+        // The old handler waited on BalanceData.class here. A bounded wait fails promptly,
+        // then the enclosing StoreBlock's finally releases the UI instead of hanging the suite.
+        assertTrue("Save must return to the UI queue while the store is busy", clicked.await(2, TimeUnit.SECONDS));
+        if (failure.get() != null) throw new AssertionError(failure.get());
+    }
+
+    private static final class StoreBlock implements AutoCloseable {
+        final CountDownLatch release = new CountDownLatch(1);
+        final Thread holder;
+
+        StoreBlock() throws Exception {
+            CountDownLatch entered = new CountDownLatch(1);
+            holder = new Thread(() -> {
+                synchronized (BalanceData.class) {
+                    entered.countDown();
+                    try {
+                        release.await();
+                    } catch (InterruptedException error) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            }, "residual-note-test-store-holder");
+            holder.start();
+            if (!entered.await(5, TimeUnit.SECONDS)) {
+                release.countDown();
+                fail("the test store holder did not start");
+            }
+        }
+
+        @Override public void close() throws Exception {
+            release.countDown();
+            holder.join(5000);
+            assertFalse("the test must release its store monitor", holder.isAlive());
+        }
     }
 
     private Residual seedGapAndOpen() throws Exception {
@@ -237,7 +389,8 @@ public class HistoryResidualNoteEditorTest {
 
     private boolean idle() {
         final boolean[] idle = {false};
-        scenario.onActivity(activity -> idle[0] = HistoryActivity.idleForTest(activity));
+        scenario.onActivity(activity -> idle[0] = HistoryActivity.idleForTest(activity)
+            && HistoryActivity.residualNoteSaveIdleForTest(activity));
         return idle[0];
     }
 
