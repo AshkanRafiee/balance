@@ -30,6 +30,7 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Deterministic journal/queue protocol tests; no timing-sensitive native scheduling or data scans. */
 @RunWith(AndroidJUnit4.class)
@@ -142,6 +143,28 @@ public class CommitmentReminderJobsTest {
         assertEquals(1, scheduler.count(FIRE));
         assertEquals(0, scheduler.count(FALLBACK));
         assertEquals(Collections.singleton("opaque-a"), request().ids.keySet());
+    }
+
+    @Test public void rapidAwaitCyclesIncludeReentrantCompletionsWithoutQueueBarrierTasks()
+            throws Exception {
+        AtomicInteger completions = new AtomicInteger();
+        for (int i = 0; i < 150; i++) {
+            String first = "opaque-cycle-" + i;
+            String reentrant = "opaque-reentrant-" + i;
+            CommitmentReminderJobs.requestFire(context, first, () -> {
+                CommitmentReminderJobs.requestFire(context, reentrant, completions::incrementAndGet);
+                completions.incrementAndGet();
+            });
+            journal();
+            assertEquals("await must include callbacks and their newly queued handoffs",
+                (i + 1) * 2, completions.get());
+            assertEquals(new HashSet<>(Arrays.asList(first, reentrant)), request().ids.keySet());
+            RecordingWork work = new RecordingWork();
+            assertFalse(drain(FIRE, work));
+            assertEquals(2, work.fired.size());
+            assertTrue(request().empty());
+            journal(); // Exercise idle waits while the production flush task is returning.
+        }
     }
 
     @Test public void deliveryLaneNeverConsumesUnrelatedBulkPlan() throws Exception {

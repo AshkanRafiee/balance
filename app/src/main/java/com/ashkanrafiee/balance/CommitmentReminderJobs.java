@@ -23,6 +23,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /** Durable coalesced requests. Only opaque IDs, generations and scan progress are stored here. */
 final class CommitmentReminderJobs {
@@ -44,6 +45,7 @@ final class CommitmentReminderJobs {
     private static final Set<String> incomingIds = new HashSet<>();
     private static boolean incomingPlan, incomingOverflow, incomingRetry, dispatching;
     private static Runnable incomingCompletion;
+    private static int pendingCompletions;
     private static final Object RETRY_LOCK = new Object();
     private static long retryAlarmAt;
     private static final ThreadPoolExecutor JOURNAL = new ThreadPoolExecutor(1, 1, 30L,
@@ -140,7 +142,10 @@ final class CommitmentReminderJobs {
 
     static void requestFire(Context context, String id, Runnable handedOff) {
         if (id != null && !id.isEmpty()) enqueue(context, id, false, handedOff);
-        else complete(handedOff);
+        else if (handedOff != null) {
+            synchronized (INBOX_LOCK) { pendingCompletions++; }
+            complete(handedOff);
+        }
     }
 
     private static void enqueue(Context context, String id, boolean retry, Runnable handedOff) {
@@ -149,6 +154,7 @@ final class CommitmentReminderJobs {
         boolean start;
         Runnable redundant = null;
         synchronized (INBOX_LOCK) {
+            if (handedOff != null) pendingCompletions++;
             if (retry) incomingRetry = true;
             else if (id == null) incomingPlan = true;
             else if (!incomingOverflow) {
@@ -175,6 +181,7 @@ final class CommitmentReminderJobs {
                     dispatching = false;
                     abandoned = incomingCompletion;
                     incomingCompletion = null;
+                    INBOX_LOCK.notifyAll();
                 }
                 complete(abandoned);
                 Log.w(TAG, "reminder journal unavailable; next request will repair");
@@ -190,6 +197,7 @@ final class CommitmentReminderJobs {
             synchronized (INBOX_LOCK) {
                 if (!incomingPlan && !incomingOverflow && !incomingRetry && incomingIds.isEmpty()) {
                     dispatching = false;
+                    INBOX_LOCK.notifyAll();
                     return;
                 }
                 ids = new HashSet<>(incomingIds);
@@ -210,6 +218,12 @@ final class CommitmentReminderJobs {
         if (handedOff != null) {
             try { handedOff.run(); }
             catch (RuntimeException ignored) { /* An expired broadcast must not break journaling. */ }
+            finally {
+                synchronized (INBOX_LOCK) {
+                    pendingCompletions--;
+                    INBOX_LOCK.notifyAll();
+                }
+            }
         }
     }
 
@@ -505,6 +519,14 @@ final class CommitmentReminderJobs {
     }
 
     static void awaitJournalForTest() throws Exception {
-        JOURNAL.submit(() -> { }).get(10, TimeUnit.SECONDS);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        synchronized (INBOX_LOCK) {
+            while (dispatching || incomingPlan || incomingOverflow || incomingRetry
+                    || !incomingIds.isEmpty() || pendingCompletions != 0) {
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) throw new TimeoutException("reminder journal did not become idle");
+                TimeUnit.NANOSECONDS.timedWait(INBOX_LOCK, remaining);
+            }
+        }
     }
 }
