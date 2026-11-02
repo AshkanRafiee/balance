@@ -9,10 +9,13 @@ public final class CommitmentAlarmReceiver extends BroadcastReceiver {
     @Override public void onReceive(Context context, Intent intent) {
         if (intent == null || !CommitmentReminders.ACTION_REMIND.equals(intent.getAction())) return;
         String id = intent.getStringExtra(CommitmentReminders.EXTRA_ID);
-        if (id == null) return;
-        BroadcastReceiver.PendingResult pending = goAsync();
-        Context application = context.getApplicationContext();
-        CommitmentReminders.runReceiverWork(pending,
-            () -> CommitmentReminders.fire(application == null ? context : application, id));
+        if (id == null || id.isEmpty()) return;
+        PendingResult pending = goAsync();
+        try {
+            // Retain the process only for the small durable journal/native enqueue handoff.
+            CommitmentReminderJobs.requestFire(context, id, pending::finish);
+        } catch (RuntimeException rejected) {
+            pending.finish();
+        }
     }
 }
