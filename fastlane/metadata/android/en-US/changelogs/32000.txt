@@ -1,5 +1,6 @@
-• Added notes to Unaccounted rows, included in search, CSV and backups. Notes follow an exact delayed-message match.
-• Saved data stays visible during quiet updates, without a refresh animation on every visit.
-• Reduced repeated history processing and improved handling of repeated or corrected bank messages.
-• Improved Persian/Arabic SMS support, diagnostics and privacy for sharing and backups.
-• Fixed reset recovery while preserving notes unless you choose to delete them.
+• Added notes to Unaccounted rows, search, CSV and backups; exact delayed matches keep their notes.
+• Saved data stays visible during quiet updates.
+• Improved large histories and handling of repeated or corrected bank messages.
+• Improved Persian/Arabic SMS support and sharing/backup privacy.
+• Fixed reset recovery and preserved notes through ambiguous message matches.
+• Fixed freezing during reminder checks; improved delivery when Android allows.
