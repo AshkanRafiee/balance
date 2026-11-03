@@ -341,7 +341,7 @@ public class CsvExportTest {
         String row = line(CsvExport.csv(fa, Arrays.asList(t),
             withReasons(reasons)), 1);
 
-         assertEquals("دریافت پل", parse(row).get(10));
+         assertEquals("دریافت وجه از طریق پل", parse(row).get(10));
     }
 
     @Test public void row_uncaptionableStoredReason_leavesTheCellEmpty() {
@@ -411,7 +411,7 @@ public class CsvExportTest {
         String row = line(CsvExport.csv(fa, Arrays.asList(t),
             withChannels(channelsOf(t, "سامانه پل (پرداخت لحظه ای)"))), 1);
 
-         assertEquals("سامانه پل (پرداخت لحظه‌ای)", parse(row).get(11));
+         assertEquals("سامانهٔ پل (پرداخت لحظه‌ای)", parse(row).get(11));
     }
 
     @Test public void row_uncaptionableStoredChannel_leavesTheCellEmpty() {

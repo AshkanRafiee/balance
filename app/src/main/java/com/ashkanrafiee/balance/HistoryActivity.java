@@ -4574,7 +4574,7 @@ public final class HistoryActivity extends Activity {
     private void residualExplainer() {
         StringBuilder body = new StringBuilder(getString(R.string.residual_explainer_body));
         body.append("\n\n").append(LocaleHelper.isPersian(this)
-            ? "تعداد مبالغ بی‌حساب: " + faDigits(residualCount)
+            ? "تعداد اختلاف‌های موجودی: " + faDigits(residualCount)
             : "Unaccounted amounts: " + residualCount);
         for (Residual r : allResiduals) {
             body.append("\n\n• ")
@@ -4586,7 +4586,7 @@ public final class HistoryActivity extends Activity {
         }
         if (residualCount > allResiduals.size()) {
             body.append("\n\n").append(LocaleHelper.isPersian(this)
-                ? "برای دیدن جزئیات مبالغ دیگر، روزهای تاریخچه را باز کنید."
+                ? "برای دیدن سایر اختلاف‌های موجودی، روزهای مربوط را در تاریخچه باز کنید."
                 : "Open the relevant history days to see the other details.");
         }
         android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)

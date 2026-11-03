@@ -269,7 +269,7 @@ public class TransactionChannelTest {
         LocaleHelper.setLanguage(ctx, "fa");
         Context fa = LocaleHelper.wrap(ctx);
         assertEquals("شتاب", BankRules.channelCaption(fa, SHETAB));
-        assertEquals("سامانه پل (پرداخت لحظه‌ای)", BankRules.channelCaption(fa, SEP));
+        assertEquals("سامانهٔ پل (پرداخت لحظه‌ای)", BankRules.channelCaption(fa, SEP));
     }
 
     @Test public void channel_storedTextThisBuildCannotCaption_showsNothing() {
