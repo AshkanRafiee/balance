@@ -1,0 +1,4 @@
+• Added explanations of balances, transactions and Unaccounted figures using bank-message evidence kept on your device.
+• Recurring schedules stay fixed across calendar and timezone changes. Reminders use your chosen unit and open the exact due.
+• Added safe message rereading that keeps your commitments and annotations. Failed checks no longer look successful.
+• Notes and tags save together. Financial explanations close when automatic hiding takes effect.
