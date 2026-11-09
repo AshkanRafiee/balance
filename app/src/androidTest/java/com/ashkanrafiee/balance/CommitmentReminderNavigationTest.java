@@ -22,6 +22,7 @@ import org.junit.runner.RunWith;
 public class CommitmentReminderNavigationTest {
     private Context context;
     private ActivityScenario<CommitmentsActivity> scenario;
+    private Intent originalLaunchingIntent;
     private Commitment commitment;
     private long due;
 
@@ -38,11 +39,25 @@ public class CommitmentReminderNavigationTest {
     }
 
     @After public void after() throws Exception {
-        if (scenario != null) scenario.close();
-        LockManager.disable(context);
-        LockManager.resetSessionForTest();
-        CommitmentReminders.cancelAllForTest(context);
-        CommitmentStore.clear(context);
+        try {
+            if (scenario != null) {
+                // ActivityScenario tracks lifecycle events by the launch intent's filter identity.
+                // Real warm navigation correctly changes getIntent(); restore only for harness
+                // cleanup so it recognizes the subsequent DESTROYED event.
+                if (originalLaunchingIntent != null)
+                    scenario.onActivity(activity -> activity.setIntent(new Intent(originalLaunchingIntent)));
+                scenario.close();
+            }
+        } finally {
+            LockManager.disable(context);
+            LockManager.resetSessionForTest();
+            CommitmentReminders.cancelAllForTest(context);
+            CommitmentStore.clear(context);
+        }
+    }
+
+    private void rememberLaunchingIntent() {
+        scenario.onActivity(activity -> originalLaunchingIntent = new Intent(activity.getIntent()));
     }
 
     private Intent intent() {
@@ -66,6 +81,7 @@ public class CommitmentReminderNavigationTest {
 
     @Test public void coldOpenHighlightsOldPaidDueOutsideTheNormalVisibleRowsAndSurvivesRecreation() {
         scenario = ActivityScenario.launch(intent());
+        rememberLaunchingIntent();
         scenario.onActivity(activity -> {
             View row = activity.findViewById(android.R.id.content).findViewWithTag(tag());
             assertNotNull(row);
@@ -80,6 +96,7 @@ public class CommitmentReminderNavigationTest {
         LockManager.enable(context, "navigation-password", false, false);
         LockManager.lockSession();
         scenario = ActivityScenario.launch(intent());
+        rememberLaunchingIntent();
         scenario.onActivity(activity -> {
             assertTrue(LockManager.isSessionLocked());
             assertNull(activity.findViewById(android.R.id.content).findViewWithTag(tag()));
@@ -103,9 +120,12 @@ public class CommitmentReminderNavigationTest {
 
     @Test public void warmIntentSelectsExactDueAndDeletionShowsAnUnavailableState() throws Exception {
         scenario = ActivityScenario.launch(CommitmentsActivity.class);
+        rememberLaunchingIntent();
         scenario.onActivity(activity -> {
             assertNull(activity.findViewById(android.R.id.content).findViewWithTag(tag()));
             activity.onNewIntent(intent());
+            assertFalse("warm navigation changes the launch filter identity used by the test harness",
+                originalLaunchingIntent.filterEquals(activity.getIntent()));
             assertNotNull(activity.findViewById(android.R.id.content).findViewWithTag(tag()));
         });
         CommitmentStore.delete(context, commitment.id);
@@ -119,6 +139,7 @@ public class CommitmentReminderNavigationTest {
 
     @Test public void warmLockedIntentKeepsItsExactTargetPendingBehindTheLock() {
         scenario = ActivityScenario.launch(CommitmentsActivity.class);
+        rememberLaunchingIntent();
         LockManager.enable(context, "navigation-password", false, false);
         LockManager.lockSession();
         scenario.onActivity(activity -> {
@@ -140,17 +161,31 @@ public class CommitmentReminderNavigationTest {
         CommitmentStore.upsert(context, Commitment.create("Many upcoming dues", -1,
             Commitment.DAILY, today, null, false, 0));
         scenario = ActivityScenario.launch(CommitmentsActivity.class);
-        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
-        scenario.onActivity(activity -> {
-            try {
-                View root = (View) field(activity, "root");
-                ScrollView scroll = (ScrollView) root.getParent();
-                scroll.fullScroll(View.FOCUS_DOWN);
-                assertTrue("fixture must start well below the reminder card", scroll.getScrollY() > 0);
-            } catch (Exception e) { throw new AssertionError(e); }
-        });
+        rememberLaunchingIntent();
+        awaitScrolledToLateMonths();
         scenario.onActivity(activity -> activity.onNewIntent(intent()));
         awaitHighlightedRowVisible();
+    }
+
+    private void awaitScrolledToLateMonths() {
+        boolean[] scrolled = {false};
+        long deadline = SystemClock.uptimeMillis() + 10000;
+        while (!scrolled[0] && SystemClock.uptimeMillis() < deadline) {
+            scenario.onActivity(activity -> {
+                try {
+                    View root = (View) field(activity, "root");
+                    ScrollView scroll = (ScrollView) root.getParent();
+                    if (root.isLayoutRequested() || scroll.isLayoutRequested()
+                            || scroll.getHeight() <= 0 || root.getHeight() <= 2 * scroll.getHeight()) return;
+                    // fullScroll() may animate, leaving scrollY at zero until the next frame.
+                    // This fixture needs an already-scrolled warm screen, not an animation race.
+                    scroll.scrollTo(0, root.getHeight());
+                    scrolled[0] = scroll.getScrollY() > scroll.getHeight();
+                } catch (Exception e) { throw new AssertionError(e); }
+            });
+            if (!scrolled[0]) SystemClock.sleep(20);
+        }
+        assertTrue("laid-out fixture must start well below the reminder card", scrolled[0]);
     }
 
     private void awaitHighlightedRowVisible() {
