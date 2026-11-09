@@ -129,7 +129,8 @@ public class WidgetStabilityTest {
         assertNotEquals("0", ((TextView) root.findViewById(R.id.widget_total)).getText().toString());
         TextView hint = root.findViewById(R.id.widget_hint);
         assertEquals(View.VISIBLE, hint.getVisibility());
-        assertEquals(context.getString(R.string.status_sms_unreadable), hint.getText().toString());
+        assertEquals(LocaleHelper.wrap(context).getString(R.string.status_sms_unreadable),
+            hint.getText().toString());
     }
 
     @Test public void corruptEncryptedStore_datasetShowsErrorRowInsteadOfEmptyState() throws Exception {
@@ -143,7 +144,7 @@ public class WidgetStabilityTest {
         factory.onDataSetChanged();
         assertEquals(1, factory.getCount());
         View row = factory.getViewAt(0).apply(context, null);
-        assertEquals(context.getString(R.string.status_sms_unreadable),
+        assertEquals(LocaleHelper.wrap(context).getString(R.string.status_sms_unreadable),
             ((TextView) row.findViewById(R.id.widget_empty)).getText().toString());
     }
 
