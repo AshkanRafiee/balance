@@ -19,7 +19,7 @@ Balance turns supported bank SMS into a clear picture of your money: the latest 
 
 SMS access lets Balance read bank messages; turning it off does not delete saved data. Figures depend on the messages Balance can access, not a live connection to your bank. Missing, deleted or restricted messages can leave gaps, and old balances may no longer reflect your account.
 
-Stored financial data is encrypted. Encrypted backups also include retained bank-message samples. Report, sharing, CSV export and backup only hand selected data to the app or location you choose. Review shared samples even though one-time password values are removed by Report.
+Saved financial records are encrypted; CSV exports are not. Encrypted backups also include retained bank-message samples. Report, sharing, CSV export and backup only hand selected data to the app or location you choose. Review shared samples even though one-time password values are removed by Report.
 
 For an unexpected result, refresh or safely re-read bank messages before deleting anything. Re-reading keeps commitments, notes, tags, excluded accounts, retained history and saved message sources. **A full reset is different and destructive:** it removes balances, history and commitments and requires two confirmations; deleted SMS cannot be recovered by scanning. Back up first. See [troubleshooting and reporting](CONTRIBUTING.md).
 
