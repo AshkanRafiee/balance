@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="scan_inbox_checked">Inbox checked · balances are from saved messages</string>
+    <string name="scan_inbox_failed">Inbox check incomplete · showing saved balances</string>
+    <string name="scan_total_stale">Included balances older than your warning limit: %1$d</string>
+    <string name="scan_reread_action">Re-read bank messages</string>
+    <string name="scan_reread_message">Re-read the bank messages still in your inbox using the current rules. Commitments, excluded accounts, notes and tags are kept. Saved history and source messages are kept even when the original SMS was deleted. Missing bank messages cannot be recovered from your inbox.</string>
+    <string name="scan_reread_done">Bank messages re-read; personal data kept</string>
+    <string name="scan_reset_title">Full reset</string>
+    <string name="scan_reset_warning">Full reset deletes saved balances, history, source messages, account exclusions and ALL commitments, including their paid or skipped records. Commitments cannot be recovered from bank SMS. Only messages still in your inbox can rebuild balances and history. Create an encrypted backup first if you may need this data. To keep your personal data, cancel and choose Re-read bank messages instead. Notes and tags are kept unless you select the option below.</string>
+    <string name="scan_reset_final_warning">Permanently delete balances, history, source messages, account exclusions and ALL commitments? Commitments and their paid or skipped records cannot be recovered from bank SMS. Deleted inbox messages cannot rebuild lost history. Without a backup, this cannot be undone.</string>
+</resources>

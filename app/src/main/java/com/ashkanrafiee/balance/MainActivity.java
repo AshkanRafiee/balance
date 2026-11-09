@@ -674,7 +674,7 @@ public class MainActivity extends Activity {
         TextView message = new TextView(this);
         message.setTextSize(14);
         message.setTextColor(resColor(R.color.subtitle));
-        message.setText(getString(R.string.dialog_hard_refresh_message));
+        message.setText(getString(R.string.scan_reset_warning));
         LinearLayout.LayoutParams messageLp = new LinearLayout.LayoutParams(-1, -2);
         messageLp.bottomMargin = dp(12);
         message.setLayoutParams(messageLp);
@@ -694,11 +694,15 @@ public class MainActivity extends Activity {
         body.setPadding(dp(18), dp(8), dp(18), 0);
         body.addView(message);
         body.addView(notesRow);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(body);
 
         showDialog(new android.app.AlertDialog.Builder(this)
-            .setTitle(getString(R.string.dialog_hard_refresh_title))
-            .setView(body)
+            .setTitle(getString(R.string.scan_reset_title))
+            .setView(scroll)
             .setNegativeButton(getString(R.string.dialog_hard_refresh_cancel), null)
+            .setNeutralButton(getString(R.string.backup_action_create),
+                (d, w) -> askPassword(true, null))
             .setPositiveButton(getString(R.string.dialog_hard_refresh_confirm),
                 (d, w) -> confirmHardRefresh(deleteNotes.isChecked()))
             .create());
@@ -709,7 +713,7 @@ public class MainActivity extends Activity {
      *  to be destroyed and that it cannot be undone — a single accidental tap can still be stopped.
      *  Confirming here runs the real reset ({@code alsoNotes} deleting the notes it carries). */
     private void confirmHardRefresh(final boolean alsoNotes) {
-        String message = getString(R.string.dialog_hard_refresh_confirm2_message);
+        String message = getString(R.string.scan_reset_final_warning);
         if (alsoNotes) message += "\n\n" + getString(R.string.dialog_hard_refresh_confirm2_notes);
         TextView body = new TextView(this);
         body.setTextSize(14);
@@ -719,10 +723,12 @@ public class MainActivity extends Activity {
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setPadding(dp(18), dp(8), dp(18), 0);
         wrap.addView(body);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(wrap);
 
         showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.dialog_hard_refresh_confirm2_title))
-            .setView(wrap)
+            .setView(scroll)
             .setNegativeButton(getString(R.string.dialog_hard_refresh_cancel), null)
             .setPositiveButton(getString(R.string.dialog_hard_refresh_confirm),
                 (d, w) -> view.refresh(true, alsoNotes))
@@ -1090,14 +1096,22 @@ public class MainActivity extends Activity {
         String[] options = {
             getString(R.string.backup_action_create),
             getString(R.string.backup_action_restore),
-            getString(R.string.data_action_reset)
+            getString(R.string.scan_reset_title),
+            getString(R.string.scan_reread_action)
         };
         showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.data_title))
             .setItems(options, (d, which) -> {
                 if (which == 0) askPassword(true, null);
                 else if (which == 1) pickRestoreSource();
-                else hardRefreshDialog();
+                else if (which == 2) hardRefreshDialog();
+                else showDialog(new android.app.AlertDialog.Builder(this)
+                    .setTitle(R.string.scan_reread_action)
+                    .setMessage(R.string.scan_reread_message)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton(R.string.scan_reread_action,
+                        (confirm, button) -> view.refresh(false, false, false, true))
+                    .create());
             })
             .create());
     }
@@ -1815,6 +1829,17 @@ public class MainActivity extends Activity {
             status.setAlpha(.82f);
             status.setMaxLines(2);
             hero.addView(status, ExpressiveUi.widthMatch(this, 4, 16));
+            int staleIncluded = 0;
+            for (java.util.Map.Entry<String, Bank> entry : view.banks.entrySet()) {
+                if (!view.excluded.contains(entry.getKey())
+                        && BalanceData.isStale(MainActivity.this, entry.getValue().date)) staleIncluded++;
+            }
+            if (staleIncluded > 0) {
+                TextView composition = ExpressiveUi.label(this,
+                    getString(R.string.scan_total_stale, staleIncluded), 12,
+                    ExpressiveUi.color(this, R.color.expressive_on_primary_container));
+                hero.addView(composition, ExpressiveUi.widthMatch(this, 0, 12));
+            }
             TextView history = ExpressiveUi.button(this,
                 getString(R.string.dashboard_open_history), true);
             history.setSingleLine(true);
@@ -2309,7 +2334,7 @@ public class MainActivity extends Activity {
          *  works in normal view hierarchies. */
         final float fs = getResources().getConfiguration().fontScale;
         Drawable lockIcon;
-        boolean hidden, refreshing, refreshAgain, pendingHard, pendingNotes;
+        boolean hidden, refreshing, refreshAgain, pendingHard, pendingNotes, pendingReRead;
         boolean refreshVisible, pendingVisible;
         boolean autoHide;
         /** Whether the "balances may be out of date" strip is up. It exists only while saved data is
@@ -2797,6 +2822,10 @@ public class MainActivity extends Activity {
          *  consequence dialog. When {@code silent} is true the "Refreshing…" status is suppressed —
          *  used by the background ContentObserver so incoming-SMS updates don't flash status. */
         void refresh(boolean hard, boolean alsoNotes, boolean silent) {
+            refresh(hard, alsoNotes, silent, false);
+        }
+
+        void refresh(boolean hard, boolean alsoNotes, boolean silent, boolean reRead) {
             if (refreshing) {
                 // A scan is already running: remember the request so the moment it completes we
                 // scan again and pick up whatever arrived while the first pass was in flight. A
@@ -2805,6 +2834,7 @@ public class MainActivity extends Activity {
                 refreshAgain = true;
                 pendingHard |= hard;
                 pendingNotes |= alsoNotes;
+                pendingReRead |= reRead;
                 pendingVisible |= !silent && !hard;
                 if (!silent && !hard) {
                     refreshVisible = true;
@@ -2813,7 +2843,7 @@ public class MainActivity extends Activity {
                 }
                 return;
             }
-            pendingHard = pendingNotes = false;
+            pendingHard = pendingNotes = pendingReRead = false;
             pendingVisible = false;
             // Cleared here rather than only on the granted path below: a request that arrived while
             // this one was in flight has now been folded into it, so leaving the flag set would make
@@ -2833,23 +2863,7 @@ public class MainActivity extends Activity {
                 if (hard) showProgress(getString(R.string.reset_progress));
                 new Thread(() -> {
                     final Context app = MainActivity.this.getApplicationContext();
-                    try {
-                        if (hard) BalanceData.reset(app, alsoNotes);
-                    } catch (Exception e) {
-                        // Reset is fail-closed: a store that cannot be cleared must not be
-                        // half-rebuilt silently. Keep the previous screen and say so.
-                        android.util.Log.w("Balance", "reset failed", e);
-                        post(() -> {
-                            dismissProgress();
-                            toast(R.string.toast_reset_failed);
-                            refreshing = false;
-                            refreshVisible = false;
-                            invalidate();
-                            if (dashboard != null) dashboard.render();
-                            finishQueuedRefresh(silent);
-                        });
-                        return;
-                    }
+                    // Never discard data when the promised inbox rebuild cannot even start.
                     final LinkedHashMap<String, Bank> saved;
                     try {
                         saved = BalanceData.read(app);
@@ -2857,7 +2871,7 @@ public class MainActivity extends Activity {
                         android.util.Log.w("Balance", "saved balances unreadable", e);
                         post(() -> {
                             dismissProgress();
-                            applySaved(!hard && !banks.isEmpty() ? new LinkedHashMap<>(banks)
+                            applySaved(!banks.isEmpty() ? new LinkedHashMap<>(banks)
                                 : new LinkedHashMap<>(), app,
                                 getString(R.string.status_sms_unreadable));
                             finishQueuedRefresh(silent);
@@ -2869,7 +2883,7 @@ public class MainActivity extends Activity {
                     post(() -> {
                         if (isFinishing() || isDestroyed()) return;
                         dismissProgress();
-                        if (hard) view.invalidateCommitmentSummary();
+                        if (hard) toast(R.string.toast_reset_failed);
                         applySaved(saved, app, saved.isEmpty()
                             ? getString(R.string.status_permission_needed)
                             : getString(R.string.status_stale_no_permission));
@@ -2885,11 +2899,11 @@ public class MainActivity extends Activity {
             }
             if (dashboard != null) dashboard.render();
             String statusNoSms = getString(R.string.status_no_sms_found);
-            String updatedNow = getString(R.string.status_updated_now);
-            String statusLoaded = getString(R.string.status_loaded_from_saved);
-            final WorkProgress refreshProgress = hard ? dialogProgress() : null;
+            String updatedNow = getString(R.string.scan_inbox_checked);
+            final WorkProgress refreshProgress = hard || reRead ? dialogProgress() : null;
             final boolean hydrateInitial = !hard && banks.isEmpty();
             if (hard) showProgress(getString(R.string.reset_progress));
+            else if (reRead) showProgress(getString(R.string.scan_reread_action));
             new Thread(() -> {
                 final Context app = MainActivity.this.getApplicationContext();
                 try {
@@ -2923,15 +2937,25 @@ public class MainActivity extends Activity {
                         started.countDown();
                         release.await();
                     }
-                    int count = BalanceData.scanSms(app, saved, refreshProgress);
+                    BalanceData.ScanOutcome outcome = reRead
+                        ? BalanceData.reReadBankMessages(app, saved, refreshProgress)
+                        : BalanceData.scanSmsOutcome(app, saved, refreshProgress);
+                    // Completion covers both projections promised by reset, not just balances.
+                    if (hard && outcome.succeeded())
+                        outcome = BalanceData.scanHistoryOutcome(app, refreshProgress);
+                    final BalanceData.ScanOutcome finished = outcome;
                     post(() -> {
                         if (isFinishing() || isDestroyed()) return;
                         dismissProgress();
                         // A reset also wipes commitments: drop the cached card summary so the next
                         // frame reloads it instead of showing the deleted series until reopen.
                         if (hard) view.invalidateCommitmentSummary();
-                        applySaved(saved, app, buildStatus(count, saved.isEmpty(), statusNoSms, updatedNow));
-                        if (hard) toast(R.string.toast_reset_done);
+                        applySaved(saved, app, finished.succeeded()
+                            ? (saved.isEmpty() ? statusNoSms + " · " + updatedNow : updatedNow)
+                            : getString(R.string.scan_inbox_failed));
+                        if (hard) toast(finished.succeeded()
+                            ? R.string.toast_reset_done : R.string.toast_reset_failed);
+                        else if (reRead && finished.succeeded()) toast(R.string.scan_reread_done);
                         finishQueuedRefresh(silent);
                     });
                 } catch (Exception e) {
@@ -2950,34 +2974,18 @@ public class MainActivity extends Activity {
                         // A transient read failure must not discard already usable balances.
                         applySaved(saved2.isEmpty() && !hard && !banks.isEmpty()
                             ? new LinkedHashMap<>(banks) : saved2, app,
-                            saved2.isEmpty() ? getString(R.string.status_sms_unreadable) : statusLoaded);
+                            getString(R.string.scan_inbox_failed));
                         if (hard) toast(R.string.toast_reset_failed);
                         finishQueuedRefresh(silent);
                     });
-                }
-                if (hard) {
-                    // History is owned by its own screen. Ordinary dashboard refreshes only need
-                    // balances and the widget; the history screen scans its store when opened (and
-                    // while it remains visible). Reset & rescan is the exception because its
-                    // existing contract promises to rebuild every deleted projection immediately.
-                    try {
-                        BalanceData.scanHistory(app, refreshProgress);
-                    } catch (Exception historyError) {
-                        android.util.Log.w("Balance", "history refresh failed", historyError);
-                    }
                 }
             }).start();
         }
 
         private void finishQueuedRefresh(boolean silent) {
             if (refreshAgain && !isFinishing() && !isDestroyed())
-                refresh(pendingHard, pendingNotes, silent && !pendingVisible);
-        }
-
-        private String buildStatus(int count, boolean empty, String noSms, String loaded) {
-            if (count == 0)
-                return empty ? noSms : loaded;
-            return getResources().getQuantityString(R.plurals.status_updated_banks, count, count);
+                refresh(pendingHard, pendingNotes, silent && !pendingVisible,
+                    pendingReRead && !pendingHard);
         }
 
         void value(Canvas c, long n, float x, float baseline, float width,
