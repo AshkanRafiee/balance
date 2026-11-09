@@ -228,6 +228,7 @@ final class FigureExplanation {
     }
 
     static String time(Context context, long date) {
+        if (date <= 0) return context.getString(R.string.figure_time_unavailable);
         java.util.Calendar civil = java.util.Calendar.getInstance(java.util.Locale.US);
         civil.setTimeInMillis(date);
         boolean iran = RegionHelper.isIran(context);

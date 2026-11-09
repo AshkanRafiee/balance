@@ -16,6 +16,10 @@ public final class FigureCalendarTest {
         long at = new java.util.GregorianCalendar(2026, java.util.Calendar.MARCH, 21, 12, 0)
             .getTimeInMillis();
         try {
+            org.junit.Assert.assertEquals(context.getString(R.string.figure_time_unavailable),
+                FigureExplanation.time(context, 0));
+            org.junit.Assert.assertEquals(context.getString(R.string.figure_time_unavailable),
+                FigureExplanation.time(context, -1));
             LocaleHelper.setLanguage(context, "en");
             RegionHelper.setRegion(context, RegionHelper.REGION_IRAN);
             assertTrue(FigureExplanation.time(context, at).startsWith("1 Farvardin 1405"));

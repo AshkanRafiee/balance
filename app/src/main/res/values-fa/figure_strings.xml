@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="figure_time_unavailable">نامشخص</string>
     <string name="figure_annotation_changed">تاریخچه هنگام ویرایش تغییر کرد. چیزی ذخیره نشد و ویرایش‌های شما هنوز اینجا هستند. آن‌ها را کپی کنید، این پنجره را ببندید و تراکنش را دوباره باز کنید تا دوباره تلاش کنید.</string>
     <string name="figure_title">توضیح این مبلغ</string>
     <string name="figure_row_hint">برای توضیح این مبلغ یا ویرایش یادداشت و برچسب‌ها بزنید.</string>

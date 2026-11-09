@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="figure_time_unavailable">not available</string>
     <string name="figure_annotation_changed">History changed while you were editing. Nothing was saved. Your edits are still here. Copy them, then close this editor and reopen the movement to retry.</string>
     <string name="figure_title">Explain this figure</string>
     <string name="figure_row_hint">Tap to explain this figure or edit your note and tags.</string>
