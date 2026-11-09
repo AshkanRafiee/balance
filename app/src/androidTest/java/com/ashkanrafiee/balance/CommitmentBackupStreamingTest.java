@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.TimeZone;
 
 /** Framed commitment export reuses one session while streaming both settlement kinds. */
 @RunWith(AndroidJUnit4.class)
@@ -104,14 +105,50 @@ public class CommitmentBackupStreamingTest {
         assertEquals(source.unpaid, unpaid);
     }
 
+    @Test public void framedRestoreDoesNotReinterpretScheduleInDestinationCalendarOrZone()
+            throws Exception {
+        TimeZone originalZone = TimeZone.getDefault();
+        int originalRegion = RegionHelper.region(context);
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Tehran"));
+            RegionHelper.setRegion(context, RegionHelper.REGION_IRAN);
+            long first = Commitment.millisOf(1405, 6, 31, CalendarSystem.JALALI);
+            long paid = Commitment.millisOf(1405, 7, 30, CalendarSystem.JALALI);
+            Commitment c = Commitment.create("Loan", -123L, Commitment.MONTHLY, first, null, true, 0);
+            CommitmentStore.upsert(context, c);
+            CommitmentStore.settle(context, c.id, paid);
+            Commitment before = CommitmentStore.get(context, c.id);
+            String schedule = before.schedule.toJson().toString();
+            backup = File.createTempFile("commitment-zone-", ".bin", context.getCacheDir());
+            BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+            BalanceData.reset(context, true);
+            TimeZone.setDefault(TimeZone.getTimeZone("America/Los_Angeles"));
+            RegionHelper.setRegion(context, RegionHelper.REGION_INTERNATIONAL);
+            assertEquals(1, BackupManager.restore(context, Uri.fromFile(backup), PASSWORD)
+                .commitmentsAdded);
+            Commitment restored = CommitmentStore.get(context, c.id);
+            assertEquals(schedule, restored.schedule.toJson().toString());
+            org.junit.Assert.assertTrue(restored.hasOccurrence(paid));
+            org.junit.Assert.assertTrue(restored.isSettled(paid));
+            assertEquals(Collections.singletonList(paid), restored.paid);
+        } finally {
+            TimeZone.setDefault(originalZone);
+            RegionHelper.setRegion(context, originalRegion);
+        }
+    }
+
     private static Commitment largeDefinition() {
         List<Long> paid = new ArrayList<>();
         List<Long> unpaid = new ArrayList<>();
         // Both kinds cross two 256-row boundaries; their dates interleave without overlapping.
         for (int i = 0; i < 513; i++) paid.add(T + 2L * i * DAY + 1);
         for (int i = 0; i < 515; i++) unpaid.add(T + (2L * i + 1) * DAY + 2);
-        return new Commitment("multi-page", "Long settlement history", -123L,
+        Commitment c = new Commitment("multi-page", "Long settlement history", -123L,
             Commitment.DAILY, T, null, false, paid, T + 10 * DAY, unpaid, false, 0);
+        // This test exercises exact streaming, not legacy civil-day migration. A stable payload
+        // retains even off-schedule imported marks verbatim, without truncating its history.
+        return c.withSchedule(CommitmentSchedule.capture(c, CalendarSystem.GREGORIAN,
+            java.time.ZoneId.systemDefault()));
     }
 
     private static void assertDates(List<Long> expected, JSONArray actual) throws Exception {

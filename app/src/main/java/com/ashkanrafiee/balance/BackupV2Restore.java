@@ -88,6 +88,7 @@ final class BackupV2Restore {
     private static final int COMMITMENT_REMIND_BEFORE = 1 << 9;
     private static final int COMMITMENT_PAID = 1 << 10;
     private static final int COMMITMENT_UNPAID = 1 << 11;
+    private static final int COMMITMENT_SCHEDULE = 1 << 12;
 
     private static final int TRANSACTION_BANK = 1;
     private static final int TRANSACTION_DATE = 1 << 1;
@@ -1013,6 +1014,7 @@ final class BackupV2Restore {
         long remindBefore = 0;
         boolean hasPaid = false;
         boolean hasUnpaid = false;
+        CommitmentSchedule schedule = null;
         int seen = 0;
 
         json.beginObject();
@@ -1032,6 +1034,7 @@ final class BackupV2Restore {
                 case "remindBefore": bit = COMMITMENT_REMIND_BEFORE; break;
                 case "paid": bit = COMMITMENT_PAID; break;
                 case "unpaid": bit = COMMITMENT_UNPAID; break;
+                case "schedule": bit = COMMITMENT_SCHEDULE; break;
                 default: throw invalid("unknown commitment field");
             }
             if ((seen & bit) != 0) throw invalid("duplicate commitment field");
@@ -1047,6 +1050,7 @@ final class BackupV2Restore {
                 case "paidThrough": paidThrough = exactLong(json); break;
                 case "remind": remind = requiredBoolean(json); break;
                 case "remindBefore": remindBefore = exactLong(json); break;
+                case "schedule": schedule = readCommitmentSchedule(json); break;
                 case "paid":
                     hasPaid = readSettlementDates(json, stage, ordinal, true);
                     break;
@@ -1076,9 +1080,31 @@ final class BackupV2Restore {
 
         Commitment definition = Commitment.normalized(new Commitment(id, name, amount,
             (int) frequency, start, end, done, java.util.Collections.emptyList(), paidThrough,
-            java.util.Collections.emptyList(), remind, remindBefore));
+            java.util.Collections.emptyList(), remind, remindBefore, schedule));
         if (definition == null) throw invalid("invalid commitment definition");
         stage.addCommitmentDefinition(ordinal, definition);
+    }
+
+    private static CommitmentSchedule readCommitmentSchedule(JsonReader json) throws Exception {
+        JSONObject object = new JSONObject();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        json.beginObject();
+        while (json.hasNext()) {
+            String field = json.nextName();
+            if (!seen.add(field)) throw invalid("duplicate schedule field");
+            switch (field) {
+                case "version": object.put(field, exactLong(json)); break;
+                case "calendar": case "zone": case "first":
+                    object.put(field, requiredString(json)); break;
+                case "last":
+                    if (json.peek() == JsonToken.NULL) json.nextNull();
+                    else object.put(field, requiredString(json));
+                    break;
+                default: throw invalid("unknown schedule field");
+            }
+        }
+        json.endObject();
+        return CommitmentSchedule.fromJson(object);
     }
 
     private static boolean readSettlementDates(JsonReader json, InputStage stage, long ordinal,
@@ -1371,7 +1397,7 @@ final class BackupV2Restore {
                 if (local == null) {
                     editor.upsert(definition);
                     changed[0] = true;
-                    local = definition;
+                    local = editor.get(definition.id);
                 } else if (local.frequency != Commitment.ONCE
                         && definition.frequency != Commitment.ONCE
                         && definition.legacyPaidThrough > local.legacyPaidThrough) {
@@ -1381,7 +1407,7 @@ final class BackupV2Restore {
                     Commitment watermark = new Commitment(local.id, local.name, local.amount,
                         local.frequency, local.start, local.end, local.done, local.paid,
                         definition.legacyPaidThrough, local.unpaid, local.remind,
-                        local.remindBeforeMs);
+                        local.remindBeforeMs, local.schedule);
                     editor.upsert(watermark);
                     changed[0] = true;
                     local = watermark;
@@ -1390,8 +1416,15 @@ final class BackupV2Restore {
                 // has a different frequency. There are no valid events for a new one-time row; skip
                 // incompatible incoming events rather than changing the local definition's meaning.
                 if (local.frequency != Commitment.ONCE) {
+                    final Commitment target = local;
                     stage.forEachCommitmentEvent(ordinal, (date, settled) -> {
-                        if (editor.mergeSettlementIfAbsent(definition.id, date, settled))
+                        // Legacy marks name civil days in the current migration interpretation.
+                        // Stable backups already carry exact schedule-zone identities.
+                        long identity = newDefinition && definition.schedule == null
+                            ? target.schedule.instant(CommitmentSchedule.day(date, target.schedule.zone))
+                            : date;
+                        if (newDefinition ? editor.restoreNewSettlement(definition.id, identity, settled)
+                                : editor.mergeSettlementIfAbsent(definition.id, identity, settled))
                             changed[0] = true;
                     });
                 }

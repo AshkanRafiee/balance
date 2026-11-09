@@ -63,6 +63,7 @@ final class CommitmentStore {
     private static final String ROW_KEY = "row_key";
     private static final String REVISION = "revision";
     private static final String MIGRATED = "legacy_digest";
+    private static final String CIVIL_SCHEDULES = "civil_schedules_v1";
     /** Prefix for per-deletion META tombstones; the value keeps the deleted definition id. */
     private static final String DELETED_PREFIX = "deleted:";
     private static final String ROW_DOMAIN = "commitments";
@@ -331,6 +332,15 @@ final class CommitmentStore {
             requireId(id); requireDate(date);
             return session().mergeSettlementIfAbsent(id, date, settled);
         }
+        boolean restoreNewSettlement(String id, long date, boolean settled) throws Exception {
+            requireId(id); requireDate(date);
+            Definition definition = session().find(id, true);
+            if (definition == null) throw new IllegalArgumentException("missing restored commitment");
+            Settlement old = session().mark(definition.rowId, date);
+            if (old != null && old.settled != settled)
+                throw new IllegalArgumentException("conflicting restored settlement civil days");
+            return session().mergeSettlementIfAbsent(id, date, settled);
+        }
         boolean isSettled(String id, long date) throws Exception {
             requireId(id); requireDate(date); return session().isSettled(id, date);
         }
@@ -519,6 +529,15 @@ final class CommitmentStore {
         writer.name("amount").value(c.amount);
         writer.name("freq").value(c.frequency);
         writer.name("start").value(c.start);
+        if (c.schedule != null) {
+            writer.name("schedule").beginObject();
+            writer.name("version").value(1);
+            writer.name("calendar").value(c.schedule.calendar.tag());
+            writer.name("zone").value(c.schedule.zone.getId());
+            writer.name("first").value(c.schedule.first.toString());
+            if (c.schedule.last != null) writer.name("last").value(c.schedule.last.toString());
+            writer.endObject();
+        }
         if (c.end != null) writer.name("end").value(c.end);
         if (c.done) writer.name("done").value(true);
         if (c.legacyPaidThrough > 0) writer.name("paidThrough").value(c.legacyPaidThrough);
@@ -631,6 +650,7 @@ final class CommitmentStore {
                     Session session = new Session(context, db, owner);
                     ACTIVE.set(session);
                     try {
+                        session.migrateSchedules();
                         String digest = legacy == null ? null : digest(legacy);
                         if (migrate && legacy != null && !digest.equals(meta(db, MIGRATED))) {
                             String plain = legacy.trim().startsWith("{") ? legacy
@@ -718,6 +738,52 @@ final class CommitmentStore {
             if (!revision.equals(expected)) throw new IllegalStateException("commitments changed; restart read");
         }
 
+        /** Freeze the configured interpretation, not an unknowable original creation setting.
+         * Marks retain their civil days; staging detects conflicting paid/reopened days before
+         * replacing anything. Migration is atomic and bounded-memory even for large histories. */
+        void migrateSchedules() throws Exception {
+            if ("1".equals(meta(db, CIVIL_SCHEDULES))) return;
+            try (Cursor cursor = db.query(DEFINITIONS, new String[]{"id", "lookup", "payload"},
+                    null, null, null, null, "id ASC")) {
+                while (cursor.moveToNext()) {
+                    Definition definition = decodeDefinition(cursor, true);
+                    if (definition.value.schedule != null) continue;
+                    Commitment c = definition.value;
+                    CommitmentSchedule schedule = CommitmentSchedule.capture(c,
+                        RegionHelper.isIran(context) ? CalendarSystem.JALALI
+                            : CalendarSystem.GREGORIAN, java.time.ZoneId.systemDefault());
+                    Commitment frozen = c.withSchedule(schedule);
+                    db.execSQL("CREATE TEMP TABLE IF NOT EXISTS incoming_marks (id INTEGER PRIMARY KEY,"
+                        + " definition_id INTEGER NOT NULL, lookup TEXT NOT NULL UNIQUE, payload TEXT NOT NULL)");
+                    db.delete("incoming_marks", null, null);
+                    try (Cursor marks = db.query(SETTLEMENTS, new String[]{"id", "lookup", "payload"},
+                            "definition_id=?", new String[]{Long.toString(definition.rowId)},
+                            null, null, "id ASC")) {
+                        while (marks.moveToNext()) {
+                            Settlement mark = decodeSettlement(marks, definition.rowId);
+                            long date = schedule.instant(CommitmentSchedule.day(mark.date, schedule.zone));
+                            putIncomingMark("incoming_marks", definition.rowId, date, mark.settled);
+                        }
+                    }
+                    db.delete(SETTLEMENTS, "definition_id=?",
+                        new String[]{Long.toString(definition.rowId)});
+                    db.execSQL("INSERT INTO " + SETTLEMENTS + " (definition_id,lookup,payload)"
+                        + " SELECT definition_id,lookup,payload FROM incoming_marks ORDER BY id");
+                    ContentValues values = new ContentValues();
+                    values.put("payload", definitionPayload(frozen));
+                    db.update(DEFINITIONS, values, "id=?",
+                        new String[]{Long.toString(definition.rowId)});
+                    touch();
+                }
+            }
+            putMeta(db, CIVIL_SCHEDULES, "1");
+        }
+
+        Commitment freeze(Commitment c) {
+            return c.freezeSchedule(RegionHelper.isIran(context) ? CalendarSystem.JALALI
+                : CalendarSystem.GREGORIAN, java.time.ZoneId.systemDefault());
+        }
+
         Definition find(String id, boolean lazy) throws Exception {
             try (Cursor cursor = db.query(DEFINITIONS, new String[]{"id", "lookup", "payload"},
                     "lookup=?", new String[]{definitionLookup(id)}, null, null, null, "1")) {
@@ -757,8 +823,7 @@ final class CommitmentStore {
                 paid.sort(null);
                 unpaid.sort(null);
             }
-            return new Definition(rowId, new Commitment(c.id, c.name, c.amount, c.frequency, c.start,
-                c.end, c.done, paid, c.legacyPaidThrough, unpaid, c.remind, c.remindBeforeMs));
+            return new Definition(rowId, c.withSettlements(c.done, paid, unpaid));
         }
 
         String definitionPayload(Commitment c) throws Exception {
@@ -820,8 +885,7 @@ final class CommitmentStore {
             Commitment c = definition.value;
             if (c.frequency == Commitment.ONCE) {
                 if (c.done == settled) return false;
-                Commitment updated = new Commitment(c.id, c.name, c.amount, c.frequency, c.start,
-                    c.end, settled, null, c.legacyPaidThrough, null, c.remind, c.remindBeforeMs);
+                Commitment updated = c.withSettlements(settled, null, null);
                 ContentValues values = new ContentValues();
                 values.put("payload", definitionPayload(updated));
                 db.update(DEFINITIONS, values, "id=?", new String[]{Long.toString(definition.rowId)});
@@ -899,7 +963,7 @@ final class CommitmentStore {
         }
 
         boolean upsert(Commitment c) throws Exception {
-            c = canonical(c);
+            c = freeze(canonical(c));
             Definition old = find(c.id, true);
             long rowId;
             if (old == null) {
@@ -946,7 +1010,7 @@ final class CommitmentStore {
             db.execSQL("CREATE TEMP TABLE replacement_marks (id INTEGER PRIMARY KEY, definition_id INTEGER NOT NULL, lookup TEXT UNIQUE NOT NULL, payload TEXT NOT NULL)");
             long rowId = nextDefinitionId();
             for (Commitment c : definitions) {
-                c = canonical(c);
+                c = freeze(canonical(c));
                 ContentValues values = new ContentValues();
                 values.put("id", rowId);
                 values.put("lookup", definitionLookup(c.id));

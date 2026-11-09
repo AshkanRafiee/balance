@@ -22,10 +22,9 @@ import org.json.JSONObject;
  *  older one. A null {@link #end} is open-ended; setting one later (or clearing it) only moves
  *  the window the occurrences below expand into.
  *
- *  <p>Occurrences expand in whole civil days in the viewing calendar (a monthly commitment due
- *  on the 31st lands on the last day of short months), so daylight-saving transitions can
- *  never shift or duplicate one. What is stored stays calendar-free epoch millis; the viewing
- *  calendar only decides how those millis read as months. */
+ *  <p>Persisted schedules expand in their own calendar and time zone. Display preferences never
+ *  change their due instants or settlement identities. Legacy definitions are frozen atomically
+ *  by the store before use. */
 final class Commitment {
     static final int ONCE = 0;
     static final int DAILY = 1;
@@ -66,6 +65,8 @@ final class Commitment {
     final boolean remind;
     /** How far before the due moment the reminder fires. */
     final long remindBeforeMs;
+    /** Null only for a legacy definition not yet migrated by the store. */
+    final CommitmentSchedule schedule;
 
     /** An immutable store-backed list. contains() must perform an individual-date lookup. */
     abstract static class SettlementList extends AbstractList<Long> {}
@@ -91,6 +92,13 @@ final class Commitment {
     Commitment(String id, String name, long amount, int frequency, long start, Long end,
             boolean done, List<Long> paid, long legacyPaidThrough, List<Long> unpaid,
             boolean remind, long remindBeforeMs) {
+        this(id, name, amount, frequency, start, end, done, paid, legacyPaidThrough, unpaid,
+            remind, remindBeforeMs, null);
+    }
+
+    Commitment(String id, String name, long amount, int frequency, long start, Long end,
+            boolean done, List<Long> paid, long legacyPaidThrough, List<Long> unpaid,
+            boolean remind, long remindBeforeMs, CommitmentSchedule schedule) {
         this.id = id;
         this.name = name;
         this.amount = amount;
@@ -103,6 +111,42 @@ final class Commitment {
         this.legacyPaidThrough = legacyPaidThrough;
         this.remind = remind;
         this.remindBeforeMs = remindBeforeMs;
+        this.schedule = schedule;
+    }
+
+    Commitment withSchedule(CommitmentSchedule value) {
+        return new Commitment(id, name, amount, frequency, start, end, done, paid,
+            legacyPaidThrough, unpaid, remind, remindBeforeMs, value);
+    }
+
+    Commitment withSettlements(boolean done, List<Long> paid, List<Long> unpaid) {
+        return new Commitment(id, name, amount, frequency, start, end, done, paid,
+            legacyPaidThrough, unpaid, remind, remindBeforeMs, schedule);
+    }
+
+    /** Legacy data did not record its creation calendar/zone. Freeze only the current
+     * interpretation; keep each mark's civil day in that interpretation, never infer a past
+     * setting from paid dates. Conflicting paid/reopened civil days fail rather than lose state. */
+    Commitment freezeSchedule(CalendarSystem calendar, java.time.ZoneId zone) {
+        if (schedule != null) return this;
+        CommitmentSchedule captured = CommitmentSchedule.capture(this, calendar, zone);
+        List<Long> settled = legacyCivilDates(paid, captured);
+        List<Long> reopened = legacyCivilDates(unpaid, captured);
+        if (!Collections.disjoint(settled, reopened))
+            throw new IllegalStateException("conflicting legacy settlement civil days");
+        return withSettlements(done, settled, reopened).withSchedule(captured);
+    }
+
+    private static List<Long> legacyCivilDates(List<Long> dates, CommitmentSchedule schedule) {
+        TreeSet<Long> days = new TreeSet<>();
+        for (long date : dates)
+            days.add(schedule.instant(CommitmentSchedule.day(date, schedule.zone)));
+        return new ArrayList<>(days);
+    }
+
+    boolean hasOccurrence(long due) {
+        if (schedule != null) return schedule.contains(due, frequency);
+        return occurrences(this, CalendarSystem.GREGORIAN, due, due).contains(due);
     }
 
     /** A fresh commitment with a stable identity, normalized the way the store keeps it. */
@@ -122,7 +166,13 @@ final class Commitment {
         int frequency = c.frequency;
         if (c.start <= 0) return null;
         Long end = c.end;
-        if (end != null && end < startOfDay(c.start)) return null;
+        if (end != null && end < (c.schedule == null ? startOfDay(c.start)
+                : c.schedule.instant(c.schedule.first))) return null;
+        if (c.schedule != null && (c.schedule.first.toEpochDay()
+                    != CommitmentSchedule.day(c.start, c.schedule.zone).toEpochDay()
+                || (c.end == null) != (c.schedule.last == null)
+                || c.end != null && !c.schedule.last.equals(
+                    CommitmentSchedule.day(c.end, c.schedule.zone)))) return null;
         if (c.legacyPaidThrough < 0 || c.remindBeforeMs < 0) return null;
         List<Long> paid = normalizeDates(c.paid);
         List<Long> unpaid = normalizeDates(c.unpaid);
@@ -130,7 +180,7 @@ final class Commitment {
         if (!(paid instanceof SettlementList) && !(unpaid instanceof SettlementList)
                 && !Collections.disjoint(paid, unpaid)) return null;
         return new Commitment(c.id, name, c.amount, frequency, c.start, end,
-            c.done, paid, c.legacyPaidThrough, unpaid, c.remind, c.remindBeforeMs);
+            c.done, paid, c.legacyPaidThrough, unpaid, c.remind, c.remindBeforeMs, c.schedule);
     }
 
     private static List<Long> normalizeDates(List<Long> dates) {
@@ -177,6 +227,7 @@ final class Commitment {
 
     /** Constant-space, constant-time count, including very long finite schedules. */
     private static long countOccurrences(Commitment c, CalendarSystem cal) {
+        if (c.schedule != null) return c.schedule.count(c.frequency);
         if (c.frequency == ONCE) return 1;
         int[] anchor = civilDay(c.start, cal);
         int[] last = civilDay(c.end, cal);
@@ -232,6 +283,17 @@ final class Commitment {
         }
     }
 
+    static Long endForCount(long start, long count, int frequency, CalendarSystem cal,
+            java.time.ZoneId zone) {
+        if (cal == null || zone == null || start <= 0 || count <= 0
+                || count > MAX_PAYMENT_COUNT || frequency < DAILY || frequency > YEARLY) return null;
+        try {
+            CommitmentSchedule schedule = new CommitmentSchedule(cal, zone,
+                CommitmentSchedule.day(start, zone), null);
+            return schedule.instant(schedule.at(count - 1, frequency));
+        } catch (RuntimeException invalid) { return null; }
+    }
+
     private static LocalDate gregorianDay(long millis) {
         int[] civil = civilDay(millis, CalendarSystem.GREGORIAN);
         return LocalDate.of(civil[0], civil[1], civil[2]);
@@ -254,6 +316,7 @@ final class Commitment {
             e.put("amount", amount);
             e.put("freq", frequency);
             e.put("start", start);
+            if (schedule != null) e.put("schedule", schedule.toJson());
             if (end != null) e.put("end", end.longValue());
             if (done) e.put("done", true);
             if (includeSettlements && !paid.isEmpty()) {
@@ -291,7 +354,8 @@ final class Commitment {
             if (legacyPaidThrough < 0 || lead < 0) return null;
             return normalized(new Commitment((String) id, (String) name, amount, (int) freq,
                 start, end, booleanFromJson(e, "done"), paid, legacyPaidThrough, unpaid,
-                booleanFromJson(e, "remind"), lead));
+                booleanFromJson(e, "remind"), lead, e.has("schedule")
+                    ? CommitmentSchedule.fromJson(e.getJSONObject("schedule")) : null));
         } catch (Exception ex) {
             return null;
         }
@@ -349,6 +413,14 @@ final class Commitment {
     static void visitOccurrences(Commitment c, CalendarSystem cal, long fromMs, long toMs,
             OccurrenceVisitor visitor, int maxVisits) {
         if (c == null || cal == null || visitor == null || toMs < fromMs) return;
+        if (c.schedule != null) {
+            Calendar endDay = Calendar.getInstance();
+            endDay.setTimeInMillis(startOfDay(toMs));
+            endDay.add(Calendar.DAY_OF_MONTH, 1);
+            long until = toMs == Long.MAX_VALUE ? Long.MAX_VALUE : endDay.getTimeInMillis() - 1;
+            c.schedule.visit(c.frequency, startOfDay(fromMs), until, visitor, maxVisits);
+            return;
+        }
         int[] anchor = civilDay(c.start, cal);
         int[] end = c.end == null || c.end > toMs ? null : civilDay(c.end, cal);
         long fromDay = startOfDay(fromMs);
@@ -418,7 +490,8 @@ final class Commitment {
     static Long nextDue(Commitment c, CalendarSystem cal, long nowMs) {
         if (c == null || cal == null) return null;
         long today = startOfDay(nowMs);
-        if (c.frequency == ONCE) return c.done ? null : startOfDay(c.start);
+        if (c.frequency == ONCE) return c.done ? null : c.schedule == null
+            ? startOfDay(c.start) : c.schedule.instant(c.schedule.first);
         List<Long> ahead = occurrences(c, cal, today, today + 730L * 86400000L);
         for (long at : ahead) if (!c.isSettled(at)) return at;
         List<Long> behind = occurrences(c, cal, today - 366L * 86400000L, today - 1);
@@ -491,7 +564,11 @@ final class Commitment {
 
     /** The civil (year, month, day) the given moment reads as in the viewing calendar. */
     static int[] civilDay(long millis, CalendarSystem cal) {
-        Calendar g = Calendar.getInstance();
+        return civilDay(millis, cal, java.time.ZoneId.systemDefault());
+    }
+
+    static int[] civilDay(long millis, CalendarSystem cal, java.time.ZoneId zone) {
+        Calendar g = Calendar.getInstance(java.util.TimeZone.getTimeZone(zone));
         g.setTimeInMillis(millis);
         int gy = g.get(Calendar.YEAR);
         int gm = g.get(Calendar.MONTH) + 1;
@@ -505,10 +582,14 @@ final class Commitment {
 
     /** Midnight starting the civil day in the viewing calendar, like the message dates. */
     static long millisOf(int year, int month, int day, CalendarSystem cal) {
+        return millisOf(year, month, day, cal, java.time.ZoneId.systemDefault());
+    }
+
+    static long millisOf(int year, int month, int day, CalendarSystem cal, java.time.ZoneId zone) {
         int[] g = cal == CalendarSystem.JALALI
             ? JalaliCalendar.of(year, month, day).toGregorian()
             : new int[]{year, month, day};
-        Calendar c = Calendar.getInstance();
+        Calendar c = Calendar.getInstance(java.util.TimeZone.getTimeZone(zone));
         c.clear();
         c.set(g[0], g[1] - 1, g[2], 0, 0, 0);
         return c.getTimeInMillis();
