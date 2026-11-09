@@ -50,6 +50,7 @@ final class CommitmentReminders {
     private static final Object SCHEDULE_LOCK = new Object();
     static final String ACTION_REMIND = "com.ashkanrafiee.balance.COMMITMENT_REMIND";
     static final String EXTRA_ID = "commitment_id";
+    static final String EXTRA_DUE = "commitment_due";
 
     /** Creates the notification channel on first use; a no-op everywhere it already exists. */
     static void ensureChannel(Context context) {
@@ -251,7 +252,7 @@ final class CommitmentReminders {
                 if (notifyDue(context, projection, token)) {
                     // Do not acknowledge a failed notification: the durable fire request retries.
                     token.check();
-                    rememberFired(context, id, projection.due);
+                    rememberFired(context, projection.definition, projection.due);
                 }
             }
             projection = project(context, id, token);
@@ -309,10 +310,9 @@ final class CommitmentReminders {
                 Long trigger = due == null ? null : Math.max(now, leadTime(c, due));
                 if (trigger == null && c.remind && hasDueBeyondWindow(c, cal, now))
                     trigger = now + 365L * 86400000L;
-                boolean cancelNotice = !c.remind || shownDue != null && c.isSettled(shownDue);
-                Commitment detached = new Commitment(c.id, c.name, c.amount, c.frequency,
-                    c.start, c.end, c.done, null, c.legacyPaidThrough, null,
-                    c.remind, c.remindBeforeMs);
+                boolean cancelNotice = !c.remind || shownDue != null
+                    && (!c.hasOccurrence(shownDue) || c.isSettled(shownDue));
+                Commitment detached = c.withSettlements(c.done, null, null);
                 token.check();
                 return new Projection(detached, due, trigger, !c.remind,
                     cancelNotice, null);
@@ -372,7 +372,7 @@ final class CommitmentReminders {
         if (c == null || !c.remind) return null;
         if (!overdueFired) {
             List<Long> overdue = new ArrayList<>();
-            long overdueEnd = Commitment.startOfDay(now) - 1;
+            long overdueEnd = Commitment.scheduleStartOfDay(c, now) - 1;
             long spanDays = c.frequency == Commitment.WEEKLY
                 ? CommitmentsActivity.MAX_OVERDUE_OCCURRENCES * 7L
                 : c.frequency == Commitment.MONTHLY
@@ -381,9 +381,9 @@ final class CommitmentReminders {
                         ? CommitmentsActivity.MAX_OVERDUE_OCCURRENCES * 366L
                         : CommitmentsActivity.MAX_OVERDUE_OCCURRENCES;
             long span = spanDays * 86400000L;
-            long from = Math.max(Commitment.startOfDay(c.start),
-                Commitment.startOfDay(overdueEnd > span ? overdueEnd - span : 0));
-            Commitment.visitOccurrences(c, cal, from, overdueEnd, at -> {
+            long from = Math.max(Commitment.scheduleStartOfDay(c, c.start),
+                Commitment.scheduleStartOfDay(c, overdueEnd > span ? overdueEnd - span : 0));
+            Commitment.visitScheduleOccurrences(c, cal, from, overdueEnd, at -> {
                     token.check();
                     overdue.add(at);
                 }, CommitmentsActivity.MAX_OVERDUE_OCCURRENCES);
@@ -395,8 +395,8 @@ final class CommitmentReminders {
                 if (!fired.contains(firedKey(c.id, at)) && !c.isSettled(at)) return at;
             }
         }
-        for (long at : Commitment.occurrences(c, cal, Commitment.startOfDay(now),
-                 Commitment.startOfDay(now) + 730L * 86400000L)) {
+        for (long at : Commitment.scheduleOccurrences(c, cal, Commitment.scheduleStartOfDay(c, now),
+                 Commitment.scheduleStartOfDay(c, now) + 730L * 86400000L)) {
             token.check();
             if (!fired.contains(firedKey(c.id, at)) && !c.isSettled(at)) return at;
         }
@@ -405,11 +405,11 @@ final class CommitmentReminders {
 
     /** Keeps long-range reminders alive until their real due date enters the planning window. */
     private static boolean hasDueBeyondWindow(Commitment c, CalendarSystem cal, long now) {
-        long horizon = Commitment.startOfDay(now) + 730L * 86400000L;
+        long horizon = Commitment.scheduleStartOfDay(c, now) + 730L * 86400000L;
         if (c.frequency == Commitment.ONCE)
             return !c.done && c.start >= horizon;
         if (c.end != null && c.end < horizon) return false;
-        return !Commitment.occurrences(c, cal, horizon, horizon + 730L * 86400000L).isEmpty();
+        return !Commitment.scheduleOccurrences(c, cal, horizon, horizon + 730L * 86400000L).isEmpty();
     }
 
     private static String firedKey(String id, long due) {
@@ -469,7 +469,8 @@ final class CommitmentReminders {
         }
     }
 
-    private static void rememberFired(Context context, String id, long due) {
+    private static void rememberFired(Context context, Commitment definition, long due) {
+        String id = definition.id;
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         synchronized (STATE_LOCK) {
             Set<String> fired = copySet(prefs, KEY_FIRED);
@@ -478,7 +479,7 @@ final class CommitmentReminders {
             shown.removeIf(value -> value.startsWith(id + "|"));
             shown.add(firedKey(id, due));
             fired.add(firedKey(id, due));
-            if (due < Commitment.startOfDay(System.currentTimeMillis())) overdue.add(id);
+            if (due < Commitment.scheduleStartOfDay(definition, System.currentTimeMillis())) overdue.add(id);
             else overdue.remove(id);
             prefs.edit().putStringSet(KEY_FIRED, fired)
                 .putStringSet(KEY_OVERDUE_FIRED, overdue)
@@ -523,25 +524,20 @@ final class CommitmentReminders {
         NotificationManager manager =
             (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager == null) throw new IllegalStateException("notification service unavailable");
-        Intent open = new Intent(context, CommitmentsActivity.class);
-        open.setData(Uri.parse("balance://commitment/" + Uri.encode(c.id)));
+        Intent open = dueIntent(context, c.id, due);
         token.check();
         PendingIntent tap = PendingIntent.getActivity(context, c.id.hashCode(), open,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        // Name every reminder: same-time dues used to post identical lines, distinguishable
-        // only by tapping through. The detail line carries data only (no words), so it needs
-        // no translation and reads correctly in both languages.
+        // Keep the name, exact currency amount and due date visible, including on the lock screen.
         String detail = notificationDetail(context, c, due);
         Notification notification = new Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_balance_monochrome)
             .setContentTitle(notificationTitle(c))
             .setContentText(detail)
             .setContentIntent(tap)
-            .setVisibility(Notification.VISIBILITY_PRIVATE)
-            .setPublicVersion(new Notification.Builder(context, CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_balance_monochrome)
-                .setContentTitle(context.getString(R.string.app_name))
-                .build())
+            .setStyle(new Notification.BigTextStyle().setBigContentTitle(notificationTitle(c))
+                .bigText(detail))
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setAutoCancel(true)
             .build();
         validate(context, projection, token);
@@ -558,15 +554,26 @@ final class CommitmentReminders {
     /** Amount and due day as data only: localizable without a translatable sentence. */
     static String notificationDetail(Context context, Commitment c, long due) {
         if (c == null) throw new NullPointerException("commitment");
-        return CurrencyHelper.display(context, c.amount) + " · " + dueText(context, due);
+        return NotificationAmounts.format(context, c.amount) + " · " + dueText(context, c, due);
+    }
+
+    /** The due is part of PendingIntent identity: an older notification must never be retargeted
+     * to the next installment by FLAG_UPDATE_CURRENT. CLEAR_TOP also routes warm opens through
+     * onNewIntent without stacking duplicate commitment screens. */
+    static Intent dueIntent(Context context, String id, long due) {
+        return new Intent(context, CommitmentsActivity.class)
+            .setData(new Uri.Builder().scheme("balance").authority("commitment")
+                .appendPath(id).appendPath(Long.toString(due)).build())
+            .putExtra(EXTRA_ID, id).putExtra(EXTRA_DUE, due)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
     }
 
     /** The due day written the way the commitments screen writes dates, in either calendar. */
-    private static String dueText(Context context, long due) {
+    private static String dueText(Context context, Commitment c, long due) {
         boolean iran = RegionHelper.isIran(context);
         boolean persian = LocaleHelper.isPersian(context);
         CalendarSystem cal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
-        int[] civil = Commitment.civilDay(due, cal);
+        int[] civil = c.dueCivil(due, cal);
         String day = persian ? faDigits(String.valueOf(civil[2])) : String.valueOf(civil[2]);
         String year = persian ? faDigits(String.valueOf(civil[0])) : String.valueOf(civil[0]);
         return day + " " + CalDate.monthName(civil[1], iran, persian) + " " + year;

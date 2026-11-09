@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="commitment_schedule_basis">Schedule: %1$s · %2$s</string>
+    <string name="commitment_calendar_jalali">Persian calendar</string>
+    <string name="commitment_calendar_gregorian">Gregorian calendar</string>
+    <string name="commitment_due_unavailable">This due is no longer available. The commitment may have been changed or deleted.</string>
+    <string name="commitment_reminder_due">Reminder due</string>
+</resources>

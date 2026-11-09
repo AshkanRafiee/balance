@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="commitment_schedule_basis">تقویم برنامه: %1$s · %2$s</string>
+    <string name="commitment_calendar_jalali">هجری شمسی</string>
+    <string name="commitment_calendar_gregorian">میلادی</string>
+    <string name="commitment_due_unavailable">این سررسید دیگر در دسترس نیست. ممکن است تعهد تغییر کرده یا حذف شده باشد.</string>
+    <string name="commitment_reminder_due">سررسید یادآوری</string>
+</resources>

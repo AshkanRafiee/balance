@@ -123,8 +123,8 @@ public class CommitmentReminderTest {
         assertEquals("loan", loanTitle);
         String rentDetail = CommitmentReminders.notificationDetail(ctx, rent, due);
         String loanDetail = CommitmentReminders.notificationDetail(ctx, loan, due);
-        assertTrue(rentDetail.contains(CurrencyHelper.display(ctx, -5000)));
-        assertTrue(loanDetail.contains(CurrencyHelper.display(ctx, -9000)));
+        assertTrue(rentDetail.contains(NotificationAmounts.format(ctx, -5000)));
+        assertTrue(loanDetail.contains(NotificationAmounts.format(ctx, -9000)));
         assertFalse("same-time dues must stay distinguishable", rentTitle.equals(loanTitle)
             && rentDetail.equals(loanDetail));
     }

@@ -3,6 +3,7 @@ package com.ashkanrafiee.balance;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -105,29 +106,27 @@ public final class CommitmentsActivity extends Activity {
                 if (c.isSettled(at)) {
                     // The current month already owns its settled rows. Keep older paid rows in
                     // their original month so they never appear in the overdue section.
-                    if (at < currentMonthStart) {
-                        int[] settledCivil = Commitment.civilDay(at, cal);
-                        MonthGroup settledMonth = null;
-                        for (MonthGroup candidate : summary.settledMonths) {
-                            if (candidate.year == settledCivil[0]
-                                    && candidate.month == settledCivil[1]) {
-                                settledMonth = candidate;
-                                break;
-                            }
+                    int[] settledCivil = c.dueCivil(at, cal);
+                    MonthGroup settledMonth = null;
+                    for (MonthGroup candidate : summary.settledMonths) {
+                        if (candidate.year == settledCivil[0]
+                                && candidate.month == settledCivil[1]) {
+                            settledMonth = candidate;
+                            break;
                         }
-                        if (settledMonth == null) {
-                            settledMonth = new MonthGroup(settledCivil[0], settledCivil[1]);
-                            summary.settledMonths.add(settledMonth);
-                        }
-                        boolean present = false;
-                        for (Row existing : settledMonth.rows) {
-                            if (existing.date == at && existing.commitment.id.equals(c.id)) {
-                                present = true;
-                                break;
-                            }
-                        }
-                        if (!present) settledMonth.rows.add(new Row(c, at, true));
                     }
+                    if (settledMonth == null) {
+                        settledMonth = new MonthGroup(settledCivil[0], settledCivil[1]);
+                        summary.settledMonths.add(settledMonth);
+                    }
+                    boolean present = false;
+                    for (Row existing : settledMonth.rows) {
+                        if (existing.date == at && existing.commitment.id.equals(c.id)) {
+                            present = true;
+                            break;
+                        }
+                    }
+                    if (!present) settledMonth.rows.add(new Row(c, at, true));
                 } else {
                     summary.overdueCount++;
                     addOverdueRow(summary, new Row(c, at, false));
@@ -170,7 +169,7 @@ public final class CommitmentsActivity extends Activity {
             for (Commitment c : commitments) {
                 if (c == null) continue;
                 for (long at : Commitment.occurrences(c, cal, windowStart, windowEnd)) {
-                    int[] dueCivil = Commitment.civilDay(at, cal);
+                    int[] dueCivil = c.dueCivil(at, cal);
                     MonthGroup group = null;
                     for (MonthGroup candidate : windowMonths) {
                         if (candidate.year == dueCivil[0] && candidate.month == dueCivil[1]) {
@@ -232,7 +231,9 @@ public final class CommitmentsActivity extends Activity {
         }
         long span = spanDays * 86400000L;
         long from = overdueEnd > span ? overdueEnd - span : 0;
-        return Math.max(Commitment.startOfDay(c.start), Commitment.startOfDay(from));
+        // The recurrence cursor already skips efficiently to its anchor. A device-zone view of
+        // c.start can be the next civil day when traveling, so it is not a safe civil lower bound.
+        return Commitment.startOfDay(from);
     }
 
     private int fg, muted, accent, card, chipBg, depBg, warnBg, warnFg, negativeColor,
@@ -253,6 +254,37 @@ public final class CommitmentsActivity extends Activity {
      *  just-snapshotted draft instead of discarding it the way a save/cancel dismissal does. */
     private boolean pausing;
     private LockOverlay lockOverlay;
+    private ReminderTarget reminderTarget;
+
+    /** Keep the exact due across the lock and recreation, not a mutable 'next due' lookup. */
+    static final class ReminderTarget {
+        final String id;
+        final long due;
+        ReminderTarget(String id, long due) { this.id = id; this.due = due; }
+
+        static ReminderTarget fromIntent(Intent intent) {
+            if (intent == null) return null;
+            String id = intent.getStringExtra(CommitmentReminders.EXTRA_ID);
+            long due = intent.getLongExtra(CommitmentReminders.EXTRA_DUE, 0);
+            if (id == null || id.isEmpty() || due <= 0) return null;
+            // Match immutable PendingIntent identity as well as extras. Old id-only reminders
+            // safely open the overview instead of guessing which installment they once meant.
+            android.net.Uri uri = intent.getData();
+            if (uri == null || !"balance".equals(uri.getScheme())
+                    || !"commitment".equals(uri.getAuthority())) return null;
+            List<String> path = uri.getPathSegments();
+            if (path.size() != 2 || !id.equals(path.get(0))
+                    || !Long.toString(due).equals(path.get(1))) return null;
+            return new ReminderTarget(id, due);
+        }
+
+        Row resolve(List<Commitment> commitments) {
+            for (Commitment c : commitments)
+                if (id.equals(c.id) && c.hasOccurrence(due))
+                    return new Row(c, due, c.isSettled(due));
+            return null;
+        }
+    }
     private final Handler monthHandler = new Handler(Looper.getMainLooper());
     private final Runnable monthRefresh = () -> {
         render();
@@ -272,6 +304,11 @@ public final class CommitmentsActivity extends Activity {
         // A draft snapshotted before rotation or process death comes back with the screen; the
         // next unlocked resume reopens it, exactly like a plain pause round-trip.
         if (state != null) pendingEditorDraft = Draft.readFrom(state);
+        if (state != null && state.getBoolean("reminder_navigation_saved", false)) {
+            String id = state.getString("reminder_target_id");
+            long due = state.getLong("reminder_target_due", 0);
+            if (id != null && !id.isEmpty() && due > 0) reminderTarget = new ReminderTarget(id, due);
+        } else reminderTarget = ReminderTarget.fromIntent(getIntent());
         iran = RegionHelper.isIran(this);
         persian = LocaleHelper.isPersian(this);
         fg = color(R.color.fg);
@@ -310,6 +347,7 @@ public final class CommitmentsActivity extends Activity {
         lockOverlay = new LockOverlay(this);
         lockOverlay.setUnlockListener(() -> {
             updateSecureFlag();
+            render();
             // An unlock is a resume the lifecycle never delivers: reopen a paused-away editor
             // here instead of leaving its draft stranded behind the lock.
             restorePendingEditor();
@@ -324,6 +362,26 @@ public final class CommitmentsActivity extends Activity {
     protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
         if (pendingEditorDraft != null) pendingEditorDraft.writeTo(out);
+        out.putBoolean("reminder_navigation_saved", true);
+        if (reminderTarget != null) {
+            out.putString("reminder_target_id", reminderTarget.id);
+            out.putLong("reminder_target_due", reminderTarget.due);
+        }
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        ReminderTarget target = ReminderTarget.fromIntent(intent);
+        if (target == null) return;
+        if (editorSnapshotter != null) pendingEditorDraft = editorSnapshotter.get();
+        pausing = true;
+        dismissActiveDialog();
+        pausing = false;
+        reminderTarget = target;
+        if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) lockOverlay.showLock();
+        updateSecureFlag();
+        render();
     }
 
     @Override
@@ -344,6 +402,7 @@ public final class CommitmentsActivity extends Activity {
      *  before reopening, so a failed open cannot loop back into itself. */
     private void restorePendingEditor() {
         if (pendingEditorDraft == null) return;
+        if (reminderTarget != null) return; // Reminder navigation takes priority; OK restores the draft.
         if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) return;
         Draft draft = pendingEditorDraft;
         pendingEditorDraft = null;
@@ -559,6 +618,10 @@ public final class CommitmentsActivity extends Activity {
 
         heroCard(summary);
         buttonsRow();
+        if (reminderTarget != null
+                && !(LockManager.isEnabled(this) && LockManager.isSessionLocked())) {
+            reminderDueCard(commitments);
+        }
 
         if (commitments.isEmpty()) {
             TextView empty = text(getString(R.string.commitments_empty_hint), 14, muted);
@@ -589,6 +652,37 @@ public final class CommitmentsActivity extends Activity {
             getString(R.string.commitments_retry), true);
         retry.setOnClickListener(v -> render());
         root.addView(retry, margin(16, 0, 16, 0));
+    }
+
+    /** A dedicated highlighted row also works for a very old paid due, a collapsed overdue due,
+     * or a due outside the usual twelve-month window. No dialogs/details appear before unlock. */
+    private void reminderDueCard(List<Commitment> commitments) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable background = rounded(chipBg, 16);
+        background.setStroke(dp(2), accent);
+        box.setBackground(background);
+        box.setPadding(dp(12), dp(12), dp(12), dp(12));
+        box.addView(text(getString(R.string.commitment_reminder_due), 15, accent, medium()));
+        Row due = reminderTarget.resolve(commitments);
+        if (due == null) {
+            TextView unavailable = text(getString(R.string.commitment_due_unavailable), 14, muted);
+            unavailable.setTag("reminder-due-unavailable");
+            box.addView(unavailable);
+        } else {
+            LinearLayout line = occurrenceRow(due);
+            line.setSelected(true);
+            line.setTag("reminder-due:" + due.commitment.id + ":" + due.date);
+            box.addView(line);
+        }
+        TextView close = ExpressiveUi.button(this, getString(android.R.string.ok), false);
+        close.setOnClickListener(v -> {
+            reminderTarget = null;
+            render();
+            restorePendingEditor();
+        });
+        box.addView(close);
+        root.addView(box, margin(0, 0, 0, 12));
     }
 
     private long yearPay(Summary summary, int year) {
@@ -702,7 +796,8 @@ public final class CommitmentsActivity extends Activity {
             row.addView(heading, new LinearLayout.LayoutParams(-1, -2));
 
             String ending = c.end == null ? getString(R.string.commitments_series_open)
-                : getString(R.string.commitments_series_ends, dateText(c.end));
+                : getString(R.string.commitments_series_ends, dateText(c.end, cal,
+                    c.schedule == null ? java.time.ZoneId.systemDefault() : c.schedule.zone));
             TextView details = text(freqLabel(c.frequency) + " · " + ending, 12, muted);
             details.setPadding(0, dp(4), 0, 0);
             row.addView(details, new LinearLayout.LayoutParams(-1, -2));
@@ -865,7 +960,9 @@ public final class CommitmentsActivity extends Activity {
             name.setPaintFlags(name.getPaintFlags() | android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
         }
         info.addView(name, new LinearLayout.LayoutParams(-1, -2));
-        info.addView(text(dateText(row.date), 12, muted), new LinearLayout.LayoutParams(-2, -2));
+        info.addView(text(dateText(row.date, iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN,
+            row.commitment.schedule == null ? java.time.ZoneId.systemDefault()
+                : row.commitment.schedule.zone), 12, muted), new LinearLayout.LayoutParams(-2, -2));
         line.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
         TextView figure = bold(signedAmount(row.commitment.amount), 15,
             row.settled ? muted : valueColor(row.commitment.amount));
@@ -963,13 +1060,19 @@ public final class CommitmentsActivity extends Activity {
                 return;
             }
         }
-        boolean iranNow = iran;
+        boolean iranNow = existing != null && existing.schedule != null
+            ? existing.schedule.calendar == CalendarSystem.JALALI : iran;
         CalendarSystem cal = iranNow ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
-        int[] today = Commitment.civilDay(System.currentTimeMillis(), cal);
+        java.time.ZoneId scheduleZone = existing != null && existing.schedule != null
+            ? existing.schedule.zone : java.time.ZoneId.systemDefault();
+        int[] today = Commitment.civilDay(System.currentTimeMillis(), cal, scheduleZone);
 
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
         form.setPadding(dp(16), dp(8), dp(16), dp(8));
+        form.addView(text(getString(R.string.commitment_schedule_basis,
+            getString(iranNow ? R.string.commitment_calendar_jalali
+                : R.string.commitment_calendar_gregorian), scheduleZone.getId()), 12, muted));
 
         EditText name = new EditText(this);
         name.setHint(getString(R.string.commitments_name_hint));
@@ -1037,7 +1140,7 @@ public final class CommitmentsActivity extends Activity {
         form.addView(text(getString(R.string.commitments_start), 13, muted, medium()),
             margin(0, 12, 0, 2));
         int[] startCivil = existing != null
-            ? Commitment.civilDay(existing.start, cal) : today;
+            ? Commitment.civilDay(existing.start, cal, scheduleZone) : today;
         EditText[] startFields = dateFields(startCivil);
         form.addView(dateRow(startFields), margin(0, 0, 0, 0));
 
@@ -1070,7 +1173,7 @@ public final class CommitmentsActivity extends Activity {
         endDateControls.addView(text(getString(R.string.commitments_end), 13, muted, medium()),
             margin(0, 12, 0, 2));
         int[] endCivil = existing != null && existing.end != null
-            ? Commitment.civilDay(existing.end, cal) : today;
+            ? Commitment.civilDay(existing.end, cal, scheduleZone) : today;
         EditText[] endFields = dateFields(endCivil);
         LinearLayout endRow = dateRow(endFields);
         endDateControls.addView(endRow, margin(0, 0, 0, 0));
@@ -1082,12 +1185,12 @@ public final class CommitmentsActivity extends Activity {
                 endMode[0] == END_MODE_END ? View.VISIBLE : View.GONE);
         };
         Runnable updateCountPreview = () -> {
-            Long start = parseDate(startFields, cal);
+            Long start = parseDate(startFields, cal, scheduleZone);
             Long count = parseCount(countField.getText().toString());
             Long end = start == null || count == null ? null
-                : Commitment.endForCount(start, count, freqSelected[0], cal);
+                : Commitment.endForCount(start, count, freqSelected[0], cal, scheduleZone);
             countPreview.setText(end == null ? ""
-                : getString(R.string.commitments_count_ends, dateText(end)));
+                : getString(R.string.commitments_count_ends, dateText(end, cal, scheduleZone)));
         };
         Runnable[] endModeActions = new Runnable[3];
         for (int i = 0; i < 3; i++) {
@@ -1231,7 +1334,7 @@ public final class CommitmentsActivity extends Activity {
                 }
                 int mode = endDateControlsVisible(freqSelected[0]) ? endMode[0] : END_MODE_OPEN;
                 if (mode == END_MODE_COUNT) {
-                    Long start = parseDate(startFields, cal);
+                    Long start = parseDate(startFields, cal, scheduleZone);
                     if (start == null) {
                         Toast.makeText(this, getString(R.string.commitments_bad_date),
                             Toast.LENGTH_SHORT).show();
@@ -1239,7 +1342,7 @@ public final class CommitmentsActivity extends Activity {
                     }
                     Long count = parseCount(countField.getText().toString());
                     Long end = count == null ? null
-                        : Commitment.endForCount(start, count, freqSelected[0], cal);
+                        : Commitment.endForCount(start, count, freqSelected[0], cal, scheduleZone);
                     if (end == null) {
                         Toast.makeText(this, getString(R.string.commitments_bad_count),
                             Toast.LENGTH_SHORT).show();
@@ -1249,7 +1352,7 @@ public final class CommitmentsActivity extends Activity {
                     Long signedAmount = parseAmount(amount.getText().toString(), pay[0]);
                     if (title.isEmpty() || signedAmount == null || leadMs < 0) return;
                     if (saveParsed(existing, title, signedAmount, freqSelected[0], start, end,
-                            remindBox.isChecked(), leadMs)) {
+                            remindBox.isChecked(), leadMs, cal, scheduleZone)) {
                         dlg.dismiss();
                     }
                     return;
@@ -1469,7 +1572,9 @@ public final class CommitmentsActivity extends Activity {
         String title = name.getText().toString().trim();
         Long signedAmount = parseAmount(amount.getText().toString(), pay);
         if (title.isEmpty() || signedAmount == null || remindBeforeMs < 0) return false;
-        Long start = parseDate(startFields, cal);
+        java.time.ZoneId zone = existing != null && existing.schedule != null
+            ? existing.schedule.zone : java.time.ZoneId.systemDefault();
+        Long start = parseDate(startFields, cal, zone);
         if (start == null) {
             Toast.makeText(this, getString(R.string.commitments_bad_date),
                 Toast.LENGTH_SHORT).show();
@@ -1477,7 +1582,7 @@ public final class CommitmentsActivity extends Activity {
         }
         Long end = null;
         if (endFields != null) {
-            end = parseDate(endFields, cal);
+            end = parseDate(endFields, cal, zone);
             if (end == null) {
                 Toast.makeText(this, getString(R.string.commitments_bad_date),
                     Toast.LENGTH_SHORT).show();
@@ -1490,20 +1595,31 @@ public final class CommitmentsActivity extends Activity {
             }
         }
         return saveParsed(existing, title, signedAmount, frequency, start, end, remind,
-            remindBeforeMs);
+            remindBeforeMs, cal, zone);
     }
 
     /** Stores an already-parsed definition: a count-derived end arrives here as the explicit
      *  date it names, so the store never learns the mode. */
     private boolean saveParsed(Commitment existing, String title, Long signedAmount, int frequency,
             Long start, Long end, boolean remind, long remindBeforeMs) {
+        CalendarSystem cal = existing != null && existing.schedule != null
+            ? existing.schedule.calendar : iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
+        java.time.ZoneId zone = existing != null && existing.schedule != null
+            ? existing.schedule.zone : java.time.ZoneId.systemDefault();
+        return saveParsed(existing, title, signedAmount, frequency, start, end, remind,
+            remindBeforeMs, cal, zone);
+    }
+
+    private boolean saveParsed(Commitment existing, String title, Long signedAmount, int frequency,
+            Long start, Long end, boolean remind, long remindBeforeMs, CalendarSystem calendar,
+            java.time.ZoneId zone) {
         if (title == null || title.isEmpty() || signedAmount == null || start == null
                 || remindBeforeMs < 0) return false;
         try {
             Commitment updated;
             if (existing == null) {
                 updated = Commitment.create(title, signedAmount, frequency, start, end,
-                    remind, remindBeforeMs);
+                    remind, remindBeforeMs, calendar, zone);
             } else {
                 BalanceData.ensureResetComplete(this);
                 // The editor may have been open while another screen changed this definition.
@@ -1517,6 +1633,8 @@ public final class CommitmentsActivity extends Activity {
                 updated = new Commitment(current.id, title, signedAmount, frequency, start, end,
                     current.done, current.paid, current.legacyPaidThrough, current.unpaid,
                     remind, remindBeforeMs);
+                if (current.schedule != null) updated = updated.withSchedule(
+                    CommitmentSchedule.capture(updated, current.schedule.calendar, current.schedule.zone));
             }
             if (updated == null) {
                 showCommitmentError(null);
@@ -1611,13 +1729,17 @@ public final class CommitmentsActivity extends Activity {
     }
 
     private Long parseDate(EditText[] fields, CalendarSystem cal) {
+        return parseDate(fields, cal, java.time.ZoneId.systemDefault());
+    }
+
+    private Long parseDate(EditText[] fields, CalendarSystem cal, java.time.ZoneId zone) {
         try {
             int year = Integer.parseInt(BalanceData.digits(fields[0].getText().toString().trim()));
             int month = Integer.parseInt(BalanceData.digits(fields[1].getText().toString().trim()));
             int day = Integer.parseInt(BalanceData.digits(fields[2].getText().toString().trim()));
             if (!cal.ownsYear(year) || month < 1 || month > 12) return null;
             if (day < 1 || day > cal.daysInMonth(year, month)) return null;
-            return Commitment.millisOf(year, month, day, cal);
+            return Commitment.millisOf(year, month, day, cal, zone);
         } catch (Exception e) {
             return null;
         }
@@ -1681,9 +1803,14 @@ public final class CommitmentsActivity extends Activity {
 
     private String dateText(long millis) {
         CalendarSystem cal = iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN;
-        int[] civil = Commitment.civilDay(millis, cal);
+        return dateText(millis, cal, java.time.ZoneId.systemDefault());
+    }
+
+    private String dateText(long millis, CalendarSystem cal, java.time.ZoneId zone) {
+        int[] civil = Commitment.civilDay(millis, cal, zone);
         String day = persian ? faDigits(String.valueOf(civil[2])) : String.valueOf(civil[2]);
-        return day + " " + CalDate.monthName(civil[1], iran, persian) + " " + yearText(civil[0]);
+        return day + " " + CalDate.monthName(civil[1], cal == CalendarSystem.JALALI, persian)
+            + " " + yearText(civil[0]);
     }
 
     private String yearText(int year) {
