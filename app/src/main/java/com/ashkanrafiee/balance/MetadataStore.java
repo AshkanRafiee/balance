@@ -405,6 +405,30 @@ final class MetadataStore {
         });
     }
 
+    /** Saves the complete personal annotation, never a partially updated note/tag pair.
+     * Call on a worker thread. Failure leaves the previous annotation intact. */
+    static boolean setAnnotations(Context context, Transaction transaction, String note,
+            Collection<String> tags) throws Exception {
+        return setAnnotations(context, BalanceData.noteKey(transaction), note, tags);
+    }
+
+    static boolean setAnnotations(Context context, String key, String note,
+            Collection<String> input) throws Exception {
+        requireKey(key);
+        String text = normalizeText(note == null ? null : note.trim());
+        List<String> tags = normalizeTags(input);
+        synchronized (BalanceData.class) {
+            // Finish retryable legacy cleanup before changing user values. access() can report a
+            // preference cleanup failure after its SQLite commit; it must not do so after this save.
+            access(context, ALL, false, true, s -> null);
+            return access(context, ALL, true, false, s -> {
+                s.put(NOTES, key, text, null);
+                s.put(TAGS, key, null, tags);
+                return true;
+            });
+        }
+    }
+
     /** Replaces only one kind. An empty/null map clears it without affecting the other kinds. */
     static boolean replaceText(Context context, int kind, Map<String, String> values)
             throws Exception {
