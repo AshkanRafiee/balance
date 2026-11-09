@@ -528,7 +528,7 @@ final class CommitmentReminders {
         token.check();
         PendingIntent tap = PendingIntent.getActivity(context, c.id.hashCode(), open,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        // Keep the name, exact currency amount and due date visible, including on the lock screen.
+        // Keep financial details in the unlocked shade, with the existing generic lock-screen view.
         String detail = notificationDetail(context, c, due);
         Notification notification = new Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_balance_monochrome)
@@ -537,7 +537,11 @@ final class CommitmentReminders {
             .setContentIntent(tap)
             .setStyle(new Notification.BigTextStyle().setBigContentTitle(notificationTitle(c))
                 .bigText(detail))
-            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setVisibility(Notification.VISIBILITY_PRIVATE)
+            .setPublicVersion(new Notification.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_balance_monochrome)
+                .setContentTitle(context.getString(R.string.app_name))
+                .build())
             .setAutoCancel(true)
             .build();
         validate(context, projection, token);

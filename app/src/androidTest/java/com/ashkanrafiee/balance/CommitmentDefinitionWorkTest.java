@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.TimeZone;
 
 /** Per-definition projections reuse one session without changing external lazy-list semantics. */
 @RunWith(AndroidJUnit4.class)
@@ -31,9 +32,12 @@ public class CommitmentDefinitionWorkTest {
     private static final long DAY = 86_400_000L;
     private static final String ID = "old-daily";
     private Context context;
+    private TimeZone originalZone;
 
     @Before public void setUp() throws Exception {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        originalZone = TimeZone.getDefault();
+        TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
         // Keep the counting wrapper on the root layout without scheduling reminder work.
         DataGeneration.clearForTests(context);
         CommitmentStore.clear(context);
@@ -44,13 +48,16 @@ public class CommitmentDefinitionWorkTest {
             CommitmentStore.clear(context);
         } finally {
             DataGeneration.clearForTests(context);
+            TimeZone.setDefault(originalZone);
         }
     }
 
     @Test public void manySettlementChecksUseOneAccessAndRespectReopenedDues() throws Exception {
         List<Long> paid = new ArrayList<>();
         List<Long> unpaid = new ArrayList<>();
-        for (int i = 0; i < 1200; i++) (i % 2 == 0 ? paid : unpaid).add(date(i));
+        // Legacy imported timestamps were not necessarily midnight. Migration retains their
+        // interpreted civil days; assertions below query those normalized occurrence identities.
+        for (int i = 0; i < 1200; i++) (i % 2 == 0 ? paid : unpaid).add(T + i * DAY);
         Commitment source = new Commitment(ID, "Old daily", -100L, Commitment.DAILY, T,
             null, false, paid, date(1199), unpaid, true, 0);
         assertTrue(CommitmentStore.upsert(context, source));
@@ -105,7 +112,7 @@ public class CommitmentDefinitionWorkTest {
 
         try {
             CommitmentStore.withDefinition(counted, ID, definition -> {
-                assertFalse(definition.isSettled(T));
+                assertFalse(definition.isSettled(date(0)));
                 throw expected;
             });
             fail("the callback failure must propagate");
@@ -114,9 +121,9 @@ public class CommitmentDefinitionWorkTest {
         }
         assertFalse("a failed projection must release its monitor", Thread.holdsLock(BalanceData.class));
 
-        assertTrue("a normal writer must work after callback cleanup", CommitmentStore.settle(context, ID, T));
+        assertTrue("a normal writer must work after callback cleanup", CommitmentStore.settle(context, ID, date(0)));
         String result = CommitmentStore.withDefinition(counted, ID, definition -> {
-            assertTrue("the next projection must see the new committed state", definition.isSettled(T));
+            assertTrue("the next projection must see the new committed state", definition.isSettled(date(0)));
             return definition.id;
         });
         assertEquals(ID, result);
@@ -124,7 +131,11 @@ public class CommitmentDefinitionWorkTest {
         assertFalse(Thread.holdsLock(BalanceData.class));
     }
 
-    private static long date(int day) { return T + day * DAY; }
+    private static long date(int day) {
+        return java.time.Instant.ofEpochMilli(T).atZone(java.time.ZoneId.of("UTC"))
+            .toLocalDate().plusDays(day).atStartOfDay(java.time.ZoneId.of("UTC"))
+            .toInstant().toEpochMilli();
+    }
 
     private static final class CountingContext extends ContextWrapper {
         int dataPreferenceReads;

@@ -15,6 +15,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.TimeZone;
+import java.time.ZoneId;
+import java.time.Instant;
 
 import org.junit.After;
 import org.junit.Before;
@@ -25,14 +28,19 @@ import org.junit.runner.RunWith;
 @RunWith(AndroidJUnit4.class)
 public class CommitmentStoreTest {
     private Context context;
+    private TimeZone originalZone;
+    private static final ZoneId FIXTURE_ZONE = ZoneId.of("America/New_York");
 
     @Before public void setUp() throws Exception {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        originalZone = TimeZone.getDefault();
+        TimeZone.setDefault(TimeZone.getTimeZone(FIXTURE_ZONE));
         CommitmentStore.clear(context);
     }
 
     @After public void tearDown() throws Exception {
-        CommitmentStore.clear(context);
+        try { CommitmentStore.clear(context); }
+        finally { TimeZone.setDefault(originalZone); }
     }
 
     @Test public void onceDefinitionsKeepNoSettlementMarks() throws Exception {
@@ -42,7 +50,7 @@ public class CommitmentStoreTest {
         long day = Commitment.startOfDay(System.currentTimeMillis());
         Commitment once = new Commitment("once-marks", "One", -10L, Commitment.ONCE, day, null,
             false, Collections.singletonList(day), 0,
-            Collections.singletonList(day + 86400000L), false, 0);
+            Collections.singletonList(civilDay(day, 1)), false, 0);
         assertTrue(CommitmentStore.upsert(context, once));
         assertEquals("{\"paidThrough\":0,\"paid\":[],\"unpaid\":[]}", exportedSettlements("once-marks"));
         assertTrue(CommitmentStore.settle(context, "once-marks", day));
@@ -62,9 +70,9 @@ public class CommitmentStoreTest {
         StringBuilder longName = new StringBuilder();
         for (int i = 0; i < 5000; i++) longName.append('n');
         List<Long> paid = new ArrayList<>();
-        for (int i = 1; i <= 2501; i++) paid.add(start + i * 86400000L);
+        for (int i = 1; i <= 2501; i++) paid.add(civilDay(start, i));
         List<Long> unpaid = new ArrayList<>();
-        for (int i = 3001; i <= 5501; i++) unpaid.add(start + i * 86400000L);
+        for (int i = 3001; i <= 5501; i++) unpaid.add(civilDay(start, i));
         for (int i = 0; i < 601; i++) {
             definitions.add(new Commitment("definition-" + i,
                 i == 0 ? longName.toString() : "name-" + i,
@@ -79,27 +87,27 @@ public class CommitmentStoreTest {
         assertEquals(Long.MAX_VALUE, stored.amount);
         assertEquals(2501, stored.paid.size());
         assertEquals(2501, stored.unpaid.size());
-        assertTrue(stored.isSettled(start + 2501 * 86400000L));
-        assertFalse(stored.isSettled(start + 3001 * 86400000L));
+        assertTrue(stored.isSettled(civilDay(start, 2501)));
+        assertFalse(stored.isSettled(civilDay(start, 3001)));
     }
 
     @Test public void undoUnderLegacyWatermarkStoresOnlyOneOverride() throws Exception {
         long start = Commitment.startOfDay(System.currentTimeMillis());
         Commitment source = new Commitment("watermark", "legacy", -10, Commitment.DAILY,
-            start, null, false, null, start + 10 * 86400000L, false, 0);
+            start, null, false, null, civilDay(start, 10), false, 0);
         context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit()
             .putString(BalanceData.KEY_COMMITMENTS,
                 new org.json.JSONObject().put(BalanceData.KEY_COMMITMENTS,
                     new org.json.JSONArray().put(source.toJson())).toString())
             .commit();
 
-        assertTrue(CommitmentStore.isSettled(context, source.id, start + 2 * 86400000L));
-        assertTrue(CommitmentStore.undo(context, source.id, start + 2 * 86400000L));
-        assertFalse(CommitmentStore.isSettled(context, source.id, start + 2 * 86400000L));
-        assertTrue(CommitmentStore.isSettled(context, source.id, start + 3 * 86400000L));
+        assertTrue(CommitmentStore.isSettled(context, source.id, civilDay(start, 2)));
+        assertTrue(CommitmentStore.undo(context, source.id, civilDay(start, 2)));
+        assertFalse(CommitmentStore.isSettled(context, source.id, civilDay(start, 2)));
+        assertTrue(CommitmentStore.isSettled(context, source.id, civilDay(start, 3)));
         Commitment stored = CommitmentStore.get(context, source.id);
         assertEquals(1, stored.unpaid.size());
-        assertEquals(start + 2 * 86400000L, stored.unpaid.get(0).longValue());
+        assertEquals(civilDay(start, 2), stored.unpaid.get(0).longValue());
         assertEquals(0, stored.paid.size());
         assertFalse(context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE)
             .contains(BalanceData.KEY_COMMITMENTS));
@@ -108,7 +116,7 @@ public class CommitmentStoreTest {
     @Test public void legacyMigrationPreservesEverySettlementDate() throws Exception {
         long start = Commitment.startOfDay(System.currentTimeMillis());
         List<Long> paid = new ArrayList<>();
-        for (int i = 1; i <= 2001; i++) paid.add(start + i * 86400000L);
+        for (int i = 1; i <= 2001; i++) paid.add(civilDay(start, i));
         Commitment source = new Commitment("legacy-large", "legacy", -10, Commitment.DAILY,
             start, null, false, paid, false, 0);
         String legacy = new org.json.JSONObject().put(BalanceData.KEY_COMMITMENTS,
@@ -232,13 +240,13 @@ public class CommitmentStoreTest {
         long start = Commitment.startOfDay(System.currentTimeMillis());
         List<Commitment> definitions = new ArrayList<>();
         for (int i = 0; i < 73; i++) definitions.add(new Commitment("page-" + i, "page",
-            1, Commitment.ONCE, start + i * 86400000L, null, false, null, false, 0));
+            1, Commitment.ONCE, civilDay(start, i), null, false, null, false, 0));
         Commitment recurring = new Commitment("settlements", "settlements", 1, Commitment.DAILY,
             start, null, false, null, false, 0);
         definitions.add(recurring);
         CommitmentStore.replace(context, definitions);
         for (int i = 1; i <= 61; i++) CommitmentStore.settle(context, recurring.id,
-            start + i * 86400000L);
+            civilDay(start, i));
 
         int definitionsSeen = 0;
         CommitmentStore.DefinitionPage page = CommitmentStore.pageDefinitions(context, 0, 11);
@@ -252,7 +260,7 @@ public class CommitmentStoreTest {
 
         int settlementsSeen = 0;
         CommitmentStore.SettlementPage settlements = CommitmentStore.windowPage(context,
-            recurring.id, start, start + 100 * 86400000L, 0, 13);
+            recurring.id, start, civilDay(start, 100), 0, 13);
         while (true) {
             assertTrue(settlements.rows.size() <= 13);
             settlementsSeen += settlements.rows.size();
@@ -265,7 +273,7 @@ public class CommitmentStoreTest {
     @Test public void getExposesImmutablePagedSettlementList() throws Exception {
         long start = Commitment.startOfDay(System.currentTimeMillis());
         List<Long> paid = new ArrayList<>();
-        for (int i = 1; i <= 257; i++) paid.add(start + i * 86400000L);
+        for (int i = 1; i <= 257; i++) paid.add(civilDay(start, i));
         Commitment definition = new Commitment("lazy", "lazy", 1, Commitment.DAILY,
             start, null, false, paid, false, 0);
         CommitmentStore.upsert(context, definition);
@@ -289,7 +297,7 @@ public class CommitmentStoreTest {
         CommitmentStore.upsert(context, definition);
         Iterator<Long> iterator = CommitmentStore.get(context, definition.id).paid.iterator();
         assertTrue(iterator.hasNext());
-        CommitmentStore.settle(context, definition.id, start + 10 * 86400000L);
+        CommitmentStore.settle(context, definition.id, civilDay(start, 10));
         try {
             iterator.next();
             fail("a lazy iterator must not combine revisions");
@@ -302,5 +310,11 @@ public class CommitmentStoreTest {
         List<Long> result = new ArrayList<>();
         result.add(date);
         return result;
+    }
+
+    /** Civil days, not elapsed 24-hour blocks: these fixtures cross New York DST transitions. */
+    private static long civilDay(long start, int days) {
+        return Instant.ofEpochMilli(start).atZone(FIXTURE_ZONE).toLocalDate().plusDays(days)
+            .atStartOfDay(FIXTURE_ZONE).toInstant().toEpochMilli();
     }
 }

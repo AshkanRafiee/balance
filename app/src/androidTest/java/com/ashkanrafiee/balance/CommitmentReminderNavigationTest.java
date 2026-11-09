@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.os.SystemClock;
 import android.view.View;
 import android.widget.EditText;
+import android.widget.ScrollView;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -97,6 +98,7 @@ public class CommitmentReminderNavigationTest {
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
         scenario.onActivity(activity -> assertNotNull(activity.findViewById(android.R.id.content)
             .findViewWithTag(tag())));
+        awaitHighlightedRowVisible();
     }
 
     @Test public void warmIntentSelectsExactDueAndDeletionShowsAnUnavailableState() throws Exception {
@@ -131,6 +133,39 @@ public class CommitmentReminderNavigationTest {
                 assertEquals(commitment.id, target.id);
             } catch (Exception e) { throw new AssertionError(e); }
         });
+    }
+
+    @Test public void warmReminderTapRevealsExactDueWhenAlreadyScrolledToLateMonths() throws Exception {
+        long today = Commitment.startOfDay(System.currentTimeMillis());
+        CommitmentStore.upsert(context, Commitment.create("Many upcoming dues", -1,
+            Commitment.DAILY, today, null, false, 0));
+        scenario = ActivityScenario.launch(CommitmentsActivity.class);
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        scenario.onActivity(activity -> {
+            try {
+                View root = (View) field(activity, "root");
+                ScrollView scroll = (ScrollView) root.getParent();
+                scroll.fullScroll(View.FOCUS_DOWN);
+                assertTrue("fixture must start well below the reminder card", scroll.getScrollY() > 0);
+            } catch (Exception e) { throw new AssertionError(e); }
+        });
+        scenario.onActivity(activity -> activity.onNewIntent(intent()));
+        awaitHighlightedRowVisible();
+    }
+
+    private void awaitHighlightedRowVisible() {
+        boolean[] visible = {false};
+        long deadline = SystemClock.uptimeMillis() + 10000;
+        while (!visible[0] && SystemClock.uptimeMillis() < deadline) {
+            scenario.onActivity(activity -> {
+                View row = activity.findViewById(android.R.id.content).findViewWithTag(tag());
+                android.graphics.Rect bounds = new android.graphics.Rect();
+                visible[0] = row != null && row.getHeight() > 0 && row.getGlobalVisibleRect(bounds)
+                    && bounds.height() == row.getHeight();
+            });
+            if (!visible[0]) SystemClock.sleep(20);
+        }
+        assertTrue("the exact highlighted due must be in the visible viewport", visible[0]);
     }
 
     @Test public void changedScheduleNeverFallsBackToAnotherInstallment() {

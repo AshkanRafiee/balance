@@ -255,6 +255,7 @@ public final class CommitmentsActivity extends Activity {
     private boolean pausing;
     private LockOverlay lockOverlay;
     private ReminderTarget reminderTarget;
+    private boolean reminderRevealPending;
 
     /** Keep the exact due across the lock and recreation, not a mutable 'next due' lookup. */
     static final class ReminderTarget {
@@ -309,6 +310,8 @@ public final class CommitmentsActivity extends Activity {
             long due = state.getLong("reminder_target_due", 0);
             if (id != null && !id.isEmpty() && due > 0) reminderTarget = new ReminderTarget(id, due);
         } else reminderTarget = ReminderTarget.fromIntent(getIntent());
+        reminderRevealPending = reminderTarget != null && (state == null
+            || state.getBoolean("reminder_reveal_pending", true));
         iran = RegionHelper.isIran(this);
         persian = LocaleHelper.isPersian(this);
         fg = color(R.color.fg);
@@ -363,6 +366,7 @@ public final class CommitmentsActivity extends Activity {
         super.onSaveInstanceState(out);
         if (pendingEditorDraft != null) pendingEditorDraft.writeTo(out);
         out.putBoolean("reminder_navigation_saved", true);
+        out.putBoolean("reminder_reveal_pending", reminderRevealPending);
         if (reminderTarget != null) {
             out.putString("reminder_target_id", reminderTarget.id);
             out.putLong("reminder_target_due", reminderTarget.due);
@@ -379,6 +383,7 @@ public final class CommitmentsActivity extends Activity {
         dismissActiveDialog();
         pausing = false;
         reminderTarget = target;
+        reminderRevealPending = true;
         if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) lockOverlay.showLock();
         updateSecureFlag();
         render();
@@ -665,24 +670,51 @@ public final class CommitmentsActivity extends Activity {
         box.setPadding(dp(12), dp(12), dp(12), dp(12));
         box.addView(text(getString(R.string.commitment_reminder_due), 15, accent, medium()));
         Row due = reminderTarget.resolve(commitments);
+        View targetView;
         if (due == null) {
             TextView unavailable = text(getString(R.string.commitment_due_unavailable), 14, muted);
             unavailable.setTag("reminder-due-unavailable");
             box.addView(unavailable);
+            targetView = unavailable;
         } else {
             LinearLayout line = occurrenceRow(due);
             line.setSelected(true);
             line.setTag("reminder-due:" + due.commitment.id + ":" + due.date);
             box.addView(line);
+            targetView = line;
         }
         TextView close = ExpressiveUi.button(this, getString(android.R.string.ok), false);
         close.setOnClickListener(v -> {
             reminderTarget = null;
+            reminderRevealPending = false;
             render();
             restorePendingEditor();
         });
         box.addView(close);
         root.addView(box, margin(0, 0, 0, 12));
+        revealReminderAfterLayout(targetView, reminderTarget);
+    }
+
+    /** A warm screen may still be scrolled to a later month. Reveal this navigation once, after
+     * layout and unlock; later refreshes must not pull the user away from their manual scroll. */
+    private void revealReminderAfterLayout(View targetView, ReminderTarget target) {
+        if (!reminderRevealPending) return;
+        targetView.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override public void onLayoutChange(View view, int left, int top, int right,
+                    int bottom, int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                if (view.getWidth() <= 0 || view.getHeight() <= 0) return;
+                view.removeOnLayoutChangeListener(this);
+                view.post(() -> {
+                    if (!reminderRevealPending || reminderTarget != target
+                            || !view.isAttachedToWindow()
+                            || LockManager.isEnabled(CommitmentsActivity.this)
+                                && LockManager.isSessionLocked()) return;
+                    reminderRevealPending = false;
+                    view.requestRectangleOnScreen(new android.graphics.Rect(0, 0,
+                        view.getWidth(), view.getHeight()), true);
+                });
+            }
+        });
     }
 
     private long yearPay(Summary summary, int year) {
