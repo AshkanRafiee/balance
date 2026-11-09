@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="figure_title">توضیح این مبلغ</string>
+    <string name="figure_row_hint">برای توضیح این مبلغ یا ویرایش یادداشت و برچسب‌ها بزنید.</string>
+    <string name="figure_edit">ویرایش یادداشت و برچسب‌ها</string>
+    <string name="figure_amount">مبلغ: %1$s ریال</string>
+    <string name="figure_account_unknown">حساب: ذکر نشده</string>
+    <string name="figure_recorded">زمان ثبت‌شده: %1$s</string>
+    <string name="figure_sourced">اطلاعات پیامک‌های بانک</string>
+    <string name="figure_personal">یادداشت و برچسب‌های شخصی شما</string>
+    <string name="figure_no_annotation">یادداشت یا برچسب شخصی ندارد.</string>
+    <string name="figure_source_missing">پیامک اصلی به این مبلغ پیوند داده نشد. ممکن است منبع مبالغ قدیمی یا بازیابی‌شده نگهداری نشده باشد. بدون آن، مبنای زمان قابل بررسی نیست.</string>
+    <string name="figure_source_ambiguous">بیش از یک پیامک منبع مطابقت دارد. نمی‌توان یک پیامک مشخص را با اطمینان انتخاب کرد.</string>
+    <string name="figure_source_error">جزئیات منبع در دسترس نیست. مبلغ ذخیره‌شده تغییری نکرده است.</string>
+    <string name="figure_arrival">زمان دریافت پیامک: %1$s</string>
+    <string name="figure_event">تاریخ و زمان درج‌شده در پیامک بانک (تفسیرشده): %1$s</string>
+    <string name="figure_event_unknown">زمان رویداد بانکی: به‌طور مستقل در دسترس نیست. ممکن است زمان ثبت‌شده همان زمان دریافت پیامک باشد.</string>
+    <string name="figure_time_caution">ترتیب دریافت پیامک‌ها لزوماً ترتیب وقوع رویدادهای بانکی نیست.</string>
+    <string name="figure_source_body">پیامک منبع (رمزهای یک‌بارمصرف حذف شده‌اند):</string>
+    <string name="figure_reported_balance">موجودی اعلام‌شده پس از این تراکنش: %1$s ریال</string>
+    <string name="figure_balance_caution">این موجودی در پیامک بانک اعلام شده و استعلام زنده نیست. پیامک‌های بعدی یا دریافت‌نشده می‌توانند تصویر موجودی را تغییر دهند.</string>
+    <string name="figure_total_basis">جمع موجودی حساب‌های نمایش‌داده‌شده است، نه استعلام زنده از بانک‌ها. زمان اعلام موجودی هر حساب ممکن است متفاوت باشد.</string>
+    <string name="figure_bracket">بازهٔ اعلام موجودی: %1$s ← %2$s</string>
+    <string name="figure_calculation">موجودی پایانی − موجودی آغازین − تراکنش‌های دریافت‌شده = اختلاف موجودی (ریال)\n%1$s − (%2$s) − (%3$s) = %4$s</string>
+    <string name="figure_calculation_unavailable">بازهٔ اصلی اعلام موجودی در دسترس نیست یا تغییر کرده است. به‌جای ساختن محاسبه، چیزی نمایش داده نمی‌شود.</string>
+    <string name="figure_residual_caution">این یک اختلاف خالص است، نه یک تراکنش شناسایی‌شده. زمان دقیق، علت و تعداد تراکنش‌های دریافت‌نشده مشخص نیست. جمع تراکنش‌های دریافت‌شده شامل تراکنش پیامک پایانی است و پیش از فیلتر جستجو، تاریخ، جهت یا برچسب محاسبه می‌شود.</string>
+</resources>

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="figure_title">Explain this figure</string>
+    <string name="figure_row_hint">Tap to explain this figure or edit your note and tags.</string>
+    <string name="figure_edit">Edit note / tags</string>
+    <string name="figure_amount">Amount: %1$s rials</string>
+    <string name="figure_account_unknown">Account: not stated</string>
+    <string name="figure_recorded">Recorded time: %1$s</string>
+    <string name="figure_sourced">From bank messages</string>
+    <string name="figure_personal">Your personal annotation</string>
+    <string name="figure_no_annotation">No personal note or tags.</string>
+    <string name="figure_source_missing">The original message could not be linked to this figure. Older or restored figures may have no retained source. The timing basis cannot be verified without it.</string>
+    <string name="figure_source_ambiguous">More than one source message matches. No single message can be identified safely.</string>
+    <string name="figure_source_error">Source details are unavailable. The saved figure has not been changed.</string>
+    <string name="figure_arrival">SMS arrival: %1$s</string>
+    <string name="figure_event">Bank message date/time (interpreted): %1$s</string>
+    <string name="figure_event_unknown">Bank event time: not independently available. A recorded time may use SMS arrival instead.</string>
+    <string name="figure_time_caution">SMS arrival is not the order in which bank events necessarily happened.</string>
+    <string name="figure_source_body">Source message (one-time codes removed):</string>
+    <string name="figure_reported_balance">Balance reported after this movement: %1$s rials</string>
+    <string name="figure_balance_caution">This is a balance reported by a bank message, not a live bank query. Later or missing messages can change the picture.</string>
+    <string name="figure_total_basis">Sum of the displayed account balances, not a live bank total. Each account may have been reported at a different time.</string>
+    <string name="figure_bracket">Statement window: %1$s → %2$s</string>
+    <string name="figure_calculation">Closing balance − opening balance − received movements = unaccounted amount (rials)\n%1$s − (%2$s) − (%3$s) = %4$s</string>
+    <string name="figure_calculation_unavailable">The original balance bracket is unavailable or has changed. No calculation is shown rather than inventing one.</string>
+    <string name="figure_residual_caution">This is one net difference, not an identified transaction. Its exact time, purpose and number of missing movements are unknown. Received movements include the closing statement’s movement and are calculated before search, date, direction or tag filters.</string>
+</resources>
