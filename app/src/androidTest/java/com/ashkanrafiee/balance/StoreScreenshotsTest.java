@@ -42,8 +42,9 @@ import java.util.Locale;
 /**
  * Optional native store captures, never part of an ordinary regression run.
  *
- * <p>Requires storeScreenshots=true, an Android emulator, and READ_SMS already revoked. Only then
- * may the fixture replace the emulator's app data. It never reads or changes the SMS provider and
+ * <p>Requires storeScreenshots=true, an Android emulator, and READ_SMS revoked or explicitly
+ * checked-empty-inbox capture mode. Only then
+ * may the fixture replace the emulator's app data. It never reads message bodies or changes SMS and
  * never snapshots existing app records. See docs/store-screenshots.md before running it.
  */
 @RunWith(AndroidJUnit4.class)
@@ -70,8 +71,23 @@ public final class StoreScreenshotsTest {
                 && ("1".equals(property("ro.kernel.qemu"))
                     || "1".equals(property("ro.boot.qemu"))));
         Context target = instrumentation.getTargetContext();
-        assertEquals("Revoke READ_SMS before starting instrumentation; see the capture runbook",
-            PackageManager.PERMISSION_DENIED, target.checkSelfPermission(Manifest.permission.READ_SMS));
+        boolean emptyInbox = "true".equals(InstrumentationRegistry.getArguments()
+            .getString("storeScreenshotsEmptyInbox"));
+        if (emptyInbox) {
+            instrumentation.getUiAutomation().grantRuntimePermission(target.getPackageName(),
+                Manifest.permission.READ_SMS);
+            // Only check whether a row exists; never inspect any message body or sender. A healthy
+            // store overview is allowed only after explicitly clearing the disposable emulator inbox.
+            try (android.database.Cursor rows = target.getContentResolver().query(
+                    android.provider.Telephony.Sms.Inbox.CONTENT_URI,
+                    new String[]{android.provider.Telephony.Sms._ID}, null, null, null)) {
+                assertNotNull("the emulator inbox must be accessible", rows);
+                assertTrue("clear the disposable emulator inbox before healthy captures", !rows.moveToFirst());
+            }
+        } else {
+            assertEquals("Revoke READ_SMS before starting instrumentation; see the capture runbook",
+                PackageManager.PERMISSION_DENIED, target.checkSelfPermission(Manifest.permission.READ_SMS));
+        }
 
         context = target;
         originalLocales = LocaleList.getDefault();
@@ -130,6 +146,8 @@ public final class StoreScreenshotsTest {
 
     private void capture(String language, String folder) throws Exception {
         seed(language);
+        // Give the overview room to show every account; commitments have their own full frame.
+        BalanceData.setShowCommitments(context, false);
         File directory = new File(context.getCacheDir(), "store-screenshots/" + folder);
         assertTrue("private screenshot directory must exist", directory.isDirectory() || directory.mkdirs());
 
@@ -140,13 +158,14 @@ public final class StoreScreenshotsTest {
                 View root = activity.getWindow().getDecorView();
                 ready[0] = activity.hasWindowFocus()
                     && findText(root, CurrencyHelper.amount(activity, 128_450_000L)) != null
-                    && findText(root, activity.getString(R.string.commitments_remaining_payable)) != null;
+                    && findText(root, BankRules.displayName(activity, "Blu")) != null;
             });
             return ready[0];
         }, "dashboard balances and commitments");
         save(directory, "01-dashboard.png");
         dashboard.close();
         dashboard = null;
+        BalanceData.setShowCommitments(context, true);
 
         history = ActivityScenario.launch(HistoryActivity.class);
         await(() -> {
@@ -156,6 +175,24 @@ public final class StoreScreenshotsTest {
                 && findText(activity.getWindow().getDecorView(), featuredNote) != null);
             return ready[0];
         }, "history with synthetic transaction notes");
+        history.onActivity(activity -> {
+            View note = findText(activity.getWindow().getDecorView(), featuredNote);
+            View parent = note;
+            while (parent != null && !(parent instanceof android.widget.ScrollView))
+                parent = parent.getParent() instanceof View ? (View) parent.getParent() : null;
+            assertTrue("history content must be scrollable", parent instanceof android.widget.ScrollView);
+            android.widget.ScrollView scroll = (android.widget.ScrollView) parent;
+            scroll.scrollTo(0, Math.max(0, scroll.getChildAt(0).getHeight() - scroll.getHeight()));
+        });
+        await(() -> {
+            boolean[] visible = {false};
+            history.onActivity(activity -> {
+                View note = findText(activity.getWindow().getDecorView(), featuredNote);
+                android.graphics.Rect bounds = new android.graphics.Rect();
+                visible[0] = note != null && note.getGlobalVisibleRect(bounds) && bounds.height() > 0;
+            });
+            return visible[0];
+        }, "visible synthetic transaction details");
         save(directory, "02-history.png");
 
         // Use the same accessible transaction row a user taps, rather than rendering a mock detail.
