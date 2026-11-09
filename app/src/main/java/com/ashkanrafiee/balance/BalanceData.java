@@ -1918,8 +1918,11 @@ final class BalanceData {
     private static boolean retrySourceEvidence(Context context, String pendingKey,
             String failureKey, String retryKey) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
-        if (DataGeneration.dataPrefs(context).getString(pendingKey, null) == null
-                && prefs.getInt(failureKey, 0) == 0) return false;
+        try {
+            if (pendingSources(context, pendingKey, failureKey).isEmpty()) return false;
+        } catch (Exception e) {
+            throw new IllegalStateException("pending source evidence could not be read", e);
+        }
         long now = System.currentTimeMillis();
         if (prefs.getLong(retryKey, 0) > now) return false;
         try {
@@ -1999,16 +2002,15 @@ final class BalanceData {
         pending.removeAll(captured);
         try {
             SharedPreferences data = DataGeneration.dataPrefs(context);
-            if (!pending.isEmpty()) {
+            if (!pending.isEmpty() || data.contains(pendingKey)) {
                 JSONArray array = new JSONArray();
                 for (String identity : pending) array.put(identity);
                 // Recommit even an unchanged backlog: a failed preference commit can leave only
                 // the in-memory value updated. Never advance a cursor on that unpersisted value.
+                // Keep a completed [] checkpoint too: death before the failure streak clears must
+                // not turn successfully captured evidence into an unknown legacy failure.
                 if (!data.edit().putString(pendingKey, encrypt(array.toString())).commit())
                     throw new IllegalStateException("pending source evidence could not be saved");
-            } else if (pending.isEmpty() && data.contains(pendingKey)
-                    && !data.edit().remove(pendingKey).commit()) {
-                throw new IllegalStateException("pending source evidence could not be cleared");
             }
         } catch (Exception e) {
             // Do not advance a core cursor if we cannot durably remember what it would skip.

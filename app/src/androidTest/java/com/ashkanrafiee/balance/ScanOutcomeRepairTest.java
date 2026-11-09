@@ -196,10 +196,40 @@ public class ScanOutcomeRepairTest {
             Files.write(sourceDatabase().toPath(), healthyDatabase);
             assertTrue("a readable source store triggers safe replay of skipped evidence",
                 scan(provider, history).succeeded());
-            assertFalse(DataGeneration.dataPrefs(context).contains(pendingKey));
+            assertEquals("[]", BalanceData.decryptStorePayload(
+                DataGeneration.dataPrefs(context).getString(pendingKey, null)));
             assertEquals(2L, SourceStore.countSources(context));
             assertTrue(scan(provider, history).succeeded());
             if (history) assertEquals(1, BalanceData.readTransactions(context).size());
+        }
+    }
+
+    @Test public void completedEvidenceCheckpointSurvivesInterruptedStreakCleanup() throws Exception {
+        for (boolean history : new boolean[]{false, true}) {
+            BalanceData.reset(context, true);
+            FixtureProvider inbox = new FixtureProvider(3);
+            Context provider = withProvider(inbox);
+            assertTrue(scan(provider, history).succeeded());
+            int fullQueries = inbox.fullQueries;
+            String pendingKey = history ? BalanceData.KEY_SOURCE_PENDING_HISTORY
+                : BalanceData.KEY_SOURCE_PENDING_BALANCE;
+            String failureKey = history ? BalanceData.KEY_SOURCE_FAILURE_HISTORY
+                : BalanceData.KEY_SOURCE_FAILURE_BALANCE;
+            // Simulate death after committing completed evidence but before clearing the streak.
+            assertTrue(DataGeneration.dataPrefs(context).edit().putString(pendingKey,
+                BalanceData.encryptStorePayload("[]")).commit());
+            assertTrue(context.getSharedPreferences(BalanceData.PREFS_PREF, 0).edit()
+                .putInt(failureKey, BalanceData.MAX_SOURCE_FAILURE_RETRIES + 1).commit());
+
+            assertTrue(scan(provider, history).succeeded());
+            assertEquals(0, context.getSharedPreferences(BalanceData.PREFS_PREF, 0)
+                .getInt(failureKey, 0));
+            assertEquals("[]", BalanceData.decryptStorePayload(
+                DataGeneration.dataPrefs(context).getString(pendingKey, null)));
+            assertTrue(scan(provider, history).succeeded());
+            assertEquals("completed checkpoints must not trigger evidence recovery replays",
+                fullQueries, inbox.fullQueries);
+            assertTrue(inbox.emptyIncrementalQueries > 0);
         }
     }
 
