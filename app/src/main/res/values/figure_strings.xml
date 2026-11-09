@@ -25,7 +25,6 @@
     <string name="figure_source_withheld">This code-bearing message is hidden to protect its secret values.</string>
     <string name="figure_reported_balance">Balance reported after this movement: %1$s rials</string>
     <string name="figure_balance_caution">This is a balance reported by a bank message, not a live bank query. Later or missing messages can change the picture.</string>
-    <string name="figure_total_basis">Sum of the displayed account balances, not a live bank total. Each account may have been reported at a different time.</string>
     <string name="figure_bracket">Statement window: %1$s → %2$s</string>
     <string name="figure_calculation">Closing balance − opening balance − received movements = unaccounted amount (rials)\n%1$s − (%2$s) − (%3$s) = %4$s</string>
     <string name="figure_calculation_unavailable">The original balance bracket is unavailable or has changed. No calculation is shown rather than inventing one.</string>

@@ -5,7 +5,7 @@ Currently supports Iranian banks and their Persian SMS formats only. Accounts ar
 See your money clearly:
 - Latest balances by bank and account, a combined total, and accounts you can exclude
 - Configurable warnings for old balances, plus a home-screen widget
-- In-app explanations of what the figures mean
+- Explanations for individual account balances and history entries
 - Deposits and withdrawals by day, month and year; filters and search across history
 - Unaccounted rows for changes between balance statements that recorded transactions do not explain — not invented transactions or guesses about missing payments
 - Bank-stated reasons, payment channels and matched merchants when available; an OTP alone never confirms a transaction

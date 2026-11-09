@@ -25,7 +25,6 @@
     <string name="figure_source_withheld">این پیامک حاوی کد است و برای حفاظت از اطلاعات محرمانهٔ آن نمایش داده نمی‌شود.</string>
     <string name="figure_reported_balance">موجودی اعلام‌شده پس از این تراکنش: %1$s ریال</string>
     <string name="figure_balance_caution">این موجودی در پیامک بانک اعلام شده و استعلام زنده نیست. پیامک‌های بعدی یا دریافت‌نشده می‌توانند تصویر موجودی را تغییر دهند.</string>
-    <string name="figure_total_basis">جمع موجودی حساب‌های نمایش‌داده‌شده است، نه استعلام زنده از بانک‌ها. زمان اعلام موجودی هر حساب ممکن است متفاوت باشد.</string>
     <string name="figure_bracket">بازهٔ اعلام موجودی: %1$s ← %2$s</string>
     <string name="figure_calculation">موجودی پایانی − موجودی آغازین − تراکنش‌های دریافت‌شده = اختلاف موجودی (ریال)\n%1$s − (%2$s) − (%3$s) = %4$s</string>
     <string name="figure_calculation_unavailable">بازهٔ اصلی اعلام موجودی در دسترس نیست یا تغییر کرده است. به‌جای ساختن محاسبه، چیزی نمایش داده نمی‌شود.</string>

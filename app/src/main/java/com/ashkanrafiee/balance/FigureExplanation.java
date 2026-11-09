@@ -10,7 +10,6 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.text.DateFormat;
 import java.text.NumberFormat;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -33,31 +32,6 @@ final class FigureExplanation {
             + activity.getString(R.string.figure_balance_caution);
         show(activity, header, presenter, isActive, context -> source(context,
             FigureEvidence.balance(context, snapshot), snapshot.date), null, null);
-    }
-
-    /** The list must be the exact account rows contributing to the displayed total. The helper
-     * snapshots their values, sums with arbitrary precision and never queries a live bank. */
-    static void showTotal(Activity activity, List<Bank> banks, Consumer<AlertDialog> presenter,
-            BooleanSupplier isActive) {
-        List<Bank> snapshot = new ArrayList<>();
-        BigInteger total = BigInteger.ZERO;
-        for (Bank bank : banks) {
-            snapshot.add(copy(bank));
-            total = total.add(BigInteger.valueOf(bank.amount));
-        }
-        String header = money(activity, total)
-            + "\n\n" + activity.getString(R.string.figure_total_basis);
-        show(activity, header, presenter, isActive, context -> {
-            StringBuilder out = new StringBuilder();
-            for (Bank bank : snapshot) {
-                paragraph(out, identity(context, bank.name, bank.account));
-                out.append('\n').append(money(context, bank.amount)).append('\n')
-                    .append(context.getString(R.string.figure_recorded, time(context, bank.date)));
-                try { paragraph(out, source(context, FigureEvidence.balance(context, bank), bank.date)); }
-                catch (Exception unavailable) { paragraph(out, context.getString(R.string.figure_source_error)); }
-            }
-            return out.toString();
-        }, null, null);
     }
 
     static void showTransaction(Activity activity, Transaction transaction,

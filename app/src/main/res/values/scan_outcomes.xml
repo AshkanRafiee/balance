@@ -2,7 +2,6 @@
 <resources>
     <string name="scan_inbox_checked">Inbox checked · balances are from saved messages</string>
     <string name="scan_inbox_failed">Inbox check incomplete · showing saved balances</string>
-    <string name="scan_total_stale">Included balances older than your warning limit: %1$d</string>
     <string name="scan_reread_action">Re-read bank messages</string>
     <string name="scan_reread_message">Re-read the bank messages still in your inbox using the current rules. Commitments, excluded accounts, notes and tags are kept. Saved history and source messages are kept even when the original SMS was deleted. Missing bank messages cannot be recovered from your inbox.</string>
     <string name="scan_reread_done">Bank messages re-read; personal data kept</string>

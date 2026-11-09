@@ -46,6 +46,7 @@ public final class DashboardUiTest {
     private String originalLanguage;
     private String originalCurrency;
     private int originalRegion;
+    private int originalStaleDays;
 
     @Before public void setUp() throws Exception {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
@@ -58,6 +59,7 @@ public final class DashboardUiTest {
         originalLanguage = LocaleHelper.currentTag(context);
         originalCurrency = CurrencyHelper.currency(context);
         originalRegion = RegionHelper.region(context);
+        originalStaleDays = BalanceData.getStaleDays(context);
         LocaleHelper.setLanguage(context, "en");
         CurrencyHelper.setCurrency(context, CurrencyHelper.CURRENCY_RIAL);
         RegionHelper.setRegion(context, RegionHelper.REGION_INTERNATIONAL);
@@ -81,6 +83,7 @@ public final class DashboardUiTest {
         LocaleHelper.setLanguage(context, originalLanguage);
         CurrencyHelper.setCurrency(context, originalCurrency);
         RegionHelper.setRegion(context, originalRegion);
+        BalanceData.setStaleDays(context, originalStaleDays);
     }
 
     @Test public void emptyDashboard_exposesNativeActionsAndGuidance() {
@@ -232,30 +235,44 @@ public final class DashboardUiTest {
         await(() -> findText(currentRoot(), persianCalendar) != null, 10_000);
     }
 
-    @Test public void figureExplanation_isDiscoverableAndRespectsDashboardMask() {
+    @Test public void totalCardKeepsHistoryWithoutExplanationOrStaleSummary() {
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        saved.put("Tejarat|1234", new Bank("Tejarat", 987_000L,
+            System.currentTimeMillis() - 8L * 86400000L, "TejaratBank", "1234"));
+        BalanceData.setStaleDays(context, 3);
+        BalanceData.write(context, saved);
+        launch();
+        await(() -> hasTextContaining(currentRoot(), "1234"), 10_000);
+        scenario.onActivity(activity -> {
+            ViewGroup total = activity.findViewById(R.id.dashboard_total_card);
+            assertEquals("only the label, amount, check status and history action", 4,
+                total.getChildCount());
+            assertNotNull(findText(total, activity.getString(R.string.dashboard_open_history)));
+            assertTrue(findText(total, activity.getString(R.string.figure_title)) == null);
+            String age = activity.getResources().getQuantityString(R.plurals.stale_days, 8, 8);
+            assertNotNull("individual account freshness warnings remain", findText(
+                activity.findViewById(R.id.dashboard_bank_list), age));
+        });
+    }
+
+    @Test public void accountExplanationRemainsAvailableAndRespectsDashboardMask() {
         LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
         saved.put("Tejarat|1234", new Bank("Tejarat", 987_000L,
             System.currentTimeMillis(), "TejaratBank", "1234"));
         BalanceData.write(context, saved);
         launch();
-        await(() -> findText(currentRoot(), context.getString(R.string.figure_title)) != null,
-            10_000);
+        await(() -> hasTextContaining(currentRoot(), "1234"), 10_000);
         scenario.onActivity(activity -> {
-            TextView action = findText(activity.getWindow().getDecorView(),
-                activity.getString(R.string.figure_title));
-            assertTrue(action.isEnabled());
             activity.findViewById(R.id.dashboard_mask_button).performClick();
         });
         scenario.onActivity(activity -> {
-            TextView action = findText(activity.getWindow().getDecorView(),
-                activity.getString(R.string.figure_title));
-            assertFalse(action.isEnabled());
-            activity.explainTotal();
-            assertTrue("mask must prevent opening financial details", activeDialog(activity) == null);
+            openAccountExplanation(activity);
+            android.app.AlertDialog current = activeDialog(activity);
+            assertTrue("mask must prevent opening financial details", current == null || !current.isShowing());
             activity.findViewById(R.id.dashboard_mask_button).performClick();
         });
         scenario.onActivity(activity -> {
-            activity.explainTotal();
+            openAccountExplanation(activity);
             assertNotNull(activeDialog(activity));
             assertTrue(activeDialog(activity).isShowing());
         });
@@ -268,23 +285,46 @@ public final class DashboardUiTest {
         BalanceData.write(context, saved);
         BalanceData.setAutoHide(context, true);
         launch();
-        await(() -> findText(currentRoot(), context.getString(R.string.figure_title)) != null,
-            10_000);
+        await(() -> findText(currentRoot(), "Tejarat") != null, 10_000);
         android.app.AlertDialog[] explanation = {null};
         scenario.onActivity(activity -> {
             // Automatic masking may already have applied during a first permission transition.
-            TextView action = findText(activity.getWindow().getDecorView(),
-                activity.getString(R.string.figure_title));
-            if (!action.isEnabled()) activity.findViewById(R.id.dashboard_mask_button).performClick();
-            activity.explainTotal();
+            if (hasText(activity.getWindow().getDecorView(), "••••••"))
+                activity.findViewById(R.id.dashboard_mask_button).performClick();
+            openAccountExplanation(activity);
             explanation[0] = activeDialog(activity);
             assertNotNull(explanation[0]);
         });
         scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED);
         assertFalse("financial dialog must close even without app lock", explanation[0].isShowing());
         scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED);
-        scenario.onActivity(activity -> assertFalse(findText(activity.getWindow().getDecorView(),
-            activity.getString(R.string.figure_title)).isEnabled()));
+        scenario.onActivity(activity -> assertTrue(hasText(activity.getWindow().getDecorView(),
+            "••••••")));
+    }
+
+    private static void openAccountExplanation(MainActivity activity) {
+        View menu = findDescription(activity.getWindow().getDecorView(), activity.getString(
+            R.string.dashboard_bank_actions, BankRules.displayName(activity, "Tejarat")));
+        assertNotNull(menu);
+        menu.performClick();
+        android.app.AlertDialog dialog = activeDialog(activity);
+        assertNotNull(dialog);
+        assertEquals(activity.getString(R.string.figure_title),
+            dialog.getListView().getAdapter().getItem(2));
+        dialog.getListView().performItemClick(null, 2, 2);
+    }
+
+    private static View findDescription(View view, String description) {
+        if (description.contentEquals(view.getContentDescription() == null
+                ? "" : view.getContentDescription())) return view;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View found = findDescription(group.getChildAt(i), description);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 
     private static android.app.AlertDialog activeDialog(MainActivity activity) {

@@ -6,7 +6,7 @@ Balance turns supported bank SMS into a clear picture of your money: the latest 
 
 ## What you can do
 
-- See balances by bank and account, exclude accounts from the total, spot old balances, and read explanations of what the figures mean.
+- See balances by bank and account, exclude accounts from the total, spot old balances, and explain individual account balances.
 - Explore deposits and withdrawals by day, month or year; filter and search history, save private notes and reusable tags together, and export the current view as CSV.
 - See bank-stated transaction reasons, payment channels and merchants when the messages provide enough information. An OTP alone never confirms a transaction.
 - Understand unexplained balance changes: amber **Unaccounted** rows show the difference between balance statements that recorded transactions do not explain. They are not invented transactions or estimates of when missing payments happened.
