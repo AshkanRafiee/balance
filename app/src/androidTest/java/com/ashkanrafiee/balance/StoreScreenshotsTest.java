@@ -78,12 +78,7 @@ public final class StoreScreenshotsTest {
                 Manifest.permission.READ_SMS);
             // Only check whether a row exists; never inspect any message body or sender. A healthy
             // store overview is allowed only after explicitly clearing the disposable emulator inbox.
-            try (android.database.Cursor rows = target.getContentResolver().query(
-                    android.provider.Telephony.Sms.Inbox.CONTENT_URI,
-                    new String[]{android.provider.Telephony.Sms._ID}, null, null, null)) {
-                assertNotNull("the emulator inbox must be accessible", rows);
-                assertTrue("clear the disposable emulator inbox before healthy captures", !rows.moveToFirst());
-            }
+            assertEmptyInbox(target);
         } else {
             assertEquals("Revoke READ_SMS before starting instrumentation; see the capture runbook",
                 PackageManager.PERMISSION_DENIED, target.checkSelfPermission(Manifest.permission.READ_SMS));
@@ -301,8 +296,14 @@ public final class StoreScreenshotsTest {
         instrumentation.waitForIdleSync();
         // Allow native window/IME/scrollbar animations to finish; pixels remain unmodified.
         SystemClock.sleep(700L);
-        assertEquals("SMS access must stay denied throughout capture", PackageManager.PERMISSION_DENIED,
-            context.checkSelfPermission(Manifest.permission.READ_SMS));
+        if ("true".equals(InstrumentationRegistry.getArguments().getString("storeScreenshotsEmptyInbox"))) {
+            assertEquals(PackageManager.PERMISSION_GRANTED,
+                context.checkSelfPermission(Manifest.permission.READ_SMS));
+            assertEmptyInbox(context);
+        } else {
+            assertEquals("SMS access must stay denied throughout capture", PackageManager.PERMISSION_DENIED,
+                context.checkSelfPermission(Manifest.permission.READ_SMS));
+        }
         Bitmap screenshot = instrumentation.getUiAutomation().takeScreenshot();
         assertNotNull("UiAutomation must return real display pixels", screenshot);
         File file = new File(directory, name);
@@ -315,6 +316,15 @@ public final class StoreScreenshotsTest {
         Bundle status = new Bundle();
         status.putString("stream", "\nSaved cache/store-screenshots/" + directory.getName() + "/" + name + "\n");
         instrumentation.sendStatus(0, status);
+    }
+
+    private static void assertEmptyInbox(Context target) {
+        try (android.database.Cursor rows = target.getContentResolver().query(
+                android.provider.Telephony.Sms.Inbox.CONTENT_URI,
+                new String[]{android.provider.Telephony.Sms._ID}, null, null, null)) {
+            assertNotNull("the emulator inbox must be accessible", rows);
+            assertTrue("clear the disposable emulator inbox before healthy captures", !rows.moveToFirst());
+        }
     }
 
     private String property(String name) throws Exception {
