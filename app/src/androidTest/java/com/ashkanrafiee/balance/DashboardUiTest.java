@@ -232,6 +232,45 @@ public final class DashboardUiTest {
         await(() -> findText(currentRoot(), persianCalendar) != null, 10_000);
     }
 
+    @Test public void figureExplanation_isDiscoverableAndRespectsDashboardMask() {
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        saved.put("Tejarat|1234", new Bank("Tejarat", 987_000L,
+            System.currentTimeMillis(), "TejaratBank", "1234"));
+        BalanceData.write(context, saved);
+        launch();
+        await(() -> findText(currentRoot(), context.getString(R.string.figure_title)) != null,
+            10_000);
+        scenario.onActivity(activity -> {
+            TextView action = findText(activity.getWindow().getDecorView(),
+                activity.getString(R.string.figure_title));
+            assertTrue(action.isEnabled());
+            activity.findViewById(R.id.dashboard_mask_button).performClick();
+        });
+        scenario.onActivity(activity -> {
+            TextView action = findText(activity.getWindow().getDecorView(),
+                activity.getString(R.string.figure_title));
+            assertFalse(action.isEnabled());
+            activity.explainTotal();
+            assertTrue("mask must prevent opening financial details", activeDialog(activity) == null);
+            activity.findViewById(R.id.dashboard_mask_button).performClick();
+        });
+        scenario.onActivity(activity -> {
+            activity.explainTotal();
+            assertNotNull(activeDialog(activity));
+            assertTrue(activeDialog(activity).isShowing());
+        });
+    }
+
+    private static android.app.AlertDialog activeDialog(MainActivity activity) {
+        try {
+            java.lang.reflect.Field field = MainActivity.class.getDeclaredField("activeDialog");
+            field.setAccessible(true);
+            return (android.app.AlertDialog) field.get(activity);
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError(error);
+        }
+    }
+
     private String monthLabel(boolean iran) {
         int[] civil = Commitment.civilDay(System.currentTimeMillis(),
             iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN);

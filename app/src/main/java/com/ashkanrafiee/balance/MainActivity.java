@@ -664,6 +664,16 @@ public class MainActivity extends Activity {
             .create());
     }
 
+    void explainTotal() {
+        if (!mainResumed || view == null || view.hidden || LockManager.isSessionLocked()) return;
+        java.util.List<Bank> included = new java.util.ArrayList<>();
+        for (java.util.Map.Entry<String, Bank> entry : view.banks.entrySet()) {
+            if (!view.excluded.contains(entry.getKey())) included.add(entry.getValue());
+        }
+        if (!included.isEmpty()) FigureExplanation.showTotal(this, included,
+            dialog -> showDialog(dialog), () -> mainResumed && !view.hidden);
+    }
+
     void hardRefreshDialog() {
         // One custom body: the notes-deletion checkbox is the destructive option. The description and
         // the checkbox share the same indented column, and both lines get the identical symmetric
@@ -1855,6 +1865,12 @@ public class MainActivity extends Activity {
             history.setOnClickListener(v -> startActivity(new Intent(MainActivity.this,
                 HistoryActivity.class)));
             hero.addView(history, new LinearLayout.LayoutParams(-1, -2));
+            if (!emptyTotal) {
+                TextView explain = ExpressiveUi.button(this, getString(R.string.figure_title), false);
+                explain.setEnabled(!view.hidden);
+                explain.setOnClickListener(v -> explainTotal());
+                hero.addView(explain, ExpressiveUi.widthMatch(this, 6, 0));
+            }
             hero.setClickable(true);
             hero.setFocusable(true);
             hero.setContentDescription(getString(R.string.dashboard_open_history));
@@ -3649,7 +3665,8 @@ public class MainActivity extends Activity {
             boolean isExcluded = excluded.contains(key);
             String[] options = {
                 getString(isExcluded ? R.string.action_include : R.string.action_exclude),
-                getString(R.string.action_copy_balance)
+                getString(R.string.action_copy_balance),
+                getString(R.string.figure_title)
             };
             showDialog(new android.app.AlertDialog.Builder(MainActivity.this)
                 .setTitle(displayName)
@@ -3666,8 +3683,13 @@ public class MainActivity extends Activity {
                             getString(excluded.contains(key)
                                 ? R.string.toast_excluded : R.string.toast_included),
                             Toast.LENGTH_SHORT).show();
-                    } else {
+                    } else if (which == 1) {
                         copyBalance(displayName, amount);
+                    } else {
+                        if (hidden || !mainResumed || LockManager.isSessionLocked()) return;
+                        Bank bank = banks.get(key);
+                        if (bank != null) FigureExplanation.showBalance(MainActivity.this, bank,
+                            dialog -> showDialog(dialog), () -> mainResumed && !hidden);
                     }
                 })
                 .create());
