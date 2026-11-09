@@ -77,12 +77,18 @@ final class BalanceData {
     static final String KEY_HISTORY_RAW_THROUGH = "history_raw_through";
     static final String KEY_HISTORY_ID = "history_id";
     static final String KEY_HISTORY_RULES_VERSION = "history_rules_version";
-    /** Consecutive source-evidence failures per scanner. While set, the scan watermark is held
+    /** Consecutive incomplete source-evidence scans per scanner. While set, the watermark is held
      *  back so the evidence batch is retried; past the retry budget below the core watermark
      *  advances anyway so a permanently broken evidence store cannot make every refresh redo a
      *  full-cost scan forever. */
     static final String KEY_SOURCE_FAILURE_BALANCE = "source_failures";
     static final String KEY_SOURCE_FAILURE_HISTORY = "source_failures_history";
+    /** Encrypted identities of uncaptured physical messages, independent of the core cursors. */
+    static final String KEY_SOURCE_PENDING_BALANCE = "source_pending_balance";
+    static final String KEY_SOURCE_PENDING_HISTORY = "source_pending_history";
+    static final String KEY_SOURCE_RETRY_BALANCE = "source_retry_balance";
+    static final String KEY_SOURCE_RETRY_HISTORY = "source_retry_history";
+    private static final long SOURCE_RECOVERY_INTERVAL_MS = 5 * 60_000L;
     /** Source-evidence retries before the core watermark advances anyway (see above). */
     static final int MAX_SOURCE_FAILURE_RETRIES = 3;
     /** Which schema generation of the stored history this build writes. Bumped when existing
@@ -1128,14 +1134,14 @@ final class BalanceData {
      *  first few consecutive failures retry (transient store hiccups must not lose evidence);
      *  past the budget the core watermark advances anyway so a permanently broken evidence
      *  store degrades to missing parser evidence instead of redoing full scans forever. A
-     *  success clears the streak. */
+     *  success clears the streak only after every pending physical source was captured. */
     private static boolean holdForSourceRetry(SharedPreferences prefs, String key,
             boolean sourceOk) {
         if (sourceOk) {
             if (prefs.getInt(key, 0) != 0) prefs.edit().remove(key).apply();
             return false;
         }
-        int streak = prefs.getInt(key, 0) + 1;
+        int streak = Math.min(prefs.getInt(key, 0), MAX_SOURCE_FAILURE_RETRIES) + 1;
         prefs.edit().putInt(key, streak).apply();
         return streak <= MAX_SOURCE_FAILURE_RETRIES;
     }
@@ -1192,6 +1198,7 @@ final class BalanceData {
                 .remove(KEY_RESIDUAL_NOTE_PROVENANCE);
             data.remove(KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS);
             data.remove(KEY_PENDING_TRANSACTION_METADATA_MIGRATIONS);
+            data.remove(KEY_SOURCE_PENDING_BALANCE).remove(KEY_SOURCE_PENDING_HISTORY);
             if (!data.commit()) throw new IllegalStateException("data reset cleanup failed");
             removeOldTransactionPagesForReset(context);
             DataGeneration.clearRollbackGenerations(context);
@@ -1210,6 +1217,8 @@ final class BalanceData {
             .remove(KEY_HISTORY_ID)
             .remove(KEY_SOURCE_FAILURE_BALANCE)
             .remove(KEY_SOURCE_FAILURE_HISTORY)
+            .remove(KEY_SOURCE_RETRY_BALANCE)
+            .remove(KEY_SOURCE_RETRY_HISTORY)
             .remove(KEY_MERCHANT_EVIDENCE_PENDING)
             .remove(KEY_HISTORY_RULES_VERSION)
             .remove(KEY_HISTORY_SCHEMA)
@@ -1543,7 +1552,9 @@ final class BalanceData {
         // rescan, which re-reads the whole inbox and re-pins the watermark under the current clock.
         long now = System.currentTimeMillis();
         boolean full = resetWasPending || watermark == 0 || watermark > now
-            || prefs.getInt(KEY_RULES_VERSION, -1) != rulesVersion;
+            || prefs.getInt(KEY_RULES_VERSION, -1) != rulesVersion
+            || retrySourceEvidence(context, KEY_SOURCE_PENDING_BALANCE,
+                KEY_SOURCE_FAILURE_BALANCE, KEY_SOURCE_RETRY_BALANCE);
         if (full) {
             watermark = 0;
             cursorDate = 0;
@@ -1706,7 +1717,8 @@ final class BalanceData {
             }
             windows.put(key, pruneWindow(merged));
         }
-        boolean sourceOk = captureSources(context, sourceRows, BankRules.VERSION);
+        boolean sourceOk = captureSources(context, sourceRows, BankRules.VERSION,
+            KEY_SOURCE_PENDING_BALANCE, KEY_SOURCE_FAILURE_BALANCE);
         boolean holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_BALANCE, sourceOk);
         if (progress != null) progress.stage(R.string.scan_stage_saving);
         if (!write(context, current) || !saveRecentMovements(context, windows))
@@ -1901,12 +1913,69 @@ final class BalanceData {
         return replacements;
     }
 
-    /** Best-effort evidence capture; source failures must not block the core stores or watermarks. */
-    private static boolean captureSources(Context context, List<SourceEvidence> sources,
-            int parserRevision) {
-        if (sources == null || sources.isEmpty()) return true;
+    /** Probe before an evidence-only full retry: a broken store must not force an unbounded inbox
+     *  replay. Once readable, retry at most every five minutes; explicit re-read still retries now. */
+    private static boolean retrySourceEvidence(Context context, String pendingKey,
+            String failureKey, String retryKey) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
+        if (DataGeneration.dataPrefs(context).getString(pendingKey, null) == null
+                && prefs.getInt(failureKey, 0) == 0) return false;
+        long now = System.currentTimeMillis();
+        if (prefs.getLong(retryKey, 0) > now) return false;
         try {
-            SourceStore.runInTransaction(context, editor -> {
+            SourceStore.runInTransaction(context, editor -> null);
+        } catch (Exception e) {
+            return false;
+        }
+        if (!prefs.edit().putLong(retryKey, now + SOURCE_RECOVERY_INTERVAL_MS).commit())
+            throw new IllegalStateException("source recovery checkpoint could not be saved");
+        return true;
+    }
+
+    /** Pending identities are encrypted, just like the sources themselves. Keeping identities
+     *  rather than only a flag also prevents a successful replay from hiding a failed SMS that
+     *  was deleted meanwhile. Such evidence remains degraded until it can actually be captured. */
+    private static Set<String> pendingSources(Context context, String pendingKey, String failureKey)
+            throws Exception {
+        String encoded = DataGeneration.dataPrefs(context).getString(pendingKey, null);
+        Set<String> pending = new LinkedHashSet<>();
+        if (encoded != null) {
+            JSONArray array = new JSONArray(decrypt(encoded));
+            for (int i = 0; i < array.length(); i++) pending.add(array.getString(i));
+        } else if (context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+                .getInt(failureKey, 0) > 0) {
+            // Older checkpoints recorded only a streak, not which physical sources were missed.
+            // An empty or partial inbox cannot prove that unknown evidence was recovered.
+            pending.add("unknown-prior-source-failure");
+        }
+        return pending;
+    }
+
+    private static String sourceRecoveryIdentity(SourceEvidence source) {
+        try {
+            // SourceStore preserves exact raw variants. A normalized content digest cannot prove
+            // that the particular failed physical source (rather than a similar SMS) was saved.
+            String identity = new JSONArray().put(source.sender).put(source.body)
+                .put(source.arrival).toString();
+            return Base64.encodeToString(MessageDigest.getInstance("SHA-256")
+                .digest(identity.getBytes(StandardCharsets.UTF_8)), Base64.NO_WRAP);
+        } catch (Exception e) {
+            throw new IllegalStateException("source recovery identity could not be computed", e);
+        }
+    }
+
+    /** Best-effort source writes, but durable incomplete status even when core cursors advance. */
+    private static boolean captureSources(Context context, List<SourceEvidence> sources,
+            int parserRevision, String pendingKey, String failureKey) {
+        final Set<String> pending;
+        try {
+            pending = pendingSources(context, pendingKey, failureKey);
+        } catch (Exception e) {
+            throw new IllegalStateException("pending source evidence could not be read", e);
+        }
+        Set<String> captured = new HashSet<>();
+        try {
+            if (sources != null && !sources.isEmpty()) SourceStore.runInTransaction(context, editor -> {
                 for (SourceEvidence evidence : sources) {
                     SourceStore.Source source = editor.capture(evidence.sender, evidence.body,
                         evidence.arrival, BankRules.VERSION);
@@ -1917,14 +1986,35 @@ final class BalanceData {
                     }
                     if (evidence.transaction != null)
                         editor.observeTransaction(source, parserRevision, evidence.transaction);
+                    captured.add(sourceRecoveryIdentity(evidence));
                 }
                 return null;
             });
-            return true;
         } catch (Exception e) {
+            captured.clear();
             Log.w(TAG, "source batch capture failed; continuing core scan", e);
-            return false;
         }
+        if (sources != null) for (SourceEvidence evidence : sources)
+            pending.add(sourceRecoveryIdentity(evidence));
+        pending.removeAll(captured);
+        try {
+            SharedPreferences data = DataGeneration.dataPrefs(context);
+            if (!pending.isEmpty()) {
+                JSONArray array = new JSONArray();
+                for (String identity : pending) array.put(identity);
+                // Recommit even an unchanged backlog: a failed preference commit can leave only
+                // the in-memory value updated. Never advance a cursor on that unpersisted value.
+                if (!data.edit().putString(pendingKey, encrypt(array.toString())).commit())
+                    throw new IllegalStateException("pending source evidence could not be saved");
+            } else if (pending.isEmpty() && data.contains(pendingKey)
+                    && !data.edit().remove(pendingKey).commit()) {
+                throw new IllegalStateException("pending source evidence could not be cleared");
+            }
+        } catch (Exception e) {
+            // Do not advance a core cursor if we cannot durably remember what it would skip.
+            throw new IllegalStateException("source recovery state could not be saved", e);
+        }
+        return pending.isEmpty();
     }
 
     /** Scans the inbox for money-movement messages and appends them to the saved transaction history,
@@ -1995,7 +2085,9 @@ final class BalanceData {
             long now = System.currentTimeMillis();
             boolean full = resetWasPending || hwm == 0 || hwm > now
                 || prefs.getInt(KEY_HISTORY_RULES_VERSION, -1) != HISTORY_RULES_VERSION
-                || prefs.getInt(KEY_HISTORY_SCHEMA, -1) != HISTORY_SCHEMA;
+                || prefs.getInt(KEY_HISTORY_SCHEMA, -1) != HISTORY_SCHEMA
+                || retrySourceEvidence(context, KEY_SOURCE_PENDING_HISTORY,
+                    KEY_SOURCE_FAILURE_HISTORY, KEY_SOURCE_RETRY_HISTORY);
             if (full) {
                 hwm = 0;
                 cursorDate = 0;
@@ -2071,7 +2163,8 @@ final class BalanceData {
                         MessageDate.eventTime(body, arrival, BankRules.calendar(bank)), evidence});
                 }
                 if (rows.isEmpty()) {
-                    sourcesSaved = captureSources(context, sourceRows, HISTORY_RULES_VERSION);
+                    sourcesSaved = captureSources(context, sourceRows, HISTORY_RULES_VERSION,
+                        KEY_SOURCE_PENDING_HISTORY, KEY_SOURCE_FAILURE_HISTORY);
                     holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_HISTORY,
                         sourcesSaved);
                 }
@@ -2296,7 +2389,8 @@ final class BalanceData {
                         lastBalanceDates.put(key, balanceDate);
                     }
                 }
-                boolean sourcesCaptured = captureSources(context, sourceRows, HISTORY_RULES_VERSION);
+                boolean sourcesCaptured = captureSources(context, sourceRows, HISTORY_RULES_VERSION,
+                    KEY_SOURCE_PENDING_HISTORY, KEY_SOURCE_FAILURE_HISTORY);
                 sourcesSaved = sourcesCaptured;
                 holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_HISTORY, sourcesCaptured);
                 // Chain banks: keep the balance chain end correct when the true-newest movement was not

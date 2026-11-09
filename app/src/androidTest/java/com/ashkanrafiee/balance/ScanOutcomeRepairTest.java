@@ -27,6 +27,8 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import java.lang.reflect.Proxy;
+import java.io.File;
+import java.nio.file.Files;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 
@@ -38,11 +40,13 @@ public class ScanOutcomeRepairTest {
 
     @Before public void setUp() {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        DataGeneration.clearForTests(context);
         BalanceData.reset(context, true);
     }
 
     @After public void tearDown() {
         BalanceData.reset(context, true);
+        DataGeneration.clearForTests(context);
     }
 
     @Test public void noAccessIsNotASuccessfulEmptyScan() {
@@ -171,36 +175,134 @@ public class ScanOutcomeRepairTest {
     }
 
     @Test public void failedSourceCaptureNeverReportsSuccessEvenAfterRetryBudget() throws Exception {
-        SourceStore.capture(context, "500095", "retained evidence", 1_000_000L, 1);
-        assertTrue(DataGeneration.context(context).deleteDatabase(SourceStore.DB_NAME));
-        for (int attempt = 0; attempt < 5; attempt++) {
-            assertEquals(BalanceData.ScanOutcome.Status.SOURCE_ERROR,
-                BalanceData.scanSmsOutcome(withProvider(3), new LinkedHashMap<>(), null).status);
+        for (boolean history : new boolean[]{false, true}) {
+            BalanceData.reset(context, true);
+            byte[] healthyDatabase = breakSourceStore();
+            FixtureProvider inbox = new FixtureProvider(3);
+            Context provider = withProvider(inbox);
+            for (int attempt = 0; attempt < 6; attempt++) {
+                assertEquals(BalanceData.ScanOutcome.Status.SOURCE_ERROR,
+                    scan(provider, history).status);
+            }
+            assertTrue("the core cursor must advance after its bounded retry budget",
+                context.getSharedPreferences(BalanceData.PREFS_PREF, 0).getLong(history
+                    ? BalanceData.KEY_HISTORY_THROUGH : BalanceData.KEY_SCANNED_THROUGH, 0) > 0);
+            assertTrue("the regression needs a genuinely empty incremental provider result",
+                inbox.emptyIncrementalQueries > 0);
+            String pendingKey = history ? BalanceData.KEY_SOURCE_PENDING_HISTORY
+                : BalanceData.KEY_SOURCE_PENDING_BALANCE;
+            assertTrue(DataGeneration.dataPrefs(context).contains(pendingKey));
+
+            Files.write(sourceDatabase().toPath(), healthyDatabase);
+            assertTrue("a readable source store triggers safe replay of skipped evidence",
+                scan(provider, history).succeeded());
+            assertFalse(DataGeneration.dataPrefs(context).contains(pendingKey));
+            assertEquals(2L, SourceStore.countSources(context));
+            assertTrue(scan(provider, history).succeeded());
+            if (history) assertEquals(1, BalanceData.readTransactions(context).size());
         }
     }
 
+    @Test public void deletedFailedSourceStaysDegradedAfterReadableEmptyRecovery() throws Exception {
+        for (boolean history : new boolean[]{false, true}) {
+            BalanceData.reset(context, true);
+            byte[] healthyDatabase = breakSourceStore();
+            FixtureProvider inbox = new FixtureProvider(3);
+            Context provider = withProvider(inbox);
+            for (int attempt = 0; attempt <= BalanceData.MAX_SOURCE_FAILURE_RETRIES; attempt++)
+                assertFalse(scan(provider, history).succeeded());
+            Files.write(sourceDatabase().toPath(), healthyDatabase);
+            inbox.messagePresent = false;
+            assertEquals(BalanceData.ScanOutcome.Status.SOURCE_ERROR,
+                scan(provider, history).status);
+            int fullQueries = inbox.fullQueries;
+            assertEquals(BalanceData.ScanOutcome.Status.SOURCE_ERROR,
+                scan(provider, history).status);
+            assertEquals("unavailable old messages must not cause a full scan on every refresh",
+                fullQueries, inbox.fullQueries);
+            assertEquals(1L, SourceStore.countSources(context));
+            if (history) assertEquals(1, BalanceData.readTransactions(context).size());
+            else assertEquals(1, BalanceData.read(context).size());
+
+            inbox.messagePresent = true;
+            inbox.messageDate += 1_000L;
+            inbox.messageId++;
+            assertEquals("capturing a newer message cannot repair the deleted failed source",
+                BalanceData.ScanOutcome.Status.SOURCE_ERROR, scan(provider, history).status);
+            assertEquals(2L, SourceStore.countSources(context));
+        }
+    }
+
+    @Test public void normalizedLookalikeDoesNotClearMissingExactSource() throws Exception {
+        for (boolean history : new boolean[]{false, true}) {
+            BalanceData.reset(context, true);
+            byte[] healthyDatabase = breakSourceStore();
+            FixtureProvider inbox = new FixtureProvider(3);
+            Context provider = withProvider(inbox);
+            for (int attempt = 0; attempt <= BalanceData.MAX_SOURCE_FAILURE_RETRIES; attempt++)
+                assertFalse(scan(provider, history).succeeded());
+            Files.write(sourceDatabase().toPath(), healthyDatabase);
+            inbox.messageBody = "  " + inbox.messageBody + "  ";
+
+            assertEquals(BalanceData.ScanOutcome.Status.SOURCE_ERROR, scan(provider, history).status);
+            assertEquals(2L, SourceStore.countSources(context));
+        }
+    }
+
+    private BalanceData.ScanOutcome scan(Context provider, boolean history) {
+        return history ? BalanceData.scanHistoryOutcome(provider, null)
+            : BalanceData.scanSmsOutcome(provider, new LinkedHashMap<>(), null);
+    }
+
+    private File sourceDatabase() {
+        return DataGeneration.context(context).getDatabasePath(SourceStore.DB_NAME);
+    }
+
+    private byte[] breakSourceStore() throws Exception {
+        SourceStore.capture(context, "500095", "retained evidence", 1_000_000L, 1);
+        byte[] healthy = Files.readAllBytes(sourceDatabase().toPath());
+        assertTrue(DataGeneration.context(context).deleteDatabase(SourceStore.DB_NAME));
+        return healthy;
+    }
+
     private Context withProvider(int mode) {
-        ContentProvider provider = new ContentProvider() {
-            int queries;
-            @Override public boolean onCreate() { return true; }
-            @Override public Cursor query(Uri uri, String[] projection, String selection,
-                    String[] args, String order) {
-                if (mode == 1 || (mode == 4 && ++queries == 2)) return null;
-                if (mode == 2) throw new IllegalStateException("provider unavailable");
-                MatrixCursor cursor = new MatrixCursor(new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY,
-                    Telephony.Sms.DATE, Telephony.Sms._ID});
-                if (mode == 3) cursor.addRow(new Object[]{"500095",
-                    "مبلغ 200,000 ریال به حساب شما واریز شد، موجودی: 3,000,000 ریال",
-                    1_000_000_000L, 1L});
-                return cursor;
-            }
-            @Override public String getType(Uri uri) { return null; }
-            @Override public Uri insert(Uri uri, ContentValues values) { throw new UnsupportedOperationException(); }
-            @Override public int delete(Uri uri, String selection, String[] args) { throw new UnsupportedOperationException(); }
-            @Override public int update(Uri uri, ContentValues values, String selection, String[] args) {
-                throw new UnsupportedOperationException();
-            }
-        };
+        return withProvider(new FixtureProvider(mode));
+    }
+
+    private static final class FixtureProvider extends ContentProvider {
+        final int mode;
+        int queries, fullQueries, emptyIncrementalQueries;
+        boolean messagePresent = true;
+        long messageDate = 1_000_000_000L, messageId = 1L;
+        String messageBody = "مبلغ 200,000 ریال به حساب شما واریز شد، موجودی: 3,000,000 ریال";
+
+        FixtureProvider(int mode) { this.mode = mode; }
+
+        @Override public boolean onCreate() { return true; }
+        @Override public Cursor query(Uri uri, String[] projection, String selection,
+                String[] args, String order) {
+            if (mode == 1 || (mode == 4 && ++queries == 2)) return null;
+            if (mode == 2) throw new IllegalStateException("provider unavailable");
+            MatrixCursor cursor = new MatrixCursor(new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY,
+                Telephony.Sms.DATE, Telephony.Sms._ID});
+            // Match the real provider's (date, _id) incremental predicate, not an always-full fixture.
+            boolean selected = selection == null || messageDate > Long.parseLong(args[0])
+                || (messageDate == Long.parseLong(args[1]) && messageId > Long.parseLong(args[2]));
+            if (mode == 3 && messagePresent && selected) cursor.addRow(new Object[]{"500095",
+                messageBody, messageDate, messageId});
+            if (selection == null) fullQueries++;
+            else if (cursor.getCount() == 0) emptyIncrementalQueries++;
+            return cursor;
+        }
+        @Override public String getType(Uri uri) { return null; }
+        @Override public Uri insert(Uri uri, ContentValues values) { throw new UnsupportedOperationException(); }
+        @Override public int delete(Uri uri, String selection, String[] args) { throw new UnsupportedOperationException(); }
+        @Override public int update(Uri uri, ContentValues values, String selection, String[] args) {
+            throw new UnsupportedOperationException();
+        }
+    }
+
+    private Context withProvider(FixtureProvider provider) {
         ProviderInfo info = new ProviderInfo();
         info.authority = "sms";
         provider.attachInfo(context, info);
