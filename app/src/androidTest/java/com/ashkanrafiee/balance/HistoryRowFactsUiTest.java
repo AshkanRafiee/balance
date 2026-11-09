@@ -158,15 +158,15 @@ public class HistoryRowFactsUiTest {
         // Both clauses ride on one description, and neither displaces the other.
         assertTrue("the description must carry the channel too",
             row.getContentDescription().toString().contains("Shetab"));
-        assertTrue("the description must still invite a note",
+        assertTrue("the description must explain the details and annotation entry",
             row.getContentDescription().toString().contains(
-                ctx.getString(R.string.note_row_hint)));
+                ctx.getString(R.string.figure_row_hint)));
     }
 
-    @Test public void aMovementWithNeither_keepsThePlainNoteHint() {
+    @Test public void aMovementWithNeither_stillExplainsTheTapDestination() {
         launch(ctx);
-        View row = findByDescriptionContaining(ctx.getString(R.string.note_row_hint));
-        assertNotNull("a movement the bank said nothing about is just an invitation to add a note",
+        View row = findByDescriptionContaining(ctx.getString(R.string.figure_row_hint));
+        assertNotNull("even a movement without extra facts must offer details and a note",
             row);
         assertTrue(row.isClickable());
     }
@@ -178,7 +178,7 @@ public class HistoryRowFactsUiTest {
         launch(ctx);
 
         assertNull(findByText("درگاه اینترنتی"));
-        assertNotNull(findByDescriptionContaining(ctx.getString(R.string.note_row_hint)));
+        assertNotNull(findByDescriptionContaining(ctx.getString(R.string.figure_row_hint)));
     }
 
     @Test public void bothFacts_inPersian_areSpokenInPersian() {
@@ -213,9 +213,9 @@ public class HistoryRowFactsUiTest {
         assertNotNull("the user's own note must be shown", findByText("rent for Ali"));
         View row = findByDescriptionContaining("Phone top-up");
         assertNotNull(row);
-        assertTrue("tapping the row still opens the note", row.isClickable());
+        assertTrue("the row must still open details with access to its note", row.isClickable());
         assertSpeaksInOrder(row, "Reason the bank gave: Phone top-up.", "Channel: Shetab.",
-            "Your note: rent for Ali.", "Tap to edit it");
+            "Your note: rent for Ali.", ctx.getString(R.string.figure_row_hint));
     }
 
     @Test public void aUserNoteOnItsOwn_isSpokenRatherThanInvited() {
@@ -233,7 +233,7 @@ public class HistoryRowFactsUiTest {
         assertTrue(said.contains("Withdrawal"));
         assertTrue(said.contains("−220,000"));
         assertTrue(said.contains(ctx.getString(R.string.row_fact_note, "rent for Ali")));
-        assertTrue(said.endsWith(ctx.getString(R.string.row_hint_edit_note)));
+        assertTrue(said.endsWith(ctx.getString(R.string.figure_row_hint)));
         assertFalse("a row that already has a note must not be heard as inviting one",
             spoken(row).contains(ctx.getString(R.string.note_row_hint)));
     }

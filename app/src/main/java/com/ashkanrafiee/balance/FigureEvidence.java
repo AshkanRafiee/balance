@@ -6,7 +6,7 @@ import java.util.Objects;
 /** Read-only evidence lookup. Never guesses a physical source from amount/time similarity. */
 final class FigureEvidence {
     private static final java.util.regex.Pattern CODE_MARKER = java.util.regex.Pattern.compile(
-        "(?:رمز|پویا|otp|passcode|password|one[- ]?time|کد\\s*(?:تایید|تأیید)|"
+        "(?:رمز|پویا|کد|otp|passcode|password|one[- ]?time|"
             + "(?<![A-Za-z])code(?![A-Za-z]))", java.util.regex.Pattern.CASE_INSENSITIVE);
     private FigureEvidence() { }
 

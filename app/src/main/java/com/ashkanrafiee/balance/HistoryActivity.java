@@ -4356,30 +4356,11 @@ public final class HistoryActivity extends Activity {
      * difference — with an explicit note that the app will not guess what it was.
      */
     private void residualDetail(Residual r) {
-        String body = getString(R.string.residual_detail_body,
-            dateText(calOfResidual(r.fromDate)),
-            dateText(calOfResidual(r.toDate)),
-            BankRules.displayName(this, r.bank));
         String note = residualNote(r);
-        android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
-            .setTitle(getString(R.string.residual_detail_title, signedAmount(r.amount)))
-            .setMessage(body)
-            .setPositiveButton(android.R.string.ok, null)
-            .setNeutralButton(getString(note == null || note.isEmpty()
-                ? R.string.residual_note_add : R.string.residual_note_edit),
-                null)
-            .create();
-        dlg.setOnShowListener(d -> {
-            android.widget.Button noteButton =
-                dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL);
-            if (noteButton != null) {
-                noteButton.setOnClickListener(v -> {
-                    dlg.dismiss();
-                    residualNoteDialog(r);
-                });
-            }
-        });
-        showDialog(dlg);
+        FigureExplanation.showResidual(this, r, this::showDialog,
+            () -> historyResumed, () -> residualNoteDialog(r),
+            getString(note == null || note.isEmpty()
+                ? R.string.residual_note_add : R.string.residual_note_edit));
     }
 
     /** UI-thread count, including canceled workers that have not delivered completion yet. */
@@ -4605,16 +4586,16 @@ public final class HistoryActivity extends Activity {
     /** One movement: bank badge, bank name with time, the account number it hit, and the signed
      *  amount. In a per-bank view every row is the same bank, so the time alone identifies it and
      *  the badge/name are dropped — but the account number stays in both scopes, because a movement's
-     *  account is meaningful even in the combined view. The whole row is tappable to add or edit the
-     *  transaction's private note, which then renders underneath; the same note follows the movement
-     *  everywhere it appears, whatever the filters. */
+     *  account is meaningful even in the combined view. Tapping opens the figure's evidence and its
+     *  separate personal annotation; the note editor remains available from those details. */
     private LinearLayout txRow(final Transaction t) {
         LinearLayout cell = new LinearLayout(this);
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setPaddingRelative(dp(4), dp(3), dp(4), dp(3));
         cell.setClickable(true);
         cell.setFocusable(true);
-        cell.setOnClickListener(v -> noteDialog(t));
+        cell.setOnClickListener(v -> FigureExplanation.showTransaction(this, t, this::showDialog,
+            () -> historyResumed, () -> noteDialog(t)));
 
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -4694,10 +4675,8 @@ public final class HistoryActivity extends Activity {
             said.add(getString(R.string.row_fact_tags,
                 android.text.TextUtils.join(", ", tagValues)));
         }
-        // A row that already carries a note needs no invitation to add one, so it is offered only the
-        // edit it really has.
-        said.add(note != null || (tagValues != null && !tagValues.isEmpty())
-            ? getString(R.string.row_hint_edit_note) : getString(R.string.note_row_hint));
+        // Explain the actual tap destination, including the still-available annotation editor.
+        said.add(getString(R.string.figure_row_hint));
         cell.setContentDescription(android.text.TextUtils.join(" ", said));
         return cell;
     }
@@ -4832,6 +4811,72 @@ public final class HistoryActivity extends Activity {
      *  Either clear affordance is hidden while there is nothing for it to clear, so the dialog
      *  never offers a dead action. */
     private void noteDialog(final Transaction t) {
+        if (!historyResumed || isDestroyed() || isFinishing() || LockManager.isSessionLocked()) return;
+        final int epoch = residualNoteUiEpoch;
+        final Context app = getApplicationContext();
+        java.util.concurrent.atomic.AtomicBoolean active = new java.util.concurrent.atomic.AtomicBoolean(true);
+        android.app.AlertDialog loading = new android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.note_edit_title).setMessage(R.string.history_loading)
+            .setNegativeButton(R.string.lock_cancel, (dialog, which) -> active.set(false)).create();
+        showDialog(loading);
+        fenceAnnotationDialog(loading, active);
+        annotationWorkers++;
+        new Thread(() -> {
+            String note = null;
+            List<String> tags = null;
+            List<String> suggestions = java.util.Collections.emptyList();
+            try {
+                synchronized (BalanceData.class) {
+                    if (active.get() && epoch == residualNoteUiEpoch && !LockManager.isSessionLocked()) {
+                        try (MetadataStore.LookupSession lookup = MetadataStore.LookupSession.open(app)) {
+                            String key = BalanceData.noteKey(t);
+                            note = lookup.text(MetadataStore.NOTES, key);
+                            tags = lookup.tags(key);
+                        }
+                        suggestions = BalanceData.readTagNames(app);
+                    }
+                }
+            } catch (Exception ignored) { /* Do not expose private metadata in logs. */ }
+            final String loadedNote = note;
+            final List<String> loadedTags = tags;
+            final List<String> loadedSuggestions = suggestions;
+            runOnUiThread(() -> {
+                annotationWorkers--;
+                if (!annotationUiActive(epoch) || !active.get() || !loading.isShowing()) return;
+                loading.dismiss();
+                if (loadedTags == null) {
+                    Toast.makeText(this, R.string.note_load_failed, Toast.LENGTH_SHORT).show();
+                } else showNoteEditor(t, loadedNote, loadedTags, loadedSuggestions);
+            });
+        }, "annotation-load").start();
+    }
+
+    private boolean annotationUiActive(int epoch) {
+        return epoch == residualNoteUiEpoch && historyResumed && !isDestroyed() && !isFinishing()
+            && !LockManager.isSessionLocked();
+    }
+
+    private int annotationWorkers;
+
+    static boolean annotationIdleForTest(HistoryActivity activity) {
+        return activity.annotationWorkers == 0;
+    }
+
+    private void fenceAnnotationDialog(android.app.AlertDialog dialog,
+            java.util.concurrent.atomic.AtomicBoolean active) {
+        dialog.getWindow().getDecorView().addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View view) { }
+            @Override public void onViewDetachedFromWindow(View view) { active.set(false); }
+        });
+        dialog.setOnCancelListener(d -> active.set(false));
+        dialog.setOnDismissListener(d -> {
+            active.set(false);
+            activeDialogs.remove(dialog);
+        });
+    }
+
+    private void showNoteEditor(final Transaction t, String existing, List<String> initialTags,
+            List<String> suggestionsList) {
         final EditText input = new EditText(this);
         input.setSingleLine(false);
         input.setInputType(android.text.InputType.TYPE_CLASS_TEXT
@@ -4842,21 +4887,10 @@ public final class HistoryActivity extends Activity {
         input.setHint(getString(R.string.note_edit_hint));
         input.setTextColor(fg);
         input.setHintTextColor(muted);
-        final String existing;
-        final List<String> initialTags;
-        try {
-            existing = BalanceData.getNote(this, t);
-            initialTags = new ArrayList<>(BalanceData.getTags(this, t));
-        } catch (RuntimeException error) {
-            android.util.Log.w("BalanceHistory", "note metadata read failed", error);
-            Toast.makeText(this, R.string.note_load_failed, Toast.LENGTH_SHORT).show();
-            return;
-        }
         input.setText(existing == null ? "" : existing);
         input.setSelection(input.getText().length());
 
         final List<String> editedTags = new ArrayList<>(initialTags);
-        final List<String> originalTags = new ArrayList<>(editedTags);
         LinearLayout selectedTagHost = new LinearLayout(this);
         selectedTagHost.setGravity(Gravity.CENTER_VERTICAL);
         selectedTagHost.setHorizontalScrollBarEnabled(true);
@@ -4919,13 +4953,6 @@ public final class HistoryActivity extends Activity {
         suggestionsScroll.setHorizontalScrollBarEnabled(false);
         suggestionsScroll.addView(suggestions,
             new android.widget.FrameLayout.LayoutParams(-2, -1));
-        List<String> suggestionsList;
-        try {
-            suggestionsList = BalanceData.readTagNames(this);
-        } catch (RuntimeException error) {
-            android.util.Log.w("BalanceHistory", "tag suggestions read failed", error);
-            suggestionsList = java.util.Collections.emptyList();
-        }
         int suggestionCount = Math.min(20, suggestionsList.size());
         for (int i = 0; i < suggestionCount; i++) {
             String suggestion = suggestionsList.get(i);
@@ -4948,6 +4975,10 @@ public final class HistoryActivity extends Activity {
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setPadding(dp(20), dp(10), dp(20), 0);
         wrap.addView(input);
+        TextView saveFeedback = text("", 12, muted);
+        saveFeedback.setVisibility(View.GONE);
+        saveFeedback.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE);
+        wrap.addView(saveFeedback, margin(0, 4, 0, 4));
         wrap.addView(text(getString(R.string.tag_label), 13, muted, medium()), margin(0, 8, 0, 2));
         wrap.addView(selectedTagScroll, new LinearLayout.LayoutParams(-1, dp(38)));
         wrap.addView(addRow, margin(0, 2, 0, 0));
@@ -4966,45 +4997,88 @@ public final class HistoryActivity extends Activity {
             .setNegativeButton(getString(R.string.lock_cancel), null);
         if (hasNote) dialogBuilder.setNeutralButton(getString(R.string.note_clear), null);
         android.app.AlertDialog dlg = dialogBuilder.create();
+        java.util.concurrent.atomic.AtomicBoolean active = new java.util.concurrent.atomic.AtomicBoolean(true);
+        java.util.concurrent.atomic.AtomicBoolean saving = new java.util.concurrent.atomic.AtomicBoolean();
         dlg.setOnShowListener(d -> {
                 dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
                 .setOnClickListener(v -> {
-                    try {
-                        BalanceData.setNote(this, t, input.getText().toString());
-                        BalanceData.setTags(this, t, editedTags);
-                    } catch (RuntimeException error) {
-                        android.util.Log.w("BalanceHistory", "note metadata save failed", error);
-                        try {
-                            BalanceData.setNote(this, t, existing);
-                            BalanceData.setTags(this, t, originalTags);
-                        } catch (RuntimeException rollbackError) {
-                            android.util.Log.w("BalanceHistory", "note metadata rollback failed",
-                                rollbackError);
-                        }
-                        Toast.makeText(this, R.string.note_save_failed, Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    invalidateTagNames();
-                    dlg.dismiss();
-                    render();
+                    addTypedTag.run();
+                    saveAnnotations(dlg, wrap, saveFeedback, t, input.getText().toString(),
+                        new ArrayList<>(editedTags), active, saving);
                 });
             android.widget.Button clearNote =
                 dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL);
             if (clearNote != null) {
                 clearNote.setOnClickListener(v -> {
-                    try {
-                        BalanceData.setNote(this, t, null);
-                    } catch (RuntimeException error) {
-                        android.util.Log.w("BalanceHistory", "note clear failed", error);
-                        Toast.makeText(this, R.string.note_save_failed, Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    dlg.dismiss();
-                    render();
+                    // Clearing is staged like tag edits; Cancel never persists either field.
+                    input.setText("");
+                    clearNote.setVisibility(View.GONE);
                 });
             }
+            dlg.getButton(android.app.AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> {
+                active.set(false);
+                dlg.dismiss();
+            });
         });
         showDialog(dlg);
+        fenceAnnotationDialog(dlg, active);
+    }
+
+    private void saveAnnotations(android.app.AlertDialog dialog, View editor, TextView feedback,
+            Transaction transaction,
+            String note, List<String> tags, java.util.concurrent.atomic.AtomicBoolean active,
+            java.util.concurrent.atomic.AtomicBoolean saving) {
+        if (!active.get() || saving.getAndSet(true)) return;
+        feedback.setVisibility(View.GONE);
+        setAnnotationEditorEnabled(editor, false);
+        dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+        android.widget.Button clear = dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL);
+        if (clear != null) clear.setEnabled(false);
+        final int epoch = residualNoteUiEpoch;
+        final Context app = getApplicationContext();
+        annotationWorkers++;
+        new Thread(() -> {
+            boolean saved = false;
+            boolean stale = false;
+            try {
+                synchronized (BalanceData.class) {
+                    if (active.get() && epoch == residualNoteUiEpoch && !LockManager.isSessionLocked())
+                        saved = MetadataStore.setCurrentAnnotations(app, transaction, note, tags,
+                            () -> active.get() && epoch == residualNoteUiEpoch && !LockManager.isSessionLocked());
+                }
+            } catch (MetadataStore.StaleAnnotationTargetException changed) {
+                stale = true;
+            } catch (Exception ignored) { /* Atomic store rollback preserves both previous values. */ }
+            final boolean completed = saved;
+            final boolean targetChanged = stale;
+            runOnUiThread(() -> {
+                annotationWorkers--;
+                saving.set(false);
+                if (!active.get() || !annotationUiActive(epoch)) return;
+                if (completed) {
+                    invalidateTagNames();
+                    dialog.dismiss();
+                    render();
+                } else {
+                    setAnnotationEditorEnabled(editor, true);
+                    dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setEnabled(true);
+                    if (clear != null) clear.setEnabled(true);
+                    if (targetChanged) {
+                        feedback.setText(R.string.figure_annotation_changed);
+                        feedback.setVisibility(View.VISIBLE);
+                    } else Toast.makeText(this, R.string.note_save_failed, Toast.LENGTH_SHORT).show();
+                }
+            });
+        }, "annotation-save").start();
+    }
+
+    private static void setAnnotationEditorEnabled(View view, boolean enabled) {
+        view.setEnabled(enabled);
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++)
+                setAnnotationEditorEnabled(group.getChildAt(i), enabled);
+        }
     }
 
     /** Rebuilds the compact, horizontally scrollable selected-tag row in the editor, hiding the

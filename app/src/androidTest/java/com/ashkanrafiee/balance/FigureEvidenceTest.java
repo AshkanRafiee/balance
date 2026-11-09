@@ -16,12 +16,18 @@ public class FigureEvidenceTest {
     private Context context;
     private final Transaction movement = new Transaction("Refah", "1234", 100L, -20L, 80L, "sig", "content");
 
-    @Before public void before() {
+    @Before public void before() throws Exception {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SourceStore.clear(context);
+        TransactionStore.clear(context);
+        MetadataStore.reset(context, true);
     }
 
-    @After public void after() { SourceStore.clear(context); }
+    @After public void after() throws Exception {
+        SourceStore.clear(context);
+        TransactionStore.clear(context);
+        MetadataStore.reset(context, true);
+    }
 
     @Test public void linksOnlyExactObservedTransaction_notSimilarAmountsOrAccounts() throws Exception {
         SourceStore.Source source = SourceStore.capture(context, "Refah", "settled", 110L, 1);
@@ -63,7 +69,7 @@ public class FigureEvidenceTest {
 
     @Test public void authorizationCodesNeverReachDetails_evenAlphanumericOrSeparated() throws Exception {
         for (String body : Arrays.asList("OTP: 123456", "رمز پویا\n۱۲۳۴۵۶", "code AB12CD",
-                "AZ7-Q4\nOne-time password", "کد تایید: ١٢٣٤٥٦")) {
+                "AZ7-Q4\nOne-time password", "کد تایید: ١٢٣٤٥٦", "کد: AB12CD")) {
             SourceStore.Source source = SourceStore.capture(context, "Refah", body, 110L, 1);
             assertEquals("[redacted]", FigureEvidence.safeBody(source));
         }
@@ -111,9 +117,28 @@ public class FigureEvidenceTest {
         assertNull(overflow.finish());
     }
 
+    @Test public void residualReadsUnfilteredStoreRegardlessOfPersonalAnnotations() throws Exception {
+        Transaction opening = tx("1234", 10, 500, 100L);
+        Transaction withdrawal = tx("1234", 20, -10, null);
+        Transaction closing = tx("1234", 30, 5, 60L);
+        TransactionStore.replace(context, Arrays.asList(opening, withdrawal, closing,
+            tx("other", 20, 999_999, null)));
+        MetadataStore.setAnnotations(context, closing, "only this row matches search", Arrays.asList("chosen"));
+        Residual residual = new Residual("Refah", "1234", 10, 30, -35, 2);
+        FigureEvidence.Bracket bracket = FigureEvidence.residual(context, residual);
+        assertNotNull(bracket);
+        assertEquals(-5, bracket.received);
+        assertEquals(100, bracket.before);
+        assertEquals(60, bracket.after);
+        assertEquals("only this row matches search", MetadataStore.getNote(context, closing));
+        assertEquals(Arrays.asList("chosen"), MetadataStore.getTags(context, closing));
+    }
+
     @Test public void exactRialFormattingHandlesBothLongExtremesInBothLanguages() {
         String original = LocaleHelper.currentTag(context);
+        String currency = CurrencyHelper.currency(context);
         try {
+            CurrencyHelper.setCurrency(context, CurrencyHelper.CURRENCY_RIAL);
             for (String language : Arrays.asList("en", "fa")) {
                 LocaleHelper.setLanguage(context, language);
                 Context localized = LocaleHelper.wrap(context);
@@ -126,7 +151,48 @@ public class FigureEvidenceTest {
                 assertEquals("9223372036854775807", max);
                 assertEquals("9223372036854775808", min);
             }
-        } finally { LocaleHelper.setLanguage(context, original); }
+        } finally {
+            LocaleHelper.setLanguage(context, original);
+            CurrencyHelper.setCurrency(context, currency);
+        }
+    }
+
+    @Test public void selectedUnitIsExactAndPrecedesExplicitRialEvidenceInBothLanguages() {
+        String original = LocaleHelper.currentTag(context);
+        String currency = CurrencyHelper.currency(context);
+        try {
+            for (String language : Arrays.asList("en", "fa")) {
+                LocaleHelper.setLanguage(context, language);
+                Context localized = LocaleHelper.wrap(context);
+                CurrencyHelper.setCurrency(context, CurrencyHelper.CURRENCY_TOMAN);
+                for (long amount : new long[]{25, -25, 0, Long.MIN_VALUE, Long.MAX_VALUE}) {
+                    String text = FigureExplanation.money(localized, amount);
+                    String selected = localized.getString(R.string.figure_display_amount,
+                        NotificationAmounts.format(localized, amount));
+                    String raw = localized.getString(R.string.figure_raw_rials,
+                        java.text.NumberFormat.getIntegerInstance(language.equals("fa")
+                            ? new java.util.Locale("fa") : java.util.Locale.US).format(amount));
+                    assertTrue(text.startsWith(selected + "\n"));
+                    assertTrue(text.endsWith(raw));
+                }
+                // A sum larger than Long.MAX_VALUE must not lose the final fractional toman digit.
+                java.math.BigInteger aggregate = new java.math.BigInteger("18446744073709551615");
+                String large = Digits.ascii(FigureExplanation.money(localized, aggregate));
+                String firstNumber = large.split("\n")[0].replaceAll("[^0-9]", "");
+                assertEquals("18446744073709551615", firstNumber);
+                assertEquals("18446744073709551615", large.split("\n")[1].replaceAll("[^0-9]", ""));
+                if (language.equals("en")) assertTrue(large.split("\n")[0].contains(".5"));
+
+                CurrencyHelper.setCurrency(context, CurrencyHelper.CUSTOM_PREFIX + "USD");
+                String custom = FigureExplanation.money(localized, -25);
+                assertTrue(custom.startsWith(localized.getString(R.string.figure_display_amount,
+                    NotificationAmounts.format(localized, -25))));
+                assertTrue(custom.endsWith(localized.getString(R.string.figure_custom_unit_caution)));
+            }
+        } finally {
+            LocaleHelper.setLanguage(context, original);
+            CurrencyHelper.setCurrency(context, currency);
+        }
     }
 
     private Transaction tx(String account, long date, long amount, Long balance) {

@@ -412,6 +412,47 @@ final class MetadataStore {
         return setAnnotations(context, BalanceData.noteKey(transaction), note, tags);
     }
 
+    /** A production editor's snapshot no longer names one unchanged current movement. */
+    static final class StaleAnnotationTargetException extends Exception {
+        StaleAnnotationTargetException() { super("annotation target changed"); }
+    }
+
+    /** Revalidates the editor snapshot and saves while holding the scan/restore monitor throughout.
+     * A reparse may have already moved its metadata to a different key; writing the old key would
+     * strand the new edits. Never guess a replacement from a similar amount, account or timestamp.
+     * The lower-level setAnnotations overloads remain available for migration/import and tests. */
+    static boolean setCurrentAnnotations(Context context, Transaction expected, String note,
+            Collection<String> tags) throws Exception {
+        return setCurrentAnnotations(context, expected, note, tags, () -> true);
+    }
+
+    /** The UI cancellation fence is checked again after the potentially long history read. */
+    static boolean setCurrentAnnotations(Context context, Transaction expected, String note,
+            Collection<String> tags, java.util.function.BooleanSupplier canSave) throws Exception {
+        if (expected == null) throw new NullPointerException("transaction");
+        if (canSave == null) throw new NullPointerException("save fence");
+        synchronized (BalanceData.class) {
+            if (!canSave.getAsBoolean()) return false;
+            Context current = DataGeneration.context(context);
+            String key = BalanceData.noteKey(expected);
+            int[] matchingKeys = {0};
+            boolean[] exact = {false};
+            TransactionStore.forEach(current, 256, transaction -> {
+                if (!key.equals(BalanceData.noteKey(transaction))) return;
+                matchingKeys[0]++;
+                exact[0] |= expected.date == transaction.date && expected.amount == transaction.amount
+                    && java.util.Objects.equals(expected.bank, transaction.bank)
+                    && java.util.Objects.equals(expected.account, transaction.account)
+                    && java.util.Objects.equals(expected.balance, transaction.balance)
+                    && java.util.Objects.equals(expected.sig, transaction.sig)
+                    && java.util.Objects.equals(expected.content, transaction.content);
+            });
+            if (!canSave.getAsBoolean()) return false;
+            if (matchingKeys[0] != 1 || !exact[0]) throw new StaleAnnotationTargetException();
+            return setAnnotations(current, key, note, tags);
+        }
+    }
+
     static boolean setAnnotations(Context context, String key, String note,
             Collection<String> input) throws Exception {
         requireKey(key);

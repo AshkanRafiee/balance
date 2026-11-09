@@ -6,6 +6,7 @@ import android.content.Context;
 import android.view.View;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.text.DateFormat;
 import java.text.NumberFormat;
@@ -44,7 +45,7 @@ final class FigureExplanation {
             snapshot.add(copy(bank));
             total = total.add(BigInteger.valueOf(bank.amount));
         }
-        String header = activity.getString(R.string.figure_amount, number(activity, total))
+        String header = money(activity, total)
             + "\n\n" + activity.getString(R.string.figure_total_basis);
         show(activity, header, presenter, isActive, context -> {
             StringBuilder out = new StringBuilder();
@@ -176,7 +177,9 @@ final class FigureExplanation {
             : context.getString(R.string.figure_event_unknown));
         paragraph(out, context.getString(R.string.figure_time_caution));
         paragraph(out, context.getString(R.string.figure_source_body));
-        out.append('\n').append(FigureEvidence.safeBody(source));
+        String safeBody = FigureEvidence.safeBody(source);
+        out.append('\n').append("[redacted]".equals(safeBody)
+            ? context.getString(R.string.figure_source_withheld) : safeBody);
         return out.toString();
     }
 
@@ -191,7 +194,33 @@ final class FigureExplanation {
     }
 
     static String money(Context context, long amount) {
-        return context.getString(R.string.figure_amount, number(context, amount));
+        return money(context, BigInteger.valueOf(amount));
+    }
+
+    /** The selected display unit comes first, with exact stored rials alongside it for checking
+     * the evidence below. No integer division, floating-point conversion or absolute value. */
+    static String money(Context context, BigInteger rials) {
+        String currency = CurrencyHelper.currency(context);
+        if (CurrencyHelper.CURRENCY_RIAL.equals(currency))
+            return context.getString(R.string.figure_amount, number(context, rials));
+        String selected;
+        if (rials.bitLength() <= 63) {
+            selected = NotificationAmounts.format(context, rials.longValue());
+        } else {
+            // An aggregate can exceed a single stored long; preserve every digit in that case too.
+            boolean toman = CurrencyHelper.CURRENCY_TOMAN.equals(currency);
+            BigDecimal value = new BigDecimal(rials);
+            if (toman) value = value.movePointLeft(1);
+            NumberFormat format = NumberFormat.getNumberInstance(locale(context));
+            format.setMaximumFractionDigits(toman ? 1 : 0);
+            format.setMinimumFractionDigits(0);
+            selected = format.format(value) + " " + CurrencyHelper.label(context);
+        }
+        String result = context.getString(R.string.figure_display_amount, selected) + "\n"
+            + context.getString(R.string.figure_raw_rials, number(context, rials));
+        if (currency.startsWith(CurrencyHelper.CUSTOM_PREFIX))
+            result += "\n" + context.getString(R.string.figure_custom_unit_caution);
+        return result;
     }
 
     private static String number(Context context, Object amount) {
