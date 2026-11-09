@@ -78,6 +78,9 @@ public final class StoreScreenshotsTest {
         BalanceData.reset(context, true);
         assertTrue("fixture preferences must reset", context.getSharedPreferences(
             BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit());
+        // This is now a guarded, synthetic-only emulator setup. Choose the unlocked product
+        // state rather than bypassing FLAG_SECURE or inheriting another test's lock preference.
+        LockManager.disable(context);
         LockManager.unlockSession();
         BalanceData.setOnboardingSeen(context, true);
         BalanceData.setShowCommitments(context, true);
