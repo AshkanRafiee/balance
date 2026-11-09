@@ -1,103 +1,40 @@
 # Balance
 
-Balance is a small, offline-first Android app that reads supported bank SMS messages locally and shows the latest balance for each recognized bank — broken out per account number when the bank states one — plus the combined total.
+Balance turns supported bank SMS into a clear picture of your money: the latest balances, a combined total, transaction history and payment reminders. Everything is processed on your phone, without an account, cloud service, analytics or internet permission.
 
-Balance currently supports Iranian banks and their Persian SMS formats only. Banks in other countries are not supported yet. A Region setting in the footer switches the app's calendar between the Persian (Jalali) calendar (Iran — the default) and the Gregorian calendar (International), with localized month and weekday names for both; the same menu picks the currency shown next to amounts — Toman by default — plus Rial as stored or any custom currency you type. Only Toman divides the rial figure by ten (the familiar toman amount); every other currency shows the raw number under its own label.
+**Currently supports Iranian banks and their Persian SMS formats only.** Accounts are shown separately when the bank includes an account number in its messages.
 
-## Features
+## What you can do
 
-- Local SMS parsing only — no account, cloud service, analytics, or internet permission
-- Latest balance per supported bank — split per account number when the bank SMS state one — without accumulating repeated messages
-- Combined total balance, with the option to exclude individual accounts from the total
-- Transaction history with deposits and withdrawals, broken down by day, month and year — each level of the breakdown opens on its own, and the current year, month and recent days start open so large histories stay responsive
-- Unaccounted money: when the balance a bank states changes by more than the messages that reached the app account for, the difference is shown as an amber "Unaccounted" row on the later statement's date and counted in every total. It is arithmetic on two balance statements the bank itself sent, so the figure is proven, but the app never invents the missing movements — it does not say how many there were, what they were for or when they happened, and it says so on the row. Nothing before the first balance statement or after the last one can be detected, and a delayed SMS that arrives within a few weeks is read by the date the bank printed on it rather than the day it turned up, so it lands in the period it belongs to and the row closes on its own — provided its balance fits the sequence the other messages imply, which is what earns that closure
-- History filters by bank and account, movement type (all, deposits or withdrawals), date — today, this month, this year or a custom date range in the active calendar (Persian for Iran, Gregorian for International) — and exact reusable tags. A search box also matches any word across bank names, accounts, amounts, notes, tags and the bank's own reason and channel; every filter shapes every figure on the screen
-- CSV export of the transaction history — exactly what the current view shows (bank, account, movement type, date range, tag and search filters; the full history when no filter is active) — saved through the system file picker, with your notes on movements or amber Unaccounted rows, tags, the reasons and channels the bank stated, and matched payment merchants
-- Movement reasons read from the bank: where a bank's SMS names the event behind a movement — a phone top-up, a bill payment, a refund, an instant transfer — the history says so on the row, in your own language, without you having to type it. Where the bank states no reason, and for plain deposits and withdrawals that only repeat the direction, nothing extra is shown, and a reason is never mixed into your own note
-- Movement channels read from the bank: when an SMS says how a transaction went through — Shetab, the instant payment system, a point-of-sale terminal, mobile banking, a bank branch or Paya — the history shows it on its own quiet line under the row, in your language. Like the reason, it is never mixed into your own note
-- Payment merchants read from bank authorization SMS: when a purchase authorization names a beneficiary or merchant and uniquely matches a completed withdrawal, the history shows it as sourced payment information. An OTP alone never creates or confirms a transaction, and ambiguous matches stay unattached
-- Private notes on any history row, including amber Unaccounted rows, and multiple reusable tags on movements: notes follow their row through filters and views and are included in CSV exports and encrypted backups. If a delayed SMS exactly identifies the missing movement, its note follows the real transaction; ambiguous matches remain unattached
-- An optional commitments card below the balance: name your own loans, debts, subscriptions and anything you pay or receive, once or on a daily, weekly, monthly or yearly schedule, open-ended, with an end date or with a payment count. The dashboard shows remaining payables and receivables separately, including zero when nothing remains due. The page groups dues by month, shows each finite commitment's full scheduled total and keeps older paid commitments in a collapsed menu; use Manage to edit commitments. For timely optional reminders, enable notifications and exact-alarm access; Android's background and power-saving restrictions can still delay delivery. The card can be hidden from Display
-- Full history from the total card, per-bank history from any bank card, and single-account history by tapping an account row in the list — an account's history shows the account number in its header, and tapping that chip copies the number
-- Long-press the total card to copy the combined total, or long-press a bank or account card to copy that balance; long-press the eye to switch auto-mask on or off (balances start hidden on every open), and long-press the lock icon for the lock settings
-- Bank sorting by balance or update time, mirrored in the list and the home-screen widget
-- Home-screen widget with the same bank order and totals as the app, its own privacy mask and light/dark theme, and accent values from the app's chosen color palette
-- Password-encrypted backup and restore (balances, transaction history, notes, tags, commitments, the reasons and channels read from SMS, matched payment merchants, and recognized SMS source samples), with each restore letting you pick which sections to bring back; a backup restores on the same or a newer app version, never on an older one, so update the app before moving a backup to another device. The same Data menu holds a full reset — deleting every balance, transaction and commitment (and optionally every note and tag) needs a second confirmation so it can never be triggered by a stray tap
-- Auto light/dark theme (following the device or forced either way), eight selectable theme colors, and persistent masked-balance and currency display preferences
-- Saved balances and history stay visible while new SMS are checked quietly, without a refresh animation on every visit. Pull-to-refresh shows progress: on the bank list it updates balances; on history it updates balances and transactions (full, per-bank or per-account)
-- Data-freshness warning: a bank whose last balance SMS is older than a configurable number of days shows a muted amount and an "N days" badge on its card, with the age also shown in the home-screen widget, so you see how fresh today's totals are before trusting them
-- English and Persian (فارسی) interface, with automatic system-language detection and localized bank names; the footer's single "Display" menu holds its selectors, ordered by how often they get changed and then grouped by kind — the Theme (system / dark / light) forces the color scheme, the Theme color offers eight curated palettes, the Widget theme (same as app / system / dark / light) points the home-screen widget somewhere else when you want it to, the Language overrides the interface language, the Calendar (Persian Jalali / Gregorian) chooses the calendar system, the Currency (Toman / Rial / custom) chooses the value and unit shown next to amounts (Toman divides by ten, others show the raw figure), and the Stale balance warning (off / 3 / 7 / 14 / 30 days) sets how long a balance can go without an SMS before it is flagged
-- Optional in-app lock with a PIN, password or fingerprint, covering the app, the home-screen widget and screenshots/recents, with progressive cooldown delays against wrong-entry guessing
-- About screen with direct links to the website, issue tracker, and a link to show the first-run introduction again
-- First-run introduction on a fresh install: three short pages explain what Balance reads, how it stays offline and private, and ask for SMS access in context during the introduction rather than with a bare dialog over an empty dashboard — skippable at any point, never shown again afterwards, and re-openable anytime from the About screen
-- Report (the Scan diagnostics screen): see which bank SMS parse per bank and which do not — known banks with an unreadable message layout, and senders not recognized yet. Tap any sender — including a recognized one, when a parsed message gets an amount, date, account, reason, channel or merchant wrong — to open its messages and pick exactly which ones to send or copy — and mark what is wrong (account, balance, sender-number, amount, date, reason, channel, merchant or OTP-redaction detection) so the prefilled email tells the maintainer which stage failed. OTP values are removed from shared samples. The email is only sent after you approve — feeding straight into the contribution flow »Contributing« below
+- See balances by bank and account, exclude accounts from the total, spot old balances, and read explanations of what the figures mean.
+- Explore deposits and withdrawals by day, month or year; filter and search history, save private notes and reusable tags together, and export the current view as CSV.
+- See bank-stated transaction reasons, payment channels and merchants when the messages provide enough information. An OTP alone never confirms a transaction.
+- Understand unexplained balance changes: amber **Unaccounted** rows show the difference between balance statements that recorded transactions do not explain. They are not invented transactions or estimates of when missing payments happened.
+- Track one-off or recurring payments and receipts on consistent schedules, with separate payable and receivable totals. Reminder taps open and highlight the due payment, keeping its name and amount visible; Android restrictions can delay reminders.
+- Keep a home-screen widget, make password-encrypted backups, and restore selected data. Backups require the same or a newer app version.
+- Choose Persian or English, a Persian or Gregorian calendar, and light or dark themes. Show amounts in Toman (10 Rial), Rial or with a custom unit label; a custom label does not convert currencies.
+- Hide balances when you choose, optionally hide them again automatically, or use a PIN, password or fingerprint lock. **Masking and automatic hiding are off by default.**
+
+## Your data stays yours
+
+SMS access lets Balance read bank messages; turning it off does not delete saved data. Figures depend on the messages Balance can access, not a live connection to your bank. Missing, deleted or restricted messages can leave gaps, and old balances may no longer reflect your account.
+
+Stored financial data is encrypted. Report, sharing, CSV export and backup only hand selected data to the app or location you choose. Review shared samples even though one-time password values are removed by Report.
+
+For an unexpected result, refresh or safely re-read bank messages before deleting anything. Re-reading keeps commitments, notes, tags, excluded accounts, retained history and saved message sources. **A full reset is different and destructive:** it removes balances, history and commitments and requires two confirmations; deleted SMS cannot be recovered by scanning. Back up first. See [troubleshooting and reporting](CONTRIBUTING.md).
 
 ## Download
 
-Balance can be installed from any of these sources:
+- [GitHub Releases](https://github.com/ashkanrafiee/balance/releases) — signed APKs; [Obtainium](https://obtainium.imranr.dev/) can keep them updated.
+- [F-Droid](https://f-droid.org/en/packages/com.ashkanrafiee.balance/)
+- [Cafe Bazaar](https://cafebazaar.ir/app/com.ashkanrafiee.balance) · [Myket](https://myket.ir/app/com.ashkanrafiee.balance)
 
-- **GitHub** — the fastest way to get the latest updates is installing the signed APK directly from the [GitHub Releases](https://github.com/ashkanrafiee/balance/releases) page. Pair it with [Obtainium](https://obtainium.imranr.dev/) to receive and install updates automatically.
-- **F-Droid** — the preferred store edition for users who like app stores; get it from the [F-Droid listing](https://f-droid.org/en/packages/com.ashkanrafiee.balance/).
-- **Myket and Cafe Bazaar** — alternative store editions, handy for users less familiar with the options above:
-  - [Cafe Bazaar](https://cafebazaar.ir/app/com.ashkanrafiee.balance)
-  - [Myket](https://myket.ir/app/com.ashkanrafiee.balance)
+## Help improve Balance
 
-## Build
+If a bank message, balance or transaction looks wrong, use **Report** to select examples and explain the problem. Nothing is emailed until you approve it in your mail app. You can also [open an issue](https://github.com/AshkanRafiee/balance/issues); please remove private information first.
 
-```sh
-bash ./gradlew assembleDebug
-bash ./gradlew assembleRelease
-```
-
-The release build is unsigned when no keystore is configured, which is suitable for source-based distribution builds. For a locally signed release, put a `signing.properties` file next to `build.gradle`:
-
-```properties
-storeFile=/path/to/balance-release.jks
-storeType=JKS
-storePassword=...
-keyAlias=...
-keyPassword=...
-```
-
-Keep the keystore and passwords outside version control (`signing.properties` and `*.jks` are gitignored). The included GitHub Actions workflow restores its own signing `signing.properties` from repository secrets when publishing a release.
-
-### Version numbers
-
-`versionName` follows `1.<minor>.<patch>`. `versionCode` is derived from it as `major * 10000 + minor * 1000 + patch` (so 1.18.0 → 28000); a fixed release line must keep the same `versionCode` as the tag and the store changelog file name `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`.
-
-## Privacy
-
-Balance requests `READ_SMS` to read existing messages, notification permission for optional commitment reminders, and declares `RECEIVE_BOOT_COMPLETED` plus the fingerprint/BIOMETRIC permissions required for its optional in-app lock. Reminder alarms may also use Android's optional exact-alarm access. It declares no `INTERNET` permission and performs no network requests. On Android 17, the system may hide restricted SMS from apps that are not given one of its limited privileged roles; diagnostics identifies its results as accessible messages. Balance does not upload or send your data; encrypted backups include recognized SMS source samples so parser observations can be restored, and if you explicitly use Report, share, CSV export or backup, selected data is handed to the app or location you choose.
-
-Revoking `READ_SMS` deletes nothing. Every balance, transaction, note, tag and commitment already parsed stays in the encrypted store, and the dashboard, history screen and home-screen widget keep showing it. Because the app can no longer read new bank SMS, the dashboard adds an amber strip under the total card saying the balances may be out of date; tapping it re-requests SMS access (falling back to the app's settings page when the denial is permanent) and refreshes on the spot.
-
-## Reporting a problem or requesting a bank
-
-Is your bank's SMS not recognized, the per-account split wrong, or a balance or
-history entry off? We need the bank's exact message format — verbatim, line
-breaks and spacing included — plus the sender number, your Android version and
-your phone model. You may swap the real numbers for made-up ones of the same
-length and format for privacy. The fastest way to hand us every unparsed
-message is the **Report** item in the footer:
-known banks with an unreadable message layout are highlighted first, then
-unknown senders — and any recognized sender is tappable too, when a parsed
-message gets an amount, date, account, reason, channel or merchant wrong. Tap a sender
-to open its messages, tick the ones to share, mark what seems wrong (account,
-balance, sender-number, amount, date, reason, channel or merchant detection), and send
-or copy exactly those. Nothing is sent until you confirm in your mail app.
-Otherwise, open an [issue](https://github.com/AshkanRafiee/balance/issues)
-or email us; see [CONTRIBUTING.md](CONTRIBUTING.md) for the full checklist.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for reporting, building and release guidance.
 
 ## Donate
 
-Balance is free and open source, and always will be. If you find it useful, you can support its development with a donation in GRAM (prev. TON). Scan the QR code or tap "open in wallet" on the [donation page](https://balance.ashkanrafiee.com/#donate), or send straight from your wallet to:
-
-```
-UQB4goexr3cp0QIdd2_fAJPW9REwZvrRQm-mltr1dMQtV9ig
-```
-
-Thank you for your support.
-
-## Source
-
-https://github.com/ashkanrafiee/balance
+Balance is free and open source. You can support development through the [donation page](https://balance.ashkanrafiee.com/#donate).

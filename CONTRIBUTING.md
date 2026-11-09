@@ -1,4 +1,4 @@
-# Contributing: bank formats, account detection and bug reports
+# Contributing to Balance
 
 Balance parses Iranian bank SMS messages on-device. Helping us keep the
 recognized bank formats up to date — or report a problem — is the most valuable
@@ -62,33 +62,37 @@ copy it or send it yourself.
 
 We integrate reported bank formats into the next update either way.
 
-## Before you report: try resetting the data
+## Before you report: refresh without deleting data
 
-Some balance and history problems — wrong, missing or duplicated entries, most
-often right after an update changed the parsing rules — come from stale data and
-can be fixed with a reset. It is the quickest thing to try first:
+Start with pull-to-refresh: on the bank list it checks balances; on history it
+checks balances and transactions. This is not a reset. If a message still looks
+wrong, use the Data menu's safe re-read to check bank messages again without
+deleting commitments, notes, tags, excluded-account choices, retained history or
+saved message sources. You can also use **Report** to share a redacted example;
+you do not need to erase your data to report a problem.
 
-Open **Data → Reset & rescan**. Balance discards its stored balances and
-transaction history and rebuilds them from the messages currently in your SMS
-inbox, exactly like a fresh install. If the problem disappears, you are done — no
-report needed. If it still shows up after the rebuild, please report it and we
-will get to the parsing rule straight away.
+Scans can only read messages Android makes available to Balance. A missing or
+deleted message, denied SMS permission, or Android restrictions can leave gaps;
+a scan is not a live check against your bank. Tell us if any of these apply.
 
-What a reset does, so there are no surprises:
+### A full reset is destructive
 
-- **Stored balances and history are erased and rebuilt** from the messages that
-  are in your inbox *right now*. Messages you have deleted from SMS cannot be
-  rebuilt — the transactions they contained will not come back.
-- **Backup first.** Make an encrypted backup beforehand (**Data → Create
-  backup**; restoring merges with your current data), so you can always go back.
-  A reset does not touch your backup files.
-- **Excluded banks are reset** — every bank is included in the combined total
-  again, so re-exclude any you had switched off.
-- **Nothing else is lost** — privacy exposure (mask/unmask), Toman display,
-  bank order, lock PIN/password, and every other setting stay as they are.
+Use the Data menu's full reset only when you intend to remove saved financial
+data and rebuild what can be read from the current inbox. It requires a second
+confirmation; it is not the first troubleshooting step.
 
-If a problem survives a reset, tell us that you already tried it; it rules out
-stale data and points us straight at the format rule.
+- **Back up first** with **Data → Create backup**. Keep the password safe;
+  restoring requires the same or a newer app version. Reset does not delete
+  backup files.
+- Saved balances, transaction history and **commitments are deleted**. Inbox
+  messages can rebuild supported balances and history, but not your commitments
+  or transactions whose SMS have been deleted.
+- Notes and tags are deleted only if you choose the additional deletion option.
+- Excluded accounts are included in the combined total again. Display and lock
+  preferences remain unchanged.
+
+If you have already reset, mention it in the report; do not reset again just to
+file an issue.
 
 ## Reporting a wrong balance, account split or history entry
 
@@ -139,12 +143,63 @@ Always include:
 - **What you expected vs. what happened.**
 - Useful extras: screenshots, a screen recording, and log output if you can
   capture it.
-- If the issue involves balances or history, try the data reset described in
-  “Before you report: try resetting the data” above, and tell us whether the
-  problem survived it.
+- If the issue involves balances or history, tell us whether refreshing helped
+  and whether the relevant SMS are still present. A destructive reset is not
+  required.
 
 ## What happens next
 
 We review the report, reproduce it, add or fix the matching rule, and the fix
 ships in a later Balance release. Thank you for helping keep Balance correct for
 everyone.
+
+## Build from source
+
+Use a trusted JDK distribution and Google's official Android SDK tools. The
+release workflow uses Temurin JDK 21, Android platform 36 and build-tools 36.0.0;
+the app's Java source compatibility is 17. Install the SDK packages with the
+official `sdkmanager` and point `ANDROID_HOME` at your SDK installation:
+
+```sh
+sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+bash ./gradlew assembleDebug
+bash ./gradlew assembleRelease
+```
+
+Use the checked-in Gradle wrapper rather than downloading Gradle from an
+unverified mirror. Its official distribution URL and SHA-256 checksum are in
+`gradle/wrapper/gradle-wrapper.properties`. The project currently uses Gradle
+8.14.5 and Android Gradle Plugin 8.13.0. Check the build files and
+`.github/workflows/release.yml` if these versions change.
+
+### Release signing
+
+A release build is unsigned when no keystore is configured, which supports
+source-based distribution builds. For a locally signed release, create
+`signing.properties` next to the root `build.gradle`, using your own values:
+
+```properties
+storeFile=/path/to/balance-release.jks
+storeType=JKS
+storePassword=YOUR_STORE_PASSWORD
+keyAlias=YOUR_KEY_ALIAS
+keyPassword=YOUR_KEY_PASSWORD
+```
+
+Keep the keystore and passwords outside version control. `signing.properties`
+and `*.jks` are gitignored; never attach them to reports or build logs. The
+GitHub release workflow restores signing files from repository secrets.
+
+### Version numbers and release metadata
+
+The repository uses `major.minor.patch` for `versionName` and derives
+`versionCode` with **`major * 10000 + minor * 1000 + patch`**. For example,
+`1.22.0` gives `10000 + 22000 + 0 = 32000`. Recompute the value from the intended
+version before changing `app/build.gradle`; do not substitute another project's
+formula. The release tag, build version and store changelog filename
+(`fastlane/metadata/android/<locale>/changelogs/<versionCode>.txt`) must agree.
+
+Keep README and English/Persian store descriptions accurate for the shipped
+behavior. Each `full_description.txt` must remain under 4000 characters. Write
+product-level changelogs at release time. Never move a published release tag;
+later changes belong to a new release.

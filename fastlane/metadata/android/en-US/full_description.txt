@@ -1,32 +1,34 @@
-Balance reads bank SMS on your phone and shows the latest balance for supported banks — split per account when stated — plus the total. No account, cloud, analytics or internet permission: parsing is on-device and stored data is encrypted. Balance does not upload or send it; Report, sharing, CSV export and backup only hand selected data to the app or location you choose.
+Balance turns bank SMS into balances, transaction history and payment reminders. Processing stays on your phone: no account, cloud service, analytics or internet permission. Stored financial data is encrypted.
 
-Currently supports Iranian banks only. Banks in other countries are not supported yet.
+Currently supports Iranian banks and their Persian SMS formats only. Accounts are shown separately when the bank states an account number.
 
-Features:
-- A first-run introduction explaining what is read and why; skippable, and re-openable from About
-- Offline SMS parsing
-- Latest balance per bank, split per account when stated, without counting the same message twice
-- A combined total, with accounts you can leave out
-- Toman (default), Rial as stored, or a custom currency
-- Balances masked by default for privacy, hidden again on every open
-- Saved data stays visible while new SMS are checked quietly, without repeated loading animations. Pull-to-refresh updates balances on the bank list, and balances plus transactions on history
-- A freshness warning: a bank whose last message is older than the window you set is flagged on its card and in the widget
-- Turning SMS access off deletes nothing — everything already read stays on screen, and a strip under the total card offers to grant access again
-- On Android 17, the system may hide restricted SMS from Balance; diagnostics makes clear when its results cover accessible messages only
-- Home-screen widget with the same bank order and totals, its own privacy mask, light/dark mode, and selected theme color
-- Transaction history by day, month and year, showing out-of-order messages (a transfer and its fee) in their true order
-- Unaccounted money: when a balance statement changed by more than the messages explain, the difference appears as an amber "Unaccounted" row on the later statement's date and is counted in every total. It is proven by two statements your bank sent
-- Filter the history by deposits or withdrawals, by date, and by exact reusable tags — today, this month, this year, or a custom range in the Persian or Gregorian calendar. Search across the transaction details and tags
-- Bank-stated movement reasons and channels appear in your language when present, and stay separate from your note
-- Payment merchants read from authorization SMS: when a purchase message names a merchant and uniquely matches a completed withdrawal, the history shows it as sourced payment information. An OTP alone never creates or confirms a transaction, and ambiguous matches stay unattached
-- Private notes on any history row, including amber Unaccounted rows, and tags on movements: add your own words and labels, with notes following their row into filters, CSV exports and encrypted backups. When a delayed SMS exactly identifies the missing movement, its note follows the real transaction; ambiguous matches remain unattached
-- Track recurring payments and receipts with separate totals and optional reminders; Android may delay them
-- CSV export of exactly what the history shows at that moment, through the system file picker, with notes on movements or Unaccounted rows, movement tags, and the bank's reason, channel and matched merchant
-- Password-encrypted backup and restore of balances, history, notes, tags, commitments, bank facts and recognized SMS source samples
-- Optional in-app lock with PIN, password or fingerprint, covering the app, the widget and screenshots/recents
-- English and Persian interface, Persian (Jalali) or Gregorian calendar, light or dark mode, and eight curated theme colors
-- Report (Scan diagnostics): see which bank messages parse, choose what is wrong, and send or copy your samples; OTP values are removed
+See your money clearly:
+- Latest balances by bank and account, a combined total, and accounts you can exclude
+- Configurable warnings for old balances, plus a home-screen widget
+- In-app explanations of what the figures mean
+- Deposits and withdrawals by day, month and year; filters and search across history
+- Unaccounted rows for changes between balance statements that recorded transactions do not explain — not invented transactions or guesses about missing payments
+- Bank-stated reasons, payment channels and matched merchants when available; an OTP alone never confirms a transaction
+- Save private notes and reusable tags together; export your filtered view as CSV
+- One-off and recurring payments and receipts on consistent schedules, with separate payable and receivable totals
+- Reminder taps open and highlight the due payment with its name and amount visible; Android restrictions can delay delivery
 
-Free and open source. If a bank message or balance looks wrong, report it through Report.
+Choose how it looks:
+- Persian or English, Persian or Gregorian calendar, light or dark mode and eight theme colors
+- Toman (10 Rial), Rial or a custom unit label; a custom label does not convert currencies
+- Optional balance masking and automatic hiding, both off by default
+- Optional PIN, password or fingerprint lock, with widget protection and screenshot blocking
 
-If Balance is useful to you, you can support its development: donation options are in the project readme at https://github.com/AshkanRafiee/balance#donate
+Stay in control:
+- Turning off SMS access does not delete saved data
+- Figures depend on accessible messages, not a live bank connection; missing, deleted or restricted SMS can leave gaps
+- Safely re-read messages while keeping commitments, notes, tags, excluded accounts, retained history and saved message sources
+- A separate full reset deletes balances, history and commitments after two confirmations; deleting notes and tags is optional. Back up first: scanning cannot recover deleted SMS
+- Password-encrypted backups and selective restore on the same or a newer app version
+- Report shows parsing results and lets you choose samples to copy or email. OTP values are removed; review samples before sharing. Email needs your approval
+
+Balance does not upload your data. Report, sharing, CSV export and backup hand selected data only to the app or location you choose.
+
+Free and open source. Report a bank message or balance that looks wrong through Report.
+
+Support development: https://github.com/AshkanRafiee/balance#donate
