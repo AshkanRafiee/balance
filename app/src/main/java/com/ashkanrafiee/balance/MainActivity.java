@@ -157,6 +157,9 @@ public class MainActivity extends Activity {
         mainResumed = false;
         unregisterSmsObserver();
         if (view != null && BalanceData.isAutoHide(this)) {
+            // Explanations have their own window: masking only the dashboard leaves their
+            // already-rendered financial details visible when the user returns.
+            dismissDialogs();
             view.hidden = true;
             view.invalidate();
             if (dashboard != null) dashboard.render();

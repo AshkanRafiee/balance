@@ -261,6 +261,32 @@ public final class DashboardUiTest {
         });
     }
 
+    @Test public void autoHide_dismissesExplanationWhenBackgrounded() {
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        saved.put("Tejarat", new Bank("Tejarat", 987_000L,
+            System.currentTimeMillis(), "TejaratBank"));
+        BalanceData.write(context, saved);
+        BalanceData.setAutoHide(context, true);
+        launch();
+        await(() -> findText(currentRoot(), context.getString(R.string.figure_title)) != null,
+            10_000);
+        android.app.AlertDialog[] explanation = {null};
+        scenario.onActivity(activity -> {
+            // Automatic masking may already have applied during a first permission transition.
+            TextView action = findText(activity.getWindow().getDecorView(),
+                activity.getString(R.string.figure_title));
+            if (!action.isEnabled()) activity.findViewById(R.id.dashboard_mask_button).performClick();
+            activity.explainTotal();
+            explanation[0] = activeDialog(activity);
+            assertNotNull(explanation[0]);
+        });
+        scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED);
+        assertFalse("financial dialog must close even without app lock", explanation[0].isShowing());
+        scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED);
+        scenario.onActivity(activity -> assertFalse(findText(activity.getWindow().getDecorView(),
+            activity.getString(R.string.figure_title)).isEnabled()));
+    }
+
     private static android.app.AlertDialog activeDialog(MainActivity activity) {
         try {
             java.lang.reflect.Field field = MainActivity.class.getDeclaredField("activeDialog");
