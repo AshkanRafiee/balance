@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="amount_custom_name">Unit name</string>
+    <string name="amount_custom_explanation">A custom label shows the original rial number under your chosen name. It does not convert currencies or apply an exchange rate.</string>
+</resources>

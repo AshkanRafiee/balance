@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="amount_custom_name">نام واحد</string>
+    <string name="amount_custom_explanation">برچسب دلخواه، عدد اصلیِ ریالی را با نام انتخابی شما نشان می‌دهد. تبدیل ارز انجام نمی‌شود و نرخ ارز اعمال نمی‌شود.</string>
+</resources>

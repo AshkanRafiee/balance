@@ -110,7 +110,7 @@
 
     <string name="settings_calendar_label">تقویم</string>
     <string name="settings_language_label">زبان</string>
-    <string name="settings_currency_label">واحد پول</string>
+    <string name="settings_currency_label">واحد نمایش مبلغ</string>
     <string name="settings_theme_label">پوسته</string>
     <string name="settings_color_label">رنگ پوسته</string>
     <string name="settings_widget_theme_label">پوستهٔ ویجت</string>
@@ -162,7 +162,7 @@
     <string name="theme_color_berry">تمشکی</string>
     <string name="currency_toman">تومان</string>
     <string name="currency_rial">ریال</string>
-    <string name="currency_custom">دلخواه</string>
+    <string name="currency_custom">برچسب واحد دلخواه</string>
 
     <string name="data_title">داده‌ها</string>
     <string name="backup_action_create">ساخت نسخهٔ پشتیبان</string>

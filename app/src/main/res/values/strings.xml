@@ -110,7 +110,7 @@
 
     <string name="settings_calendar_label">Calendar</string>
     <string name="settings_language_label">Language</string>
-    <string name="settings_currency_label">Currency</string>
+    <string name="settings_currency_label">Amount unit</string>
     <string name="settings_theme_label">Theme</string>
     <string name="settings_color_label">Theme color</string>
     <string name="settings_widget_theme_label">Widget theme</string>
@@ -162,7 +162,7 @@
     <string name="theme_color_berry">Berry</string>
     <string name="currency_toman">Toman</string>
     <string name="currency_rial">Rial</string>
-    <string name="currency_custom">Custom</string>
+    <string name="currency_custom">Custom unit label</string>
 
     <string name="data_title">Data</string>
     <string name="backup_action_create">Create backup</string>

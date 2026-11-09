@@ -528,6 +528,10 @@ public class MainActivity extends Activity {
         String storedCurrency = CurrencyHelper.currency(this);
         final EditText customInput = new EditText(this);
         customInput.setSingleLine(true);
+        customInput.setHint(R.string.amount_custom_name);
+        final TextView customHelp = new TextView(this);
+        customHelp.setText(R.string.amount_custom_explanation);
+        customHelp.setTextSize(13);
         customInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
         if (storedCurrency.startsWith(CurrencyHelper.CUSTOM_PREFIX))
             customInput.setText(storedCurrency.substring(CurrencyHelper.CUSTOM_PREFIX.length()));
@@ -539,9 +543,11 @@ public class MainActivity extends Activity {
         int curIdx = CurrencyHelper.fixedIndex(storedCurrency);
         currencySpin.setSelection(curIdx);
         customInput.setVisibility(curIdx == 2 ? View.VISIBLE : View.GONE);
+        customHelp.setVisibility(curIdx == 2 ? View.VISIBLE : View.GONE);
         currencySpin.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
                 customInput.setVisibility(pos == 2 ? View.VISIBLE : View.GONE);
+                customHelp.setVisibility(pos == 2 ? View.VISIBLE : View.GONE);
                 if (pos != 2) {
                     String chosen = CurrencyHelper.fixedCurrency(pos);
                     if (!chosen.equals(CurrencyHelper.currency(MainActivity.this))) {
@@ -627,6 +633,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams curInLp = new LinearLayout.LayoutParams(-1, -2);
         curInLp.topMargin = dp(8);
         box.addView(customInput, curInLp);
+        box.addView(customHelp);
         LinearLayout.LayoutParams staleLp = new LinearLayout.LayoutParams(-1, -2);
         staleLp.topMargin = dp(18);
         box.addView(staleLabel, staleLp);
