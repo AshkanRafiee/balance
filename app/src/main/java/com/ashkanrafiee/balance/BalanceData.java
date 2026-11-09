@@ -1493,11 +1493,41 @@ final class BalanceData {
     /** Same as {@link #scanSms(Context, LinkedHashMap)} with advisory progress. */
     static synchronized int scanSms(Context context, LinkedHashMap<String, Bank> saved,
             WorkProgress progress) {
+        return scanSmsOutcome(context, saved, progress).changed;
+    }
+
+    /** A checked inbox is not a claim that any saved account balance is current. */
+    static final class ScanOutcome {
+        enum Status { SUCCESS, NO_ACCESS, PROVIDER_ERROR, SAVE_ERROR, SOURCE_ERROR, BUSY }
+        final Status status;
+        final int changed;
+
+        ScanOutcome(Status status, int changed) {
+            this.status = status;
+            this.changed = changed;
+        }
+
+        boolean succeeded() { return status == Status.SUCCESS; }
+    }
+
+    static synchronized ScanOutcome scanSmsOutcome(Context context,
+            LinkedHashMap<String, Bank> saved, WorkProgress progress) {
+        try {
+            return scanSmsChecked(context, saved, progress);
+        } catch (Exception e) {
+            Log.w(TAG, "balance scan could not complete", e);
+            return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, 0);
+        }
+    }
+
+    private static ScanOutcome scanSmsChecked(Context context, LinkedHashMap<String, Bank> saved,
+            WorkProgress progress) {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
-            return 0;
+            return new ScanOutcome(ScanOutcome.Status.NO_ACCESS, 0);
         boolean resetWasPending = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
             .getBoolean(KEY_RESET_IN_PROGRESS, false);
-        if (resetWasPending && !recoverReset(context)) return 0;
+        if (resetWasPending && !recoverReset(context))
+            return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, 0);
         if (progress != null) progress.stage(R.string.scan_stage_reading);
         LinkedHashMap<String, Bank> current = read(context);
         SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
@@ -1584,7 +1614,7 @@ final class BalanceData {
             scanSucceeded = false;
             Log.w(TAG, "scan failed", e);
         }
-        if (!scanSucceeded) return 0;
+        if (!scanSucceeded) return new ScanOutcome(ScanOutcome.Status.PROVIDER_ERROR, 0);
         // A full re-scan that re-keys a bank's messages per account supersedes the legacy plain
         // bank slot (which pre-dates account extraction): drop it so the old merged balance is not
         // kept next to — and summed with — the new per-account slots. Banks with no account-bearing
@@ -1679,8 +1709,8 @@ final class BalanceData {
         boolean sourceOk = captureSources(context, sourceRows, BankRules.VERSION);
         boolean holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_BALANCE, sourceOk);
         if (progress != null) progress.stage(R.string.scan_stage_saving);
-        if (!write(context, current)) return 0;
-        if (!saveRecentMovements(context, windows)) return 0;
+        if (!write(context, current) || !saveRecentMovements(context, windows))
+            return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, 0);
         // A full scan that finds no bank message at all could not have re-derived anything, so it
         // must not confirm the rules version or advance the watermark: the stored balances may be
         // stale (the messages they came from are gone, or the SMS store is not available yet) and
@@ -1697,11 +1727,12 @@ final class BalanceData {
                     .putLong(KEY_SCANNED_ID, newestId);
             }
             if (holdWatermark) editor.remove(KEY_RULES_VERSION);
-            editor.apply();
+            if (!editor.commit()) return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, 0);
         }
         saved.clear();
         saved.putAll(current);
-        return matched;
+        return new ScanOutcome(sourceOk ? ScanOutcome.Status.SUCCESS
+            : ScanOutcome.Status.SOURCE_ERROR, matched);
     }
 
     /** One recognized SMS and the parse result, if this scanner recognized one. */
@@ -1919,12 +1950,26 @@ final class BalanceData {
 
     /** Same as {@link #scanHistory(Context)} with advisory progress. */
     static synchronized int scanHistory(Context context, WorkProgress progress) {
+        return scanHistoryOutcome(context, progress).changed;
+    }
+
+    static synchronized ScanOutcome scanHistoryOutcome(Context context, WorkProgress progress) {
+        try {
+            return scanHistoryChecked(context, progress);
+        } catch (Exception e) {
+            Log.w(TAG, "history scan could not complete", e);
+            return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, 0);
+        }
+    }
+
+    private static ScanOutcome scanHistoryChecked(Context context, WorkProgress progress) {
         if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
-            return 0;
-        if (HISTORY_SCANNING) return 0;
+            return new ScanOutcome(ScanOutcome.Status.NO_ACCESS, 0);
+        if (HISTORY_SCANNING) return new ScanOutcome(ScanOutcome.Status.BUSY, 0);
         boolean resetWasPending = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
             .getBoolean(KEY_RESET_IN_PROGRESS, false);
-        if (resetWasPending && !recoverReset(context)) return 0;
+        if (resetWasPending && !recoverReset(context))
+            return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, 0);
         if (progress != null) progress.stage(R.string.scan_stage_reading);
         HISTORY_SCANNING = true;
         boolean completed = false;
@@ -1937,6 +1982,7 @@ final class BalanceData {
         boolean textChanged = false;
         boolean holdWatermark = false;
         boolean merchantEvidenceReadable = true;
+        boolean sourcesSaved = true;
         try {
             List<Transaction> stored = null;
             SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
@@ -1994,7 +2040,7 @@ final class BalanceData {
                 Telephony.Sms.DATE + " DESC, " + Telephony.Sms._ID + " DESC")) {
                 if (cursor == null) {
                     failed = true;
-                    return 0;
+                    return new ScanOutcome(ScanOutcome.Status.PROVIDER_ERROR, 0);
                 }
                 List<Object[]> rows = new ArrayList<>();
                 List<SourceEvidence> sourceRows = new ArrayList<>();
@@ -2024,9 +2070,11 @@ final class BalanceData {
                     rows.add(new Object[]{bank, sender, body,
                         MessageDate.eventTime(body, arrival, BankRules.calendar(bank)), evidence});
                 }
-                if (rows.isEmpty())
+                if (rows.isEmpty()) {
+                    sourcesSaved = captureSources(context, sourceRows, HISTORY_RULES_VERSION);
                     holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_HISTORY,
-                        captureSources(context, sourceRows, HISTORY_RULES_VERSION));
+                        sourcesSaved);
+                }
                 if (rows.isEmpty()) {
                     // Most no-new-message refreshes have no queued metadata at all. Checking the
                     // encrypted preference presence first keeps them from reading the whole
@@ -2044,7 +2092,7 @@ final class BalanceData {
                         if (!saveRecentMovements(context, new HashMap<>())
                                 || !saveLastBalances(context, new HashMap<>())) {
                             failed = true;
-                            return 0;
+                            return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, 0);
                         }
                     }
                     completed = true;
@@ -2064,8 +2112,9 @@ final class BalanceData {
                         emptyEditor.remove(KEY_HISTORY_RULES_VERSION)
                             .remove(KEY_HISTORY_SCHEMA);
                     }
-                    emptyEditor.apply();
-                    return 0;
+                    if (!emptyEditor.commit())
+                        return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, 0);
+                    return historyCompletion(context, sourcesSaved, 0);
                 }
                 stored = readTransactions(context);
                 Map<String, List<Transaction>> priorParses = full
@@ -2248,6 +2297,7 @@ final class BalanceData {
                     }
                 }
                 boolean sourcesCaptured = captureSources(context, sourceRows, HISTORY_RULES_VERSION);
+                sourcesSaved = sourcesCaptured;
                 holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_HISTORY, sourcesCaptured);
                 // Chain banks: keep the balance chain end correct when the true-newest movement was not
                 // among the rows scanned now (a previous scan already committed it), and place fresh
@@ -2470,7 +2520,7 @@ final class BalanceData {
                 failed = true;
                 Log.w(TAG, "history scan failed", e);
             }
-            if (!completed) return added;
+            if (!completed) return new ScanOutcome(ScanOutcome.Status.PROVIDER_ERROR, added);
             if (progress != null) progress.stage(R.string.scan_stage_saving);
             Map<String, String> residualAliases = notedResiduals.isEmpty()
                 ? new LinkedHashMap<>()
@@ -2478,7 +2528,7 @@ final class BalanceData {
             if (!residualAliases.isEmpty() && !stageResidualNoteMigrations(context, residualAliases)) {
                 failed = true;
                 completed = false;
-                return added;
+                return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, added);
             }
             boolean transactionsSaved = true;
             if (transactionsChanged) {
@@ -2496,19 +2546,19 @@ final class BalanceData {
             if (!transactionsSaved) {
                 failed = true;
                 completed = false;
-                return added;
+                return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, added);
             }
             textChanged |= completePendingTransactionMetadataMigrations(context, stored);
             textChanged |= completePendingResidualNoteMigrations(context, stored);
             if (windows != null && !saveRecentMovements(context, windows)) {
                 failed = true;
                 completed = false;
-                return added;
+                return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, added);
             }
             if (!saveLastBalances(context, lastBalance, lastBalanceDates)) {
                 failed = true;
                 completed = false;
-                return added;
+                return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, added);
             }
             boolean merchantsCleared = removeMerchants(context, ambiguousMerchants);
             // The reasons and channels land after the transactions they belong to, so the stores never
@@ -2538,12 +2588,39 @@ final class BalanceData {
                 editor.putLong(KEY_HISTORY_RAW_THROUGH, newestRaw)
                     .putLong(KEY_HISTORY_ID, newestId);
             }
-            editor.apply();
-            return added;
+            if (!editor.commit()) return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, added);
+            return historyCompletion(context, sourcesSaved && merchantEvidenceReadable, added);
         } finally {
             HISTORY_SCANNING = false;
             if (added != 0 || failed || textChanged) notifyHistoryChanged();
         }
+    }
+
+    private static ScanOutcome historyCompletion(Context context, boolean sourcesSaved, int added) {
+        if (!sourcesSaved) return new ScanOutcome(ScanOutcome.Status.SOURCE_ERROR, added);
+        boolean pending = hasPendingMetadataMigrations(context,
+            KEY_PENDING_TRANSACTION_METADATA_MIGRATIONS)
+            || hasPendingMetadataMigrations(context, KEY_PENDING_RESIDUAL_NOTE_MIGRATIONS)
+            || context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE)
+                .getBoolean(KEY_MERCHANT_EVIDENCE_PENDING, false);
+        return new ScanOutcome(pending ? ScanOutcome.Status.SAVE_ERROR
+            : ScanOutcome.Status.SUCCESS, added);
+    }
+
+    /** Reparse available messages without clearing personal data or deleted-message evidence.
+     *  Invalidate only parser checkpoints; failed work is retried by the next ordinary scan. */
+    static synchronized ScanOutcome reReadBankMessages(Context context,
+            LinkedHashMap<String, Bank> saved, WorkProgress progress) {
+        if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED)
+            return new ScanOutcome(ScanOutcome.Status.NO_ACCESS, 0);
+        if (!context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
+                .remove(KEY_RULES_VERSION).remove(KEY_HISTORY_RULES_VERSION)
+                .remove(KEY_HISTORY_SCHEMA).commit())
+            return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, 0);
+        ScanOutcome balances = scanSmsOutcome(context, saved, progress);
+        if (!balances.succeeded()) return balances;
+        ScanOutcome history = scanHistoryOutcome(context, progress);
+        return new ScanOutcome(history.status, balances.changed + history.changed);
     }
 
     /** Builds one-to-one residual-to-transaction aliases for a completed scan. */
