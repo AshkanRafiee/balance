@@ -227,9 +227,18 @@ final class FigureExplanation {
         return NumberFormat.getIntegerInstance(locale(context)).format(amount);
     }
 
-    private static String time(Context context, long date) {
-        return DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, locale(context))
-            .format(new java.util.Date(date));
+    static String time(Context context, long date) {
+        java.util.Calendar civil = java.util.Calendar.getInstance(java.util.Locale.US);
+        civil.setTimeInMillis(date);
+        boolean iran = RegionHelper.isIran(context);
+        CalDate day = CalDate.fromGregorian(civil.get(java.util.Calendar.YEAR),
+            civil.get(java.util.Calendar.MONTH) + 1, civil.get(java.util.Calendar.DAY_OF_MONTH), iran);
+        NumberFormat digits = NumberFormat.getIntegerInstance(locale(context));
+        digits.setGroupingUsed(false);
+        return digits.format(day.day) + " "
+            + CalDate.monthName(day.month, iran, LocaleHelper.isPersian(context)) + " "
+            + digits.format(day.year) + " · "
+            + DateFormat.getTimeInstance(DateFormat.SHORT, locale(context)).format(new java.util.Date(date));
     }
 
     private static Locale locale(Context context) {
