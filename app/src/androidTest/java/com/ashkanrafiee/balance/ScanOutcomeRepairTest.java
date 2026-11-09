@@ -170,6 +170,15 @@ public class ScanOutcomeRepairTest {
         assertFalse(outcome.succeeded());
     }
 
+    @Test public void failedSourceCaptureNeverReportsSuccessEvenAfterRetryBudget() throws Exception {
+        SourceStore.capture(context, "500095", "retained evidence", 1_000_000L, 1);
+        assertTrue(DataGeneration.context(context).deleteDatabase(SourceStore.DB_NAME));
+        for (int attempt = 0; attempt < 5; attempt++) {
+            assertEquals(BalanceData.ScanOutcome.Status.SOURCE_ERROR,
+                BalanceData.scanSmsOutcome(withProvider(3), new LinkedHashMap<>(), null).status);
+        }
+    }
+
     private Context withProvider(int mode) {
         ContentProvider provider = new ContentProvider() {
             int queries;
