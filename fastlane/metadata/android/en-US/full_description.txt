@@ -24,7 +24,7 @@ Stay in control:
 - Figures depend on accessible messages, not a live bank connection; missing, deleted or restricted SMS can leave gaps
 - Safely re-read messages while keeping commitments, notes, tags, excluded accounts, retained history and saved message sources
 - A separate full reset deletes balances, history and commitments after two confirmations; deleting notes and tags is optional. Back up first: scanning cannot recover deleted SMS
-- Password-encrypted backups and selective restore on the same or a newer app version
+- Password-encrypted backups, including retained bank-message samples, and selective restore on the same or a newer app version
 - Report shows parsing results and lets you choose samples to copy or email. OTP values are removed; review samples before sharing. Email needs your approval
 
 Balance does not upload your data. Report, sharing, CSV export and backup hand selected data only to the app or location you choose.
