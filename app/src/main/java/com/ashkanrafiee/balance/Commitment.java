@@ -139,8 +139,11 @@ final class Commitment {
 
     private static List<Long> legacyCivilDates(List<Long> dates, CommitmentSchedule schedule) {
         TreeSet<Long> days = new TreeSet<>();
-        for (long date : dates)
-            days.add(schedule.instant(CommitmentSchedule.day(date, schedule.zone)));
+        for (long date : dates) {
+            long identity = schedule.instant(CommitmentSchedule.day(date, schedule.zone));
+            if (identity <= 0) throw new IllegalArgumentException("invalid legacy settlement civil day");
+            days.add(identity);
+        }
         return new ArrayList<>(days);
     }
 
@@ -154,6 +157,22 @@ final class Commitment {
             boolean remind, long remindBeforeMs) {
         return normalized(new Commitment(UUID.randomUUID().toString(), name, amount, frequency,
             start, end, false, null, remind, remindBeforeMs));
+    }
+
+    static Commitment create(String name, long amount, int frequency, long start, Long end,
+            boolean remind, long remindBeforeMs, CalendarSystem calendar, java.time.ZoneId zone) {
+        Commitment c = create(name, amount, frequency, start, end, remind, remindBeforeMs);
+        return c == null ? null : c.freezeSchedule(calendar, zone);
+    }
+
+    int[] dueCivil(long due, CalendarSystem displayCalendar) {
+        return civilDay(due, displayCalendar,
+            schedule == null ? java.time.ZoneId.systemDefault() : schedule.zone);
+    }
+
+    static long scheduleStartOfDay(Commitment c, long at) {
+        return c.schedule == null ? startOfDay(at)
+            : c.schedule.instant(CommitmentSchedule.day(at, c.schedule.zone));
     }
 
     /** Valid nonzero signed long amounts, names, ids, positive dates and nonnegative lead times
@@ -392,9 +411,9 @@ final class Commitment {
     // Occurrences
     // ====================================================================
 
-    /** Every due day of this commitment inside {@code [fromMs, toMs]}, as start-of-day millis in
-     *  the viewing calendar and in chronological order. Both bounds are civil days: anything due
-     *  on the boundary day is included. Unbounded work is bounded by the caller asking for a
+    /** Every due day of this commitment inside the inclusive viewing-zone civil-day window, in
+     *  chronological order. Returned millis are stable home-zone settlement identities, not
+     *  viewing-zone midnights; use {@link #dueCivil} for display/grouping. Unbounded work is bounded by the caller asking for a
      *  window — an open-ended daily commitment expands to a handful of integers per day, so even
      *  a decade-wide window costs nothing. */
     static List<Long> occurrences(Commitment c, CalendarSystem cal, long fromMs, long toMs) {
@@ -414,11 +433,14 @@ final class Commitment {
             OccurrenceVisitor visitor, int maxVisits) {
         if (c == null || cal == null || visitor == null || toMs < fromMs) return;
         if (c.schedule != null) {
-            Calendar endDay = Calendar.getInstance();
-            endDay.setTimeInMillis(startOfDay(toMs));
-            endDay.add(Calendar.DAY_OF_MONTH, 1);
-            long until = toMs == Long.MAX_VALUE ? Long.MAX_VALUE : endDay.getTimeInMillis() - 1;
-            c.schedule.visit(c.frequency, startOfDay(fromMs), until, visitor, maxVisits);
+            // Screen windows are inclusive civil days in the viewing zone. Project those same
+            // civil dates into the home zone; traveling must not hide a month-boundary due or
+            // rename its civil date. The returned identities remain home-zone instants.
+            java.time.ZoneId displayZone = java.time.ZoneId.systemDefault();
+            long from = c.schedule.instant(CommitmentSchedule.day(fromMs, displayZone));
+            long until = toMs == Long.MAX_VALUE ? Long.MAX_VALUE : c.schedule.instant(
+                CommitmentSchedule.day(toMs, displayZone).plusDays(1)) - 1;
+            c.schedule.visit(c.frequency, from, until, visitor, maxVisits);
             return;
         }
         int[] anchor = civilDay(c.start, cal);
@@ -442,6 +464,19 @@ final class Commitment {
             }
             step(cursor, c.frequency, cal, anchor[2]);
         }
+    }
+
+    /** Reminder planning uses instants rather than a screen's civil-day window. */
+    static void visitScheduleOccurrences(Commitment c, CalendarSystem cal, long from, long to,
+            OccurrenceVisitor visitor, int maxVisits) {
+        if (c.schedule == null) visitOccurrences(c, cal, from, to, visitor, maxVisits);
+        else c.schedule.visit(c.frequency, from, to, visitor, maxVisits);
+    }
+
+    static List<Long> scheduleOccurrences(Commitment c, CalendarSystem cal, long from, long to) {
+        List<Long> result = new ArrayList<>();
+        visitScheduleOccurrences(c, cal, from, to, result::add, -1);
+        return result;
     }
 
     /** Positions the recurrence cursor at the first possible due day in the requested window. */
@@ -489,12 +524,12 @@ final class Commitment {
      *  schedule does not expand its whole history to answer. */
     static Long nextDue(Commitment c, CalendarSystem cal, long nowMs) {
         if (c == null || cal == null) return null;
-        long today = startOfDay(nowMs);
+        long today = scheduleStartOfDay(c, nowMs);
         if (c.frequency == ONCE) return c.done ? null : c.schedule == null
             ? startOfDay(c.start) : c.schedule.instant(c.schedule.first);
-        List<Long> ahead = occurrences(c, cal, today, today + 730L * 86400000L);
+        List<Long> ahead = scheduleOccurrences(c, cal, today, today + 730L * 86400000L);
         for (long at : ahead) if (!c.isSettled(at)) return at;
-        List<Long> behind = occurrences(c, cal, today - 366L * 86400000L, today - 1);
+        List<Long> behind = scheduleOccurrences(c, cal, today - 366L * 86400000L, today - 1);
         Long overdue = null;
         for (long at : behind) if (!c.isSettled(at)) overdue = at;
         return overdue;

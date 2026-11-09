@@ -73,6 +73,7 @@ public class BackupV2Test {
         Commitment recurring = new Commitment("rent-id", "Monthly rent", -1_000L,
             Commitment.MONTHLY, T, T + 120 * DAY, false, paid, T + DAY, unpaid, true,
             3_600_000L);
+        recurring = stableFixture(recurring);
         Commitment once = new Commitment("once-id", "One-time bill", 99L, Commitment.ONCE,
             T, null, true, Collections.emptyList(), 0, Collections.emptyList(), false, 0);
         BalanceData.writeCommitments(context, Arrays.asList(recurring, once));
@@ -325,6 +326,7 @@ public class BackupV2Test {
         Commitment backupDefinition = new Commitment(id, "Union", -5L, Commitment.DAILY, T,
             null, false, Arrays.asList(first, second), 0,
             Collections.singletonList(third), false, 0);
+        backupDefinition = stableFixture(backupDefinition);
         BalanceData.writeCommitments(context, Collections.singletonList(backupDefinition));
         File backup = file("v2-settlement-union.bin");
         BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
@@ -333,6 +335,7 @@ public class BackupV2Test {
         Commitment localDefinition = new Commitment(id, "Local definition", -5L,
             Commitment.DAILY, T, null, false, Collections.singletonList(fourth), 0,
             Collections.singletonList(first), false, 0);
+        localDefinition = stableFixture(localDefinition);
         BalanceData.writeCommitments(context, Collections.singletonList(localDefinition));
 
         BackupManager.restore(context, Uri.fromFile(backup), PASSWORD);
@@ -341,6 +344,12 @@ public class BackupV2Test {
         assertFalse(CommitmentStore.isSettled(context, id, third));
         assertTrue(CommitmentStore.isSettled(context, id, fourth));
         assertEquals("Local definition", CommitmentStore.get(context, id).name);
+    }
+
+    /** Exact event-merge fixtures are already-migrated records, not legacy civil-day inputs. */
+    private static Commitment stableFixture(Commitment c) {
+        return c.withSchedule(CommitmentSchedule.capture(c, CalendarSystem.GREGORIAN,
+            java.time.ZoneId.systemDefault()));
     }
 
     @Test public void sources_roundTripThroughFramedBackup() throws Exception {

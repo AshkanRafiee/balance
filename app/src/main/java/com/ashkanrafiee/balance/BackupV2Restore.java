@@ -1420,8 +1420,9 @@ final class BackupV2Restore {
                     stage.forEachCommitmentEvent(ordinal, (date, settled) -> {
                         // Legacy marks name civil days in the current migration interpretation.
                         // Stable backups already carry exact schedule-zone identities.
-                        long identity = newDefinition && definition.schedule == null
-                            ? target.schedule.instant(CommitmentSchedule.day(date, target.schedule.zone))
+                        long identity = definition.schedule == null
+                            ? target.schedule.instant(CommitmentSchedule.day(date,
+                                java.time.ZoneId.systemDefault()))
                             : date;
                         if (newDefinition ? editor.restoreNewSettlement(definition.id, identity, settled)
                                 : editor.mergeSettlementIfAbsent(definition.id, identity, settled))

@@ -89,6 +89,27 @@ public class CommitmentScheduleTest {
         for (long due : dues) assertTrue(c.hasOccurrence(due));
     }
 
+    @Test public void travelDoesNotRenameMonthBoundaryDueOrSkipItsFutureReminder() {
+        ZoneId home = ZoneId.of("Pacific/Pago_Pago");
+        long first = day(2026, 1, 31, home.getId());
+        Commitment c = Commitment.create("Loan", -123, Commitment.MONTHLY, first, null, true, 0,
+            CalendarSystem.GREGORIAN, home);
+        TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Kiritimati"));
+        // The home due's instant is already February 1 on the traveling device.
+        assertEquals(2, Commitment.civilDay(first, CalendarSystem.GREGORIAN)[1]);
+        CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
+            Collections.singletonList(c), CalendarSystem.GREGORIAN,
+            day(2026, 1, 15, "Pacific/Kiritimati"), 2);
+        assertEquals(2, summary.months.size());
+        assertEquals(1, summary.months.get(0).month);
+        assertEquals(first, summary.months.get(0).rows.get(0).date);
+        assertEquals(2, summary.months.get(1).month);
+        long now = first - 3600000L;
+        assertEquals(Long.valueOf(first), CommitmentReminders.reminderDue(c, CalendarSystem.JALALI,
+            now, Collections.emptySet(), false, new CommitmentReminderJobs.Token()));
+        assertEquals(Long.valueOf(first), Commitment.nextDue(c, CalendarSystem.JALALI, now));
+    }
+
     @Test public void jalaliScheduleClampsAndCountUsesItsOwnCalendarAndZone() {
         ZoneId zone = ZoneId.of("Asia/Tehran");
         long start = Commitment.millisOf(1405, 6, 31, CalendarSystem.JALALI, zone);
@@ -142,6 +163,39 @@ public class CommitmentScheduleTest {
         } catch (IllegalStateException expected) { }
         assertEquals(payload, context.getSharedPreferences(BalanceData.PREFS_DATA,
             Context.MODE_PRIVATE).getString(BalanceData.KEY_COMMITMENTS, null));
+    }
+
+    @Test public void encryptedDatabaseUpgradeMigratesBothCivilSettlementKindsAtomically() throws Exception {
+        long first = day(2026, 1, 31, "UTC"), second = day(2026, 2, 28, "UTC");
+        Commitment legacy = new Commitment("database-legacy", "Loan", -7, Commitment.MONTHLY,
+            first, null, false, Collections.singletonList(first + 3600000), second,
+            Collections.singletonList(second + 3600000), false, 0);
+        // Seed the old on-disk shape using the actual row codec, not an unencrypted test DB.
+        CommitmentStore.upsert(context, legacy.withSchedule(CommitmentSchedule.capture(legacy,
+            CalendarSystem.GREGORIAN, ZoneId.of("UTC"))));
+        CommitmentStore.runInTransaction(context, editor -> {
+            java.lang.reflect.Field active = CommitmentStore.class.getDeclaredField("ACTIVE");
+            active.setAccessible(true);
+            Object session = ((ThreadLocal<?>) active.get(null)).get();
+            java.lang.reflect.Method payload = session.getClass().getDeclaredMethod(
+                "definitionPayload", Commitment.class);
+            payload.setAccessible(true);
+            java.lang.reflect.Field database = session.getClass().getDeclaredField("db");
+            database.setAccessible(true);
+            android.database.sqlite.SQLiteDatabase db =
+                (android.database.sqlite.SQLiteDatabase) database.get(session);
+            android.content.ContentValues values = new android.content.ContentValues();
+            values.put("payload", (String) payload.invoke(session, legacy));
+            db.update(CommitmentStore.TABLE, values, null, null);
+            db.delete("store_meta", "key=?", new String[]{"civil_schedules_v1"});
+            return null;
+        });
+        Commitment upgraded = CommitmentStore.get(context, legacy.id);
+        assertNotNull(upgraded.schedule);
+        assertEquals(Collections.singletonList(first), upgraded.paid);
+        assertEquals(Collections.singletonList(second), upgraded.unpaid);
+        assertTrue(upgraded.isSettled(first));
+        assertFalse(upgraded.isSettled(second));
     }
 
     @Test public void newJsonRetainsZoneCivilDatesAndCalendarAcrossRestore() throws Exception {

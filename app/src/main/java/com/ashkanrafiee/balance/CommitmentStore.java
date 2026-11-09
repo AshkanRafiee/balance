@@ -762,6 +762,7 @@ final class CommitmentStore {
                         while (marks.moveToNext()) {
                             Settlement mark = decodeSettlement(marks, definition.rowId);
                             long date = schedule.instant(CommitmentSchedule.day(mark.date, schedule.zone));
+                            requireDate(date);
                             putIncomingMark("incoming_marks", definition.rowId, date, mark.settled);
                         }
                     }
@@ -1219,7 +1220,7 @@ final class CommitmentStore {
     private static void requireDefinition(Commitment c) {
         if (c == null || c.id == null || c.id.isEmpty() || c.name == null || c.name.trim().isEmpty()
                 || c.amount == 0 || c.frequency < Commitment.ONCE || c.frequency > Commitment.YEARLY
-                || c.start <= 0 || c.end != null && c.end < Commitment.startOfDay(c.start)
+                || c.start <= 0 || c.end != null && c.end < Commitment.scheduleStartOfDay(c, c.start)
                 || c.legacyPaidThrough < 0 || c.remindBeforeMs < 0)
             throw new IllegalArgumentException("invalid commitment");
         // Lazy collections are already validated encrypted rows. Validation must not copy them.
