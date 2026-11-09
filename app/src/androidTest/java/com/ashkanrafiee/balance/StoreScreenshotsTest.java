@@ -45,7 +45,9 @@ import java.util.Locale;
  * <p>Requires storeScreenshots=true, an Android emulator, and READ_SMS revoked or explicitly
  * checked-empty-inbox capture mode. Only then
  * may the fixture replace the emulator's app data. It never reads message bodies or changes SMS and
- * never snapshots existing app records. See docs/store-screenshots.md before running it.
+ * never snapshots existing app records. Use only a disposable emulator; invoke this class with
+ * {@code -e storeScreenshots true}. Checked-empty-inbox mode additionally requires
+ * {@code -e storeScreenshotsEmptyInbox true}; it grants SMS access and verifies an empty inbox.
  */
 @RunWith(AndroidJUnit4.class)
 public final class StoreScreenshotsTest {
@@ -80,7 +82,7 @@ public final class StoreScreenshotsTest {
             // store overview is allowed only after explicitly clearing the disposable emulator inbox.
             assertEmptyInbox(target);
         } else {
-            assertEquals("Revoke READ_SMS before starting instrumentation; see the capture runbook",
+            assertEquals("Revoke READ_SMS before instrumentation in denied-access capture mode",
                 PackageManager.PERMISSION_DENIED, target.checkSelfPermission(Manifest.permission.READ_SMS));
         }
 
