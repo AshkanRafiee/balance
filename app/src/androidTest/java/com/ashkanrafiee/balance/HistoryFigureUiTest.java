@@ -17,6 +17,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import org.junit.After;
 import org.junit.Before;
@@ -126,37 +127,44 @@ public class HistoryFigureUiTest {
 
     @Test public void queuedSaveDoesNotBlockUiAndCancelPreventsLaterCommit() throws Exception {
         openEditor();
+        final AlertDialog[] opened = {null};
+        scenario.onActivity(activity -> opened[0] = lastDialog(activity));
+        AlertDialog editor = opened[0];
         try (StoreBlock ignored = new StoreBlock()) {
-            scenario.onActivity(activity -> {
-                AlertDialog editor = lastDialog(activity);
+            runWithoutBlockingUi("Save must return to the UI queue while the store is busy", () -> {
                 noteInput(editor).setText("must not save");
                 editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
                 assertFalse(editor.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled());
                 assertTrue(editor.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled());
-                editor.getButton(AlertDialog.BUTTON_NEGATIVE).performClick();
             });
+            runWithoutBlockingUi("Cancel must return while the store is busy", () ->
+                editor.getButton(AlertDialog.BUTTON_NEGATIVE).performClick());
         }
         await(this::idle);
+        scenario.onActivity(activity -> assertTrue(HistoryActivity.shownDialogsForTest(activity).isEmpty()));
         assertEquals("previous note", BalanceData.getNote(context, transaction));
         assertEquals(Arrays.asList("old tag"), BalanceData.getTags(context, transaction));
     }
 
     @Test public void openingEditorDoesNotBlockUiAndCancelPreventsLateWindow() throws Exception {
         openDetails();
+        await(() -> dialogContains(context.getString(R.string.figure_source_missing)));
+        final HistoryActivity[] opened = {null};
+        scenario.onActivity(activity -> opened[0] = activity);
+        HistoryActivity activity = opened[0];
         try (StoreBlock ignored = new StoreBlock()) {
-            scenario.onActivity(activity -> {
-                lastDialog(activity).getButton(AlertDialog.BUTTON_NEUTRAL).performClick();
-            });
-            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
-            scenario.onActivity(activity -> {
+            runWithoutBlockingUi("Opening must return to the UI queue while the store is busy", () ->
+                lastDialog(activity).getButton(AlertDialog.BUTTON_NEUTRAL).performClick());
+            runWithoutBlockingUi("Cancel must return while the store is busy", () -> {
                 AlertDialog loading = lastDialog(activity);
                 assertNull(find(loading.getWindow().getDecorView(), v -> v instanceof EditText));
                 loading.getButton(AlertDialog.BUTTON_NEGATIVE).performClick();
             });
         }
         await(this::idle);
-        scenario.onActivity(activity -> assertTrue(HistoryActivity.shownDialogsForTest(activity).isEmpty()));
+        scenario.onActivity(current -> assertTrue(HistoryActivity.shownDialogsForTest(current).isEmpty()));
         assertEquals("previous note", BalanceData.getNote(context, transaction));
+        assertEquals(Arrays.asList("old tag"), BalanceData.getTags(context, transaction));
     }
 
     @Test public void reparseWhileEditorOpenRejectsSaveAndPreservesTypedNoteAndTags() throws Exception {
@@ -284,6 +292,33 @@ public class HistoryFigureUiTest {
         fail("UI condition timed out");
     }
 
+    private static void runWithoutBlockingUi(String message, Runnable action) throws Exception {
+        CountDownLatch returnedToQueue = new CountDownLatch(1);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+        Runnable posted = () -> {
+            try {
+                action.run();
+            } catch (Throwable error) {
+                failure.set(error);
+            } finally {
+                // A separate queue turn also catches work posted by the click that blocks the UI.
+                // On timeout the enclosing StoreBlock releases the monitor instead of hanging.
+                main.post(returnedToQueue::countDown);
+            }
+        };
+        main.post(posted);
+        try {
+            if (!returnedToQueue.await(2, TimeUnit.SECONDS)) {
+                fail(message + "\nUI thread: "
+                    + Arrays.toString(main.getLooper().getThread().getStackTrace()));
+            }
+            if (failure.get() != null) throw new AssertionError(failure.get());
+        } finally {
+            main.removeCallbacks(posted);
+        }
+    }
+
     private static final class StoreBlock implements AutoCloseable {
         private final CountDownLatch entered = new CountDownLatch(1);
         private final CountDownLatch release = new CountDownLatch(1);
@@ -292,17 +327,23 @@ public class HistoryFigureUiTest {
             thread = new Thread(() -> {
                 synchronized (BalanceData.class) {
                     entered.countDown();
-                    try { release.await(10, TimeUnit.SECONDS); }
+                    try { release.await(); }
                     catch (InterruptedException e) { Thread.currentThread().interrupt(); }
                 }
-            });
+            }, "figure-test-store-holder");
             thread.start();
-            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            boolean acquired = false;
+            try {
+                acquired = entered.await(5, TimeUnit.SECONDS);
+                assertTrue("the test store holder did not start", acquired);
+            } finally {
+                if (!acquired) release.countDown();
+            }
         }
         @Override public void close() throws Exception {
             release.countDown();
             thread.join(5_000);
-            assertFalse(thread.isAlive());
+            assertFalse("the test must release its store monitor", thread.isAlive());
         }
     }
 }
