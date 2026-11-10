@@ -871,11 +871,11 @@ final class BankRules {
                 // amount, a balance, a date or a time can never be read as the channel, and every split
                 // stays unique instead of a body with no newline being divided between them in N ways,
                 // which is what turns one unparsable message into seconds of stall.
-                return Pattern.compile("(?m)^[ \\t]*" + Pattern.quote(BalanceData.normalizeLetters(row[2]))
+                return Pattern.compile("(?m)^[ \\t]*" + Pattern.quote(TextNormalizer.normalize(row[2]))
                     + "[ \\t]*([^\\d\\s\\r\\n][^\\d\\r\\n]{0," + (MAX_CHANNEL_LENGTH - 2)
                     + "}[^\\d\\s\\r\\n])[ \\t]*\\r?\\n");
             case "final-prefix":  // Sepah: the final line states the transfer channel ("انتقال وجه پایا")
-                return Pattern.compile("(?m)^[ \\t]*" + Pattern.quote(BalanceData.normalizeLetters(row[2]))
+                return Pattern.compile("(?m)^[ \\t]*" + Pattern.quote(TextNormalizer.normalize(row[2]))
                     + "[ \\t]+(پایا)[ \\t]*\\r?$" );
             default:
                 throw new IllegalArgumentException("unknown channel shape '" + row[1] + "' for " + row[0]);
