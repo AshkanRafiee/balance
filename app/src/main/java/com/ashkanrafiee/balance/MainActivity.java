@@ -2649,7 +2649,7 @@ public class MainActivity extends Activity {
         void recalcTotal() {
             total = 0;
             for (java.util.Map.Entry<String, Bank> e : banks.entrySet())
-                if (!excluded.contains(e.getKey())) total += e.getValue().amount;
+                if (!BalanceData.isExcluded(excluded, e.getKey())) total += e.getValue().amount;
         }
 
         /** A short live summary of the dashboard for screen readers: the total (or its mask state)
@@ -2660,7 +2660,7 @@ public class MainActivity extends Activity {
                     + CurrencyHelper.label(MainActivity.this);
             int staleCount = 0;
             for (java.util.Map.Entry<String, Bank> e : banks.entrySet())
-                if (!excluded.contains(e.getKey()) && BalanceData.isStale(MainActivity.this, e.getValue().date))
+                if (!BalanceData.isExcluded(excluded, e.getKey()) && BalanceData.isStale(MainActivity.this, e.getValue().date))
                     staleCount++;
             String note = staleCount > 0
                 ? " " + getResources().getQuantityString(
@@ -3491,7 +3491,7 @@ public class MainActivity extends Activity {
                 for (Bank b : block) {
                     String key = BalanceData.storageKey(b.name, b.account);
                     out.add(new BankRow(BankRow.SINGLE, b, b.name, key, b.amount,
-                        excluded.contains(key), cursor, 82));
+                        BalanceData.isExcluded(excluded, key), cursor, 82));
                     cursor += 96;
                 }
             }
@@ -3645,7 +3645,7 @@ public class MainActivity extends Activity {
          *  key, so exclude/include affects only the tapped account, never its siblings. */
         void showBankMenu(String key, String bankName, long amount) {
             String displayName = BankRules.displayName(MainActivity.this, bankName);
-            boolean isExcluded = excluded.contains(key);
+            boolean isExcluded = BalanceData.isExcluded(excluded, key);
             String[] options = {
                 getString(isExcluded ? R.string.action_include : R.string.action_exclude),
                 getString(R.string.action_copy_balance),
@@ -3663,7 +3663,7 @@ public class MainActivity extends Activity {
                         if (dashboard != null) dashboard.render();
                         BalanceWidgetProvider.push(MainActivity.this);
                         Toast.makeText(MainActivity.this,
-                            getString(excluded.contains(key)
+                            getString(BalanceData.isExcluded(excluded, key)
                                 ? R.string.toast_excluded : R.string.toast_included),
                             Toast.LENGTH_SHORT).show();
                     } else if (which == 1) {

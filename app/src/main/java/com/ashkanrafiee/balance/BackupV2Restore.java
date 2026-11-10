@@ -512,6 +512,12 @@ final class BackupV2Restore {
                     seen |= bit;
                     parseLegacyTags(json, stage);
                     break;
+                case "accountRepairState":
+                    bit = 1 << 9;
+                    if ((seen & bit) != 0) throw invalid("duplicate account repair state");
+                    seen |= bit;
+                    parseAccountRepairState(json, stage);
+                    break;
                 case "commitments":
                     bit = 1 << 8;
                     if ((seen & bit) != 0) throw invalid("duplicate legacy commitments");
@@ -829,6 +835,12 @@ final class BackupV2Restore {
             String kind = json.nextName();
             int bit;
             int stageKind;
+            if ("accountRepairState".equals(kind)) {
+                if ((seen & (1 << 5)) != 0) throw invalid("duplicate account repair state");
+                seen |= 1 << 5;
+                parseAccountRepairState(json, stage);
+                continue;
+            }
             if ("notes".equals(kind)) { bit = 1; stageKind = NOTES; }
             else if ("reasons".equals(kind)) { bit = 1 << 1; stageKind = REASONS; }
             else if ("channels".equals(kind)) { bit = 1 << 2; stageKind = CHANNELS; }
@@ -843,6 +855,43 @@ final class BackupV2Restore {
         // Merchant metadata was added after framed schema 2 was already deployed. Older valid
         // backups omit it; absence must leave local merchant rows untouched during restore.
         if ((seen & 0x0f) != 0x0f) throw invalid("incomplete metadata");
+    }
+
+    private static void parseAccountRepairState(JsonReader json, InputStage stage) throws Exception {
+        json.beginArray();
+        while (json.hasNext()) {
+            int seen = 0;
+            int kind = 0;
+            String key = null;
+            boolean archived = false;
+            json.beginObject();
+            while (json.hasNext()) {
+                switch (json.nextName()) {
+                    case "kind":
+                        seen = once(seen, 1, "duplicate repair kind");
+                        long value = exactLong(json);
+                        if (value < MetadataStore.NOTES || value > MetadataStore.MERCHANTS)
+                            throw invalid("invalid repair kind");
+                        kind = (int) value;
+                        break;
+                    case "key":
+                        seen = once(seen, 2, "duplicate repair key");
+                        key = requiredString(json);
+                        requireMetadataKey(key);
+                        break;
+                    case "archived":
+                        seen = once(seen, 4, "duplicate repair archive state");
+                        if (json.peek() != JsonToken.BOOLEAN) throw invalid("invalid repair archive state");
+                        archived = json.nextBoolean();
+                        break;
+                    default: throw invalid("unknown account repair field");
+                }
+            }
+            json.endObject();
+            if (seen != 7) throw invalid("incomplete account repair state");
+            stage.addAccountRepairState(kind, key, archived);
+        }
+        json.endArray();
     }
 
     private static void parseMetadataRows(JsonReader json, InputStage stage, int kind,
@@ -1218,6 +1267,10 @@ final class BackupV2Restore {
             throws Exception {
         if (selection == null) selection = BackupManager.allSections();
         BackupManager.RestoreResult result = new BackupManager.RestoreResult();
+        // Local account repair and imported aliases share restore's atomic generation. An older
+        // backup may reintroduce padding even after this installation's migration completed.
+        if (!DataGeneration.dataPrefs(context).getBoolean(DottedAccountMigration.KEY_COMPLETE, false))
+            result.metadataChanged = DottedAccountMigration.normalizeStage(context);
         if (selection.contains(BackupManager.Section.SOURCES)) mergeSources(context, stage, result);
         if (selection.contains(BackupManager.Section.BALANCES))
             mergeBalances(context, stage, result);
@@ -1234,14 +1287,14 @@ final class BackupV2Restore {
             TransactionStore.collectAliases(context,
                 visitor -> stage.forEach(TRANSACTION,
                     payload -> visitor.accept(readTransaction(payload))),
-                stage::addAlias);
+                stage::addAlias, stage::addRepairedAlias);
         }
 
         if (selection.contains(BackupManager.Section.TRANSACTIONS)) {
             TransactionStore.MergeResult merged = TransactionStore.mergeResult(context,
                 visitor -> stage.forEach(TRANSACTION,
                     payload -> visitor.accept(readTransaction(payload))),
-                stage::addAlias);
+                stage::addAlias, stage::addRepairedAlias);
             result.transactionsAdded = Math.toIntExact(merged.added);
         }
 
@@ -1254,6 +1307,9 @@ final class BackupV2Restore {
                     row.getLong("from"), row.getLong("to"), row.getLong("amount"),
                     row.getInt("movements"));
                 result.metadataChanged |= BalanceData.mergeResidualNoteProvenance(context, residual);
+                if (stage.hasMetadata(NOTES, BalanceData.noteKey(residual)))
+                    result.metadataChanged |= DottedAccountMigration.importResidual(context, residual,
+                        stage.accountRepairState(MetadataStore.NOTES, BalanceData.noteKey(residual)));
             });
         }
         if (selection.contains(BackupManager.Section.REASONS))
@@ -1269,6 +1325,7 @@ final class BackupV2Restore {
             mergeCommitments(context, stage, result, includeDeleted);
             mergeCommitmentDeletions(context, stage, result, includeDeleted);
         }
+        result.metadataChanged |= DottedAccountMigration.normalizeStage(context);
         return result;
     }
 
@@ -1316,10 +1373,11 @@ final class BackupV2Restore {
         LinkedHashMap<String, Bank> merged = new LinkedHashMap<>(current);
         stage.forEach(BALANCE, payload -> {
             JSONObject row = new JSONObject(payload);
-            String key = row.getString("key");
+            String key = DottedAccountMigration.storageKey(row.getString("key"));
             String name = row.getString("name");
             String account = row.has("account") && !row.isNull("account")
                 ? row.getString("account") : null;
+            account = DottedAccountMigration.account(name, account);
             Bank incoming = new Bank(name, row.getLong("amount"), row.getLong("date"),
                 row.getString("sender"), account);
             Bank old = merged.get(key);
@@ -1360,19 +1418,73 @@ final class BackupV2Restore {
 
     private static void mergeMetadata(Context context, InputStage stage, int inputKind,
             int storeKind, boolean tags, BackupManager.RestoreResult result) throws Exception {
+        // All annotations converging on one repaired survivor belong to the same repair. Plan
+        // this per selected kind in the encrypted input stage, independent of backup row order.
+        // Otherwise an ordinary canonical-to-signed alias could still discard its original text
+        // when the signed survivor already has a conflicting local value.
         stage.forEach(inputKind, payload -> {
-            JSONObject row = new JSONObject(payload);
-            String key = stage.resolveAlias(row.getString("key"));
-            if (tags) {
-                JSONArray values = row.getJSONArray("tags");
-                List<String> incoming = new ArrayList<>(values.length());
-                for (int i = 0; i < values.length(); i++) incoming.add(values.getString(i));
-                result.metadataChanged |= MetadataStore.mergeTagsEntry(context, key, incoming);
-            } else {
-                result.metadataChanged |= MetadataStore.mergeTextEntry(context, storeKind, key,
-                    row.getString("text"));
-            }
+            String original = new JSONObject(payload).getString("key");
+            String repaired = stage.repairedDestination(original);
+            String normalized = DottedAccountMigration.metadataKey(original);
+            if (repaired != null || !normalized.equals(original)
+                    || stage.accountRepairState(storeKind, original) != null)
+                stage.markMetadataRepairDestination(storeKind,
+                    metadataDestination(stage, original, repaired, normalized));
         });
+        // Bounded passes: preserve original repair rows first, then ordinary parser aliases, then
+        // protected canonical aliases, and finally padded aliases. In particular, optional repair
+        // state also puts active canonical rows on the repair path; those must reach a signed
+        // survivor before any padded copy can occupy it. Every text merge remains local-first.
+        for (int pass = 0; pass < 4; pass++) {
+            final int phase = pass;
+            stage.forEach(inputKind, payload -> {
+                JSONObject row = new JSONObject(payload);
+                String original = row.getString("key");
+                String repaired = stage.repairedDestination(original);
+                String normalized = DottedAccountMigration.metadataKey(original);
+                Boolean archived = stage.accountRepairState(storeKind, original);
+                String destination = metadataDestination(stage, original, repaired, normalized);
+                boolean padded = repaired != null || !normalized.equals(original);
+                boolean repair = archived != null || padded
+                    || stage.metadataRepairDestination(storeKind, destination);
+                if (repair && phase == (padded ? 3 : 2)) {
+                    result.metadataChanged |= MetadataStore.copyImportedDottedEntry(context,
+                        storeKind, original, destination, archived == null);
+                    return;
+                }
+                // Unrepaired parser aliases retain their established destination-only import
+                // policy, but only after every destination's own original row has been imported.
+                boolean importOriginal = phase == 0 && (repair || destination.equals(original));
+                boolean importAlias = phase == 1 && !repair && !destination.equals(original);
+                if (!importOriginal && !importAlias) return;
+                if (tags) {
+                    JSONArray values = row.getJSONArray("tags");
+                    List<String> incoming = new ArrayList<>(values.length());
+                    for (int i = 0; i < values.length(); i++) incoming.add(values.getString(i));
+                    if (repair)
+                        result.metadataChanged |= MetadataStore.importDottedEntry(context, storeKind,
+                            original, null, incoming, archived);
+                    else result.metadataChanged |= MetadataStore.mergeTagsEntry(context, destination, incoming);
+                } else {
+                    if (repair)
+                        result.metadataChanged |= MetadataStore.importDottedEntry(context, storeKind,
+                            original, row.getString("text"), null, archived);
+                    else result.metadataChanged |= MetadataStore.mergeTextEntry(context, storeKind,
+                            destination, row.getString("text"));
+                }
+            });
+        }
+    }
+
+    private static String metadataDestination(InputStage stage, String original, String repaired,
+            String normalized) throws Exception {
+        if (repaired != null) return repaired;
+        String ordinary = stage.resolveAlias(original);
+        if (!ordinary.equals(original)) return ordinary;
+        // Orphan padded annotations may have no incoming transaction of their own. The canonical
+        // transaction can nevertheless prove the direct route to an existing signed survivor.
+        String canonical = stage.repairedDestination(normalized);
+        return canonical != null ? canonical : stage.resolveAlias(normalized);
     }
 
     /**
@@ -1663,6 +1775,14 @@ final class BackupV2Restore {
             add(kind, payload);
         }
 
+        boolean hasMetadata(int kind, String key) {
+            try (Cursor cursor = db.query("metadata_keys", new String[]{"kind"},
+                    "kind=? AND key_digest=?", new String[]{Integer.toString(kind),
+                        digest("metadata\n" + kind + "\n" + key)}, null, null, null, "1")) {
+                return cursor.moveToFirst();
+            }
+        }
+
         long beginCommitment() throws Exception {
             long ordinal = nextCommitment;
             nextCommitment = Math.incrementExact(nextCommitment);
@@ -1720,10 +1840,66 @@ final class BackupV2Restore {
         }
 
         void addAlias(String from, String to) throws Exception {
+            addAlias(from, to, false);
+        }
+
+        void addAccountRepairState(int kind, String key, boolean archived) throws Exception {
+            String digest = digest("account-repair\n" + kind + "\n" + key);
+            ContentValues values = new ContentValues();
+            values.put("source_digest", digest);
+            values.put("payload", codec.encrypt(new JSONObject().put("kind", kind)
+                .put("key", key).put("archived", archived).toString(), aliasIdentity(digest)));
+            try {
+                db.insertOrThrow("aliases", null, values);
+            } catch (SQLiteConstraintException duplicate) {
+                throw invalid("duplicate account repair identity");
+            }
+        }
+
+        Boolean accountRepairState(int kind, String key) throws Exception {
+            String digest = digest("account-repair\n" + kind + "\n" + key);
+            try (Cursor cursor = db.query("aliases", new String[]{"payload"}, "source_digest=?",
+                    new String[]{digest}, null, null, null, "1")) {
+                if (!cursor.moveToFirst()) return null;
+                JSONObject row = new JSONObject(codec.decrypt(cursor.getString(0), aliasIdentity(digest)));
+                if (row.getInt("kind") != kind || !key.equals(row.getString("key")))
+                    throw invalid("account repair identity mismatch");
+                return row.getBoolean("archived");
+            }
+        }
+
+        void markMetadataRepairDestination(int kind, String key) throws Exception {
+            if (metadataRepairDestination(kind, key)) return;
+            String digest = digest("metadata-repair-destination\n" + kind + "\n" + key);
+            ContentValues values = new ContentValues();
+            values.put("source_digest", digest);
+            values.put("payload", codec.encrypt(new JSONObject().put("kind", kind)
+                .put("key", key).toString(), aliasIdentity(digest)));
+            db.insertOrThrow("aliases", null, values);
+        }
+
+        boolean metadataRepairDestination(int kind, String key) throws Exception {
+            String digest = digest("metadata-repair-destination\n" + kind + "\n" + key);
+            try (Cursor cursor = db.query("aliases", new String[]{"payload"}, "source_digest=?",
+                    new String[]{digest}, null, null, null, "1")) {
+                if (!cursor.moveToFirst()) return false;
+                JSONObject row = new JSONObject(codec.decrypt(cursor.getString(0), aliasIdentity(digest)));
+                if (row.getInt("kind") != kind || !key.equals(row.getString("key")))
+                    throw invalid("metadata repair destination mismatch");
+                return true;
+            }
+        }
+
+        void addRepairedAlias(String from, String to) throws Exception {
+            addAlias(from, to, true);
+        }
+
+        private void addAlias(String from, String to, boolean repaired) throws Exception {
             if (from == null || to == null || from.isEmpty() || to.isEmpty())
                 throw invalid("invalid transaction alias");
-            if (from.equals(to)) return;
+            if (from.equals(to) && !repaired) return;
             String sourceDigest = digest("alias\n" + from);
+            boolean replace = false;
             try (Cursor cursor = db.query("aliases", new String[]{"payload"},
                     "source_digest=?", new String[]{sourceDigest}, null, null, null, "1")) {
                 if (cursor.moveToFirst()) {
@@ -1731,28 +1907,41 @@ final class BackupV2Restore {
                         aliasIdentity(sourceDigest)));
                     if (!to.equals(old.getString("to")))
                         throw invalid("conflicting transaction alias");
-                    return;
+                    // Two old interpretations can prove the same survivor. The additive route is
+                    // the stronger preservation requirement, irrespective of callback order.
+                    if (old.optBoolean("repaired") || !repaired) return;
+                    replace = true;
                 }
             }
             ContentValues values = new ContentValues();
             values.put("source_digest", sourceDigest);
             values.put("payload", codec.encrypt(new JSONObject().put("from", from)
-                .put("to", to).toString(), aliasIdentity(sourceDigest)));
-            db.insertOrThrow("aliases", null, values);
+                .put("to", to).put("repaired", repaired).toString(), aliasIdentity(sourceDigest)));
+            if (replace) db.update("aliases", values, "source_digest=?", new String[]{sourceDigest});
+            else db.insertOrThrow("aliases", null, values);
         }
 
         String resolveAlias(String source) throws Exception {
+            return aliasDestination(source, false);
+        }
+
+        String repairedDestination(String source) throws Exception {
+            return aliasDestination(source, true);
+        }
+
+        private String aliasDestination(String source, boolean repaired) throws Exception {
             // A merge alias targets the surviving stored row directly. TransactionStore never
             // replaces a survivor, so following chains or retaining an in-memory alias set would
             // both be unnecessary and could remap a valid survivor's own metadata incorrectly.
             String sourceDigest = digest("alias\n" + source);
             try (Cursor cursor = db.query("aliases", new String[]{"payload"},
                     "source_digest=?", new String[]{sourceDigest}, null, null, null, "1")) {
-                if (!cursor.moveToFirst()) return source;
+                if (!cursor.moveToFirst()) return repaired ? null : source;
                 JSONObject alias = new JSONObject(codec.decrypt(cursor.getString(0),
                     aliasIdentity(sourceDigest)));
                 if (!source.equals(alias.getString("from")))
                     throw invalid("transaction alias mismatch");
+                if (alias.optBoolean("repaired") != repaired) return repaired ? null : source;
                 return alias.getString("to");
             }
         }

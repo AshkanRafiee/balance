@@ -1286,8 +1286,14 @@ final class BalanceData {
             if (raw == null) return set;
             boolean legacy = raw.indexOf('[') == 0;
             JSONArray arr = new JSONArray(legacy ? raw : decrypt(raw));
-            for (int i = 0; i < arr.length(); i++) set.add(arr.getString(i));
-            if (legacy) setExcluded(context, set);
+            boolean normalized = false;
+            for (int i = 0; i < arr.length(); i++) {
+                String old = arr.getString(i);
+                String canonical = DottedAccountMigration.storageKey(old);
+                set.add(canonical);
+                normalized |= !old.equals(canonical);
+            }
+            if (legacy || normalized) setExcluded(context, set);
         } catch (Exception e) {
             Log.w(TAG, "excluded entries unreadable; treating as none", e);
         }
@@ -1297,7 +1303,9 @@ final class BalanceData {
     static void setExcluded(Context context, Set<String> excluded) {
         try {
             JSONArray arr = new JSONArray();
-            for (String key : excluded) arr.put(key);
+            Set<String> canonical = new HashSet<>();
+            for (String key : excluded) canonical.add(DottedAccountMigration.storageKey(key));
+            for (String key : canonical) arr.put(key);
             context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE).edit()
                 .putString(KEY_EXCLUDED, encrypt(arr.toString())).apply();
         } catch (Exception e) {
@@ -1306,10 +1314,16 @@ final class BalanceData {
     }
 
     static boolean isExcluded(Context context, String key) {
-        return getExcluded(context).contains(key);
+        return isExcluded(getExcluded(context), key);
+    }
+
+    /** A saved padded spelling is the same excluded account even before worker migration runs. */
+    static boolean isExcluded(Set<String> excluded, String key) {
+        return excluded.contains(DottedAccountMigration.storageKey(key));
     }
 
     static void toggleExcluded(Context context, String key) {
+        key = DottedAccountMigration.storageKey(key);
         Set<String> excluded = getExcluded(context);
         if (excluded.contains(key)) excluded.remove(key);
         else excluded.add(key);
@@ -1327,7 +1341,7 @@ final class BalanceData {
         List<Bank> included = new ArrayList<>();
         List<Bank> excludedBanks = new ArrayList<>();
         for (Bank b : banks.values()) {
-            if (excluded.contains(storageKey(b.name, b.account))) excludedBanks.add(b);
+            if (isExcluded(excluded, storageKey(b.name, b.account))) excludedBanks.add(b);
             else included.add(b);
         }
         sortBanks(included, sort);
@@ -1363,7 +1377,7 @@ final class BalanceData {
         List<Bank> included = new ArrayList<>();
         List<Bank> excludedBanks = new ArrayList<>();
         for (Bank b : banks.values()) {
-            if (excluded.contains(storageKey(b.name, b.account))) excludedBanks.add(b);
+            if (isExcluded(excluded, storageKey(b.name, b.account))) excludedBanks.add(b);
             else included.add(b);
         }
         sortBanks(included, sort);
@@ -1537,6 +1551,12 @@ final class BalanceData {
             .getBoolean(KEY_RESET_IN_PROGRESS, false);
         if (resetWasPending && !recoverReset(context))
             return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, 0);
+        boolean accountsMigrated;
+        try { accountsMigrated = DottedAccountMigration.ensure(context); }
+        catch (Exception e) {
+            Log.w(TAG, "account migration failed", e);
+            return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, 0);
+        }
         if (progress != null) progress.stage(R.string.scan_stage_reading);
         LinkedHashMap<String, Bank> current = read(context);
         SharedPreferences prefs = context.getSharedPreferences(PREFS_PREF, Context.MODE_PRIVATE);
@@ -1560,7 +1580,7 @@ final class BalanceData {
             cursorDate = 0;
             cursorId = 0;
         }
-        int matched = 0;
+        int matched = accountsMigrated ? 1 : 0;
         long newest = 0;
         long newestRaw = 0;
         long newestId = 0;
@@ -1836,7 +1856,9 @@ final class BalanceData {
                 SourceEvidence present = byPhysical.get(physicalMessageKey(source.sender,
                     source.rawBody, source.arrivalTime));
                 for (SourceStore.BalanceObservation old : balances) {
-                    String key = storageKey(old.bank, old.account);
+                    // The immutable observation keeps its old spelling; compare its account
+                    // identity to the migrated projection without rewriting source evidence.
+                    String key = DottedAccountMigration.storageKey(storageKey(old.bank, old.account));
                     Bank saved = current.get(key);
                     if (saved != null && saved.date == old.date && saved.amount == old.balance) {
                         possibleSources.computeIfAbsent(key, ignored -> new HashSet<>()).add(source.id);
@@ -1864,7 +1886,8 @@ final class BalanceData {
                 String key = physicalMessageKey(source.sender, source.rawBody, source.arrivalTime);
                 if (!present.contains(key)) return;
                 for (SourceStore.TransactionObservation observation : transactions)
-                    prior.computeIfAbsent(key, ignored -> new ArrayList<>()).add(observation.transaction);
+                    prior.computeIfAbsent(key, ignored -> new ArrayList<>())
+                        .add(DottedAccountMigration.transaction(observation.transaction));
             });
         } catch (Exception e) {
             prior.clear();
@@ -2117,6 +2140,12 @@ final class BalanceData {
             .getBoolean(KEY_RESET_IN_PROGRESS, false);
         if (resetWasPending && !recoverReset(context))
             return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, 0);
+        boolean accountsMigrated;
+        try { accountsMigrated = DottedAccountMigration.ensure(context); }
+        catch (Exception e) {
+            Log.w(TAG, "account migration failed", e);
+            return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, 0);
+        }
         if (progress != null) progress.stage(R.string.scan_stage_reading);
         HISTORY_SCANNING = true;
         boolean completed = false;
@@ -2126,7 +2155,7 @@ final class BalanceData {
         // scan still notifies, exactly as before, so its render path is unchanged.
         int added = 0;
         boolean failed = false;
-        boolean textChanged = false;
+        boolean textChanged = accountsMigrated;
         boolean holdWatermark = false;
         boolean merchantEvidenceReadable = true;
         boolean sourcesSaved = true;

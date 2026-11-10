@@ -351,6 +351,17 @@ public class BankRulesTest {
         }
     }
 
+    @Test public void extractAccount_dottedLinePadding_doesNotChangeAccountIdentity() {
+        String account = "123.456.78901234.5";
+        String[] padding = {"", " ", "\t", " \t ", "\r", "\n", " \n\n", "\t\r\n\r\n"};
+        for (String bank : new String[]{"Pasargad", "Wepod"}) {
+            for (String suffix : padding) {
+                assertEquals(bank, account, BankRules.extractAccount(bank,
+                    account + suffix + "\n+12,000,000\n08/07_18:59\n\u0645\u0627\u0646\u062F\u0647: 12,000,000"));
+            }
+        }
+    }
+
     @Test public void extractAccount_pasargadDateOrAmount_notCaptured() {
         // A dated line, a signed amount, or a dotted date must not be mistaken for the account.
         assertNull(BankRules.extractAccount("Pasargad", "-508,000\n06/29_21:06\n\u0645\u0627\u0646\u062F\u0647: 51,289"));

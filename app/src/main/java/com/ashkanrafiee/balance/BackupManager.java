@@ -189,6 +189,10 @@ final class BackupManager {
         writer.write(BalanceData.serializeTextMap(BalanceData.readMerchants(context)));
         writer.write(",\"txTags\":");
         writer.write(BalanceData.serializeTagsMap(BalanceData.readTags(context)));
+        writer.write(",\"accountRepairState\":");
+        JsonWriter repair = new JsonWriter(writer);
+        MetadataStore.writeAccountRepairState(context, repair);
+        repair.flush();
         writer.write(",\"commitments\":");
         writer.write(BalanceData.serializeCommitments(BalanceData.readCommitments(context)));
         writer.write("}");
@@ -263,6 +267,8 @@ final class BackupManager {
         writeMetadata(context, json, MetadataStore.CHANNELS, false);
         writeMetadata(context, json, MetadataStore.TAGS, true);
         writeMetadata(context, json, MetadataStore.MERCHANTS, false);
+        json.name("accountRepairState");
+        MetadataStore.writeAccountRepairState(context, json);
         json.endObject();
 
         // Notes kept through a reset may no longer have transactions from which to recover their

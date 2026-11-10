@@ -827,6 +827,36 @@ public class HistoryScanTest {
         }
     }
 
+    @Test public void dottedAccountPadding_keepsMovementsInOneAccount() throws Exception {
+        String[] senders = {"+985000114", "b.pasargad"};
+        String[] banks = {"Wepod", "Pasargad"};
+        for (int i = 0; i < senders.length; i++) {
+            seed(senders[i], "123.456.78901234.5 \t\n\n+12,000,000\n08/07_18:59\n\u0645\u0627\u0646\u062F\u0647: 12,000,000",
+                at(2026, 10, 29, 19, 0));
+            seed(senders[i], "123.456.78901234.5\r\n-500,000\r\n08/07_19:01\r\n\u0645\u0627\u0646\u062F\u0647: 11,500,000",
+                at(2026, 10, 29, 19, 2));
+        }
+
+        assertEquals(4, BalanceData.scanHistory(ctx));
+        List<Transaction> transactions = BalanceData.readTransactions(ctx);
+        assertEquals(4, transactions.size());
+        for (Transaction transaction : transactions) {
+            assertEquals("123.456.78901234.5", transaction.account);
+        }
+        for (String bank : banks) {
+            long total = 0;
+            int count = 0;
+            for (Transaction transaction : transactions) {
+                if (!bank.equals(transaction.bank)) continue;
+                total += transaction.amount;
+                count++;
+            }
+            assertEquals(2, count);
+            assertEquals(11_500_000L, total);
+        }
+        assertEquals(0, BalanceData.scanHistory(ctx));
+    }
+
     @Test public void realBankFormat_saderatAccountLabelMovements_areRecorded() throws Exception {
         // Saderat writes "انتقال: <amount>-" and the account right after the "حساب:" label, with
         // the resulting balance in the line below.

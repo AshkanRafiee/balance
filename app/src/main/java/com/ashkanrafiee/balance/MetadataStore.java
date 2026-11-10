@@ -3,6 +3,7 @@ package com.ashkanrafiee.balance;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.util.JsonWriter;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
@@ -630,6 +631,10 @@ final class MetadataStore {
                 for (int kind = NOTES; kind <= MERCHANTS; kind++) {
                     Row source = s.find(kind, from);
                     if (source == null) continue;
+                    if (dottedProtected(dottedState(s, from), kind)) {
+                        changed |= copyDottedRow(s, source, to, false);
+                        continue;
+                    }
                     Row destination = s.find(kind, to);
                     if (kind == TAGS) {
                         s.put(TAGS, to, null, unionTags(destination == null
@@ -643,6 +648,206 @@ final class MetadataStore {
             }
             return changed;
         });
+    }
+
+    /** Additive account repair, including sigless annotations whose transaction is already gone.
+     * Original rows remain intact even when two aliases carry different user-authored text. */
+    static boolean copyNormalizedDottedKeys(Context context) throws Exception {
+        return access(context, ALL, false, true, s -> {
+            boolean[] changed = {false};
+            visit(s, ALL, row -> {
+                String destination = DottedAccountMigration.metadataKey(row.key);
+                if (!destination.equals(row.key))
+                    changed[0] |= copyDottedRow(s, row, destination, false);
+            });
+            return changed[0];
+        });
+    }
+
+    static boolean copyKeysPreservingSources(Context context, Map<String, String> aliases)
+            throws Exception {
+        if (aliases.isEmpty()) return false;
+        return access(context, ALL, false, true, s -> {
+            boolean changed = false;
+            for (Map.Entry<String, String> alias : aliases.entrySet()) {
+                requireKey(alias.getKey());
+                requireKey(alias.getValue());
+                if (alias.getKey().equals(alias.getValue())) continue;
+                for (int kind = NOTES; kind <= MERCHANTS; kind++) {
+                    Row source = s.find(kind, alias.getKey());
+                    if (source != null)
+                        changed |= copyDottedRow(s, source, alias.getValue(), false);
+                }
+            }
+            return changed;
+        });
+    }
+
+    // Kept with the metadata transaction, so copying and retiring a route cannot be separated by
+    // process death. Only repaired accounts' existing annotation keys enter this encrypted ledger.
+    private static final String DOTTED_STATE_PREFIX = "dotted_account_v1:";
+
+    private static String dottedStateIndex(Session session, String key) {
+        return DOTTED_STATE_PREFIX + session.lookup(ALL, "dotted-account\n" + key);
+    }
+
+    /** One bounded encrypted record per source, with no account text in the SQL lookup key. */
+    private static JSONObject dottedState(Session session, String key) throws Exception {
+        if (session.owner == null) return null;
+        String stored = meta(session.db, dottedStateIndex(session, key));
+        if (stored == null) return null;
+        JSONObject payload = new JSONObject(BalanceData.decryptStorePayload(stored));
+        if (!key.equals(payload.getString("key")))
+            throw new Exception("account repair state identity mismatch");
+        JSONObject state = payload.getJSONObject("state");
+        Iterator<String> fields = state.keys();
+        while (fields.hasNext()) {
+            String field = fields.next();
+            if (!field.matches("[pa][1-5]") || !(state.get(field) instanceof Boolean))
+                throw new Exception("invalid account repair state");
+        }
+        for (int kind = NOTES; kind <= MERCHANTS; kind++)
+            if (state.optBoolean("a" + kind) && !state.optBoolean("p" + kind))
+                throw new Exception("unprotected account repair archive");
+        return state;
+    }
+
+    private static void saveDottedState(Session session, String key, JSONObject state) throws Exception {
+        JSONObject previous = dottedState(session, key);
+        if (previous != null && previous.toString().equals(state.toString())) return;
+        JSONObject payload = new JSONObject().put("key", key).put("state", state);
+        putMeta(session.db, dottedStateIndex(session, key),
+            BalanceData.encryptStorePayload(payload.toString()));
+    }
+
+    static void protectDottedTransactions(Context context, List<Transaction> transactions) throws Exception {
+        access(context, ALL, false, true, session -> {
+            List<String> keys = new ArrayList<>();
+            for (Transaction transaction : transactions) {
+                keys.add(BalanceData.noteKey(transaction));
+                if (transaction.content != null) keys.add("c:" + transaction.content);
+                if (transaction.sig != null && transaction.sig.startsWith("e2:")) {
+                    int end = transaction.sig.indexOf(':', 3);
+                    if (end > 3) keys.add("s:" + transaction.sig.substring(3, end));
+                }
+            }
+            for (String key : keys) {
+                JSONObject state = dottedState(session, key);
+                boolean present = false;
+                for (int kind = NOTES; kind <= MERCHANTS; kind++) {
+                    if (session.find(kind, key) != null) {
+                        state = protectDottedKind(state, kind);
+                        present = true;
+                    }
+                }
+                if (present) saveDottedState(session, key, state);
+            }
+            return null;
+        });
+    }
+
+    /** Import only the original identity and its selected kind's bookkeeping. Restore imports all
+     * originals before copying aliases, so a copy cannot conceal a destination's own backup text. */
+    static boolean importDottedEntry(Context context, int kind, String from,
+            String text, List<String> tags, Boolean incomingArchive) throws Exception {
+        requireKey(from);
+        if (kind != TAGS) requireTextKind(kind);
+        String incomingText = kind == TAGS ? null : normalizeText(text);
+        List<String> incomingTags = kind == TAGS ? normalizeTags(tags) : Collections.emptyList();
+        if (kind == TAGS ? incomingTags.isEmpty() : incomingText == null) return false;
+        return access(context, ALL, true, true, session -> {
+            Row existing = session.find(kind, from);
+            JSONObject localState = dottedState(session, from);
+            boolean localProtected = dottedProtected(localState, kind);
+            boolean changed = kind == TAGS
+                ? session.put(kind, from, null, unionTags(existing == null
+                    ? Collections.emptyList() : existing.tags, incomingTags))
+                : existing == null && session.put(kind, from, incomingText, null);
+            // Imported bookkeeping never retires a local active value or alters another kind.
+            // A missing state field is an old backup's explicit restore, not an archived copy.
+            JSONObject state = protectDottedKind(localState, kind);
+            if (incomingArchive != null && incomingArchive && existing == null && !localProtected)
+                state.put("a" + kind, true);
+            saveDottedState(session, from, state);
+            return changed;
+        });
+    }
+
+    static boolean copyImportedDottedNote(Context context, String from, String to, boolean replay)
+            throws Exception {
+        return copyImportedDottedEntry(context, NOTES, from, to, replay);
+    }
+
+    /** Only an old backup without archive state may explicitly replay a retired source. */
+    static boolean copyImportedDottedEntry(Context context, int kind, String from, String to,
+            boolean replay) throws Exception {
+        requireKey(from);
+        requireKey(to);
+        if (kind != TAGS) requireTextKind(kind);
+        return access(context, ALL, false, true, session -> {
+            Row source = session.find(kind, from);
+            if (source == null) return false;
+            return copyDottedRow(session, source, to, replay);
+        });
+    }
+
+    private static boolean copyDottedRow(Session session, Row source,
+            String destination, boolean imported) throws Exception {
+        JSONObject completed = protectDottedKind(dottedState(session, source.key), source.kind);
+        if (source.key.equals(destination) || (!imported && dottedArchived(completed, source.kind))) {
+            saveDottedState(session, source.key, completed);
+            return false;
+        }
+        boolean changed = copyRow(session, source, destination);
+        // A canonical sigless identity can itself be superseded by a later source-proven e2 parse.
+        // Its annotations belong to this same repair, including any pre-existing conflicting text.
+        saveDottedState(session, destination,
+            protectDottedKind(dottedState(session, destination), source.kind));
+        // Retirement belongs to the source kind, not to a particular destination. A later parser
+        // identity must not revive an archive after the user clears the active canonical copy.
+        completed.put("a" + source.kind, true);
+        saveDottedState(session, source.key, completed);
+        return changed;
+    }
+
+    private static JSONObject protectDottedKind(JSONObject state, int kind)
+            throws Exception {
+        if (state == null) state = new JSONObject();
+        state.put("p" + kind, true);
+        return state;
+    }
+
+    private static boolean dottedProtected(JSONObject state, int kind) {
+        return state != null && state.optBoolean("p" + kind);
+    }
+
+    private static boolean dottedArchived(JSONObject state, int kind) {
+        if (state == null) return false;
+        return state.optBoolean("a" + kind);
+    }
+
+    /** Optional backup bookkeeping, separate from user text. Only extant annotations are emitted;
+     * one bit per source kind preserves both active protection and archive retirement. */
+    static void writeAccountRepairState(Context context, JsonWriter writer) throws Exception {
+        writer.beginArray();
+        access(context, ALL, false, true, session -> {
+            visit(session, ALL, row -> {
+                JSONObject state = dottedState(session, row.key);
+                if (!dottedProtected(state, row.kind)) return;
+                writer.beginObject().name("kind").value(row.kind).name("key").value(row.key)
+                    .name("archived").value(dottedArchived(state, row.kind)).endObject();
+            });
+            return null;
+        });
+        writer.endArray();
+    }
+
+    private static boolean copyRow(Session session, Row source, String destination) throws Exception {
+        requireKey(destination);
+        Row existing = session.find(source.kind, destination);
+        if (source.kind == TAGS) return session.put(TAGS, destination, null,
+            unionTags(existing == null ? Collections.emptyList() : existing.tags, source.tags));
+        return existing == null && session.put(source.kind, destination, source.text, null);
     }
 
     /** A live keyset cursor. Use the Page overload for generation-checked continuations. */

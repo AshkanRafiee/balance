@@ -179,6 +179,53 @@ final class TransactionStore {
         });
     }
 
+    /** In-place payload/index repair, preserving every ordinal, signature and content digest.
+     * This is not a merge: even equal date/amount rows remain distinct. */
+    static boolean normalizeDottedAccounts(Context context) throws Exception {
+        return access(context, false, true, false, s -> {
+            if (s == null) return false;
+            boolean changed = false;
+            long after = -1;
+            while (true) {
+                List<Long> ordinals = new ArrayList<>(DEFAULT_PAGE_SIZE);
+                List<Transaction> batch = new ArrayList<>(DEFAULT_PAGE_SIZE);
+                try (Cursor cursor = s.db.query(TABLE, ROW_COLUMNS, "ordinal > ?",
+                        new String[]{Long.toString(after)}, null, null, "ordinal ASC",
+                        Integer.toString(DEFAULT_PAGE_SIZE))) {
+                    while (cursor.moveToNext()) {
+                        after = cursor.getLong(0);
+                        ordinals.add(after);
+                        batch.add(s.decode(cursor));
+                    }
+                }
+                // Close the read cursor before modifying rows; old ordinals need not be contiguous.
+                List<Transaction> repaired = new ArrayList<>();
+                for (Transaction old : batch)
+                    if (!same(old.account, DottedAccountMigration.account(old.bank, old.account)))
+                        repaired.add(old);
+                if (!repaired.isEmpty()) MetadataStore.protectDottedTransactions(context, repaired);
+                for (int i = 0; i < batch.size(); i++) {
+                    Transaction old = batch.get(i);
+                    String account = DottedAccountMigration.account(old.bank, old.account);
+                    if (same(account, old.account)) continue;
+                    long ordinal = ordinals.get(i);
+                    Transaction canonical = new Transaction(old.bank, account, old.date,
+                        old.amount, old.balance, old.sig, old.content);
+                    ContentValues values = s.indexes(canonical);
+                    values.put("payload", s.rows.encrypt(BalanceData.serializeTransactions(
+                        Collections.singletonList(canonical)), rowIdentity(ordinal)));
+                    if (s.db.update(TABLE, values, "ordinal=?",
+                            new String[]{Long.toString(ordinal)}) != 1)
+                        throw new Exception("account migration row disappeared");
+                    changed = true;
+                }
+                if (batch.size() < DEFAULT_PAGE_SIZE || after == Long.MAX_VALUE) break;
+            }
+            if (changed) s.touch();
+            return changed;
+        });
+    }
+
     /** Consumes each row once, without a history-sized list, cap or plaintext staging table. */
     static boolean replace(Context context, StreamSource source) throws Exception {
         if (source == null) throw new NullPointerException("source");
@@ -228,6 +275,11 @@ final class TransactionStore {
 
     static MergeResult mergeResult(Context context, StreamSource source, AliasVisitor aliases)
             throws Exception {
+        return mergeResult(context, source, aliases, null);
+    }
+
+    static MergeResult mergeResult(Context context, StreamSource source, AliasVisitor aliases,
+            AliasVisitor repairedAliases) throws Exception {
         if (source == null) throw new NullPointerException("source");
         return access(context, true, true, false, s -> {
             // Validate local payloads and their indexes before trusting them to deduplicate a backup.
@@ -237,22 +289,34 @@ final class TransactionStore {
             final long[] aliasCount = {0};
             Map<String, String> pendingAliases = new LinkedHashMap<>();
             Set<String> ambiguousAliases = new HashSet<>();
-            consume(source, incoming -> {
-                requireTransaction(incoming);
+            Map<String, String> repaired = new LinkedHashMap<>();
+            Set<String> ambiguousRepaired = new HashSet<>();
+            consume(source, original -> {
+                requireTransaction(original);
+                Transaction incoming = DottedAccountMigration.transaction(original);
                 Transaction existing = s.find(incoming);
                 if (existing == null) {
                     if (next[0] < 0) throw new IllegalStateException("transaction ordinal exhausted");
                     s.insert(next[0], incoming);
                     next[0] = next[0] == Long.MAX_VALUE ? -1 : next[0] + 1;
                     added[0]++;
-                } else {
-                    String from = BalanceData.noteKey(incoming);
+                }
+                Transaction survivor = existing == null ? incoming : existing;
+                if (!same(original.account, incoming.account)) {
+                    collectRepairedAliases(repaired, ambiguousRepaired, original, survivor);
+                } else if (existing != null) {
+                    // Ordinary parser migrations retain their established destination-first policy.
+                    String from = BalanceData.noteKey(original);
                     String to = BalanceData.noteKey(existing);
-                    if (!from.equals(to)) {
+                    if (!from.equals(to) && from.equals(BalanceData.noteKey(incoming))) {
                         collectAlias(pendingAliases, ambiguousAliases, from, to);
                     }
                 }
             });
+            reconcileAliases(pendingAliases, ambiguousAliases, repaired, ambiguousRepaired);
+            if (repairedAliases != null) for (Map.Entry<String, String> entry : repaired.entrySet())
+                if (!ambiguousRepaired.contains(entry.getKey()))
+                    repairedAliases.accept(entry.getKey(), entry.getValue());
             for (Map.Entry<String, String> alias : pendingAliases.entrySet()) {
                 if (ambiguousAliases.contains(alias.getKey()) || s.hasMetadataKey(alias.getKey())) continue;
                 aliasCount[0]++;
@@ -278,6 +342,11 @@ final class TransactionStore {
      * produced, but selecting metadata must never bring the transaction section along. */
     static void collectAliases(Context context, StreamSource source, AliasVisitor aliases)
             throws Exception {
+        collectAliases(context, source, aliases, null);
+    }
+
+    static void collectAliases(Context context, StreamSource source, AliasVisitor aliases,
+            AliasVisitor repairedAliases) throws Exception {
         if (source == null) throw new NullPointerException("source");
         if (aliases == null) throw new NullPointerException("aliases");
         access(context, false, true, false, s -> {
@@ -285,14 +354,26 @@ final class TransactionStore {
             s.visit(DEFAULT_PAGE_SIZE, transaction -> {});
             Map<String, String> pendingAliases = new LinkedHashMap<>();
             Set<String> ambiguousAliases = new HashSet<>();
-            consume(source, incoming -> {
-                requireTransaction(incoming);
+            Map<String, String> repaired = new LinkedHashMap<>();
+            Set<String> ambiguousRepaired = new HashSet<>();
+            consume(source, original -> {
+                requireTransaction(original);
+                Transaction incoming = DottedAccountMigration.transaction(original);
                 Transaction existing = s.find(incoming);
                 if (existing == null) return;
-                String from = BalanceData.noteKey(incoming);
+                if (!same(original.account, incoming.account)) {
+                    collectRepairedAliases(repaired, ambiguousRepaired, original, existing);
+                    return;
+                }
+                String from = BalanceData.noteKey(original);
                 String to = BalanceData.noteKey(existing);
-                if (!from.equals(to)) collectAlias(pendingAliases, ambiguousAliases, from, to);
+                if (!from.equals(to) && from.equals(BalanceData.noteKey(incoming)))
+                    collectAlias(pendingAliases, ambiguousAliases, from, to);
             });
+            reconcileAliases(pendingAliases, ambiguousAliases, repaired, ambiguousRepaired);
+            if (repairedAliases != null) for (Map.Entry<String, String> entry : repaired.entrySet())
+                if (!ambiguousRepaired.contains(entry.getKey()))
+                    repairedAliases.accept(entry.getKey(), entry.getValue());
             for (Map.Entry<String, String> alias : pendingAliases.entrySet())
                 if (!ambiguousAliases.contains(alias.getKey()) && !s.hasMetadataKey(alias.getKey()))
                     aliases.accept(alias.getKey(), alias.getValue());
@@ -304,6 +385,30 @@ final class TransactionStore {
             String from, String to) {
         String previous = aliases.put(from, to);
         if (previous != null && !previous.equals(to)) ambiguous.add(from);
+    }
+
+    private static void collectRepairedAliases(Map<String, String> aliases, Set<String> ambiguous,
+            Transaction original, Transaction survivor) {
+        String to = BalanceData.noteKey(survivor);
+        collectAlias(aliases, ambiguous, BalanceData.noteKey(original), to);
+        if (original.content != null) collectAlias(aliases, ambiguous, "c:" + original.content, to);
+        if (original.sig != null && original.sig.startsWith("e2:")) {
+            int end = original.sig.indexOf(':', 3);
+            if (end > 3) collectAlias(aliases, ambiguous, "s:" + original.sig.substring(3, end), to);
+        }
+    }
+
+    private static void reconcileAliases(Map<String, String> ordinary, Set<String> ambiguous,
+            Map<String, String> repaired, Set<String> ambiguousRepaired) {
+        for (Map.Entry<String, String> entry : repaired.entrySet()) {
+            String other = ordinary.get(entry.getKey());
+            if (other == null) continue;
+            if (!other.equals(entry.getValue()) || ambiguous.contains(entry.getKey())
+                    || ambiguousRepaired.contains(entry.getKey())) {
+                ambiguous.add(entry.getKey());
+                ambiguousRepaired.add(entry.getKey());
+            } else ordinary.remove(entry.getKey());
+        }
     }
 
     /** Current store revision for cache validation; null when absent or unreadable. Read-only:

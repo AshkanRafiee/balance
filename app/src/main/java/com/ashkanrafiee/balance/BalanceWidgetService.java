@@ -30,7 +30,7 @@ public class BalanceWidgetService extends RemoteViewsService {
         for (List<Bank> block : BalanceData.groupedForDisplay(
                 BalanceData.read(c), excluded, BalanceData.getSort(c))) {
             for (Bank b : block) {
-                if (excluded.contains(BalanceData.storageKey(b.name, b.account))) continue;
+                if (BalanceData.isExcluded(excluded, BalanceData.storageKey(b.name, b.account))) continue;
                 included.add(new Bank(b.name, b.amount, b.date, b.sender, b.account));
             }
         }

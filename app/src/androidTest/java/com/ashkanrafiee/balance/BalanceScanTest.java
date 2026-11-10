@@ -639,6 +639,37 @@ public class BalanceScanTest {
         assertEquals(1L, SourceStore.balanceObservationCount(ctx));
     }
 
+    @Test public void dottedAccountWhitespaceVariants_keepOneBalanceSlotPerBank() throws Exception {
+        String account = "123.456.78901234.5";
+        String plain = dottedBalance(account, "06/29_21:06", 51_289L);
+        String spaced = dottedBalance("\n" + account + " \t\n\n", "06/30_09:14", 171_289L);
+        long older = persian(1405, 6, 29, 21, 7);
+        long newer = persian(1405, 6, 30, 9, 15);
+        seed("+985000114", plain, older);
+        seed("+985000114", spaced, newer);
+        seed("B.Pasargad", plain, older);
+        seed("B.Pasargad", spaced, newer);
+        BalanceData.setExcluded(ctx, java.util.Collections.singleton("Pasargad|" + account));
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(2, BalanceData.scanSms(ctx, saved));
+        assertEquals(2, saved.size());
+        assertNull(saved.get("Wepod"));
+        assertNull(saved.get("Pasargad"));
+        long total = 0;
+        for (String bank : new String[]{"Wepod", "Pasargad"}) {
+            Bank balance = saved.get(bank + "|" + account);
+            assertNotNull(balance);
+            assertEquals(account, balance.account);
+            assertEquals(171_289L, balance.amount);
+            total += balance.amount;
+        }
+        assertEquals(342_578L, total);
+        assertEquals(java.util.Collections.singleton("Pasargad|" + account), BalanceData.getExcluded(ctx));
+        assertEquals(0, BalanceData.scanSms(ctx, saved));
+        assertEquals(2, BalanceData.read(ctx).size());
+    }
+
     @Test public void saderatAccountLabel_singleAccountEntry() throws Exception {
         // Saderat movements state the account right after the "حساب:" label, so their balances land
         // in a per-account entry instead of a bank-wide slot.
