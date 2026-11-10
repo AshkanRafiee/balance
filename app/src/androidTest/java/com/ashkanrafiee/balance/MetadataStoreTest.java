@@ -34,6 +34,8 @@ public class MetadataStoreTest {
     }
 
     @After public void tearDown() throws Exception {
+        // Publication retains root/rollback copies; discard them before clearing the root fixture.
+        DataGeneration.clearForTests(context);
         MetadataStore.reset(context, true);
     }
 
@@ -47,6 +49,15 @@ public class MetadataStoreTest {
             singletonText("merchant-key", "فروشگاه نمونه")));
         assertTrue(MetadataStore.setTags(context, "tag-key", Arrays.asList(" food ", "Bills", "FOOD")));
 
+        // Inspect the selected store after publication, never a stale root-layout copy.
+        synchronized (BalanceData.class) {
+            try (DataGeneration.Stage stage = DataGeneration.beginStage(context)) {
+                stage.publish();
+            }
+        }
+        assertNotEquals(context.getDatabasePath(MetadataStore.DB_NAME),
+            DataGeneration.context(context).getDatabasePath(MetadataStore.DB_NAME));
+
         assertEquals("private note", MetadataStore.getNote(context, "note-key"));
         assertEquals("bank reason", MetadataStore.readReasons(context).get("reason-key"));
         assertEquals("bank channel", MetadataStore.readChannels(context).get("channel-key"));
@@ -54,7 +65,7 @@ public class MetadataStoreTest {
         assertEquals(Arrays.asList("food", "Bills"), MetadataStore.getTags(context, "tag-key"));
 
         SQLiteDatabase db = SQLiteDatabase.openDatabase(
-            context.getDatabasePath(MetadataStore.DB_NAME).getPath(), null,
+            DataGeneration.context(context).getDatabasePath(MetadataStore.DB_NAME).getPath(), null,
             SQLiteDatabase.OPEN_READONLY);
         try {
             try (Cursor cursor = db.query(MetadataStore.TABLE, new String[]{"payload"},
@@ -109,7 +120,7 @@ public class MetadataStoreTest {
         Map<String, List<String>> tags = new LinkedHashMap<>();
         tags.put("legacy-tags", Arrays.asList("one", "two"));
 
-        context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit()
+        DataGeneration.dataPrefs(context).edit()
             .putString(BalanceData.KEY_TX_NOTES, BalanceData.serializeTextMap(notes))
             .putString(BalanceData.KEY_TX_REASONS,
                 BalanceData.encryptStorePayload(BalanceData.serializeTextMap(reasons)))
@@ -139,7 +150,7 @@ public class MetadataStoreTest {
         // Recreate the actual v1 table shape. Merchant rows did not exist yet, so only the four
         // original kinds can be copied into the old CHECK constraint before opening v2 again.
         SQLiteDatabase db = SQLiteDatabase.openDatabase(
-            context.getDatabasePath(MetadataStore.DB_NAME).getPath(), null,
+            DataGeneration.context(context).getDatabasePath(MetadataStore.DB_NAME).getPath(), null,
             SQLiteDatabase.OPEN_READWRITE);
         try {
             db.execSQL("CREATE TABLE metadata_v1 (id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -236,15 +247,15 @@ public class MetadataStoreTest {
 
     @Test public void missingTokenRecoversAndWrongTokenBlocksWithoutDeletingRows() throws Exception {
         assertTrue(MetadataStore.setNote(context, "old", "old value"));
-        String oldToken = context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE)
+        String oldToken = DataGeneration.dataPrefs(context)
             .getString(MetadataStore.KEY_METADATA_STORE_TOKEN, null);
         assertTrue(oldToken != null && !oldToken.isEmpty());
 
-        context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit()
+        DataGeneration.dataPrefs(context).edit()
             .remove(MetadataStore.KEY_METADATA_STORE_TOKEN).commit();
         assertEquals("old value", MetadataStore.getNote(context, "old"));
 
-        context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit()
+        DataGeneration.dataPrefs(context).edit()
             .putString(MetadataStore.KEY_METADATA_STORE_TOKEN, "wrong-token").commit();
         try {
             MetadataStore.readNotes(context);
@@ -253,7 +264,7 @@ public class MetadataStoreTest {
             // The rows remain inaccessible until the original token is restored.
         }
 
-        context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit()
+        DataGeneration.dataPrefs(context).edit()
             .putString(MetadataStore.KEY_METADATA_STORE_TOKEN, oldToken).commit();
         assertEquals("old value", MetadataStore.getNote(context, "old"));
     }
@@ -291,7 +302,7 @@ public class MetadataStoreTest {
     }
 
     private String legacyValue(String key) {
-        return context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE)
+        return DataGeneration.dataPrefs(context)
             .getString(key, null);
     }
 }

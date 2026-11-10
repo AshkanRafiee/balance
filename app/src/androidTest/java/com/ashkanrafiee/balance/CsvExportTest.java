@@ -629,7 +629,17 @@ public class CsvExportTest {
         try {
             assertTrue(TransactionStore.replace(ctx,
                 java.util.Collections.singletonList(new Transaction("Synthetic", 1L, 2L))));
-            assertTrue(ctx.deleteDatabase(TransactionStore.DB_NAME));
+            // Force generation routing even when this test is run alone on a fresh install.
+            synchronized (BalanceData.class) {
+                try (DataGeneration.Stage stage = DataGeneration.beginStage(ctx)) {
+                    stage.publish();
+                }
+            }
+            Context active = DataGeneration.context(ctx);
+            assertFalse(ctx.getDatabasePath(TransactionStore.DB_NAME).equals(
+                active.getDatabasePath(TransactionStore.DB_NAME)));
+            assertTrue(active.getDatabasePath(TransactionStore.DB_NAME).isFile());
+            assertTrue(active.deleteDatabase(TransactionStore.DB_NAME));
 
             final boolean[] flushed = {false};
             StringWriter output = new StringWriter() {

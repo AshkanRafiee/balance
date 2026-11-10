@@ -34,6 +34,8 @@ public class SourceStoreTest {
     }
 
     @After public void tearDown() {
+        // Publication retains root/rollback copies; discard them before clearing the root fixture.
+        DataGeneration.clearForTests(context);
         SourceStore.clear(context);
     }
 
@@ -96,8 +98,9 @@ public class SourceStoreTest {
             new Transaction("Refah", null, 20L, -5L, 95L, "PRIVATE-SIG", "PRIVATE-CONTENT"));
         SourceStore.observeBalance(context, source, 3, "Refah", null, 20L, 95L);
 
-        SQLiteDatabase db = SQLiteDatabase.openDatabase(context.getDatabasePath(SourceStore.DB_NAME)
-            .getPath(), null, SQLiteDatabase.OPEN_READONLY);
+        SQLiteDatabase db = SQLiteDatabase.openDatabase(
+            DataGeneration.context(context).getDatabasePath(SourceStore.DB_NAME).getPath(), null,
+            SQLiteDatabase.OPEN_READONLY);
         try {
             assertNoPlaintext(db, SourceStore.TABLE, body);
             assertNoPlaintext(db, SourceStore.TABLE, sender);
@@ -151,8 +154,17 @@ public class SourceStoreTest {
 
     @Test public void corruptPayloadFailsAndDatabaseRemainsForRecovery() throws Exception {
         SourceStore.capture(context, "Refah", "corrupt-me", 40L, 6);
-        SQLiteDatabase db = SQLiteDatabase.openDatabase(context.getDatabasePath(SourceStore.DB_NAME)
-            .getPath(), null, SQLiteDatabase.OPEN_READWRITE);
+        // Corrupt the selected generation so a surviving root copy cannot mask the failure.
+        synchronized (BalanceData.class) {
+            try (DataGeneration.Stage stage = DataGeneration.beginStage(context)) {
+                stage.publish();
+            }
+        }
+        assertNotEquals(context.getDatabasePath(SourceStore.DB_NAME),
+            DataGeneration.context(context).getDatabasePath(SourceStore.DB_NAME));
+        SQLiteDatabase db = SQLiteDatabase.openDatabase(
+            DataGeneration.context(context).getDatabasePath(SourceStore.DB_NAME).getPath(), null,
+            SQLiteDatabase.OPEN_READWRITE);
         try {
             ContentValues values = new ContentValues();
             values.put("payload", "not-an-encrypted-source-row");
@@ -168,7 +180,7 @@ public class SourceStoreTest {
             failed = true;
         }
         assertTrue(failed);
-        assertTrue(context.getDatabasePath(SourceStore.DB_NAME).isFile());
+        assertTrue(DataGeneration.context(context).getDatabasePath(SourceStore.DB_NAME).isFile());
     }
 
     private void assertNoPlaintext(SQLiteDatabase db, String table, String value) {
