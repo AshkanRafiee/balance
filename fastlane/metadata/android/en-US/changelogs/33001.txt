@@ -1,0 +1,4 @@
+• Added support for Mofid Jet Card / Hami balances and transactions.
+• Fixed Wepod account detection and improved preservation of saved balances.
+• Fixed extra spaces splitting Wepod and Pasargad accounts, keeping saved records and exclusion choices.
+• If Wepod was excluded before the update, check exclusions for its newly recognized accounts.
