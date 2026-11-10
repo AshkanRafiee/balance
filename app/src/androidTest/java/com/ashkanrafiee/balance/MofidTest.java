@@ -65,11 +65,11 @@ public class MofidTest {
         Context target = InstrumentationRegistry.getInstrumentation().getTargetContext();
         Configuration english = new Configuration(target.getResources().getConfiguration());
         english.setLocale(Locale.ENGLISH);
-        assertEquals("Mofid",
+        assertEquals("Mofid — Jet Card / Hami",
             BankRules.displayName(target.createConfigurationContext(english), BANK));
         Configuration persian = new Configuration(target.getResources().getConfiguration());
         persian.setLocale(new Locale("fa"));
-        assertEquals("مفید",
+        assertEquals("مفید — جت کارت / حامی",
             BankRules.displayName(target.createConfigurationContext(persian), BANK));
     }
 
