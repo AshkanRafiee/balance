@@ -55,7 +55,10 @@ final class DataGeneration {
     private static final String PREFS_GENERATION_KEY = "__balance_data_generation";
     private static final String PREFS_PREFIX = BalanceData.PREFS_DATA + ".generation.";
     private static final String LEGACY_PAGE_PREFIX = "transactions_page_v2_";
-    private static final String PRESENCE_FILE = "balance_transactions.present";
+    private static final String[] PRESENCE_FILES = {
+        "balance_transactions.present",
+        "balance_sources.present"
+    };
     private static final int COPY_BUFFER_SIZE = 16 * 1024;
     private static final int MAX_MANIFEST_BYTES = 4 * 1024;
     private static final int MAX_MARKER_BYTES = 4 * 1024;
@@ -643,9 +646,13 @@ final class DataGeneration {
         }
 
         private void copyPresenceMarker() throws Exception {
-            File source = new File(active.getNoBackupFilesDir(), PRESENCE_FILE);
-            if (source.exists()) copyFile(source, new File(context.getNoBackupFilesDir(),
-                PRESENCE_FILE));
+            // A receipt must survive even when its database is missing: the stores use it to
+            // distinguish lost data from a genuinely fresh install after publication.
+            for (String name : PRESENCE_FILES) {
+                File source = new File(active.getNoBackupFilesDir(), name);
+                if (source.exists()) copyFile(source,
+                    new File(context.getNoBackupFilesDir(), name));
+            }
         }
 
         private void abortLocked() {
