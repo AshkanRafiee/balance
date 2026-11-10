@@ -1626,6 +1626,10 @@ final class BalanceData {
             Log.w(TAG, "scan failed", e);
         }
         if (!scanSucceeded) return new ScanOutcome(ScanOutcome.Status.PROVIDER_ERROR, 0);
+        // Wepod only recently gained account keys. Its newest SMS may already be gone from the
+        // inbox, so upgrade a source-proven retained snapshot before the legacy-slot cleanup can
+        // replace it with an older message (possibly belonging to a different account).
+        if (full) matched += migrateRetainedWepodBalance(context, current, sourceRows, now);
         // A full re-scan that re-keys a bank's messages per account supersedes the legacy plain
         // bank slot (which pre-dates account extraction): drop it so the old merged balance is not
         // kept next to — and summed with — the new per-account slots. Banks with no account-bearing
@@ -1767,6 +1771,57 @@ final class BalanceData {
 
     private static String physicalMessageKey(String sender, String body, long arrival) {
         return contentHash(sender, body) + "|" + arrival;
+    }
+
+    /** Only exact, unique source proof may assign a retained bank-wide Wepod balance to an account.
+     *  Missing or competing evidence deliberately leaves the existing legacy-slot fallback alone. */
+    private static int migrateRetainedWepodBalance(Context context, Map<String, Bank> current,
+            List<SourceEvidence> sources, long now) {
+        Bank saved = current.get("Wepod");
+        if (saved == null || !"Wepod".equals(saved.name) || saved.account != null) return 0;
+        SourceStore.Source[] candidate = {null};
+        int[] matches = {0};
+        try {
+            SourceStore.forEachSourceWithObservations(context, 256, (source, transactions, balances) -> {
+                for (SourceStore.BalanceObservation old : balances) {
+                    if ("Wepod".equals(old.bank) && old.account == null
+                            && old.date == saved.date && old.balance == saved.amount) {
+                        // Count physical sources, not parser revisions of the same source. Even a
+                        // competing source that cannot be parsed today makes the assignment unsafe.
+                        matches[0]++;
+                        candidate[0] = source;
+                        break;
+                    }
+                }
+            });
+        } catch (Exception e) {
+            Log.w(TAG, "retained Wepod source lookup failed", e);
+            return 0;
+        }
+        if (matches[0] != 1) return 0;
+        SourceStore.Source source = candidate[0];
+        if (!"Wepod".equals(source.bank) || !"Wepod".equals(BankRules.resolve(source.sender))
+                || source.arrivalTime <= 0 || source.arrivalTime > now) return 0;
+        String account = BankRules.extractAccount("Wepod", source.rawBody);
+        long balance = extract("Wepod", source.rawBody);
+        if (account == null || account.isEmpty() || balance < 0 || balance != saved.amount) return 0;
+        // In particular, a year-less date must use the original physical arrival, not today's year.
+        long date = MessageDate.eventTime(source.rawBody, source.arrivalTime, BankRules.calendar("Wepod"));
+        String key = storageKey("Wepod", account);
+        Bank target = current.get(key);
+        if (target == null || date > target.date)
+            current.put(key, new Bank("Wepod", balance, date, source.sender, account));
+        current.remove("Wepod");
+
+        // Append the new interpretation through the ordinary capture batch; never replace the raw
+        // source or its old plain-account observation, including when the SMS has been deleted.
+        SourceEvidence evidence = new SourceEvidence(source.sender, source.rawBody, source.arrivalTime);
+        evidence.balanceBank = "Wepod";
+        evidence.balanceAccount = account;
+        evidence.balanceDate = date;
+        evidence.balance = balance;
+        sources.add(evidence);
+        return 1;
     }
 
     private static Map<SourceEvidence, String> balanceSourceReplacements(Context context,

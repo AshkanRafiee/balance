@@ -464,6 +464,181 @@ public class BalanceScanTest {
         assertEquals("+985000114", second.sender);
     }
 
+    private static String dottedBalance(String accountLine, String statedDate, long balance) {
+        return accountLine + "\n" + statedDate + "\n\u0645\u0627\u0646\u062F\u0647: " + balance;
+    }
+
+    private SourceStore.Source retainPlainWepod(String body, long arrival, long date, long balance)
+            throws Exception {
+        LinkedHashMap<String, Bank> legacy = new LinkedHashMap<>();
+        legacy.put("Wepod", new Bank("Wepod", balance, date, "+985000114", null));
+        assertTrue(BalanceData.write(ctx, legacy));
+        SourceStore.Source source = SourceStore.capture(ctx, "+985000114", body, arrival, 0);
+        assertNotNull(source);
+        assertTrue(SourceStore.observeBalance(ctx, source, 0, "Wepod", null, date, balance));
+        return source;
+    }
+
+    @Test public void wepodRetainedPlain_uniqueDeletedSourceKeepsNewerSameAccount() throws Exception {
+        String account = "123.456.78901234.5";
+        String body = dottedBalance(account, "06/30_09:14", 171_289L);
+        // Use a previous year: reparsing against today's clock would invent a different event date.
+        long arrival = persian(1404, 6, 30, 9, 15);
+        long date = persian(1404, 6, 30, 9, 14);
+        SourceStore.Source source = retainPlainWepod(body, arrival, date, 171_289L);
+        assertTrue(SourceStore.observeBalance(ctx, source, 1, "Wepod", null, date, 171_289L));
+        seed("+985000114", dottedBalance(account, "06/29_21:06", 51_289L),
+            persian(1404, 6, 29, 21, 7));
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+        assertEquals(1, saved.size());
+        assertNull(saved.get("Wepod"));
+        Bank retained = saved.get("Wepod|" + account);
+        assertNotNull(retained);
+        assertEquals(171_289L, retained.amount);
+        assertEquals(date, retained.date);
+        assertEquals(account, retained.account);
+        assertEquals("+985000114", retained.sender);
+        assertEquals(date, BalanceData.read(ctx).get("Wepod|" + account).date);
+
+        assertEquals(2L, SourceStore.sourceCount(ctx));
+        assertEquals(4L, SourceStore.balanceObservationCount(ctx));
+        SourceStore.Source original = SourceStore.pageSources(ctx, -1, 8).rows.get(0);
+        assertEquals(source.id, original.id);
+        assertEquals(body, original.rawBody);
+        assertEquals(arrival, original.arrivalTime);
+        assertEquals(0, original.ruleVersion);
+        java.util.List<SourceStore.BalanceObservation> observations =
+            SourceStore.balanceObservationsForSource(ctx, source.id);
+        assertEquals(3, observations.size());
+        assertNull(observations.get(0).account);
+        assertEquals(0, observations.get(0).parserRevision);
+        assertEquals(date, observations.get(0).date);
+        assertEquals(171_289L, observations.get(0).balance);
+        assertNull(observations.get(1).account);
+        assertEquals(account, observations.get(2).account);
+        assertEquals(date, observations.get(2).date);
+
+        assertTrue(prefs().edit().remove(BalanceData.KEY_RULES_VERSION).commit());
+        assertEquals(0, BalanceData.scanSms(ctx, saved));
+        assertEquals(1, BalanceData.read(ctx).size());
+        assertEquals(171_289L, saved.get("Wepod|" + account).amount);
+        assertEquals(date, saved.get("Wepod|" + account).date);
+        assertEquals(2L, SourceStore.sourceCount(ctx));
+        assertEquals(4L, SourceStore.balanceObservationCount(ctx));
+    }
+
+    @Test public void wepodRetainedPlain_deletedSourceAndDifferentInboxAccountKeepBoth() throws Exception {
+        String retainedAccount = "123.456.78901234.5";
+        String inboxAccount = "123.456.78901235.6";
+        long date = persian(1405, 6, 30, 9, 14);
+        retainPlainWepod(dottedBalance(retainedAccount, "06/30_09:14", 171_289L),
+            persian(1405, 6, 30, 9, 15), date, 171_289L);
+        seed("+985000114", dottedBalance(inboxAccount, "06/29_21:06", 51_289L),
+            persian(1405, 6, 29, 21, 7));
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(2, BalanceData.scanSms(ctx, saved));
+        assertEquals(2, saved.size());
+        assertNull(saved.get("Wepod"));
+        assertEquals(171_289L, saved.get("Wepod|" + retainedAccount).amount);
+        assertEquals(date, saved.get("Wepod|" + retainedAccount).date);
+        assertEquals(51_289L, saved.get("Wepod|" + inboxAccount).amount);
+        long total = 0;
+        for (Bank bank : BalanceData.read(ctx).values()) total += bank.amount;
+        assertEquals("the proven plain snapshot must not also be summed", 222_578L, total);
+
+        assertTrue(prefs().edit().remove(BalanceData.KEY_RULES_VERSION).commit());
+        assertEquals(0, BalanceData.scanSms(ctx, saved));
+        assertEquals(2, saved.size());
+        assertEquals(171_289L, saved.get("Wepod|" + retainedAccount).amount);
+    }
+
+    @Test public void wepodRetainedPlain_neverRegressesNewerCompositeSnapshot() throws Exception {
+        String account = "123.456.78901234.5";
+        long retainedDate = persian(1405, 6, 30, 9, 14);
+        retainPlainWepod(dottedBalance(account, "06/30_09:14", 171_289L),
+            persian(1405, 6, 30, 9, 15), retainedDate, 171_289L);
+        LinkedHashMap<String, Bank> existing = BalanceData.read(ctx);
+        long newerDate = persian(1405, 6, 31, 10, 0);
+        existing.put("Wepod|" + account, new Bank("Wepod", 271_289L, newerDate, "Wepod", account));
+        assertTrue(BalanceData.write(ctx, existing));
+        seed("+985000114", dottedBalance(account, "06/29_21:06", 51_289L),
+            persian(1405, 6, 29, 21, 7));
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+        assertEquals(1, saved.size());
+        assertNull(saved.get("Wepod"));
+        assertEquals(271_289L, saved.get("Wepod|" + account).amount);
+        assertEquals(newerDate, saved.get("Wepod|" + account).date);
+        assertEquals("Wepod", saved.get("Wepod|" + account).sender);
+        assertEquals(newerDate, BalanceData.read(ctx).get("Wepod|" + account).date);
+    }
+
+    @Test public void wepodRetainedPlain_ambiguousSourcesKeepExistingInboxFallback() throws Exception {
+        String account = "123.456.78901234.5";
+        String other = "123.456.78901235.6";
+        long date = persian(1405, 6, 30, 9, 14);
+        long arrival = persian(1405, 6, 30, 9, 15);
+        retainPlainWepod(dottedBalance(account, "06/30_09:14", 171_289L), arrival, date, 171_289L);
+        SourceStore.Source competing = SourceStore.capture(ctx, "+985000114",
+            dottedBalance(other, "06/30_09:14", 171_289L), arrival, 0);
+        assertTrue(SourceStore.observeBalance(ctx, competing, 0, "Wepod", null, date, 171_289L));
+        seed("+985000114", dottedBalance(account, "06/29_21:06", 51_289L),
+            persian(1405, 6, 29, 21, 7));
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(1, BalanceData.scanSms(ctx, saved));
+        assertEquals(1, saved.size());
+        assertNull(saved.get("Wepod"));
+        assertNull(saved.get("Wepod|" + other));
+        assertEquals(51_289L, saved.get("Wepod|" + account).amount);
+        assertEquals("no guessed account observation for either competing source", 3L,
+            SourceStore.balanceObservationCount(ctx));
+    }
+
+    @Test public void wepodRetainedPlain_sourceWithoutAccountKeepsUndatedSnapshot() throws Exception {
+        SourceStore.Source source = retainPlainWepod("\u0645\u0627\u0646\u062F\u0647: 171289", 0, 0, 171_289L);
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(0, BalanceData.scanSms(ctx, saved));
+        assertEquals(1, saved.size());
+        assertEquals(0, saved.get("Wepod").date);
+        assertNull(saved.get("Wepod").account);
+        assertEquals(1, SourceStore.balanceObservationsForSource(ctx, source.id).size());
+        assertEquals(-1, storedRulesVersion());
+    }
+
+    @Test public void wepodRetainedPlain_sourceMustStillProveSavedBalance() throws Exception {
+        long date = persian(1405, 6, 30, 9, 14);
+        retainPlainWepod(dottedBalance("123.456.78901234.5", "06/30_09:14", 271_289L),
+            persian(1405, 6, 30, 9, 15), date, 171_289L);
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(0, BalanceData.scanSms(ctx, saved));
+        assertEquals(1, saved.size());
+        assertEquals(171_289L, saved.get("Wepod").amount);
+        assertEquals(date, saved.get("Wepod").date);
+        assertEquals(1L, SourceStore.balanceObservationCount(ctx));
+    }
+
+    @Test public void wepodRetainedPlain_observationMustMatchSavedDateExactly() throws Exception {
+        long date = persian(1405, 6, 30, 9, 14);
+        retainPlainWepod(dottedBalance("123.456.78901234.5", "06/30_09:14", 171_289L),
+            persian(1405, 6, 30, 9, 15), date, 171_289L);
+        LinkedHashMap<String, Bank> existing = BalanceData.read(ctx);
+        existing.get("Wepod").date = date + 60_000;
+        assertTrue(BalanceData.write(ctx, existing));
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(0, BalanceData.scanSms(ctx, saved));
+        assertEquals(1, saved.size());
+        assertEquals(171_289L, saved.get("Wepod").amount);
+        assertEquals(date + 60_000, saved.get("Wepod").date);
+        assertEquals(1L, SourceStore.balanceObservationCount(ctx));
+    }
+
     @Test public void saderatAccountLabel_singleAccountEntry() throws Exception {
         // Saderat movements state the account right after the "حساب:" label, so their balances land
         // in a per-account entry instead of a bank-wide slot.
