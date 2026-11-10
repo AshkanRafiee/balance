@@ -1609,7 +1609,7 @@ final class BalanceData {
                     // SMS cannot create a new physical source row on every later scan.
                     SourceEvidence evidence = new SourceEvidence(sender, body, rawArrival);
                     sourceRows.add(evidence);
-                    long value = extract(body);
+                    long value = extract(bank, body);
                     if (value < 0) continue;
                     long eventDate = MessageDate.eventTime(body, arrival, BankRules.calendar(bank));
                     evidence.balanceBank = bank;
@@ -1666,7 +1666,7 @@ final class BalanceData {
                 chosen = last;
                 chosenSender = sigSender.get(last.sig);
             } else {
-                long bal = extract((String) newestArr[1]);
+                long bal = extract(bank, (String) newestArr[1]);
                 if (bal >= 0) {
                     chosen = new Reconcile.Entry((Long) newestArr[2], 0, bal, null);
                     chosenSender = (String) newestArr[0];
@@ -2161,6 +2161,9 @@ final class BalanceData {
                     String body = cursor.getString(1);
                     SourceEvidence evidence = new SourceEvidence(sender, body, rawArrival);
                     sourceRows.add(evidence);
+                    // Retain unsupported products for diagnostics, but do not let them split a
+                    // supported account's adjacent reconciliation rows or influence its delta seed.
+                    if (!BankRules.acceptsBalance(bank, body)) continue;
                     rows.add(new Object[]{bank, sender, body,
                         MessageDate.eventTime(body, arrival, BankRules.calendar(bank)), evidence});
                 }
@@ -2385,7 +2388,7 @@ final class BalanceData {
                     // Remember the last stated balance per bank so the next movement can be measured
                     // against it, across scans. OTP messages and balance-less prompts return -1 here
                     // and leave the chain untouched.
-                    long bal = extract(body);
+                    long bal = extract(bank, body);
                     if (bal >= 0 && (seedDate == null || balanceDate >= seedDate)) {
                         lastBalance.put(key, bal);
                         lastBalanceDates.put(key, balanceDate);
@@ -3420,6 +3423,11 @@ final class BalanceData {
         return t.account == null ? base : base + "|" + t.account;
     }
 
+    /** Applies any product scope before accepting a known sender's stated balance. */
+    static long extract(String bank, String raw) {
+        return BankRules.acceptsBalance(bank, raw) ? extract(raw) : -1;
+    }
+
     /** The resulting balance a message states, or -1 when it states none. Matching runs over one
      *  letter form (the Arabic yeh and kaf folded onto their Persian counterparts, mirroring the
      *  movement matchers) so a bank that spells "موجودي" either way still reads — and over the
@@ -3602,12 +3610,13 @@ final class BalanceData {
     static Transaction parseMovement(String bank, String sender, String body, long date,
                                      boolean hasPrev, long prevBalance) {
         if (body == null) return null;
-        long stated = extract(body);
+        long stated = extract(bank, body);
+        if (stated < 0) return null;
         Long txn = extractTransaction(body);
         if (txn == null) {
             String n = normalizeLetters(digits(body.replace("\u066C", ",").replace("\u060C", ",")));
             if (!containsAny(n, DEPOSIT_KEYWORDS) && !containsAny(n, WITHDRAWAL_KEYWORDS)) return null;
-            if (stated < 0 || !hasPrev) return null;
+            if (!hasPrev) return null;
             long delta = stated - prevBalance;
             if (delta == 0) return null;
             txn = delta;
@@ -3616,7 +3625,7 @@ final class BalanceData {
         // The balance the message reported travels with the movement, so the history can prove a
         // missing message later without ever touching the inbox again (see Residual).
         return new Transaction(bank, account, date, txn,
-            stated < 0 ? null : stated, movementSig(bank, sender, body, account, date), contentHash(sender, body));
+            stated, movementSig(bank, sender, body, account, date), contentHash(sender, body));
     }
 
     /** The last number captured by the given pattern in the string, or null if it matched nothing. */
@@ -3691,7 +3700,7 @@ final class BalanceData {
             String sender = (String) row[0];
             String body = (String) row[1];
             Long txn = extractTransaction(body);
-            long bal = extract(body);
+            long bal = extract(bank, body);
             if (txn == null || bal < 0) continue;
             long date = (Long) row[2];
             String sig = movementSig(bank, sender, body,

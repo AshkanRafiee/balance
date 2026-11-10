@@ -208,8 +208,8 @@ public class BankRulesParityTest {
     // ---- reachability / counts unchanged -------------------------------------------------
     @Test public void parity_reachableBanksUnchanged() {
         Set<String> reachable = BankRules.reachableBanks();
-        // 42 bank senders must still be reachable so no alias-table change silently drops a bank.
-        assertEquals(42, reachable.size());
+        // All 43 institutions, including Mofid, must stay reachable after alias-table changes.
+        assertEquals(43, reachable.size());
         assertEquals(reachable, oracleReachable());
     }
 

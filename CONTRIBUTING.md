@@ -1,18 +1,21 @@
 # Contributing to Balance
 
-Balance parses Iranian bank SMS messages on-device. Helping us keep the
-recognized bank formats up to date — or report a problem — is the most valuable
+Balance reads Iranian bank and Mofid Jet Card (Hami) SMS on-device. Helping us keep the
+supported message formats up to date — or report a problem — is the most valuable
 contribution you can make.
 
 ## What Balance can and cannot detect
 
 - Balance recognizes the **balance messages of about 40 Iranian banks** (sender
   aliases and message layouts).
+- **Mofid Jet Card (Hami)** messages from **10008700** provide one latest reported
+  balance and confirmed deposit/withdrawal history, without an account number.
+  This does not mean general support for brokerage messages.
 - Only a handful of those banks state a **machine-readable account number** in
   their SMS. For those banks Balance splits the balance — and history — per
-  account. For every other bank, Balance shows one combined balance per bank,
-  even if you hold several accounts, because the message carries no account
-  number to tell them apart.
+  account. Without an account number, Balance shows the latest reported balance
+  for that bank or Jet Card, not the sum of several accounts. It cannot
+  distinguish multiple accounts when messages do not identify them.
 - History entries (deposits/withdrawals) also come from the same message
   layouts. A message layout we have not seen before can therefore mean a wrong
   or missing transaction in history, even when the balance looks fine.

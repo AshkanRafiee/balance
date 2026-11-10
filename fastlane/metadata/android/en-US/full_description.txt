@@ -1,6 +1,6 @@
-Balance turns bank SMS into balances, transaction history and payment reminders. Processing stays on your phone: no account, cloud service, analytics or internet permission. Saved financial records are encrypted; CSV exports are not.
+Balance turns supported SMS into balances, transaction history and payment reminders. Processing stays on your phone: no account, cloud service, analytics or internet permission. Saved financial records are encrypted; CSV exports are not.
 
-Currently supports Iranian banks and their Persian SMS formats only. Accounts are shown separately when the bank states an account number.
+Supports Persian SMS formats from Iranian banks and selected financial services. Accounts are shown separately when messages include an account number.
 
 See your money clearly:
 - Latest balances by bank and account, a combined total, and accounts you can exclude

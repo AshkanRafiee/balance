@@ -112,7 +112,7 @@ final class ScanDiagnostics {
             if (bank == null) {
                 s.unknownSendersMessages++;
                 add(unknown, sender, null, body, date);
-            } else if (BalanceData.extract(body) < 0) {
+            } else if (BalanceData.extract(bank, body) < 0) {
                 s.unparsedSendersMessages++;
                 add(unparsed, sender, bank, body, date);
             } else {

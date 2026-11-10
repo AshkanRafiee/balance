@@ -53,6 +53,7 @@ final class BankRules {
         DISPLAY_NAME_RES.put("Tosee Saderat", R.string.bank_tosee_saderat);
         DISPLAY_NAME_RES.put("Bankino", R.string.bank_bankino);
         DISPLAY_NAME_RES.put("Wepod", R.string.bank_wepod);
+        DISPLAY_NAME_RES.put("Mofid", R.string.bank_mofid);
         DISPLAY_NAME_RES.put("Industry & Mine", R.string.bank_industry_mine);
         DISPLAY_NAME_RES.put("Tosee Credit Inst.", R.string.bank_tosee_credit_inst);
         DISPLAY_NAME_RES.put("EDBI", R.string.bank_edbi);
@@ -104,7 +105,8 @@ final class BankRules {
         {"Sepah", "Sepah|Bank Sepah", "J"},
         {"Tosee Saderat", "Tosee Saderat|ToseeSaderat", "J"},
         {"Bankino", "Bankino|Bankino Bank", "J"},
-        {"Wepod", "Wepod|Wepod Bank", "J"}
+        {"Wepod", "Wepod|Wepod Bank", "J"},
+        {"Mofid", "10008700", "J"}
     };
     private static final String[][] OFFICIAL_EXTRA_RULES = {
         {"Saderat", "+987007851040|+9830009419|9830009419|30009419|983-000-9419|+98200060|+98200040|+9820004008|+98700719|700710|700718|98700719|700719|7007190", "J"},
@@ -135,6 +137,13 @@ final class BankRules {
         {"Wepod", "+981000214|98500011|5000114|+985000114|985000114|981000214|1000214|9830009017|30009017", "J"},
         {"Bankino", "20004860", "J"}
     };
+
+    // Mofid's sender may carry other brokerage products. Only the reported Hami stream belongs
+    // in this accountless balance slot; its product name is not a unique account number.
+    private static final Pattern MOFID_HEADER = Pattern.compile(
+        "(?m)^[ \\t]*کارگزاری[ \\t]+مفید[ \\t]*\\r?$");
+    private static final Pattern MOFID_HAMI_ACCOUNT = Pattern.compile(
+        "(?m)^[ \\t]*(?:به|از)[ \\t]+حساب[ \\t]+حامی[ \\t]*\\r?$");
 
     /** A bank authorization message is evidence about a possible payment, not a movement. The
      * parser is deliberately shape-based: a known sender, an action, a separately stated amount,
@@ -339,6 +348,8 @@ final class BankRules {
     private static int rulesVersion() {
         int v = 0;
         v = v * 31 + TextNormalizer.VERSION.hashCode();
+        v = v * 31 + MOFID_HEADER.pattern().hashCode();
+        v = v * 31 + MOFID_HAMI_ACCOUNT.pattern().hashCode();
         v = v * 31 + AUTH_AMOUNT.pattern().hashCode();
         v = v * 31 + AUTH_RIAL_AMOUNT.pattern().hashCode();
         v = v * 31 + AUTH_CODE.pattern().hashCode();
@@ -399,6 +410,15 @@ final class BankRules {
         }
         Alias e = EXACT.get(a);
         return e == null ? null : e.bank;
+    }
+
+    /** Keeps distinct products from a shared sender out of an unidentified account's balance chain. */
+    static boolean acceptsBalance(String bank, String body) {
+        if (!"Mofid".equals(bank)) return true;
+        if (body == null) return false;
+        String normalized = TextNormalizer.normalize(body);
+        return MOFID_HEADER.matcher(normalized).find()
+            && MOFID_HAMI_ACCOUNT.matcher(normalized).find();
     }
 
     /** Parses a completed-payment authorization message without turning it into a balance or
