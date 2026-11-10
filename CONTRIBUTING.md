@@ -75,6 +75,13 @@ Scans can only read messages Android makes available to Balance. A missing or
 deleted message, denied SMS permission, or Android restrictions can leave gaps;
 a scan is not a live check against your bank. Tell us if any of these apply.
 
+When an update starts recognizing separate accounts, check which accounts are
+excluded from your total. For Wepod, a saved balance can follow its newly recognized
+account when a uniquely matching saved message proves the link. If the newest SMS
+was deleted and that evidence is missing or ambiguous, splitting accounts may
+instead use older inbox balances; re-reading cannot guarantee recovering the newer
+balance. Do not reset your data to try to resolve this.
+
 ### A full reset is destructive
 
 Use the Data menu's full reset only when you intend to remove saved financial

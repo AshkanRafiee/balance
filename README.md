@@ -1,8 +1,8 @@
 # Balance
 
-Balance turns supported bank SMS into a clear picture of your money: the latest balances, a combined total, transaction history and payment reminders. Everything is processed on your phone, without an account, cloud service, analytics or internet permission.
+Balance turns supported financial SMS into a clear picture of your money: the latest balances, a combined total, transaction history and payment reminders. Everything is processed on your phone, without an account, cloud service, analytics or internet permission.
 
-**Currently supports Iranian banks and their Persian SMS formats only.** Accounts are shown separately when the bank includes an account number in its messages.
+**Supports Persian SMS formats from Iranian banks and selected financial services only.** Accounts are shown separately when messages include an account number.
 
 ## What you can do
 
@@ -21,7 +21,7 @@ SMS access lets Balance read bank messages; turning it off does not delete saved
 
 Saved financial records are encrypted; CSV exports are not. Encrypted backups also include retained bank-message samples. Report, sharing, CSV export and backup only hand selected data to the app or location you choose. Review shared samples even though one-time password values are removed by Report.
 
-For an unexpected result, refresh or safely re-read bank messages before deleting anything. Re-reading keeps commitments, notes, tags, excluded accounts, retained history and saved message sources. **A full reset is different and destructive:** it removes balances, history and commitments and requires two confirmations; deleted SMS cannot be recovered by scanning. Back up first. See [troubleshooting and reporting](CONTRIBUTING.md).
+For an unexpected result, refresh or safely re-read bank messages before deleting anything. Re-reading does not clear your saved data; check exclusions when newly recognized accounts appear. **A full reset is different and destructive:** it removes balances, history and commitments and requires two confirmations; deleted SMS cannot be recovered by scanning. Back up first. See [troubleshooting and reporting](CONTRIBUTING.md).
 
 ## Download
 
