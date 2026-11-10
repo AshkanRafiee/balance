@@ -206,7 +206,7 @@ public class CommitmentReminderPlanningTest {
             new CommitmentReminderJobs.Token());
         plan();
 
-        Notification shown = notification(definition.id);
+        Notification shown = awaitNotification(definition.id, true);
         assertNotNull("removing the consumed alarm must not remove its notification", shown);
         assertEquals(Notification.VISIBILITY_PRIVATE, shown.visibility);
         assertNotNull(shown.publicVersion);
@@ -217,7 +217,7 @@ public class CommitmentReminderPlanningTest {
 
         CommitmentStore.settle(context, definition.id, definition.start);
         CommitmentReminders.fireNow(context, definition.id, new CommitmentReminderJobs.Token());
-        assertNull(notification(definition.id));
+        assertNull(awaitNotification(definition.id, false));
     }
 
     @Test public void fullResetRemovesDeliveredFinancialNotificationBeforeQueuedReplanning()
@@ -226,12 +226,12 @@ public class CommitmentReminderPlanningTest {
             Commitment.ONCE, inDays(-1), null, true, 0);
         CommitmentStore.upsert(context, definition);
         CommitmentReminders.fireNow(context, definition.id, new CommitmentReminderJobs.Token());
-        assertNotNull(notification(definition.id));
+        assertNotNull(awaitNotification(definition.id, true));
 
         BalanceData.reset(new CountingContext(context), true);
 
         assertNull("reset must not wait for background job admission to hide deleted data",
-            notification(definition.id));
+            awaitNotification(definition.id, false));
         assertTrue(BalanceData.readCommitments(context).isEmpty());
     }
 
@@ -240,12 +240,12 @@ public class CommitmentReminderPlanningTest {
             inDays(-1), null, true, 0);
         CommitmentStore.upsert(context, definition);
         CommitmentReminders.fireNow(context, definition.id, new CommitmentReminderJobs.Token());
-        assertNotNull(notification(definition.id));
+        assertNotNull(awaitNotification(definition.id, true));
         CommitmentStore.delete(context, definition.id);
 
         plan();
 
-        assertNull(notification(definition.id));
+        assertNull(awaitNotification(definition.id, false));
         assertTrue(CommitmentReminders.scheduledIds(context).isEmpty());
     }
 
@@ -276,7 +276,7 @@ public class CommitmentReminderPlanningTest {
         assertEquals(1, reminderPrefs().getStringSet("fired_due", Collections.emptySet()).size());
         assertTrue(reminderPrefs().getStringSet("overdue_fired", Collections.emptySet())
             .contains(definition.id));
-        assertNotNull(notification(definition.id));
+        assertNotNull(awaitNotification(definition.id, true));
         assertFalse(CommitmentReminders.scheduledIds(context).contains(definition.id));
     }
 
@@ -375,7 +375,7 @@ public class CommitmentReminderPlanningTest {
         assertNull(notification(definition.id));
 
         CommitmentReminders.fireNow(context, definition.id, new CommitmentReminderJobs.Token());
-        assertNotNull(notification(definition.id));
+        assertNotNull(awaitNotification(definition.id, true));
     }
 
     @Test public void scheduledStateDiskFlushDoesNotBlockUiSuppressionReset() throws Exception {
@@ -446,8 +446,13 @@ public class CommitmentReminderPlanningTest {
         try {
             CommitmentReminders.fireNow(failing, definition.id, new CommitmentReminderJobs.Token());
             fail("a failed durable flush must remain a failed dispatcher request");
-        } catch (IllegalStateException expected) { }
-        assertNotNull(notification(definition.id));
+        } catch (IllegalStateException expected) {
+            assertEquals("reminder delivery persistence failed", expected.getMessage());
+        }
+        assertFalse("the injected commit failure must be reached", first.get());
+        // notify() enqueues work in Android; the failing commit adds no incidental disk wait.
+        assertNotNull("the reminder must still be posted after the failed flush",
+            awaitNotification(definition.id, true));
         assertTrue(reminderPrefs().getStringSet("fired_due", Collections.emptySet())
             .contains(definition.id + "|" + definition.start));
 
@@ -480,7 +485,7 @@ public class CommitmentReminderPlanningTest {
             inDays(-1), null, true, 0);
         CommitmentStore.upsert(context, definition);
         CommitmentReminders.fireNow(context, definition.id, new CommitmentReminderJobs.Token());
-        assertNotNull(notification(definition.id));
+        assertNotNull(awaitNotification(definition.id, true));
         NotificationManager manager = context.getSystemService(NotificationManager.class);
         manager.notify("unrelated-test", 91, new Notification.Builder(context,
             CommitmentReminders.CHANNEL_ID).setSmallIcon(R.drawable.ic_balance_monochrome)
@@ -515,7 +520,7 @@ public class CommitmentReminderPlanningTest {
             assertTrue("reset privacy cleanup cannot wait for job admission",
                 returned.await(2, TimeUnit.SECONDS));
             assertNull(hookFailure.get());
-            assertNull(notification(definition.id));
+            assertNull(awaitNotification(definition.id, false));
             assertEquals("reset cleanup must never read the financial store", 0,
                 counted.dataPreferenceReads);
             boolean unrelatedPresent = false;
@@ -581,6 +586,16 @@ public class CommitmentReminderPlanningTest {
                 .getActiveNotifications())
             if (("commitment:" + id).equals(shown.getTag())) return shown.getNotification();
         return null;
+    }
+
+    private Notification awaitNotification(String id, boolean present) {
+        long deadline = SystemClock.elapsedRealtime() + 5000;
+        Notification shown;
+        // Both notify() and cancel() finish asynchronously in Android's notification service.
+        while (((shown = notification(id)) != null) != present
+                && SystemClock.elapsedRealtime() < deadline)
+            SystemClock.sleep(20);
+        return shown;
     }
 
     private void plan() throws Exception {
