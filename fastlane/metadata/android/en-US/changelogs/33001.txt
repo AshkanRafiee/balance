@@ -2,3 +2,4 @@
 • Fixed Wepod account detection and improved preservation of saved balances.
 • Fixed extra spaces splitting Wepod and Pasargad accounts, keeping history, notes, tags and exclusion choices.
 • If Wepod was excluded before the update, check exclusions for its newly recognized accounts.
+• Fixed scans incorrectly reporting success after an update or restore when saved messages were missing.
