@@ -570,6 +570,7 @@ final class BankRules {
         {"Mehr",     "bare-bidi",       "10", "24"},
         {"Resalat",  "dotted",          "",   ""},
         {"Pasargad", "dotted-line",     "",   ""},
+        {"Wepod",    "dotted-line",     "",   ""},
         {"Middle East", "slash-line",   "",   ""},
         {"Sepah",  "credit-line",    "6",  "24"},
         {"Maskan",   "label-colon",     "6",  "24"},
@@ -598,7 +599,7 @@ final class BankRules {
                 return Pattern.compile("(?m)^[\\u202A-\\u202E]*(" + d + ")(?![0-9,.])[\\u202A-\\u202E ]*\\r?$");
             case "dotted":        // Resalat: free-floating three-part id; bounds keep dotted dates out
                 return Pattern.compile("(?<![0-9])[0-9]{1,2}\\.[0-9]{4,12}\\.[0-9]{1,2}(?![0-9])");
-            case "dotted-line":   // Pasargad: four-part dotted id alone on its own line
+            case "dotted-line":   // Pasargad/Wepod: four-part dotted id alone on its own line
                 return Pattern.compile("(?m)^[0-9]{1,4}\\.[0-9]{1,6}\\.[0-9]{6,12}\\.[0-9]{1,3}(?![0-9.])\\s*\\r?$");
             case "dotted-labeled":   // Gardeshgari: four-part dotted id behind "واریز به:".
                 // The label is required and line-anchored, so a bare dotted date elsewhere never

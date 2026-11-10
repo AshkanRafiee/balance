@@ -322,6 +322,35 @@ public class BankRulesTest {
             + "-508,000\n06/29_21:06\n\u0645\u0627\u0646\u062F\u0647: 51,289"));
     }
 
+    @Test public void extractAccount_wepodDottedAccountLine_returnsAccount() {
+        String bank = BankRules.resolve("+985000114");
+        assertEquals("Wepod", bank);
+        assertEquals("123.456.78901234.5", BankRules.extractAccount(bank,
+            "123.456.78901234.5\n+12,000,000\n08/07_18:59\n\u0645\u0627\u0646\u062F\u0647: 12,000,000"));
+        assertEquals("321.654.87654321.0", BankRules.extractAccount(bank,
+            "321.654.87654321.0\r\n-500,000\r\n08/07_19:00\r\n\u0645\u0627\u0646\u062F\u0647: 11,500,000"));
+    }
+
+    @Test public void extractAccount_wepodLocalizedDigits_returnsAsciiAccount() {
+        assertEquals("123.456.78901234.5", BankRules.extractAccount("Wepod",
+            "\u06F1\u06F2\u06F3.\u06F4\u06F5\u06F6.\u06F7\u06F8\u06F9\u06F0\u06F1\u06F2\u06F3\u06F4.\u06F5\n"
+            + "+12,000,000\n08/07_18:59\n\u0645\u0627\u0646\u062F\u0647: 12,000,000"));
+        assertEquals("123.456.78901234.5", BankRules.extractAccount("Wepod",
+            "\u0661\u0662\u0663.\u0664\u0665\u0666.\u0667\u0668\u0669\u0660\u0661\u0662\u0663\u0664.\u0665\n"
+            + "+12,000,000\n08/07_18:59\n\u0645\u0627\u0646\u062F\u0647: 12,000,000"));
+    }
+
+    @Test public void extractAccount_wepodDateAmountOrMalformedAccount_notCaptured() {
+        String[] nonAccounts = {
+            "+12,000,000", "08/07_18:59", "1405.08.07", "\u0645\u0627\u0646\u062F\u0647: 12,000,000",
+            "123.456.78901234", "12345.456.78901234.5", "123.456.78901.5",
+            "123.456.78901234.5678", "123.456.78901234.5.6", "123.456.78901234.5 extra"
+        };
+        for (String line : nonAccounts) {
+            assertNull(line, BankRules.extractAccount("Wepod", line));
+        }
+    }
+
     @Test public void extractAccount_pasargadDateOrAmount_notCaptured() {
         // A dated line, a signed amount, or a dotted date must not be mistaken for the account.
         assertNull(BankRules.extractAccount("Pasargad", "-508,000\n06/29_21:06\n\u0645\u0627\u0646\u062F\u0647: 51,289"));

@@ -434,6 +434,36 @@ public class BalanceScanTest {
         assertEquals("123.456.78901234.5", acct.account);
     }
 
+    @Test public void wepodDottedAccounts_fullScanSeparatesBalancesAndRemovesLegacySlot() throws Exception {
+        LinkedHashMap<String, Bank> legacy = new LinkedHashMap<>();
+        legacy.put("Wepod", new Bank("Wepod", 42L, T, "+985000114", null));
+        assertTrue(BalanceData.write(ctx, legacy));
+
+        seed("+985000114", "123.456.78901234.5\n-508,000\n06/29_21:06\n\u0645\u0627\u0646\u062F\u0647: 51,289",
+            at(2026, 9, 20, 21, 7));
+        seed("+985000114", "123.456.78901234.5\n+120,000\n06/30_09:14\n\u0645\u0627\u0646\u062F\u0647: 171,289",
+            at(2026, 9, 21, 9, 15));
+        seed("+985000114", "123.456.78901235.6\n-508,000\n06/30_09:16\n\u0645\u0627\u0646\u062F\u0647: 951,289",
+            at(2026, 9, 21, 9, 17));
+
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        assertEquals(2, BalanceData.scanSms(ctx, saved));
+
+        LinkedHashMap<String, Bank> after = BalanceData.read(ctx);
+        assertEquals(2, after.size());
+        assertNull(after.get("Wepod"));
+        Bank first = after.get("Wepod|123.456.78901234.5");
+        Bank second = after.get("Wepod|123.456.78901235.6");
+        assertNotNull(first);
+        assertNotNull(second);
+        assertEquals(171_289L, first.amount);
+        assertEquals(951_289L, second.amount);
+        assertEquals("123.456.78901234.5", first.account);
+        assertEquals("123.456.78901235.6", second.account);
+        assertEquals("+985000114", first.sender);
+        assertEquals("+985000114", second.sender);
+    }
+
     @Test public void saderatAccountLabel_singleAccountEntry() throws Exception {
         // Saderat movements state the account right after the "حساب:" label, so their balances land
         // in a per-account entry instead of a bank-wide slot.

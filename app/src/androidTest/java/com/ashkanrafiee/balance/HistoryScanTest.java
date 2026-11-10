@@ -769,6 +769,64 @@ public class HistoryScanTest {
         assertEquals(-388000L, sum);    // -508,000 + +120,000
     }
 
+    @Test public void wepodDottedAccounts_reReadKeepsDistinctHistoryAndAnnotations() throws Exception {
+        // Equal amounts, balances and event times must still have distinct identities per account.
+        long arrival = at(2026, 10, 29, 19, 0);
+        String body = "123.456.78901234.5\n+12,000,000\n08/07_18:59\n\u0645\u0627\u0646\u062F\u0647: 12,000,000";
+        seed("+985000114", body, arrival);
+        seed("+985000114", "123.456.78901235.6\n+12,000,000\n08/07_18:59\n\u0645\u0627\u0646\u062F\u0647: 12,000,000",
+            arrival);
+
+        // Before account support, this same message was stored under Wepod without an account.
+        long event = MessageDate.eventTime(body, arrival, BankRules.calendar("Wepod"));
+        Transaction legacy = new Transaction("Wepod", null, event, 12_000_000L, 12_000_000L,
+            BalanceData.messageSig("+985000114", body), BalanceData.contentHash("+985000114", body));
+        assertTrue(BalanceData.writeTransactions(ctx, Collections.singletonList(legacy)));
+        BalanceData.setNote(ctx, legacy, "keep Wepod note");
+        BalanceData.setTags(ctx, legacy, Collections.singletonList("keep"));
+
+        assertEquals(2, BalanceData.scanHistory(ctx));
+        List<Transaction> before = BalanceData.readTransactions(ctx);
+        assertEquals(2, before.size());
+        Transaction first = null;
+        for (Transaction transaction : before) {
+            assertEquals("Wepod", transaction.bank);
+            assertEquals(12_000_000L, transaction.amount);
+            assertEquals(Long.valueOf(12_000_000L), transaction.balance);
+            if ("123.456.78901234.5".equals(transaction.account)) first = transaction;
+            else assertEquals("123.456.78901235.6", transaction.account);
+        }
+        assertNotNull(first);
+        assertFalse(before.get(0).account.equals(before.get(1).account));
+        assertFalse(BalanceData.noteKey(before.get(0)).equals(BalanceData.noteKey(before.get(1))));
+        String firstKey = BalanceData.noteKey(first);
+        assertEquals("keep Wepod note", BalanceData.getNote(ctx, first));
+        assertEquals(Collections.singletonList("keep"), BalanceData.getTags(ctx, first));
+
+        java.util.LinkedHashMap<String, Bank> balances = new java.util.LinkedHashMap<>();
+        for (int pass = 0; pass < 2; pass++) {
+            assertTrue(BalanceData.reReadBankMessages(ctx, balances, null).succeeded());
+            List<Transaction> after = BalanceData.readTransactions(ctx);
+            assertEquals(2, after.size());
+            assertFalse(after.get(0).account.equals(after.get(1).account));
+            for (Transaction transaction : after) {
+                assertEquals("Wepod", transaction.bank);
+                assertEquals(12_000_000L, transaction.amount);
+                assertEquals(Long.valueOf(12_000_000L), transaction.balance);
+                if ("123.456.78901234.5".equals(transaction.account)) {
+                    assertEquals(firstKey, BalanceData.noteKey(transaction));
+                    assertEquals("keep Wepod note", BalanceData.getNote(ctx, transaction));
+                    assertEquals(Collections.singletonList("keep"), BalanceData.getTags(ctx, transaction));
+                } else {
+                    assertEquals("123.456.78901235.6", transaction.account);
+                    assertNull(BalanceData.getNote(ctx, transaction));
+                    assertTrue(BalanceData.getTags(ctx, transaction).isEmpty());
+                }
+            }
+            assertEquals(0, BalanceData.scanHistory(ctx));
+        }
+    }
+
     @Test public void realBankFormat_saderatAccountLabelMovements_areRecorded() throws Exception {
         // Saderat writes "انتقال: <amount>-" and the account right after the "حساب:" label, with
         // the resulting balance in the line below.
