@@ -181,11 +181,12 @@ final class BalanceData {
     /** The amount written directly after a deposit/withdrawal label, as Tejarat does with
      *  "برداشت: 490,098,000 ریال". Matching one of these also resolves the direction: a label that
      *  feeds the amount is authoritative, so a payment-method word like "پرداخت" in the same message
-     *  does not make a deposit look ambiguous. */
+     *  does not make a deposit look ambiguous. A label must stay on the amount's line so a
+     *  sentence ending in a movement word cannot consume the following balance line. */
     private static final Pattern depositLabel = Pattern.compile(
-        "(?:\u0648\u0627\u0631\u06CC\u0632)[^\\d]{0,12}?([0-9][0-9,]*)");
+        "(?:\u0648\u0627\u0631\u06CC\u0632)[^\\d\\r\\n]{0,12}?([0-9][0-9,]*)");
     private static final Pattern withdrawalLabel = Pattern.compile(
-        "(?:\u0628\u0631\u062F\u0627\u0634\u062A)[^\\d]{0,12}?([0-9][0-9,]*)");
+        "(?:\u0628\u0631\u062F\u0627\u0634\u062A)[^\\d\\r\\n]{0,12}?([0-9][0-9,]*)");
     /** A bare number standing next to "ریال" (e.g. Blu's "400,000 ریال از حساب شما پرید"). The stated
      *  resulting balance is removed first, so this captures the moved amount rather than the balance. */
     private static final Pattern rialAmount = Pattern.compile("([0-9][0-9,]*)\\s*\u0631\u06CC\u0627\u0644");

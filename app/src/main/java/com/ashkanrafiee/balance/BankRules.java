@@ -154,6 +154,7 @@ final class BankRules {
     // Only integer rial amounts: grouping is either absent or consistently three digits.
     private static final String AUTH_INTEGER = "([0-9]{1,19}|[0-9]{1,3}(?:,[0-9]{3}){1,6})";
     private static final String AUTH_LAYOUT_VERSION = "strict-purchase-layouts-v2";
+    private static final String MOVEMENT_LAYOUT_VERSION = "line-local-movement-labels-v1";
     private static final Pattern AUTH_AMOUNT = Pattern.compile(
         "مبلغ\\s*[:：]?\\s*" + AUTH_INTEGER + "(?:\\s*ریال)?");
     private static final Pattern AUTH_RIAL_AMOUNT = Pattern.compile(
@@ -348,6 +349,8 @@ final class BankRules {
     private static int rulesVersion() {
         int v = 0;
         v = v * 31 + TextNormalizer.VERSION.hashCode();
+        // Amount parsing changed outside the bank tables; re-read available SMS on upgrade.
+        v = v * 31 + MOVEMENT_LAYOUT_VERSION.hashCode();
         v = v * 31 + MOFID_HEADER.pattern().hashCode();
         v = v * 31 + MOFID_HAMI_ACCOUNT.pattern().hashCode();
         v = v * 31 + AUTH_AMOUNT.pattern().hashCode();

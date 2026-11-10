@@ -1998,7 +1998,54 @@ public class HistoryScanTest {
         assertEquals(1, BalanceData.scanHistory(ctx));
 
         assertEquals(1, BalanceData.readTransactions(ctx).size());
+        Transaction transaction = BalanceData.readTransactions(ctx).get(0);
+        assertEquals(-6_666_000L, transaction.amount);
+        assertEquals(Long.valueOf(12_345_683L), transaction.balance);
         assertTrue(BalanceData.readReasons(ctx).isEmpty());
+    }
+
+    @Test public void bluWithdrawal_rulesBumpCorrectsOldBalanceAsAmount_andKeepsAnnotations()
+            throws Exception {
+        // Measured on 8c54b88 in fresh instrumentation with BankRules initialized first.
+        int oldRules = 155_420_608;
+        assertTrue("movement parsing changes must invalidate the previous rules fingerprint",
+            BankRules.VERSION != oldRules);
+        long arrival = persian(1405, 6, 16, 12, 0);
+        seed(BluMessages.SENDER, BluMessages.WITHDRAWAL, arrival);
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        Transaction parsed = BalanceData.readTransactions(ctx).get(0);
+        // Simulate the previous parser's exact mistake, independently of today's extraction rules.
+        Transaction old = new Transaction("Blu", null, parsed.date, -12_345_683L, 12_345_683L,
+            "old-blu-parser-signature", parsed.content);
+        // This retained movement's message is no longer in the inbox, so a rebuild must keep it.
+        Transaction orphan = new Transaction("Saman", T, 999_999L, "deleted-message-signature");
+        assertTrue(BalanceData.writeTransactions(ctx, java.util.Arrays.asList(old, orphan)));
+        BalanceData.setNote(ctx, old, "kept withdrawal note");
+        BalanceData.setTags(ctx, old, Collections.singletonList("keep"));
+        SourceStore.Source source = SourceStore.capture(ctx, BluMessages.SENDER,
+            BluMessages.WITHDRAWAL, arrival, oldRules);
+        assertNotNull(source);
+        assertTrue(SourceStore.observeTransaction(ctx, source, 0, old));
+        assertTrue(prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION, oldRules).commit());
+
+        assertEquals(1, BalanceData.scanHistory(ctx));
+        List<Transaction> saved = BalanceData.readTransactions(ctx);
+        assertEquals(2, saved.size());
+        Transaction corrected = saved.get(0);
+        assertEquals(-6_666_000L, corrected.amount);
+        assertEquals(Long.valueOf(12_345_683L), corrected.balance);
+        assertNotNull(old.content);
+        assertEquals(old.content, corrected.content);
+        assertEquals("kept withdrawal note", BalanceData.getNote(ctx, corrected));
+        assertEquals(Collections.singletonList("keep"), BalanceData.getTags(ctx, corrected));
+        assertEquals(1, amountsOf(saved, -6_666_000L));
+        assertEquals(1, amountsOf(saved, orphan.amount));
+        assertEquals(orphan.sig, saved.get(1).sig);
+        assertEquals(orphan.date, saved.get(1).date);
+        assertEquals(BankRules.VERSION,
+            prefs().getInt(BalanceData.KEY_HISTORY_RULES_VERSION, -1));
+        assertEquals(0, BalanceData.scanHistory(ctx));
+        assertEquals(2, BalanceData.readTransactions(ctx).size());
     }
 
     @Test public void bluTitledPromoAndOtp_areNotMovementsAndStateNoReason() throws Exception {
