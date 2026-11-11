@@ -7,3 +7,4 @@ signing.properties
 *.apk
 *.aab
 local.properties
+__pycache__/

@@ -179,6 +179,66 @@ unverified mirror. Its official distribution URL and SHA-256 checksum are in
 8.14.5 and Android Gradle Plugin 8.13.0. Check the build files and
 `.github/workflows/release.yml` if these versions change.
 
+### Running tests safely
+
+Use a **disposable emulator**, never a phone: provider tests seed and clear the
+real SMS inbox. Tests sharing app data must run serially. Do not use Gradle's
+`connected*AndroidTest` tasks across a remote/Docker adb connection; build the
+APKs with Gradle, then invoke instrumentation directly.
+
+```sh
+bash ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest
+adb -s emulator-5554 install -r -t -g app/build/outputs/apk/debug/app-debug.apk
+adb -s emulator-5554 install -r -t -g app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+```
+
+Build the companion `sms-injector` project and install its debug APK on the same
+emulator first. It supplies `com.ashkanrafiee.smsinject/.SeedReceiver`, used by
+scan tests. After every reinstall, grant the required app ops:
+
+```sh
+adb -s emulator-5554 shell cmd appops set com.ashkanrafiee.smsinject WRITE_SMS allow
+adb -s emulator-5554 shell cmd appops set com.ashkanrafiee.balance android:read_restricted_messages allow
+python3 tools/run_instrumentation.py
+```
+
+The Python 3.9+ Linux runner rejects physical-device serials, verifies the
+emulator property, installed/local debug APK hashes, helper and SMS permissions,
+and prevents concurrent cooperating runs. Rebuild and reinstall after source
+changes; hash matching cannot prove that an APK was built from current sources.
+It does not install APKs or change device settings automatically. Avoid running
+raw adb instrumentation concurrently with it.
+
+Progress is printed per test; logs, JSONL results and a summary are saved under
+`app/build/test-results/instrumentation/`. Success requires all announced tests,
+an `OK` summary, the final instrumentation code and zero failures—not just an
+adb exit code of zero. Assumption skips are reported separately. The default
+overall limit is four hours; `--timeout` accepts seconds. An interrupt or timeout
+attempts to stop both remote packages and the local adb client; check any cleanup
+errors before starting another run. `--serial`, `--output` and `--classes` allow
+an explicitly selected emulator, output directory or class/method filter:
+
+```sh
+python3 tools/run_instrumentation.py --classes com.ashkanrafiee.balance.ReconcileTest
+```
+
+Before accepting a parser change or release, run **both startup methods in
+separate invocations**, then the full suite. These exact single-method selections
+automatically omit the isolation listener so it cannot initialize the parser
+first. Running both in one process does not check both initialization orders.
+
+```sh
+python3 tools/run_instrumentation.py --classes 'com.ashkanrafiee.balance.ParserRevisionInitializationTest#balanceDataInitializedFirst_keepsTheHistoryRevisionCurrent'
+python3 tools/run_instrumentation.py --classes 'com.ashkanrafiee.balance.ParserRevisionInitializationTest#bankRulesInitializedFirst_keepsTheHistoryRevisionCurrent'
+python3 tools/run_instrumentation.py
+```
+
+Host-only runner checks use the standard library and never contact adb:
+
+```sh
+python3 -m unittest discover -s tools -v
+```
+
 ### Release signing
 
 A release build is unsigned when no keystore is configured, which supports
