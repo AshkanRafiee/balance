@@ -187,7 +187,7 @@ real SMS inbox. Tests sharing app data must run serially. Do not use Gradle's
 APKs with Gradle, then invoke instrumentation directly.
 
 ```sh
-bash ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest
+bash ./gradlew --no-watch-fs :app:assembleDebug :app:assembleDebugAndroidTest
 adb -s emulator-5554 install -r -t -g app/build/outputs/apk/debug/app-debug.apk
 adb -s emulator-5554 install -r -t -g app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 ```
@@ -206,6 +206,7 @@ The Python 3.9+ Linux runner rejects physical-device serials, verifies the
 emulator property, installed/local debug APK hashes, helper and SMS permissions,
 and prevents concurrent cooperating runs. Rebuild and reinstall after source
 changes; hash matching cannot prove that an APK was built from current sources.
+`--no-watch-fs` avoids stale file-watcher snapshots on shared/container filesystems.
 It does not install APKs or change device settings automatically. Avoid running
 raw adb instrumentation concurrently with it.
 
