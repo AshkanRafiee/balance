@@ -13,8 +13,10 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 import java.util.TimeZone;
 import java.time.ZoneId;
 import java.time.Instant;
@@ -244,30 +246,71 @@ public class CommitmentStoreTest {
         Commitment recurring = new Commitment("settlements", "settlements", 1, Commitment.DAILY,
             start, null, false, null, false, 0);
         definitions.add(recurring);
-        CommitmentStore.replace(context, definitions);
-        for (int i = 1; i <= 61; i++) CommitmentStore.settle(context, recurring.id,
-            civilDay(start, i));
+        assertTrue(CommitmentStore.replace(context, definitions));
+        List<Long> expectedDates = new ArrayList<>();
+        for (int i = 1; i <= 61; i++) expectedDates.add(civilDay(start, i));
+        CommitmentStore.runInTransaction(context, editor -> {
+            for (long date : expectedDates) assertTrue(editor.settle(recurring.id, date));
+            return null;
+        });
 
         int definitionsSeen = 0;
+        List<String> expectedIds = new ArrayList<>();
+        for (Commitment definition : definitions) expectedIds.add(definition.id);
+        List<String> actualIds = new ArrayList<>();
+        Set<String> uniqueIds = new HashSet<>();
+        int definitionPages = 0;
+        long definitionCursor = 0;
         CommitmentStore.DefinitionPage page = CommitmentStore.pageDefinitions(context, 0, 11);
         while (true) {
+            assertTrue("definition paging must terminate", ++definitionPages <= (74 + 10) / 11);
+            assertFalse("each fixture page must contain definitions", page.rows.isEmpty());
             assertTrue(page.rows.size() <= 11);
+            assertTrue("definition cursor must advance", page.nextId > definitionCursor);
+            definitionCursor = page.nextId;
+            for (Commitment definition : page.rows) {
+                assertTrue("duplicate definition " + definition.id, uniqueIds.add(definition.id));
+                actualIds.add(definition.id);
+            }
             definitionsSeen += page.rows.size();
             if (!page.hasMore) break;
             page = CommitmentStore.pageDefinitions(context, page, 11);
         }
         assertEquals(74, definitionsSeen);
+        assertEquals(74, uniqueIds.size());
+        assertEquals("definitions retain insertion order", expectedIds, actualIds);
+        assertEquals((74 + 10) / 11, definitionPages);
 
         int settlementsSeen = 0;
+        int settlementPages = 0;
+        long settlementCursor = 0;
+        List<Long> actualDates = new ArrayList<>();
+        Set<Long> uniqueDates = new HashSet<>();
         CommitmentStore.SettlementPage settlements = CommitmentStore.windowPage(context,
             recurring.id, start, civilDay(start, 100), 0, 13);
         while (true) {
+            assertTrue("settlement paging must terminate", ++settlementPages <= (61 + 12) / 13);
+            assertFalse("each fixture page must contain settlements", settlements.rows.isEmpty());
             assertTrue(settlements.rows.size() <= 13);
+            assertTrue("settlement cursor must advance", settlements.nextId > settlementCursor);
+            for (CommitmentStore.Settlement settlement : settlements.rows) {
+                assertTrue("settlement row IDs must increase", settlement.id > settlementCursor);
+                settlementCursor = settlement.id;
+                assertEquals(recurring.id, settlement.definitionId);
+                assertTrue(settlement.settled);
+                assertTrue("duplicate settlement date " + settlement.date,
+                    uniqueDates.add(settlement.date));
+                actualDates.add(settlement.date);
+            }
+            assertEquals(settlementCursor, settlements.nextId);
             settlementsSeen += settlements.rows.size();
             if (!settlements.hasMore) break;
             settlements = CommitmentStore.pageSettlements(context, settlements, 13);
         }
         assertEquals(61, settlementsSeen);
+        assertEquals(61, uniqueDates.size());
+        assertEquals("row order retains the fixture's exact civil dates", expectedDates, actualDates);
+        assertEquals((61 + 12) / 13, settlementPages);
     }
 
     @Test public void getExposesImmutablePagedSettlementList() throws Exception {

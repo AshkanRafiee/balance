@@ -11,8 +11,6 @@ import android.content.Context;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 
-import org.junit.After;
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -23,17 +21,6 @@ import java.util.List;
 /** The commitment model, its store and its recurrence engine (pure logic plus store round trip). */
 @RunWith(AndroidJUnit4.class)
 public class CommitmentTest {
-
-    private Context ctx;
-
-    @Before public void setUp() throws Exception {
-        ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        CommitmentStore.clear(ctx);
-    }
-
-    @After public void tearDown() throws Exception {
-        CommitmentStore.clear(ctx);
-    }
 
     private static Commitment commitment(String name, long amount, int frequency, long start) {
         return Commitment.create(name, amount, frequency, start, null, false, 0);
@@ -69,9 +56,9 @@ public class CommitmentTest {
 
     @Test public void normalized_rejectsInvalidFrequencyAndEnd() {
         long start = Commitment.millisOf(2026, 10, 7, CalendarSystem.GREGORIAN);
-        Commitment c = Commitment.create("rent", -5000, 99, start,
-            Commitment.millisOf(2026, 10, 1, CalendarSystem.GREGORIAN), false, -5);
-        assertNull(c);
+        assertNull(Commitment.create("rent", -5000, 99, start, null, false, 0));
+        assertNull(Commitment.create("rent", -5000, Commitment.MONTHLY, start,
+            Commitment.millisOf(2026, 10, 1, CalendarSystem.GREGORIAN), false, 0));
         assertNotNull(Commitment.create("valid", Long.MIN_VALUE, Commitment.MONTHLY,
             start, null, false, 0));
     }
@@ -149,21 +136,27 @@ public class CommitmentTest {
 
     // ---- store --------------------------------------------------------------------
 
-    @Test public void store_roundTripAndEmptyRemovesKey() {
-        assertTrue(BalanceData.readCommitments(ctx).isEmpty());
-        long start = Commitment.millisOf(2026, 10, 7, CalendarSystem.GREGORIAN);
-        List<Commitment> commitments = new ArrayList<>();
-        commitments.add(commitment("rent", -5000, Commitment.MONTHLY, start));
-        commitments.add(commitment("salary", 9000, Commitment.MONTHLY, start));
-        BalanceData.writeCommitments(ctx, commitments);
-        List<Commitment> back = BalanceData.readCommitments(ctx);
-        assertEquals(2, back.size());
-        assertEquals("rent", back.get(0).name);
-        assertEquals(9000, back.get(1).amount);
-        BalanceData.writeCommitments(ctx, new ArrayList<Commitment>());
-        assertTrue(BalanceData.readCommitments(ctx).isEmpty());
-        assertFalse(ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE)
-            .contains(BalanceData.KEY_COMMITMENTS));
+    @Test public void store_roundTripAndEmptyRemovesKey() throws Exception {
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        try {
+            CommitmentStore.clear(ctx);
+            assertTrue(BalanceData.readCommitments(ctx).isEmpty());
+            long start = Commitment.millisOf(2026, 10, 7, CalendarSystem.GREGORIAN);
+            List<Commitment> commitments = new ArrayList<>();
+            commitments.add(commitment("rent", -5000, Commitment.MONTHLY, start));
+            commitments.add(commitment("salary", 9000, Commitment.MONTHLY, start));
+            BalanceData.writeCommitments(ctx, commitments);
+            List<Commitment> back = BalanceData.readCommitments(ctx);
+            assertEquals(2, back.size());
+            assertEquals("rent", back.get(0).name);
+            assertEquals(9000, back.get(1).amount);
+            BalanceData.writeCommitments(ctx, new ArrayList<Commitment>());
+            assertTrue(BalanceData.readCommitments(ctx).isEmpty());
+            assertFalse(ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE)
+                .contains(BalanceData.KEY_COMMITMENTS));
+        } finally {
+            CommitmentStore.clear(ctx);
+        }
     }
 
     // ---- occurrences ---------------------------------------------------------------
