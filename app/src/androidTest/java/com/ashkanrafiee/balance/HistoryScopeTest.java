@@ -19,6 +19,7 @@ import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /** Multi-bank / multi-account scope: the pickers' collectors, the scope predicate, and the
@@ -54,6 +55,12 @@ public class HistoryScopeTest {
 
     private static Transaction tx(String bank, String account, long amount) {
         return new Transaction(bank, account, epoch(2026, 9, 10), amount, null);
+    }
+
+    private static List<String> identities(List<Transaction> transactions) {
+        List<String> identities = new ArrayList<>();
+        for (Transaction t : transactions) identities.add(t.bank + "|" + t.account + "|" + t.sig);
+        return identities;
     }
 
     // ---- collectors ----------------------------------------------------------
@@ -144,6 +151,7 @@ public class HistoryScopeTest {
         Transaction mellat111 = tx("Mellat", "111", 1L);
         Transaction mellat222 = tx("Mellat", "222", 2L);
         Transaction saman333 = tx("Saman", "333", 3L);
+        Transaction saman111 = tx("Saman", "111", 9L);
 
         // Banks only.
         assertTrue(HistoryActivity.inBankAccountScope(mellat111,
@@ -154,8 +162,7 @@ public class HistoryScopeTest {
         // Accounts only match across banks.
         assertTrue(HistoryActivity.inBankAccountScope(mellat111,
             Collections.emptySet(), new HashSet<>(Collections.singletonList("111"))));
-        assertTrue(HistoryActivity.inBankAccountScope(
-            tx("Saman", "111", 9L),
+        assertTrue(HistoryActivity.inBankAccountScope(saman111,
             Collections.emptySet(), new HashSet<>(Collections.singletonList("111"))));
 
         // Both narrow together.
@@ -163,6 +170,9 @@ public class HistoryScopeTest {
             new HashSet<>(Collections.singletonList("Mellat")),
             new HashSet<>(Collections.singletonList("111"))));
         assertFalse(HistoryActivity.inBankAccountScope(mellat222,
+            new HashSet<>(Collections.singletonList("Mellat")),
+            new HashSet<>(Collections.singletonList("111"))));
+        assertFalse(HistoryActivity.inBankAccountScope(saman111,
             new HashSet<>(Collections.singletonList("Mellat")),
             new HashSet<>(Collections.singletonList("111"))));
         assertFalse(HistoryActivity.inBankAccountScope(saman333,
@@ -176,6 +186,7 @@ public class HistoryScopeTest {
         long day = epoch(2026, 9, 10);
         List<Transaction> stored = Arrays.asList(
             new Transaction("Mellat", "111", day, -30L, 290L, "a", null),
+            new Transaction("Melli", "444", day, 123456L, 123456L, "excluded", null),
             new Transaction("Saman", "333", day, 900L, 999L, "b", null),
             new Transaction("Mellat", "222", day, 70L, 360L, "c", null));
         assertTrue(BalanceData.writeTransactions(context, stored));
@@ -186,6 +197,9 @@ public class HistoryScopeTest {
         HistoryReader.Result result = HistoryReader.reference(context, request);
         try {
             assertEquals(3, result.visibleTransactions().size());
+            assertEquals(Arrays.asList("Mellat|111|a", "Saman|333|b", "Mellat|222|c"),
+                identities(result.visibleTransactions()));
+            assertEquals(940L, result.total);
         } finally {
             result.close();
         }
@@ -205,7 +219,9 @@ public class HistoryScopeTest {
         HistoryReader.Result result = HistoryReader.reference(context, request);
         try {
             assertEquals(2, result.visibleTransactions().size());
-            for (Transaction t : result.visibleTransactions()) assertEquals("111", t.account);
+            assertEquals(Arrays.asList("Mellat|111|a", "Saman|111|b"),
+                identities(result.visibleTransactions()));
+            assertEquals(870L, result.total);
         } finally {
             result.close();
         }
@@ -226,14 +242,15 @@ public class HistoryScopeTest {
         HistoryReader.Result result = HistoryReader.reference(context, request);
         try {
             assertEquals(1, result.visibleTransactions().size());
-            assertEquals("Mellat", result.visibleTransactions().get(0).bank);
-            assertEquals("111", result.visibleTransactions().get(0).account);
+            assertEquals(Collections.singletonList("Mellat|111|a"),
+                identities(result.visibleTransactions()));
+            assertEquals(-30L, result.total);
         } finally {
             result.close();
         }
     }
 
-    @Test public void summary_setScope_matchesReference() throws Exception {
+    @Test public void summary_setScope_hasLiteralTotalAndCount() throws Exception {
         long day = epoch(2026, 9, 10);
         List<Transaction> stored = Arrays.asList(
             new Transaction("Mellat", "111", day, -30L, 290L, "a", null),
@@ -270,9 +287,14 @@ public class HistoryScopeTest {
         // Set order never changes the identity.
         assertEquals(
             HistoryActivity.narrowingKey("", null,
-                new HashSet<>(Arrays.asList("Mellat", "Saman")), null, all),
+                new LinkedHashSet<>(Arrays.asList("Mellat", "Saman")), null, all),
             HistoryActivity.narrowingKey("", null,
-                new HashSet<>(Arrays.asList("Saman", "Mellat")), null, all));
+                new LinkedHashSet<>(Arrays.asList("Saman", "Mellat")), null, all));
+        assertEquals(
+            HistoryActivity.narrowingKey("", new LinkedHashSet<>(Arrays.asList("a", "b")),
+                null, new LinkedHashSet<>(Arrays.asList("111", "222")), all),
+            HistoryActivity.narrowingKey("", new LinkedHashSet<>(Arrays.asList("b", "a")),
+                null, new LinkedHashSet<>(Arrays.asList("222", "111")), all));
         // Every axis moves the key.
         assertFalse(base.equals(HistoryActivity.narrowingKey("saman", null, null, null, all)));
         assertFalse(base.equals(HistoryActivity.narrowingKey("", new HashSet<>(Arrays.asList("x")),
@@ -287,5 +309,14 @@ public class HistoryScopeTest {
         assertFalse(base.equals(HistoryActivity.narrowingKey("", null, null, null,
             new HistoryActivity.Filter(HistoryActivity.DIR_ALL, HistoryActivity.RANGE_CUSTOM,
                 CalDate.of(2026, 9, 1), CalDate.of(2026, 9, 10)))));
+        String custom = HistoryActivity.narrowingKey("", null, null, null,
+            new HistoryActivity.Filter(HistoryActivity.DIR_ALL, HistoryActivity.RANGE_CUSTOM,
+                null, null));
+        assertFalse(custom.equals(HistoryActivity.narrowingKey("", null, null, null,
+            new HistoryActivity.Filter(HistoryActivity.DIR_ALL, HistoryActivity.RANGE_CUSTOM,
+                CalDate.of(2026, 9, 1), null))));
+        assertFalse(custom.equals(HistoryActivity.narrowingKey("", null, null, null,
+            new HistoryActivity.Filter(HistoryActivity.DIR_ALL, HistoryActivity.RANGE_CUSTOM,
+                null, CalDate.of(2026, 9, 10)))));
     }
 }

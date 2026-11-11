@@ -42,7 +42,10 @@ public class NotificationAmountsTest {
     }
 
     @Test public void persianNumbersRetainTheFractionInsteadOfRoundingTinyAmountsToZero() {
-        String persian = BalanceData.digits(NotificationAmounts.number(true, true, -1))
+        String formatted = NotificationAmounts.number(true, true, -1);
+        assertTrue("Persian zero must be rendered", formatted.indexOf('\u06F0') >= 0);
+        assertTrue("Persian one must be rendered", formatted.indexOf('\u06F1') >= 0);
+        String persian = BalanceData.digits(formatted)
             .replace("\u066B", ".").replace("\u200E", "").replace("\u200F", "").replace("\u061C", "")
             .replace('\u2212', '-');
         assertEquals("-0.1", persian);

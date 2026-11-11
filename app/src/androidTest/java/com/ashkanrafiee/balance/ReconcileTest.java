@@ -1,5 +1,6 @@
 package com.ashkanrafiee.balance;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
@@ -11,6 +12,7 @@ import org.junit.runner.RunWith;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 /** Unit tests for the balance-chain reconciliation that fixes bank messages arriving out of order.
@@ -33,10 +35,12 @@ public class ReconcileTest {
         // them in the reverse order.
         Reconcile.Entry fee = e(1, -10000, 177222945L);
         Reconcile.Entry transfer = e(2, -100000000L, 77222945L);
-        List<Reconcile.Entry> out = Reconcile.order(Arrays.asList(transfer, fee));
+        List<Reconcile.Entry> in = new ArrayList<>(Arrays.asList(transfer, fee));
+        List<Reconcile.Entry> out = Reconcile.order(in);
         assertEquals(2, out.size());
         assertSame(fee, out.get(0));
         assertSame(transfer, out.get(1));
+        assertEquals(Arrays.asList(transfer, fee), in);
     }
 
     @Test public void order_reversedResalatPair_returnsTransferThenFee() {
@@ -66,10 +70,13 @@ public class ReconcileTest {
         List<Reconcile.Entry> out = Reconcile.order(in);
         assertEquals(3, out.size());
         long[] expected = {100000L, -200000L, 50000L};
-        assertEquals(Arrays.toString(expected), Arrays.toString(sums(out)));
+        assertArrayEquals(expected, sums(out));
+        assertEquals(Arrays.asList(a, b, c), out);
+        assertEquals(Arrays.asList(c, a, b), in);
     }
 
     @Test public void order_singleEntry_returnsNull() {
+        assertNull(Reconcile.order(Collections.emptyList()));
         assertNull(Reconcile.order(Arrays.asList(e(1, 100L, 1000L))));
     }
 
@@ -105,10 +112,12 @@ public class ReconcileTest {
 
     @Test public void order_disconnectedPairs_returnsNull() {
         // Two independent chains cannot be ordered into one without knowing their relationship.
-        Reconcile.Entry a = e(1, 100L, 0L);
-        Reconcile.Entry b = e(2, -100L, 100L);
-        Reconcile.Entry c = e(3, 50L, 0L);
-        Reconcile.Entry d = e(4, -50L, 50L);
+        Reconcile.Entry a = e(1, 10L, 100L);
+        Reconcile.Entry b = e(2, 20L, 120L);
+        Reconcile.Entry c = e(3, 30L, 1000L);
+        Reconcile.Entry d = e(4, 40L, 1040L);
+        assertEquals(Arrays.asList(a, b), Reconcile.order(Arrays.asList(b, a)));
+        assertEquals(Arrays.asList(c, d), Reconcile.order(Arrays.asList(d, c)));
         assertNull(Reconcile.order(Arrays.asList(b, d, c, a)));
     }
 
@@ -122,10 +131,18 @@ public class ReconcileTest {
     }
 
     @Test public void order_overClusterLimit_returnsNull() {
-        // The O(n^2) matcher is only walked for small windows; a larger fold must bail out cleanly
-        // and leave the caller on the original arrival order.
-        List<Reconcile.Entry> in = new ArrayList<>();
-        for (int i = 0; i < 65; i++) in.add(e(i, 100L, 1000L + i));
+        // A uniquely connected chain succeeds at 64. The same chain extended to 65 must bail out
+        // solely because of the resource bound, not because its balances are disconnected.
+        List<Reconcile.Entry> chain = new ArrayList<>();
+        for (int i = 0; i < 65; i++) chain.add(e(i, 1L, 1000L + i));
+        List<Reconcile.Entry> in = new ArrayList<>(chain.subList(0, 64));
+        Collections.reverse(in);
+        List<Reconcile.Entry> out = Reconcile.order(in);
+        assertEquals(64, out.size());
+        for (int i = 0; i < 64; i++) assertSame(chain.get(i), out.get(i));
+        in.add(0, chain.get(64));
+        List<Reconcile.Entry> original = new ArrayList<>(in);
         assertNull(Reconcile.order(in));
+        assertEquals(original, in);
     }
 }

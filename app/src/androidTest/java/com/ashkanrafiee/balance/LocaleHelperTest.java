@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.LocaleList;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -30,16 +31,29 @@ public class LocaleHelperTest {
     /** What the device itself asked for. Read from the (never locale-wrapped) app context rather
      *  than from the process default, which is exactly the value under test. */
     private LocaleList systemLocales;
+    private String originalLanguage;
+    private LocaleList originalLocales;
 
     @Before public void setUp() {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         systemLocales = ctx.getResources().getConfiguration().getLocales();
-        ctx.getSharedPreferences("balance_language", Context.MODE_PRIVATE).edit().clear().commit();
+        originalLanguage = ctx.getSharedPreferences("balance_language", Context.MODE_PRIVATE)
+            .getString("language", null);
+        originalLocales = LocaleList.getDefault();
+        ctx.getSharedPreferences("balance_language", Context.MODE_PRIVATE)
+            .edit().remove("language").commit();
     }
 
     @After public void tearDown() {
-        ctx.getSharedPreferences("balance_language", Context.MODE_PRIVATE).edit().clear().commit();
-        LocaleList.setDefault(systemLocales);
+        try {
+            SharedPreferences.Editor language = ctx.getSharedPreferences(
+                "balance_language", Context.MODE_PRIVATE).edit();
+            if (originalLanguage == null) language.remove("language");
+            else language.putString("language", originalLanguage);
+            language.commit();
+        } finally {
+            LocaleList.setDefault(originalLocales);
+        }
     }
 
     private static String languageOf(Context c) {

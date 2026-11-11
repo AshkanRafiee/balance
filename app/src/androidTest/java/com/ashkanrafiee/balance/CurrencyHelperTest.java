@@ -5,6 +5,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
+import android.content.SharedPreferences;
+import android.os.LocaleList;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -20,17 +22,39 @@ public class CurrencyHelperTest {
 
     private Context ctx;
     private String originalLanguage;
+    private String originalCurrency;
+    private LocaleList originalLocales;
 
     @Before public void setUp() {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        originalLanguage = LocaleHelper.currentTag(ctx);
+        originalLanguage = ctx.getSharedPreferences("balance_language", Context.MODE_PRIVATE)
+            .getString("language", null);
+        originalCurrency = ctx.getSharedPreferences("balance_currency", Context.MODE_PRIVATE)
+            .getString("currency", null);
+        originalLocales = LocaleList.getDefault();
         LocaleHelper.setLanguage(ctx, "en");
-        ctx.getSharedPreferences("balance_currency", Context.MODE_PRIVATE).edit().clear().commit();
-        LocaleHelper.setLanguage(ctx, originalLanguage);
+        ctx.getSharedPreferences("balance_currency", Context.MODE_PRIVATE)
+            .edit().remove("currency").commit();
     }
 
     @After public void tearDown() {
-        ctx.getSharedPreferences("balance_currency", Context.MODE_PRIVATE).edit().clear().commit();
+        try {
+            SharedPreferences.Editor currency = ctx.getSharedPreferences(
+                "balance_currency", Context.MODE_PRIVATE).edit();
+            if (originalCurrency == null) currency.remove("currency");
+            else currency.putString("currency", originalCurrency);
+            currency.commit();
+        } finally {
+            try {
+                SharedPreferences.Editor language = ctx.getSharedPreferences(
+                    "balance_language", Context.MODE_PRIVATE).edit();
+                if (originalLanguage == null) language.remove("language");
+                else language.putString("language", originalLanguage);
+                language.commit();
+            } finally {
+                LocaleList.setDefault(originalLocales);
+            }
+        }
     }
 
     @Test public void fixedIndex_roundTripsEveryCurrency() {
@@ -63,11 +87,20 @@ public class CurrencyHelperTest {
     }
 
     @Test public void amount_dividesByTenOnlyForToman() {
-        assertEquals(BalanceData.toman(ctx, 123450), CurrencyHelper.amount(ctx, 123450));
-        java.text.NumberFormat us = java.text.NumberFormat.getNumberInstance(java.util.Locale.US);
+        assertEquals("12,345", CurrencyHelper.amount(ctx, 123450));
         CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_RIAL);
-        assertEquals(us.format(123450), CurrencyHelper.amount(ctx, 123450));
+        assertEquals("123,450", CurrencyHelper.amount(ctx, 123450));
         CurrencyHelper.setCurrency(ctx, CurrencyHelper.CUSTOM_PREFIX + "KW");
-        assertEquals(us.format(123450), CurrencyHelper.amount(ctx, 123450));
+        assertEquals("123,450", CurrencyHelper.amount(ctx, 123450));
+    }
+
+    @Test public void amount_languageTransitions_refreshTheThreadFormatter() {
+        boolean[] persian = {false, true, false};
+        String[] toman = {"12,345", "۱۲٬۳۴۵", "12,345"};
+        String[] rial = {"123,450", "۱۲۳٬۴۵۰", "123,450"};
+        for (int i = 0; i < persian.length; i++) {
+            assertEquals(toman[i], CurrencyHelper.amount(true, persian[i], 123450));
+            assertEquals(rial[i], CurrencyHelper.amount(false, persian[i], 123450));
+        }
     }
 }
