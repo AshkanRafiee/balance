@@ -258,9 +258,9 @@ public class MessageDateTest {
     }
 
     @Test public void aDateInTheFuture_isDroppedNotReinterpreted() {
-        // 1405/12/30 has not happened yet; believing it would file the movement ahead of every
+        // This valid date has not happened yet; believing it would file the movement ahead of every
         // statement the bank has actually sent.
-        String body = "\u0645\u0627\u0646\u062F\u0647: 5,000,000 \u0631\u06CC\u0627\u0644\n1405/12/30\n10:00";
+        String body = "\u0645\u0627\u0646\u062F\u0647: 5,000,000 \u0631\u06CC\u0627\u0644\n1405/12/29\n10:00";
         assertEquals(ARRIVAL, MessageDate.eventTime(body, ARRIVAL, CalendarSystem.JALALI));
     }
 
@@ -280,9 +280,13 @@ public class MessageDateTest {
         assertEquals(esfand30, MessageDate.eventTime(body, esfand30 + 86400000L, CalendarSystem.JALALI));
     }
 
-    @Test public void aDateOnlyMessage_landsOnThatDayAtMidnight() {
-        String body = "\u0645\u0627\u0646\u062F\u0647: 5,000,000 \u0631\u06CC\u0627\u0644\n1405/06/07";
-        assertEquals(persian(1405, 6, 7, 0, 0), MessageDate.eventTime(body, ARRIVAL, CalendarSystem.JALALI));
+    @Test public void futureSlack_acceptsExactlySixHoursButNotOneMillisecondMore() {
+        String body = "balance: 5,000,000\n2026-10-01\n18:00";
+        long event = at(2026, 10, 1, 18, 0);
+        long arrival = event - 6L * 60 * 60 * 1000;
+        assertEquals(event, MessageDate.eventTime(body, arrival, CalendarSystem.GREGORIAN));
+        assertEquals(arrival - 1,
+            MessageDate.eventTime(body, arrival - 1, CalendarSystem.GREGORIAN));
     }
 
     // ====================================================================

@@ -27,9 +27,15 @@ public class BankRulesTest {
         }
     }
 
-    @Test public void everySupportedBank_resolvesToACalendar() {
-        for (String bank : BankRules.supportedNames())
-            assertTrue(bank, BankRules.calendar(bank) != null);
+    @Test public void everySupportedBank_resolvesToItsDeclaredCalendar() {
+        java.util.Map<String, CalendarSystem> declarations = new java.util.HashMap<>();
+        for (String[] rule : BankRules.rulesTestOnly()) {
+            CalendarSystem declared = CalendarSystem.ofTag(rule[2]);
+            CalendarSystem previous = declarations.put(rule[0], declared);
+            if (previous != null) assertEquals("conflicting calendars for " + rule[0], previous, declared);
+            assertEquals(rule[0], declared, BankRules.calendar(rule[0]));
+        }
+        assertEquals(BankRules.supportedNames(), declarations.keySet());
     }
 
     // ---- exact numeric aliases ---------------------------------------------------------
@@ -63,12 +69,6 @@ public class BankRulesTest {
         assertEquals("Blu", BankRules.resolve("+9890000258"));
         assertEquals("Blu", BankRules.resolve("9890000258"));
         assertEquals("Blu", BankRules.resolve("90000258"));
-    }
-
-    @Test public void resolve_urlStyleSuffix_numericSender_returnsBank() {
-        // 989999920000 normalizes to 9999992000, which is a suffix of Saman's 9999920000 pair...
-        // instead assert a real documented suffix match below.
-        assertEquals("Saman", BankRules.resolve("989999920000"));
     }
 
     // ---- Persian/Arabic digit senders -------------------------------------------------
@@ -740,9 +740,9 @@ public class BankRulesTest {
     }
 
     @Test public void extractReason_indentedAndMarkedTitles_matchTheSameReason() {
-        // A sender that indents the title, or wraps it in the invisible right-to-left marks, states
-        // the same event and must land on the same stored reason.
-        String indented = BluMessages.TOPUP.replace("\n \u0627\u0634\u06A9\u0627\u0646", "\n   \u0627\u0634\u06A9\u0627\u0646");
+        // Amount-line indentation and invisible marks around the title preserve the reason.
+        String indented = BluMessages.TOPUP.replace("\n علی", "\n   علی");
+        assertTrue("indentation fixture must change", !indented.equals(BluMessages.TOPUP));
         assertEquals("شارژ شدی", BankRules.extractReason("Blu", indented));
         String marked = "\u0628\u0644\u0648\n\u200F\u0634\u0627\u0631\u0698\u200C \u0634\u062F\u06CC\n\u0627\u0634\u06A9\u0627\u0646\ny\n";
         assertEquals("شارژ شدی", BankRules.extractReason("Blu", marked));
@@ -818,12 +818,6 @@ public class BankRulesTest {
         assertEquals("همراه بانک", BankRules.extractChannel("Tejarat", TejaratMessages.WITHDRAWAL_MOBILE));
         assertEquals("شعبه", BankRules.extractChannel("Tejarat", TejaratMessages.WITHDRAWAL_BRANCH));
         assertEquals("پایا", BankRules.extractChannel("Tejarat", TejaratMessages.DEPOSIT_PAYA));
-    }
-
-    @Test public void extractChannel_storesTheBanksOwnWords() {
-        // What is stored is a fact about the message, not a caption: a build with no Persian strings
-        // still shows the channel Tejarat stated, and another language can caption the same value later.
-        assertEquals("شعبه", BankRules.extractChannel("Tejarat", TejaratMessages.WITHDRAWAL_BRANCH));
     }
 
     @Test public void extractChannel_messageWithoutTheLine_statesNoChannel() {

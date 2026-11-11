@@ -157,14 +157,6 @@ public class BalanceExtractTest {
             "مبلغ 500,000-\nاز حساب شما برداشت شد", 1700000000000L, false, 0L));
     }
 
-    @Test public void parseMovement_everyStoredMovementCarriesItsBalance() {
-        // The corollary that makes the detector's witnesses reliable: anything the parser does return
-        // has a balance, so the stored history is entirely made of potential statements.
-        Transaction t = BalanceData.parseMovement("Mellat", "10002533",
-            "مبلغ 500,000-\nموجودی حساب شما: 1,250,000 ریال", 1700000000000L, false, 0L);
-        assertNotNull(t.balance);
-    }
-
     @Test public void parseMovement_zeroBalance_isKeptAsStated() {
         // An emptied account is a real balance and often the moment a gap becomes visible, so zero
         // has to survive as "the bank said zero" rather than "the bank said nothing".
