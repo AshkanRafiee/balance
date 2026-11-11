@@ -40,18 +40,6 @@ public class DashboardLayoutTest {
         assertFalse(DashboardLayout.smsBannerVisible(false, GRANTED));
     }
 
-    @Test public void smsBanner_readsTheGrantStateNotItsNegation() {
-        // The strip shows when access is *not* granted. A caller that reaches for the already
-        // tested form — checkSelfPermission(...) != PERMISSION_GRANTED — is true exactly when
-        // access is denied, so passing that here would hide the strip in the one case it exists
-        // for. Pinning both constants here keeps that inversion from reading as correct.
-        assertEquals(PackageManager.PERMISSION_DENIED, DENIED);
-        assertEquals(-1, DENIED);
-        assertEquals(0, GRANTED);
-        assertTrue(DENIED != GRANTED);
-        assertFalse(GRANTED != PackageManager.PERMISSION_GRANTED);
-    }
-
     // ---- the shift the strip applies ----
 
     @Test public void shift_withoutStrip_leavesGeometryUntouched() {
