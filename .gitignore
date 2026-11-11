@@ -8,3 +8,12 @@ signing.properties
 *.aab
 local.properties
 __pycache__/
+
+# Local-only working notes and credentials
+/.local/
+.env
+.env.*
+!.env.example
+*.keystore
+*.p12
+*.pfx
