@@ -43,7 +43,9 @@ class ResultsTest(unittest.TestCase):
 
     def test_failures_and_incomplete_runs_cannot_pass(self):
         for code in (-1, -2):
-            self.assertFalse(parse(status() + status(code=code) + ENDING).success(0))
+            result = parse(status() + status(code=code) + ENDING)
+            self.assertTrue(result.complete())
+            self.assertFalse(result.success(0))
         for text in (ENDING, "OK (0 tests)\nINSTRUMENTATION_CODE: -1\n",
                      status() + status(code=0, total=2) + ENDING,
                      status() + status(code=0) * 2 + ENDING,
@@ -189,6 +191,7 @@ class ExecutionTest(unittest.TestCase):
     def test_truncated_run_is_failure_even_when_adb_exits_zero(self):
         code, summary, stops = self.execute_fake(status())
         self.assertEqual(1, code)
+        self.assertFalse(summary["complete"])
         self.assertFalse(summary["success"])
         self.assertEqual(1, stops)
 

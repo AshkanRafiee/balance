@@ -93,12 +93,15 @@ class Results:
             return None
         return event
 
+    def complete(self):
+        return (not self.invalid and not self.running and self.expected is not None
+                and self.expected > 0 and len(self.completed) == self.expected
+                and self.instrumentation_code == -1)
+
     def success(self, return_code):
-        return (return_code == 0 and not self.invalid and not self.running
-                and self.expected is not None and self.expected > 0
-                and len(self.completed) == self.expected
+        return (return_code == 0 and self.complete()
                 and self.runner_count == self.expected - self.ignored
-                and self.instrumentation_code == -1 and self.counts["failed"] == 0)
+                and self.counts["failed"] == 0)
 
 
 def preflight(serial):
@@ -226,7 +229,7 @@ def run(args, artifacts):
                     print(f"{event['outcome']} [{event['current']}/{event['total']}] "
                           f"{event['class']}#{event['method']}", flush=True)
             return_code = process.wait(timeout=max(1, args.timeout - (time.monotonic() - began)))
-            summary.update(complete=True, process_return_code=return_code,
+            summary.update(complete=results.complete(), process_return_code=return_code,
                            success=results.success(return_code))
     except (KeyboardInterrupt, OSError, TimeoutError, subprocess.SubprocessError) as error:
         summary["error"] = type(error).__name__
