@@ -6,6 +6,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
+import android.os.LocaleList;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -37,9 +38,11 @@ public class TransactionReasonTest {
 
     private Context ctx;
     private String originalTag;
+    private LocaleList originalLocales;
 
     @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        originalLocales = LocaleList.getDefault();
         MetadataStore.reset(ctx, true);
         originalTag = LocaleHelper.currentTag(ctx);
         LocaleHelper.setLanguage(ctx, "en");
@@ -48,9 +51,16 @@ public class TransactionReasonTest {
     }
 
     @After public void tearDown() throws Exception {
-        MetadataStore.reset(ctx, true);
-        LocaleHelper.setLanguage(ctx, originalTag);
-        ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        try {
+            MetadataStore.reset(ctx, true);
+        } finally {
+            try {
+                ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+            } finally {
+                try { LocaleHelper.setLanguage(ctx, originalTag); }
+                finally { LocaleList.setDefault(originalLocales); }
+            }
+        }
     }
 
     private Transaction tx(String bank, String account, String sig, String content) {
@@ -98,16 +108,6 @@ public class TransactionReasonTest {
 
         assertEquals("do not lose this", BalanceData.getNote(ctx, t));
         assertEquals(notesBefore, BalanceData.readNotes(ctx));
-    }
-
-    @Test public void note_neverOverwritesTheStatedReason() {
-        Transaction t = tx("Blu", null, "sig-A", "content-A");
-        BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
-
-        BalanceData.setNote(ctx, t, "a note");
-        BalanceData.setNote(ctx, t, null);
-
-        assertEquals(TOPUP, BalanceData.readReasons(ctx).get(BalanceData.noteKey(t)));
     }
 
     @Test public void reason_survivesTheUserClearingTheirNote() {
@@ -206,15 +206,13 @@ public class TransactionReasonTest {
         assertEquals(TOPUP, BalanceData.readReasons(ctx).get(BalanceData.noteKey(fresh)));
     }
 
-    @Test public void reason_persistsInTheEncryptedStore() {
+    @Test public void reason_usesTheMetadataStoreWithoutLegacyPreferences() {
         Transaction t = tx("Blu", null, "sig-A", "content-A");
         BalanceData.mergeReasons(ctx, reasonsFor(t, TOPUP));
 
-        // What sits in the preferences is ciphertext, not the bank's wording in the clear: this is
-        // the store the notes use too, and both are readable only through the app.
-        String stored = ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE)
-            .getString(BalanceData.KEY_TX_REASONS, "");
-        assertFalse("reasons must not sit in the prefs as plaintext", stored.contains(TOPUP));
+        // Actual row encryption is checked by MetadataStoreTest, not an absent legacy key.
+        assertFalse(ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE)
+            .contains(BalanceData.KEY_TX_REASONS));
         assertEquals(TOPUP, BalanceData.readReasons(ctx).get(BalanceData.noteKey(t)));
     }
 

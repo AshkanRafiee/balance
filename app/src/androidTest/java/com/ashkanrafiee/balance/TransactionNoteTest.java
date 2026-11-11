@@ -155,7 +155,7 @@ public class TransactionNoteTest {
         assertEquals(600, stored.length());
     }
 
-    @Test public void note_persistsInTheEncryptedStore() {
+    @Test public void note_storeRoundTripsThroughTheSharedSerializer() {
         Transaction t = tx("Tejarat", null, "sig-A", "content-A");
         BalanceData.setNote(ctx, t, "stored off-device safe");
         Map<String, String> notes = BalanceData.readNotes(ctx);
