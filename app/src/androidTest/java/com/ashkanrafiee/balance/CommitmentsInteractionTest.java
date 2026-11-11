@@ -3,6 +3,7 @@ package com.ashkanrafiee.balance;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import android.Manifest;
@@ -11,6 +12,8 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.os.LocaleList;
+import android.os.SystemClock;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
@@ -44,27 +47,36 @@ public class CommitmentsInteractionTest {
     private static final String REMAINING_RECEIVABLE = "Remaining receivable";
 
     private Context ctx;
+    private LocaleList originalLocales;
     private String originalLanguage;
     private String originalCurrency;
     private int originalRegion;
     private boolean originalShowCommitments;
     private boolean originalOnboardingSeen;
-    private boolean originalSmsPermission;
     private List<Commitment> originalCommitments;
     private ActivityScenario<CommitmentsActivity> commitmentsScenario;
     private ActivityScenario<MainActivity> mainScenario;
 
     @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        CommitmentStore.clear(ctx);
+        originalLocales = LocaleList.getDefault();
         originalLanguage = LocaleHelper.currentTag(ctx);
         originalCurrency = CurrencyHelper.currency(ctx);
         originalRegion = RegionHelper.region(ctx);
         originalShowCommitments = BalanceData.getShowCommitments(ctx);
         originalOnboardingSeen = BalanceData.isOnboardingSeen(ctx);
-        originalSmsPermission = ctx.checkSelfPermission(Manifest.permission.READ_SMS)
-            == android.content.pm.PackageManager.PERMISSION_GRANTED;
-        originalCommitments = new ArrayList<>(BalanceData.readCommitments(ctx));
+        // Detach lazy settlement lists before clear() invalidates their store revision, keeping
+        // the original frozen calendar/zone rather than recapturing it during restoration.
+        List<Commitment> snapshot = new ArrayList<>();
+        for (Commitment c : BalanceData.readCommitments(ctx)) {
+            snapshot.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
+                c.done, new ArrayList<>(c.paid), c.legacyPaidThrough, new ArrayList<>(c.unpaid),
+                c.remind, c.remindBeforeMs).withSchedule(c.schedule));
+        }
+        originalCommitments = snapshot;
+        LockManager.disable(ctx);
+        LockManager.resetSessionForTest();
+        CommitmentStore.clear(ctx);
 
         // Keep all visible strings and date arithmetic deterministic, including on a Persian device.
         LocaleHelper.setLanguage(ctx, "en");
@@ -72,20 +84,49 @@ public class CommitmentsInteractionTest {
         RegionHelper.setRegion(ctx, RegionHelper.REGION_INTERNATIONAL);
         BalanceData.setShowCommitments(ctx, true);
         BalanceData.setOnboardingSeen(ctx, true);
-        BalanceData.writeCommitments(ctx, new ArrayList<Commitment>());
     }
 
     @After public void tearDown() throws Exception {
-        if (commitmentsScenario != null) commitmentsScenario.close();
-        if (mainScenario != null) mainScenario.close();
+        try {
+            try {
+                if (commitmentsScenario != null) commitmentsScenario.close();
+            } finally {
+                if (mainScenario != null) mainScenario.close();
+            }
+        } finally {
+            try {
+                if (originalCommitments != null)
+                    BalanceData.writeCommitments(ctx, originalCommitments);
+            } finally {
+                try {
+                    restoreSettings();
+                } finally {
+                    try { LockManager.disable(ctx); }
+                    finally { LockManager.resetSessionForTest(); }
+                }
+            }
+        }
+    }
 
-        BalanceData.writeCommitments(ctx, originalCommitments);
-        BalanceData.setShowCommitments(ctx, originalShowCommitments);
-        BalanceData.setOnboardingSeen(ctx, originalOnboardingSeen);
-        LocaleHelper.setLanguage(ctx, originalLanguage);
-        CurrencyHelper.setCurrency(ctx, originalCurrency);
-        RegionHelper.setRegion(ctx, originalRegion);
-        setSmsPermission(originalSmsPermission);
+    private void restoreSettings() {
+        try {
+            BalanceData.setShowCommitments(ctx, originalShowCommitments);
+        } finally {
+            try {
+                BalanceData.setOnboardingSeen(ctx, originalOnboardingSeen);
+            } finally {
+                try {
+                    LocaleHelper.setLanguage(ctx, originalLanguage);
+                } finally {
+                    try {
+                        CurrencyHelper.setCurrency(ctx, originalCurrency);
+                    } finally {
+                        try { RegionHelper.setRegion(ctx, originalRegion); }
+                        finally { LocaleList.setDefault(originalLocales); }
+                    }
+                }
+            }
+        }
     }
 
     @Test public void monthlyPaymentOccurrence_hasNoRowEditorAndMarkUndoKeepsExactDate() {
@@ -141,9 +182,11 @@ public class CommitmentsInteractionTest {
     }
 
     @Test public void dashboardGuidanceAppearsOnlyWithoutDefinitions() {
-        // Granting SMS access bypasses the first-run permission dialog. The test never seeds or waits
-        // for SMS data; it only invokes the commitment card renderer after the Activity is attached.
-        setSmsPermission(true);
+        // The harness owns runtime permissions: revoking READ_SMS to restore it can kill this
+        // instrumentation process. This renderer test neither seeds nor waits for SMS data.
+        assertEquals("the dashboard fixture requires harness-granted SMS access",
+            android.content.pm.PackageManager.PERMISSION_GRANTED,
+            ctx.checkSelfPermission(Manifest.permission.READ_SMS));
         mainScenario = ActivityScenario.launch(MainActivity.class);
 
         BalanceData.writeCommitments(ctx, new ArrayList<Commitment>());
@@ -181,10 +224,13 @@ public class CommitmentsInteractionTest {
         long rawLeadMs = 30L * 60_000L + 1L;
         long due = Commitment.startOfDay(System.currentTimeMillis());
         Commitment source = Commitment.create("raw reminder", -100_000L, Commitment.MONTHLY,
-            due, null, true, rawLeadMs);
+            due, null, true, rawLeadMs)
+            .freezeSchedule(CalendarSystem.GREGORIAN, java.time.ZoneId.systemDefault());
+        String changedName = "raw reminder saved";
         BalanceData.writeCommitments(ctx, singleton(source));
 
         commitmentsScenario = ActivityScenario.launch(CommitmentsActivity.class);
+        AlertDialog[] opened = {null};
         commitmentsScenario.onActivity(activity -> {
             String manageLabel = LocaleHelper.wrap(ctx).getString(R.string.commitments_manage);
             TextView manage = findText(activity.getWindow().getDecorView(), manageLabel);
@@ -205,15 +251,59 @@ public class CommitmentsInteractionTest {
 
             AlertDialog editor = dialogField(activity, "activeDialog");
             assertNotNull("the editor must open synchronously from the row click", editor);
+            opened[0] = editor;
             EditText lead = findEditText(editor.getWindow().getDecorView(), String.valueOf(rawLeadMs));
             assertNotNull("a raw reminder must reopen with its exact milliseconds", lead);
             assertEquals(String.valueOf(rawLeadMs), lead.getText().toString());
-            editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+            EditText name = findEditText(editor.getWindow().getDecorView(), source.name);
+            assertNotNull("the editor must expose the current name", name);
+            name.setText(changedName);
         });
+        // onShow posts the real save listener; an immediate click above only dismisses by default.
+        commitmentsScenario.onActivity(activity -> {
+            assertSame("save must target this scenario's exact editor", opened[0],
+                dialogField(activity, "activeDialog"));
+            assertTrue(opened[0].isShowing());
+            assertTrue(opened[0].getButton(AlertDialog.BUTTON_POSITIVE).isEnabled());
+            assertTrue("Save must be clicked",
+                opened[0].getButton(AlertDialog.BUTTON_POSITIVE).performClick());
+        });
+        awaitEditorDismissed(opened[0]);
 
         List<Commitment> saved = BalanceData.readCommitments(ctx);
         assertEquals(1, saved.size());
-        assertEquals(rawLeadMs, saved.get(0).remindBeforeMs);
+        Commitment persisted = saved.get(0);
+        assertEquals(source.id, persisted.id);
+        assertEquals("the changed name proves Save actually persisted", changedName, persisted.name);
+        assertEquals(rawLeadMs, persisted.remindBeforeMs);
+        assertEquals(source.remind, persisted.remind);
+        assertEquals(source.amount, persisted.amount);
+        assertEquals(source.frequency, persisted.frequency);
+        assertEquals(source.start, persisted.start);
+        assertEquals(source.end, persisted.end);
+        assertEquals(source.done, persisted.done);
+        assertNotNull(persisted.schedule);
+        assertEquals(source.schedule.calendar, persisted.schedule.calendar);
+        assertEquals(source.schedule.zone, persisted.schedule.zone);
+        assertEquals(source.schedule.first, persisted.schedule.first);
+        assertEquals(source.schedule.last, persisted.schedule.last);
+    }
+
+    private void awaitEditorDismissed(AlertDialog expected) {
+        long deadline = SystemClock.uptimeMillis() + 10_000L;
+        while (SystemClock.uptimeMillis() < deadline) {
+            boolean[] gone = {false};
+            commitmentsScenario.onActivity(activity -> {
+                assertFalse("the editor's activity must remain alive", activity.isDestroyed());
+                assertFalse(activity.isFinishing());
+                AlertDialog active = dialogField(activity, "activeDialog");
+                if (active != null) assertSame("the editor must not be replaced", expected, active);
+                gone[0] = active == null && !expected.isShowing();
+            });
+            if (gone[0]) return;
+            SystemClock.sleep(20L);
+        }
+        throw new AssertionError("the saved editor did not dismiss");
     }
 
     private void assertRemainingZeroes(List<String> drawn) {
@@ -250,15 +340,6 @@ public class CommitmentsInteractionTest {
                 Field summaryField = view.getClass().getDeclaredField("commitmentSummary");
                 summaryField.setAccessible(true);
                 before[0] = summaryField.get(view);
-            } catch (Exception e) {
-                throw new AssertionError("could not read the dashboard summary state", e);
-            }
-        });
-        mainScenario.onActivity(activity -> {
-            try {
-                Field field = MainActivity.class.getDeclaredField("view");
-                field.setAccessible(true);
-                Object view = field.get(activity);
                 Method invalidateSummary = view.getClass().getDeclaredMethod(
                     "invalidateCommitmentSummary");
                 invalidateSummary.setAccessible(true);
@@ -271,9 +352,9 @@ public class CommitmentsInteractionTest {
         // summary (and its loaded flag) up while the fresh load runs, so a fast poll would draw
         // the stale card. Every successful load installs a new Summary object, so wait for the
         // reference itself to turn over with no load in flight.
-        long deadline = System.currentTimeMillis() + 15_000L;
+        long deadline = SystemClock.uptimeMillis() + 15_000L;
         boolean fresh = false;
-        while (System.currentTimeMillis() < deadline) {
+        while (SystemClock.uptimeMillis() < deadline) {
             final Object[] state = {null, null, null, null};
             mainScenario.onActivity(activity -> {
                 try {
@@ -314,33 +395,35 @@ public class CommitmentsInteractionTest {
                 fresh = true;
                 break;
             }
-            android.os.SystemClock.sleep(20L);
+            SystemClock.sleep(20L);
         }
         // Post-mortem for the wait above: reported inside the assertion when the reload
         // never lands, so one failing run tells whether a worker was stuck mid-load or the
         // reference simply never turned over.
-        final Object[] last = {null, null, null};
-        mainScenario.onActivity(activity -> {
-            try {
-                Field field = MainActivity.class.getDeclaredField("view");
-                field.setAccessible(true);
-                Object view = field.get(activity);
-                Field loadingField =
-                    view.getClass().getDeclaredField("commitmentSummaryLoading");
-                loadingField.setAccessible(true);
-                last[0] = loadingField.getBoolean(view);
-                Field loadedField = view.getClass().getDeclaredField("commitmentSummaryLoaded");
-                loadedField.setAccessible(true);
-                last[1] = loadedField.getBoolean(view);
-                Field staleField = view.getClass().getDeclaredField("commitmentSummaryStale");
-                staleField.setAccessible(true);
-                last[2] = staleField.getBoolean(view);
-            } catch (Exception e) {
-                throw new AssertionError("could not read the dashboard summary state", e);
-            }
-        });
-        assertTrue("the dashboard commitment summary did not finish reloading [loading="
-            + last[0] + " loaded=" + last[1] + " stale=" + last[2] + "]", fresh);
+        if (!fresh) {
+            final Object[] last = {null, null, null};
+            mainScenario.onActivity(activity -> {
+                try {
+                    Field field = MainActivity.class.getDeclaredField("view");
+                    field.setAccessible(true);
+                    Object view = field.get(activity);
+                    Field loadingField =
+                        view.getClass().getDeclaredField("commitmentSummaryLoading");
+                    loadingField.setAccessible(true);
+                    last[0] = loadingField.getBoolean(view);
+                    Field loadedField = view.getClass().getDeclaredField("commitmentSummaryLoaded");
+                    loadedField.setAccessible(true);
+                    last[1] = loadedField.getBoolean(view);
+                    Field staleField = view.getClass().getDeclaredField("commitmentSummaryStale");
+                    staleField.setAccessible(true);
+                    last[2] = staleField.getBoolean(view);
+                } catch (Exception e) {
+                    throw new AssertionError("could not read the dashboard summary state", e);
+                }
+            });
+            throw new AssertionError("the dashboard commitment summary did not finish reloading [loading="
+                + last[0] + " loaded=" + last[1] + " stale=" + last[2] + "]");
+        }
         mainScenario.onActivity(activity -> {
             try {
                 Field field = MainActivity.class.getDeclaredField("view");
@@ -385,20 +468,6 @@ public class CommitmentsInteractionTest {
         day = Math.min(day, c.getActualMaximum(Calendar.DAY_OF_MONTH));
         return Commitment.millisOf(c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, day,
             CalendarSystem.GREGORIAN);
-    }
-
-    private void setSmsPermission(boolean grant) {
-        try {
-            if (grant) {
-                InstrumentationRegistry.getInstrumentation().getUiAutomation()
-                    .grantRuntimePermission(ctx.getPackageName(), Manifest.permission.READ_SMS);
-            } else {
-                InstrumentationRegistry.getInstrumentation().getUiAutomation()
-                    .revokeRuntimePermission(ctx.getPackageName(), Manifest.permission.READ_SMS);
-            }
-        } catch (SecurityException ignored) {
-            // The permission may be fixed by the test harness; the activity still renders without it.
-        }
     }
 
     private static TextView findText(View root, String wanted) {

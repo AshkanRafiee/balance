@@ -1,13 +1,16 @@
 package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
-import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
+import android.os.LocaleList;
+import android.os.SystemClock;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
@@ -16,8 +19,6 @@ import androidx.lifecycle.Lifecycle;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
-import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry;
-import androidx.test.runner.lifecycle.Stage;
 
 import org.junit.After;
 import org.junit.Before;
@@ -37,6 +38,7 @@ import java.util.List;
 public class CommitmentsEditorDraftTest {
 
     private Context ctx;
+    private LocaleList originalLocales;
     private String originalLanguage;
     private String originalCurrency;
     private int originalRegion;
@@ -45,31 +47,53 @@ public class CommitmentsEditorDraftTest {
 
     @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        originalLocales = LocaleList.getDefault();
         originalLanguage = LocaleHelper.currentTag(ctx);
         originalCurrency = CurrencyHelper.currency(ctx);
         originalRegion = RegionHelper.region(ctx);
         // Read and detach the snapshot before clearing the store. Store-backed settlement lists
         // become invalid as soon as clear() advances the store revision.
-        originalCommitments = new ArrayList<>();
+        List<Commitment> snapshot = new ArrayList<>();
         for (Commitment c : BalanceData.readCommitments(ctx)) {
-            originalCommitments.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start,
+            snapshot.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start,
                 c.end, c.done, new ArrayList<>(c.paid), c.legacyPaidThrough,
-                new ArrayList<>(c.unpaid), c.remind, c.remindBeforeMs));
+                new ArrayList<>(c.unpaid), c.remind, c.remindBeforeMs).withSchedule(c.schedule));
         }
+        originalCommitments = snapshot;
+        LockManager.disable(ctx);
+        LockManager.resetSessionForTest();
         CommitmentStore.clear(ctx);
 
         LocaleHelper.setLanguage(ctx, "en");
         CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_RIAL);
         RegionHelper.setRegion(ctx, RegionHelper.REGION_INTERNATIONAL);
-        BalanceData.writeCommitments(ctx, new ArrayList<Commitment>());
     }
 
     @After public void tearDown() throws Exception {
-        if (scenario != null) scenario.close();
-        BalanceData.writeCommitments(ctx, originalCommitments);
-        LocaleHelper.setLanguage(ctx, originalLanguage);
-        CurrencyHelper.setCurrency(ctx, originalCurrency);
-        RegionHelper.setRegion(ctx, originalRegion);
+        try {
+            if (scenario != null) scenario.close();
+        } finally {
+            try {
+                if (originalCommitments != null)
+                    BalanceData.writeCommitments(ctx, originalCommitments);
+            } finally {
+                try {
+                    try {
+                        LocaleHelper.setLanguage(ctx, originalLanguage);
+                    } finally {
+                        try {
+                            CurrencyHelper.setCurrency(ctx, originalCurrency);
+                        } finally {
+                            try { RegionHelper.setRegion(ctx, originalRegion); }
+                            finally { LocaleList.setDefault(originalLocales); }
+                        }
+                    }
+                } finally {
+                    try { LockManager.disable(ctx); }
+                    finally { LockManager.resetSessionForTest(); }
+                }
+            }
+        }
     }
 
     @Test public void editor_pausedAway_reopensWithTypedInput() throws Exception {
@@ -132,10 +156,10 @@ public class CommitmentsEditorDraftTest {
         });
         // The custom click listeners are installed in onShow, which the dialog posts; click
         // from a later main-thread hop that it is guaranteed to precede.
-        postClick(AlertDialog.BUTTON_NEGATIVE);
+        AlertDialog cancelled = postClick(AlertDialog.BUTTON_NEGATIVE);
         // Button taps dismiss on the next main-loop turn; the pause below must see the dismissal,
         // or it would snapshot a form the user just discarded.
-        awaitNoDialog();
+        awaitNoDialog(cancelled);
 
         scenario.moveToState(Lifecycle.State.STARTED);
         scenario.onActivity(activity -> assertNull("a cancelled form leaves no draft",
@@ -161,8 +185,7 @@ public class CommitmentsEditorDraftTest {
         });
         // Same onShow ordering as above: the save listener is only installed once the
         // posted onShow has run.
-        postClick(AlertDialog.BUTTON_POSITIVE);
-        awaitNoDialog();
+        awaitNoDialog(postClick(AlertDialog.BUTTON_POSITIVE));
 
         List<Commitment> saved = BalanceData.readCommitments(ctx);
         assertEquals(1, saved.size());
@@ -199,8 +222,7 @@ public class CommitmentsEditorDraftTest {
             assertTrue("a seeded count form must be savable",
                 editor.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled());
         });
-        postClick(AlertDialog.BUTTON_POSITIVE);
-        awaitNoDialog();
+        awaitNoDialog(postClick(AlertDialog.BUTTON_POSITIVE));
 
         List<Commitment> saved = BalanceData.readCommitments(ctx);
         assertEquals(1, saved.size());
@@ -311,39 +333,40 @@ public class CommitmentsEditorDraftTest {
     /** Clicks the open editor's button from a fresh main-thread hop. The dialog posts its onShow
      *  (which installs the editor's own click listeners) when shown, so clicking synchronously
      *  after opening would hit the default dismiss instead of save. Call from the test thread. */
-    private static void postClick(final int which) {
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            for (Activity a : ActivityLifecycleMonitorRegistry.getInstance()
-                    .getActivitiesInStage(Stage.RESUMED)) {
-                if (!(a instanceof CommitmentsActivity)) continue;
-                AlertDialog dialog = dialogField((CommitmentsActivity) a, "activeDialog");
-                if (dialog != null) dialog.getButton(which).performClick();
-            }
+    private AlertDialog postClick(final int which) {
+        AlertDialog[] clicked = {null};
+        // ActivityScenario.getState() waits for idle and must run on the test thread.
+        assertEquals("the expected scenario must be resumed", Lifecycle.State.RESUMED,
+            scenario.getState());
+        scenario.onActivity(activity -> {
+            AlertDialog dialog = dialogField(activity, "activeDialog");
+            assertNotNull("this scenario must have an editor to click", dialog);
+            assertTrue("the intended editor must be showing", dialog.isShowing());
+            assertNotNull("the intended button must exist", dialog.getButton(which));
+            assertTrue("the intended button must be enabled", dialog.getButton(which).isEnabled());
+            clicked[0] = dialog;
+            assertTrue("the intended button must be clicked", dialog.getButton(which).performClick());
         });
+        return clicked[0];
     }
 
     /** Button taps dismiss on the next main-loop turn; join that before pausing, or the pause
      *  would snapshot a form the tap just discarded. */
-    private static void awaitNoDialog() {
-        long deadline = System.currentTimeMillis() + 10_000;
-        while (System.currentTimeMillis() < deadline) {
+    private void awaitNoDialog(AlertDialog expected) {
+        long deadline = SystemClock.uptimeMillis() + 10_000L;
+        while (SystemClock.uptimeMillis() < deadline) {
             final boolean[] gone = {false};
-            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-                boolean any = false;
-                for (Activity a : ActivityLifecycleMonitorRegistry.getInstance()
-                        .getActivitiesInStage(Stage.RESUMED)) {
-                    if (!(a instanceof CommitmentsActivity)) continue;
-                    any = true;
-                    if (dialogField((CommitmentsActivity) a, "activeDialog") == null)
-                        gone[0] = true;
-                }
-                if (!any) gone[0] = true;
+            assertEquals("the expected scenario must remain resumed", Lifecycle.State.RESUMED,
+                scenario.getState());
+            scenario.onActivity(activity -> {
+                assertFalse("the editor's activity must remain alive", activity.isDestroyed());
+                assertFalse(activity.isFinishing());
+                AlertDialog active = dialogField(activity, "activeDialog");
+                if (active != null) assertSame("the editor must not be replaced", expected, active);
+                gone[0] = active == null && !expected.isShowing();
             });
             if (gone[0]) return;
-            try { Thread.sleep(100); } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
+            SystemClock.sleep(20L);
         }
         throw new AssertionError("the editor dialog did not dismiss");
     }
