@@ -42,6 +42,7 @@ public class BackupRestoreTest {
 
     private static final long T = 1_000_000_000L;
     private static final String PASSWORD = "correct horse battery staple";
+    private static byte[] productionBackup;
 
     private Context ctx;
 
@@ -86,8 +87,33 @@ public class BackupRestoreTest {
                 if (n < 0) break;
                 off += n;
             }
+            assertEquals(buf.length, off);
             return buf;
         }
+    }
+
+    /** Callers seed the same Tejarat snapshot; only cloned production ciphertext is shared. */
+    private byte[] productionBackupBytes() throws Exception {
+        synchronized (BackupRestoreTest.class) {
+            if (productionBackup == null) {
+                File fixture = file("production-header-fixture.balance");
+                try {
+                    BackupManager.create(ctx, Uri.fromFile(fixture), PASSWORD);
+                    productionBackup = readFile(fixture);
+                } finally {
+                    fixture.delete();
+                }
+            }
+            return productionBackup.clone();
+        }
+    }
+
+    private File productionBackupFile(String name) throws Exception {
+        File f = file(name);
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) {
+            out.write(productionBackupBytes());
+        }
+        return f;
     }
 
     // ============================================================
@@ -255,13 +281,7 @@ public class BackupRestoreTest {
 
     @Test public void headerCarriesSelfDescribingEncryptionParameters() throws Exception {
         BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
-        File f = file("header.balance");
-        String payload = "{\"payloadFormat\":1,\"balances\":{"
-            + "\"Tejarat\":{\"amount\":1000000,\"date\":" + (T + 1000)
-            + ",\"sender\":\"Tejarat\"}}}";
-        writeLegacyBackup(f, payload, PASSWORD);
-
-        byte[] bytes = readFile(f);
+        byte[] bytes = productionBackupBytes();
         assertEquals("BALNCEBK", new String(bytes, 0, 8, StandardCharsets.US_ASCII));
         assertEquals(1, bytes[8] & 0xFF);
         int headerLen = ((bytes[9] & 0xFF) << 24) | ((bytes[10] & 0xFF) << 16)
@@ -277,14 +297,13 @@ public class BackupRestoreTest {
         assertEquals(128, h.getJSONObject("cipher").getInt("tagBits"));
         assertTrue(h.getJSONObject("kdf").has("salt"));
         assertTrue(h.getJSONObject("cipher").has("iv"));
+        assertEquals(BackupManager.appVersionCode(ctx), h.getInt("appVersionCode"));
         assertTrue(bytes.length > 13 + headerLen);
     }
 
     @Test public void newLegacyHeaderCarriesNumericProducerVersionCode() throws Exception {
-        File f = file("versioned-header.balance");
-        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
-
-        byte[] bytes = readFile(f);
+        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        byte[] bytes = productionBackupBytes();
         int headerLen = ((bytes[9] & 0xFF) << 24) | ((bytes[10] & 0xFF) << 16)
             | ((bytes[11] & 0xFF) << 8) | (bytes[12] & 0xFF);
         org.json.JSONObject header = new org.json.JSONObject(
@@ -326,8 +345,7 @@ public class BackupRestoreTest {
 
     @Test public void newerFormatVersion_isRejected() throws Exception {
         BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
-        File f = file("futuristic.balance");
-        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        File f = productionBackupFile("futuristic.balance");
         byte[] bytes = readFile(f);
         bytes[8] = 99;
         try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) {
@@ -361,8 +379,7 @@ public class BackupRestoreTest {
 
     @Test public void tamperedCiphertext_isRejected() throws Exception {
         BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
-        File f = file("tampered.balance");
-        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        File f = productionBackupFile("tampered.balance");
         byte[] bytes = readFile(f);
         int last = bytes.length - 1;
         bytes[last] ^= 0xFF;
@@ -379,25 +396,28 @@ public class BackupRestoreTest {
 
     @Test public void tamperedHeader_isRejected() throws Exception {
         BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
-        File f = file("tamperedHeader.balance");
-        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        File f = productionBackupFile("tamperedHeader.balance");
         byte[] bytes = readFile(f);
         int headerLen = ((bytes[9] & 0xFF) << 24) | ((bytes[10] & 0xFF) << 16)
             | ((bytes[11] & 0xFF) << 8) | (bytes[12] & 0xFF);
-        // Flip a digit of the iteration count inside the plaintext header.
-        int pos = 13;
-        while (pos < 13 + headerLen && (bytes[pos] < '0' || bytes[pos] > '9')) pos++;
-        if (pos < 13 + headerLen) {
-            bytes[pos] = (byte) (bytes[pos] == '0' ? '1' : bytes[pos] - 1);
-            try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) {
-                out.write(bytes);
-            }
-            try {
-                BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
-                fail("tampered header must be rejected");
-            } catch (BackupManager.BackupException e) {
-                assertEquals(R.string.backup_error_password, e.resId);
-            }
+        // Change exactly the iterations field to another accepted work factor. The header remains
+        // structurally valid, so rejection must come from authentication rather than validation.
+        String header = new String(bytes, 13, headerLen, StandardCharsets.UTF_8);
+        String target = "\"iterations\":600000";
+        int pos = header.indexOf(target);
+        assertTrue("production header must contain the intended mutation target", pos >= 0);
+        int digit = 13 + header.substring(0, pos).getBytes(StandardCharsets.UTF_8).length
+            + target.length() - 1;
+        assertEquals('0', bytes[digit]);
+        bytes[digit] = '1';
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) {
+            out.write(bytes);
+        }
+        try {
+            BackupManager.restore(ctx, Uri.fromFile(f), PASSWORD);
+            fail("tampered header must be rejected");
+        } catch (BackupManager.BackupException e) {
+            assertEquals(R.string.backup_error_password, e.resId);
         }
     }
 
@@ -441,8 +461,7 @@ public class BackupRestoreTest {
 
     @Test public void hostileIterations_aboveCap_isRejectedBeforeDerivation() throws Exception {
         BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
-        File f = file("hostileIter.balance");
-        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        File f = productionBackupFile("hostileIter.balance");
         BackupManager.BackupException e = restoreExpecting(
             b -> rewriteHeaderField(b, "kdf", "iterations", Integer.MAX_VALUE / 2), f);
         assertEquals(R.string.backup_error_unsupported, e.resId);
@@ -450,40 +469,35 @@ public class BackupRestoreTest {
 
     @Test public void hostileZeroIterations_isRejected() throws Exception {
         BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
-        File f = file("hostileZeroIter.balance");
-        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        File f = productionBackupFile("hostileZeroIter.balance");
         assertEquals(R.string.backup_error_unsupported,
             restoreExpecting(b -> rewriteHeaderField(b, "kdf", "iterations", 0), f).resId);
     }
 
     @Test public void hostileHugeKeyBits_isRejectedBeforeDerivation() throws Exception {
         BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
-        File f = file("hostileKeyBits.balance");
-        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        File f = productionBackupFile("hostileKeyBits.balance");
         assertEquals(R.string.backup_error_unsupported,
             restoreExpecting(b -> rewriteHeaderField(b, "kdf", "keyBits", Integer.MAX_VALUE), f).resId);
     }
 
     @Test public void hostileOddKeyBits_isRejected() throws Exception {
         BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
-        File f = file("hostileOddKeyBits.balance");
-        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        File f = productionBackupFile("hostileOddKeyBits.balance");
         assertEquals(R.string.backup_error_unsupported,
             restoreExpecting(b -> rewriteHeaderField(b, "kdf", "keyBits", 123), f).resId);
     }
 
     @Test public void hostileTagBits_isRejected() throws Exception {
         BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
-        File f = file("hostileTagBits.balance");
-        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        File f = productionBackupFile("hostileTagBits.balance");
         assertEquals(R.string.backup_error_unsupported,
             restoreExpecting(b -> rewriteHeaderField(b, "cipher", "tagBits", 256), f).resId);
     }
 
     @Test public void hostileIvLength_isRejected() throws Exception {
         BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
-        File f = file("hostileIv.balance");
-        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        File f = productionBackupFile("hostileIv.balance");
         assertEquals(R.string.backup_error_unsupported,
             restoreExpecting(b -> rewriteHeaderField(b, "cipher", "iv",
                 android.util.Base64.encodeToString(new byte[16], android.util.Base64.NO_WRAP)), f).resId);
@@ -493,8 +507,7 @@ public class BackupRestoreTest {
         // A 1 MB KDF salt would multiply the PBKDF2 work factor enormously if it ever reached
         // derivation, so it must be rejected up front, before any key is derived.
         BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
-        File f = file("hostileSalt.balance");
-        BackupManager.create(ctx, Uri.fromFile(f), PASSWORD);
+        File f = productionBackupFile("hostileSalt.balance");
         byte[] huge = new byte[1024 * 1024];
         new java.security.SecureRandom().nextBytes(huge);
         String b64 = android.util.Base64.encodeToString(huge, android.util.Base64.NO_WRAP);
@@ -502,7 +515,7 @@ public class BackupRestoreTest {
             restoreExpecting(b -> rewriteHeaderField(b, "kdf", "salt", b64), f).resId);
     }
 
-    @Test public void legacyPayloadOverTenMiB_restoresItsLargeRecord() throws Exception {
+    @Test public void legacyPayloadWithLargeField_restoresItsLargeRecord() throws Exception {
         // A single SMS-derived value stays far below the 1 MiB per-field memory-safety bound
         // while still spanning many 64 KiB frames and staged row chunks; total history size
         // remains uncapped.
@@ -583,17 +596,23 @@ public class BackupRestoreTest {
     }
 
     @Test public void merge_sameDate_keepsCurrent() throws Exception {
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000),
+            bank("Saman", 2_000_000L, T + 2000)));
         Uri u = uri("merge4.balance");
         BackupManager.create(ctx, u, PASSWORD);
 
         BalanceData.reset(ctx, true);
-        BalanceData.write(ctx, map(bank("Tejarat", 1_000_000L, T + 1000)));
+        BalanceData.write(ctx, map(new Bank("Tejarat", 7_000_000L, T + 1000, "local-sender")));
 
         BackupManager.RestoreResult res = BackupManager.restore(ctx, u, PASSWORD);
-        assertEquals(0, res.added);
+        assertEquals(1, res.added);
         assertEquals(0, res.updated);
-        assertEquals(1_000_000L, BalanceData.read(ctx).get("Tejarat").amount);
+        LinkedHashMap<String, Bank> restored = BalanceData.read(ctx);
+        assertEquals(2, restored.size());
+        assertEquals(7_000_000L, restored.get("Tejarat").amount);
+        assertEquals("local-sender", restored.get("Tejarat").sender);
+        assertEquals(T + 1000, restored.get("Tejarat").date);
+        assertEquals(2_000_000L, restored.get("Saman").amount);
     }
 
     @Test public void merge_accountCompositeKeys_keepsAccountsSeparate() throws Exception {

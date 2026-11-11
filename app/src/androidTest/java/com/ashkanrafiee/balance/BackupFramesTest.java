@@ -24,6 +24,8 @@ import java.util.Arrays;
 public class BackupFramesTest {
     private static final char[] PASSWORD = "correct horse battery staple".toCharArray();
     private static final char[] WRONG_PASSWORD = "not the password".toCharArray();
+    private static byte[] payloadBackup;
+    private static byte[] threeByteBackup;
 
     @Test public void roundTrip_multiFrameStream_isLossless() throws Exception {
         byte[] original = patternedBytes(BackupFrames.MAX_PLAINTEXT_BYTES * 3 + 17);
@@ -63,7 +65,7 @@ public class BackupFramesTest {
 
     @Test public void truncatedFooter_isRejected() throws Exception {
         byte[] payload = "payload".getBytes(StandardCharsets.UTF_8);
-        byte[] backup = encode(new ByteArrayInputStream(payload), PASSWORD);
+        byte[] backup = payloadBackup();
         byte[] truncated = Arrays.copyOf(backup, backup.length - 1);
         ByteArrayOutputStream restored = new ByteArrayOutputStream();
 
@@ -73,8 +75,7 @@ public class BackupFramesTest {
     }
 
     @Test public void bitFlipInCiphertext_isRejected() throws Exception {
-        byte[] backup = encode(new ByteArrayInputStream("payload".getBytes(StandardCharsets.UTF_8)),
-                PASSWORD);
+        byte[] backup = payloadBackup();
         backup[BackupFrames.HEADER_BYTES + BackupFrames.FRAME_HEADER_BYTES + 2] ^= 0x40;
 
         expectInvalid(() -> BackupFrames.read(
@@ -98,7 +99,7 @@ public class BackupFramesTest {
     }
 
     @Test public void headerBitFlip_isRejectedBecauseEveryFrameAuthenticatesTheHeader() throws Exception {
-        byte[] backup = encode(new ByteArrayInputStream(new byte[]{1, 2, 3}), PASSWORD);
+        byte[] backup = threeByteBackup();
         backup[BackupFrames.HEADER_BYTES - 1] ^= 0x01;
 
         expectInvalid(() -> BackupFrames.read(
@@ -106,7 +107,7 @@ public class BackupFramesTest {
     }
 
     @Test public void trailingBytesAfterFooter_areRejected() throws Exception {
-        byte[] backup = encode(new ByteArrayInputStream(new byte[]{1, 2, 3}), PASSWORD);
+        byte[] backup = threeByteBackup();
         byte[] trailing = Arrays.copyOf(backup, backup.length + 2);
         trailing[trailing.length - 2] = 0x55;
         trailing[trailing.length - 1] = 0x66;
@@ -177,8 +178,7 @@ public class BackupFramesTest {
     }
 
     @Test public void inputStream_truncatedFooterIsRejectedByFinish() throws Exception {
-        byte[] backup = encode(new ByteArrayInputStream("payload".getBytes(StandardCharsets.UTF_8)),
-                PASSWORD);
+        byte[] backup = payloadBackup();
         byte[] truncated = Arrays.copyOf(backup, backup.length - 1);
         BackupFrames.AuthenticatedInputStream plaintext = BackupFrames.openInputStream(
                 new ByteArrayInputStream(truncated), PASSWORD);
@@ -189,8 +189,7 @@ public class BackupFramesTest {
     }
 
     @Test public void inputStream_trailingBytesAreRejectedByFinish() throws Exception {
-        byte[] backup = encode(new ByteArrayInputStream("payload".getBytes(StandardCharsets.UTF_8)),
-                PASSWORD);
+        byte[] backup = payloadBackup();
         byte[] trailing = Arrays.copyOf(backup, backup.length + 1);
         trailing[trailing.length - 1] = 0x55;
         BackupFrames.AuthenticatedInputStream plaintext = BackupFrames.openInputStream(
@@ -202,8 +201,7 @@ public class BackupFramesTest {
     }
 
     @Test public void inputStream_footerTamperIsRejectedByFinish() throws Exception {
-        byte[] backup = encode(new ByteArrayInputStream("payload".getBytes(StandardCharsets.UTF_8)),
-                PASSWORD);
+        byte[] backup = payloadBackup();
         backup[backup.length - 1] ^= 0x20;
         BackupFrames.AuthenticatedInputStream plaintext = BackupFrames.openInputStream(
                 new ByteArrayInputStream(backup), PASSWORD);
@@ -234,6 +232,22 @@ public class BackupFramesTest {
         ByteArrayOutputStream restored = new ByteArrayOutputStream();
         BackupFrames.read(new ByteArrayInputStream(backup.toByteArray()), restored, PASSWORD);
         assertEquals(size, restored.size());
+    }
+
+    // Only ciphertext is shared; each caller owns its bytes and opens a fresh production reader.
+    private static synchronized byte[] payloadBackup() throws IOException {
+        if (payloadBackup == null) {
+            payloadBackup = encode(new ByteArrayInputStream(
+                "payload".getBytes(StandardCharsets.UTF_8)), PASSWORD);
+        }
+        return payloadBackup.clone();
+    }
+
+    private static synchronized byte[] threeByteBackup() throws IOException {
+        if (threeByteBackup == null) {
+            threeByteBackup = encode(new ByteArrayInputStream(new byte[]{1, 2, 3}), PASSWORD);
+        }
+        return threeByteBackup.clone();
     }
 
     private static byte[] encode(InputStream source, char[] password) throws IOException {

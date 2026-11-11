@@ -1,5 +1,6 @@
 package com.ashkanrafiee.balance;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -557,45 +558,71 @@ public class BackupV2Test {
 
     @Test public void wrongPasswordLateFrameTrailingAndMalformedInputLeaveLiveDataUnchanged()
             throws Exception {
-        LinkedHashMap<String, Bank> live = new LinkedHashMap<>();
-        live.put("Live", new Bank("Live", 10L, T, "sender"));
-        BalanceData.write(context, live);
-        Transaction liveTransaction = new Transaction("Live", T + 1, -1L, "live-signature");
-        BalanceData.writeTransactions(context, Collections.singletonList(liveTransaction));
+        LinkedHashMap<String, Bank> incoming = new LinkedHashMap<>();
+        incoming.put("Live", new Bank("Live", 20L, T + 100, "incoming-sender"));
+        incoming.put("Incoming", new Bank("Incoming", 40L, T + 100, "incoming-only"));
+        BalanceData.write(context, incoming);
+        Transaction incomingTransaction = new Transaction("Incoming", "incoming-account", T + 100,
+            -50L, 950L, "incoming-signature", "incoming-content");
+        BalanceData.writeTransactions(context, Collections.singletonList(incomingTransaction));
+        BalanceData.setNote(context, incomingTransaction, "incoming-note");
         File valid = file("v2-invalid-base.bin");
         BackupManager.createFramed(context, Uri.fromFile(valid), PASSWORD);
 
+        BalanceData.reset(context, true);
+        LinkedHashMap<String, Bank> live = new LinkedHashMap<>();
+        live.put("Live", new Bank("Live", 10L, T, "sender"));
+        BalanceData.write(context, live);
+        Transaction liveTransaction = new Transaction("Live", "local-account", T + 1, -1L, 9L,
+            "live-signature", "live-content");
+        BalanceData.writeTransactions(context, Collections.singletonList(liveTransaction));
+        String localKey = BalanceData.noteKey(liveTransaction);
+        BalanceData.setNote(context, liveTransaction, "live-note");
+        BalanceData.mergeReasons(context, Collections.singletonMap(localKey, "live-reason"));
+        BalanceData.mergeChannels(context, Collections.singletonMap(localKey, "live-channel"));
+        BalanceData.mergeMerchants(context, Collections.singletonMap(localKey, "live-merchant"));
+        BalanceData.setTags(context, liveTransaction, Arrays.asList("live-tag", "second-tag"));
+        try (DataGeneration.Stage stage = DataGeneration.beginStage(context)) {
+            stage.publish();
+        }
+        File selectedDirectory = DataGeneration.context(context).getNoBackupFilesDir();
+        byte[] manifest = read(DataGeneration.manifestFileForTests(context));
+        List<String> generations = DataGeneration.generationNamesForTests(context);
+
         expectRestoreFailure(valid, "wrong password", "wrong password");
-        assertLiveData(liveTransaction);
+        assertLiveData(liveTransaction, selectedDirectory, manifest, generations);
 
         byte[] late = read(valid);
         late[late.length - 1] ^= 0x01;
         File lateFile = file("v2-late-frame.bin");
         write(lateFile, late);
         expectRestoreFailure(lateFile, "damaged late frame", PASSWORD);
-        assertLiveData(liveTransaction);
+        assertLiveData(liveTransaction, selectedDirectory, manifest, generations);
 
         byte[] trailing = Arrays.copyOf(read(valid), (int) valid.length() + 1);
         trailing[trailing.length - 1] = 7;
         File trailingFile = file("v2-trailing.bin");
         write(trailingFile, trailing);
         expectRestoreFailure(trailingFile, "trailing bytes", PASSWORD);
-        assertLiveData(liveTransaction);
+        assertLiveData(liveTransaction, selectedDirectory, manifest, generations);
 
         File malformed = file("v2-malformed.bin");
-        writePayload(malformed, "{\"schema\":2,\"schema\":2}");
-        expectRestoreFailure(malformed, "malformed JSON", PASSWORD);
-        assertLiveData(liveTransaction);
+        String incomingBalances = "\"balances\":[{\"key\":\"Live\",\"name\":\"Live\","
+            + "\"amount\":20,\"date\":" + (T + 100) + ",\"sender\":\"incoming-sender\"}],";
+        // Structural failures must also discard rows already accepted into the input stage.
+        writePayload(malformed, "{\"schema\":2," + incomingBalances + "\"schema\":2}");
+        expectStructuralRestoreFailure(malformed, "duplicate schema");
+        assertLiveData(liveTransaction, selectedDirectory, manifest, generations);
 
         File conflictingSettlements = file("v2-conflicting-settlements.bin");
         writePayload(conflictingSettlements,
-            "{\"schema\":2,\"balances\":[],\"transactions\":[],"
+            "{\"schema\":2," + incomingBalances + "\"transactions\":[],"
                 + "\"metadata\":{\"notes\":[],\"reasons\":[],\"channels\":[],\"tags\":[]},"
                 + "\"commitments\":[{\"id\":\"conflict\",\"name\":\"Conflict\","
                 + "\"amount\":-1,\"freq\":1,\"start\":" + T
                 + ",\"paid\":[" + (T + DAY) + "],\"unpaid\":[" + (T + DAY) + "]}]}" );
-        expectRestoreFailure(conflictingSettlements, "conflicting settlement states", PASSWORD);
-        assertLiveData(liveTransaction);
+        expectStructuralRestoreFailure(conflictingSettlements, "conflicting settlement date");
+        assertLiveData(liveTransaction, selectedDirectory, manifest, generations);
     }
 
     @Test public void newerFramedProducerVersion_isRejectedBeforePublication() throws Exception {
@@ -653,7 +680,9 @@ public class BackupV2Test {
             payload.put("residualNoteProvenance", provenance);
             File malformed = file("v2-residual-note-invalid-" + scenario + ".bin");
             writePayload(malformed, payload.toString());
-            expectRestoreFailure(malformed, "invalid residual provenance " + scenario, PASSWORD);
+            String diagnostic = scenario == 0 ? "residual note key mismatch"
+                : scenario == 1 ? "invalid residual note provenance" : "duplicate metadata key";
+            expectStructuralRestoreFailure(malformed, diagnostic);
             assertResidualNote(gap, "live note");
             assertEquals(2, BalanceData.readTransactions(context).size());
             assertFalse(BalanceData.read(context).containsKey("Incoming"));
@@ -678,20 +707,23 @@ public class BackupV2Test {
 
     @Test public void largeSourceStore_backupCompletesWithDeterminateProgressAndRoundTrips()
             throws Exception {
-        // A real inbox holds thousands of recognized SMS; the sources section must stream them
-        // in linear time with live progress instead of stalling the backup dialog.
+        // Keep the full inbox-sized workload and determinate progress; batch only fixture setup.
         int sources = 1200;
-        for (int i = 0; i < sources; i++) {
-            SourceStore.Source source = SourceStore.capture(context, "Refah",
-                "perf body " + i + " balance 1,000,000", T + i, BankRules.VERSION);
-            assertNotNull(source);
-            assertTrue(SourceStore.observeTransaction(context, source, 1,
-                new Transaction("Refah", null, T + i, -100L - i, 900L,
-                    "sig-" + i, "content-" + i)));
-            assertTrue(SourceStore.observeBalance(context, source, 1, "Refah", null,
-                T + i, 900L));
-        }
+        SourceStore.runInTransaction(context, editor -> {
+            for (int i = 0; i < sources; i++) {
+                SourceStore.Source source = editor.capture("Refah",
+                    "perf body " + i + " balance 1,000,000", T + i, BankRules.VERSION);
+                assertNotNull(source);
+                assertTrue(editor.observeTransaction(source, 1,
+                    new Transaction("Refah", null, T + i, -100L - i, 900L,
+                        "sig-" + i, "content-" + i)));
+                assertTrue(editor.observeBalance(source, 1, "Refah", null, T + i, 900L));
+            }
+            return null;
+        });
         assertEquals((long) sources, SourceStore.sourceCount(context));
+        assertEquals((long) sources, SourceStore.transactionObservationCount(context));
+        assertEquals((long) sources, SourceStore.balanceObservationCount(context));
 
         final List<Integer> stages = new ArrayList<>();
         final long[] last = {0, 0};
@@ -729,19 +761,52 @@ public class BackupV2Test {
         try {
             BackupManager.restore(context, Uri.fromFile(file), password);
             fail(description + " must be rejected");
-        } catch (Exception expected) {
-            // The important property is that the generation was never published. Wrong-password
-            // and frame failures are exposed as BackupException; structural failures may retain
-            // their precise parser exception for diagnostics.
+        } catch (BackupManager.BackupException expected) {
+            assertEquals(R.string.backup_error_password, expected.resId);
         }
     }
 
-    private void assertLiveData(Transaction transaction) {
-        Bank bank = BalanceData.read(context).get("Live");
+    private void expectStructuralRestoreFailure(File file, String diagnostic) throws Exception {
+        try {
+            BackupManager.restore(context, Uri.fromFile(file), PASSWORD);
+            fail(diagnostic + " must be rejected");
+        } catch (IllegalArgumentException expected) {
+            assertEquals(diagnostic, expected.getMessage());
+        }
+    }
+
+    private void assertLiveData(Transaction transaction, File selectedDirectory, byte[] manifest,
+            List<String> generations) throws Exception {
+        assertEquals(selectedDirectory, DataGeneration.context(context).getNoBackupFilesDir());
+        assertArrayEquals(manifest, read(DataGeneration.manifestFileForTests(context)));
+        assertEquals("a rejected restore must leave no abandoned generation", generations,
+            DataGeneration.generationNamesForTests(context));
+        LinkedHashMap<String, Bank> balances = BalanceData.read(context);
+        assertEquals(1, balances.size());
+        Bank bank = balances.get("Live");
         assertNotNull(bank);
+        assertEquals("Live", bank.name);
+        assertNull(bank.account);
         assertEquals(10L, bank.amount);
-        assertEquals(1, BalanceData.readTransactions(context).size());
-        assertEquals(transaction.content, BalanceData.readTransactions(context).get(0).content);
+        assertEquals(T, bank.date);
+        assertEquals("sender", bank.sender);
+        List<Transaction> transactions = BalanceData.readTransactions(context);
+        assertEquals(1, transactions.size());
+        Transaction actual = transactions.get(0);
+        assertEquals(transaction.bank, actual.bank);
+        assertEquals(transaction.account, actual.account);
+        assertEquals(transaction.date, actual.date);
+        assertEquals(transaction.amount, actual.amount);
+        assertEquals(transaction.balance, actual.balance);
+        assertEquals(transaction.sig, actual.sig);
+        assertEquals(transaction.content, actual.content);
+        String key = BalanceData.noteKey(transaction);
+        assertEquals(Collections.singletonMap(key, "live-note"), BalanceData.readNotes(context));
+        assertEquals(Collections.singletonMap(key, "live-reason"), BalanceData.readReasons(context));
+        assertEquals(Collections.singletonMap(key, "live-channel"), BalanceData.readChannels(context));
+        assertEquals(Collections.singletonMap(key, "live-merchant"), BalanceData.readMerchants(context));
+        assertEquals(Collections.singletonMap(key, Arrays.asList("live-tag", "second-tag")),
+            BalanceData.readTags(context));
     }
 
     private Residual saveResidualNote(String note) {
