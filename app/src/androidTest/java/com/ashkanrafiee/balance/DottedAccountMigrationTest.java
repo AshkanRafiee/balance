@@ -17,11 +17,14 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.StringWriter;
 import java.io.FileOutputStream;
@@ -43,8 +46,17 @@ public class DottedAccountMigrationTest {
     private static final String ACCOUNT = "1234.123456.123456789012.123";
     private static final String PADDED = ACCOUNT + " \t\r\n";
     private static final long T = 1_700_000_000_000L;
+    // Only encrypted inputs shared by the full/metadata-only original-conflict cases.
+    // Entries are private defensive copies, never live stores or restored results.
+    private static final Map<String, byte[]> CONFLICTING_ORIGINAL_BACKUPS = new LinkedHashMap<>();
     private Context context;
     private boolean usesInbox;
+
+    @AfterClass public static void clearEncryptedFixtureCache() {
+        synchronized (CONFLICTING_ORIGINAL_BACKUPS) {
+            CONFLICTING_ORIGINAL_BACKUPS.clear();
+        }
+    }
 
     @Before public void setUp() throws Exception {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
@@ -796,6 +808,12 @@ public class DottedAccountMigrationTest {
     }
 
     @Test public void invalidOrDuplicateAccountRepairStateFailsBeforePublishing() throws Exception {
+        Transaction retained = tx("Saman", "retained-account", T + 1,
+            "retained-signature", "retained-content");
+        assertTrue(TransactionStore.replace(context, Arrays.asList(retained)));
+        MetadataStore.setNote(context, retained, "retained words");
+        String transactionRevision = TransactionStore.revision(context);
+        String metadataRevision = MetadataStore.revision(context);
         for (String state : Arrays.asList(
                 "[{\"kind\":0,\"key\":\"c:test\",\"archived\":true}]",
                 "[{\"kind\":1,\"key\":\"c:test\",\"archived\":\"true\"}]",
@@ -820,9 +838,25 @@ public class DottedAccountMigrationTest {
                 try {
                     BackupManager.restore(context, Uri.fromFile(backup), "test backup password");
                     fail("invalid repair state should fail");
-                } catch (Exception expected) { }
+                } catch (IllegalArgumentException expected) {
+                    assertTrue(expected.getMessage().contains("repair"));
+                }
                 assertEquals(before, DataGeneration.generationNamesForTests(context));
                 assertEquals(0, repairStates().length());
+                List<Transaction> after = BalanceData.readTransactions(context);
+                assertEquals(1, after.size());
+                Transaction row = after.get(0);
+                assertEquals(retained.bank, row.bank);
+                assertEquals(retained.account, row.account);
+                assertEquals(retained.date, row.date);
+                assertEquals(retained.amount, row.amount);
+                assertEquals(retained.balance, row.balance);
+                assertEquals(retained.sig, row.sig);
+                assertEquals(retained.content, row.content);
+                assertEquals(Collections.singletonMap(BalanceData.noteKey(retained), "retained words"),
+                    BalanceData.readNotes(context));
+                assertEquals(transactionRevision, TransactionStore.revision(context));
+                assertEquals(metadataRevision, MetadataStore.revision(context));
             } finally { backup.delete(); }
         }
     }
@@ -888,8 +922,7 @@ public class DottedAccountMigrationTest {
                 assertEquals(0, repairStates().length());
                 File backup = File.createTempFile("dotted-original-order-", ".balance", context.getCacheDir());
                 try {
-                    if (framed) BackupManager.createFramed(context, Uri.fromFile(backup), "test backup password");
-                    else BackupManager.create(context, Uri.fromFile(backup), "test backup password");
+                    writeConflictingOriginalBackup(backup, framed, bank, canonicalFirst);
                     BalanceData.reset(context, true);
                     EnumSet<BackupManager.Section> selection = metadataOnly
                         ? allMetadataSections() : BackupManager.allSections();
@@ -902,6 +935,32 @@ public class DottedAccountMigrationTest {
                         assertConflictingMetadata(padded, canonical);
                     }
                 } finally { backup.delete(); }
+            }
+        }
+    }
+
+    private void writeConflictingOriginalBackup(File backup, boolean framed, String bank,
+            boolean canonicalFirst) throws Exception {
+        // Selection changes only restore behavior, not this source snapshot. Keep the writer,
+        // bank and insertion order separate, and version the fixture shape explicitly.
+        String key = "conflicting-original-v1|" + framed + "|" + bank + "|" + canonicalFirst;
+        synchronized (CONFLICTING_ORIGINAL_BACKUPS) {
+            byte[] encrypted = CONFLICTING_ORIGINAL_BACKUPS.get(key);
+            if (encrypted == null) {
+                if (framed) BackupManager.createFramed(context, Uri.fromFile(backup), "test backup password");
+                else BackupManager.create(context, Uri.fromFile(backup), "test backup password");
+                try (InputStream input = new FileInputStream(backup);
+                        ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+                    byte[] buffer = new byte[8192];
+                    int count;
+                    while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+                    CONFLICTING_ORIGINAL_BACKUPS.put(key, output.toByteArray().clone());
+                }
+            } else {
+                // Every case owns a fresh disposable file; cached ciphertext is never exposed.
+                try (FileOutputStream output = new FileOutputStream(backup)) {
+                    output.write(encrypted.clone());
+                }
             }
         }
     }
