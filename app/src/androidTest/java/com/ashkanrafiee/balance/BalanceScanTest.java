@@ -46,20 +46,30 @@ public class BalanceScanTest {
         "-40,000  \n06/22_20:37 \n\u0645\u0627\u0646\u062F\u0647: 2,279,505,033";
 
     private Context ctx;
+    private boolean shellIdentityAdopted;
 
     @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         BalanceData.reset(ctx, true);
         InstrumentationRegistry.getInstrumentation().getUiAutomation()
+                .grantRuntimePermission(ctx.getPackageName(), android.Manifest.permission.READ_SMS);
+        assertEquals(PackageManager.PERMISSION_GRANTED, ctx.getPackageManager()
+                .checkPermission(android.Manifest.permission.READ_SMS, ctx.getPackageName()));
+        InstrumentationRegistry.getInstrumentation().getUiAutomation()
                 .adoptShellPermissionIdentity(android.Manifest.permission.READ_SMS);
-        exec("pm grant " + ctx.getPackageName() + " android.permission.READ_SMS");
+        shellIdentityAdopted = true;
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
         clearInbox();
     }
 
     @After public void tearDown() throws Exception {
-        clearInbox();
+        try {
+            if (shellIdentityAdopted) clearInbox();
+        } finally {
+            if (shellIdentityAdopted) InstrumentationRegistry.getInstrumentation().getUiAutomation()
+                    .dropShellPermissionIdentity();
+        }
     }
 
     private void exec(String cmd) throws Exception {
@@ -69,7 +79,6 @@ public class BalanceScanTest {
             byte[] buf = new byte[2048];
             while (is.read(buf) >= 0) { }
         }
-        Thread.sleep(200);
     }
 
     private void clearInbox() throws Exception {
@@ -78,12 +87,12 @@ public class BalanceScanTest {
         exec("am broadcast -n com.ashkanrafiee.smsinject/.SeedReceiver -a com.ashkanrafiee.smsinject.CLEAR");
         // Clearing is async across processes: wait until the inbox is actually empty so the next
         // test never sees a leftover row, regardless of device load.
-        long deadline = System.currentTimeMillis() + 45_000;
-        while (System.currentTimeMillis() < deadline) {
+        long deadline = android.os.SystemClock.elapsedRealtime() + 45_000;
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
             try (android.database.Cursor c = ctx.getContentResolver().query(
                     android.provider.Telephony.Sms.Inbox.CONTENT_URI,
                     new String[]{android.provider.Telephony.Sms._ID}, null, null, null)) {
-                if (c == null || !c.moveToFirst()) return;
+                if (c != null && !c.moveToFirst()) return;
             }
             Thread.sleep(150);
         }
@@ -95,27 +104,29 @@ public class BalanceScanTest {
                 body.getBytes(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP);
         exec("am broadcast -n com.ashkanrafiee.smsinject/.SeedReceiver -a com.ashkanrafiee.smsinject.SEED"
                 + " -e sender " + sender + " -e body64 " + b64 + " -e base " + base);
-        awaitSms(sender, body);
+        awaitSms(sender, body, base);
     }
 
     /** Polls the real inbox until the exact seeded message is visible, so that the scan that follows
      *  in the same test is deterministic even when the system is slow. */
-    private void awaitSms(String sender, String body) throws Exception {
-        long deadline = System.currentTimeMillis() + 45_000;
-        while (System.currentTimeMillis() < deadline) {
+    private void awaitSms(String sender, String body, long arrival) throws Exception {
+        long deadline = android.os.SystemClock.elapsedRealtime() + 45_000;
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
             try (android.database.Cursor c = ctx.getContentResolver().query(
                     android.provider.Telephony.Sms.Inbox.CONTENT_URI,
-                    new String[]{android.provider.Telephony.Sms.ADDRESS, android.provider.Telephony.Sms.BODY},
+                    new String[]{android.provider.Telephony.Sms.ADDRESS, android.provider.Telephony.Sms.BODY,
+                        android.provider.Telephony.Sms.DATE},
                     null, null, null)) {
                 if (c != null) {
                     while (c.moveToNext()) {
-                        if (sender.equals(c.getString(0)) && body.equals(c.getString(1))) return;
+                        if (sender.equals(c.getString(0)) && body.equals(c.getString(1))
+                                && arrival == c.getLong(2)) return;
                     }
                 }
             }
             Thread.sleep(150);
         }
-        fail("seeded SMS did not arrive in time: sender=" + sender);
+        fail("seeded SMS did not arrive in time: sender=" + sender + " date=" + arrival);
     }
 
     private SharedPreferences prefs() {
@@ -277,11 +288,17 @@ public class BalanceScanTest {
         LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
         saved.put("Mellat", new Bank("Mellat", 1_000_000L, T, "5000973189"));
         assertTrue(BalanceData.write(ctx, saved));
-        String before = prefs().getString(BalanceData.KEY_BALANCES, null);
+        String before = DataGeneration.dataPrefs(ctx).getString(BalanceData.KEY_BALANCES, null);
+        assertNotNull(before);
 
         assertTrue(BalanceData.write(ctx, saved));
         assertEquals("an unchanged balance map must not be re-encrypted", before,
-            prefs().getString(BalanceData.KEY_BALANCES, null));
+            DataGeneration.dataPrefs(ctx).getString(BalanceData.KEY_BALANCES, null));
+        LinkedHashMap<String, Bank> reread = BalanceData.read(ctx);
+        assertEquals(1, reread.size());
+        assertEquals(1_000_000L, reread.get("Mellat").amount);
+        assertEquals(T, reread.get("Mellat").date);
+        assertEquals("5000973189", reread.get("Mellat").sender);
     }
 
     @Test public void legacyBalanceRead_migratesToEncryptedPayload() throws Exception {
@@ -1276,33 +1293,40 @@ public class BalanceScanTest {
     // ============================================================
 
     @Test public void zz_scanWithoutSmsPermission_returnsZeroWithoutSideEffects() throws Exception {
-        Context foreign = null;
-        String[] candidates = {
-            "com.android.systemui", "com.android.launcher3", "com.google.android.googlequicksearchbox",
-            "com.android.documentsui", "com.android.camera2", "com.android.printspooler",
-            "com.android.settings", "com.android.deskclock", "com.android.phone",
-            "com.android.providers.contacts"};
-        for (String p : candidates) {
-            try {
-                Context c = ctx.createPackageContext(p, Context.CONTEXT_IGNORE_SECURITY);
-                if (c.checkSelfPermission(android.Manifest.permission.READ_SMS)
-                        != PackageManager.PERMISSION_GRANTED) {
-                    foreign = c;
-                    break;
-                }
-            } catch (Exception ignored) { }
-        }
-        org.junit.Assume.assumeTrue("no permission-less package available", foreign != null);
-
-        long wmBefore = watermark();
-        int verBefore = storedRulesVersion();
+        LinkedHashMap<String, Bank> persisted = new LinkedHashMap<>();
+        persisted.put("Saman", new Bank("Saman", 900L, T, "500095"));
+        assertTrue(BalanceData.write(ctx, persisted));
+        assertTrue(prefs().edit().putLong(BalanceData.KEY_SCANNED_THROUGH, T + 1000)
+            .putLong(BalanceData.KEY_SCANNED_RAW_THROUGH, T + 1000)
+            .putLong(BalanceData.KEY_SCANNED_ID, 37L)
+            .putInt(BalanceData.KEY_RULES_VERSION, BankRules.VERSION).commit());
+        java.util.Map<String, ?> prefsBefore = new LinkedHashMap<>(prefs().getAll());
+        String payloadBefore = DataGeneration.dataPrefs(ctx)
+            .getString(BalanceData.KEY_BALANCES, null);
+        assertNotNull(payloadBefore);
+        Context denied = new android.content.ContextWrapper(ctx) {
+            @Override public int checkSelfPermission(String permission) {
+                return PackageManager.PERMISSION_DENIED;
+            }
+            @Override public android.content.ContentResolver getContentResolver() {
+                throw new AssertionError("a denied scan must not access the SMS provider");
+            }
+        };
+        Bank sentinel = new Bank("Mellat", 42L, T - 1000, "Mellat");
         LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        saved.put("Mellat", sentinel);
 
-        int matched = BalanceData.scanSms(foreign, saved);
+        int matched = BalanceData.scanSms(denied, saved);
 
         assertEquals(0, matched);
-        assertEquals(0, saved.size());
-        assertEquals(wmBefore, watermark());
-        assertEquals(verBefore, storedRulesVersion());
+        assertEquals(1, saved.size());
+        assertTrue("the caller's map must remain untouched", saved.get("Mellat") == sentinel);
+        assertEquals(42L, sentinel.amount);
+        assertEquals(T - 1000, sentinel.date);
+        assertEquals("Mellat", sentinel.sender);
+        assertEquals(prefsBefore, prefs().getAll());
+        assertEquals(payloadBefore, DataGeneration.dataPrefs(ctx)
+            .getString(BalanceData.KEY_BALANCES, null));
+        assertEquals(900L, BalanceData.read(ctx).get("Saman").amount);
     }
 }

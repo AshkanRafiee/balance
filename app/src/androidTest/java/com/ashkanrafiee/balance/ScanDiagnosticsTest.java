@@ -378,7 +378,9 @@ public class ScanDiagnosticsTest {
         assertEquals(2, h.stored.size());
         assertEquals("newest", h.stored.get(0).body);
         assertEquals("older", h.stored.get(1).body);
-        assertTrue(ScanDiagnostics.reportText(s.unknownSenders).contains("newest"));
+        String report = ScanDiagnostics.reportText(s.unknownSenders);
+        assertTrue(report.contains("newest"));
+        assertFalse("only the newest sample is shared", report.contains("older"));
     }
 
     @Test public void nullBodyOrSender_tolerated() {
@@ -414,6 +416,7 @@ public class ScanDiagnosticsTest {
         String txt = ScanDiagnostics.senderReport("+98x", 2, new ArrayList<>());
         assertTrue(txt.contains("+98x"));
         assertTrue(txt.contains("2 messages in total"));
+        assertFalse("an empty selection must not include a sample block", txt.contains("```"));
     }
 
     @Test public void senderReport_embedsDeviceModelAndAndroidVersion() {
@@ -491,19 +494,36 @@ public class ScanDiagnosticsTest {
     private static final String UNKNOWN_2 = "+9821OTP";
 
     private android.content.Context ctx;
+    private boolean usesInbox;
 
-    @Before public void setUpScreen() throws Exception {
+    @Before public void setUpScreen() {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        InstrumentationRegistry.getInstrumentation().getUiAutomation()
-                .adoptShellPermissionIdentity(android.Manifest.permission.READ_SMS);
-        exec("pm grant " + ctx.getPackageName() + " android.permission.READ_SMS");
+    }
+
+    private void prepareScreenPreferences() {
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, android.content.Context.MODE_PRIVATE).edit().clear().commit();
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, android.content.Context.MODE_PRIVATE).edit().clear().commit();
+    }
+
+    private void prepareInbox() throws Exception {
+        InstrumentationRegistry.getInstrumentation().getUiAutomation()
+                .grantRuntimePermission(ctx.getPackageName(), android.Manifest.permission.READ_SMS);
+        assertEquals(android.content.pm.PackageManager.PERMISSION_GRANTED, ctx.getPackageManager()
+                .checkPermission(android.Manifest.permission.READ_SMS, ctx.getPackageName()));
+        InstrumentationRegistry.getInstrumentation().getUiAutomation()
+                .adoptShellPermissionIdentity(android.Manifest.permission.READ_SMS);
+        usesInbox = true;
+        prepareScreenPreferences();
         clearInbox();
     }
 
     @After public void tearDownScreen() throws Exception {
-        clearInbox();
+        try {
+            if (usesInbox) clearInbox();
+        } finally {
+            if (usesInbox) InstrumentationRegistry.getInstrumentation().getUiAutomation()
+                    .dropShellPermissionIdentity();
+        }
     }
 
     private void exec(String cmd) throws Exception {
@@ -513,17 +533,16 @@ public class ScanDiagnosticsTest {
             byte[] buf = new byte[2048];
             while (is.read(buf) >= 0) { }
         }
-        Thread.sleep(200);
     }
 
     private void clearInbox() throws Exception {
         exec("am broadcast -n com.ashkanrafiee.smsinject/.SeedReceiver -a com.ashkanrafiee.smsinject.CLEAR");
-        long deadline = System.currentTimeMillis() + 45_000;
-        while (System.currentTimeMillis() < deadline) {
+        long deadline = android.os.SystemClock.elapsedRealtime() + 45_000;
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
             try (android.database.Cursor c = ctx.getContentResolver().query(
                     android.provider.Telephony.Sms.Inbox.CONTENT_URI,
                     new String[]{android.provider.Telephony.Sms._ID}, null, null, null)) {
-                if (c == null || !c.moveToFirst()) return;
+                if (c != null && !c.moveToFirst()) return;
             }
             Thread.sleep(150);
         }
@@ -535,21 +554,23 @@ public class ScanDiagnosticsTest {
                 body.getBytes(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP);
         exec("am broadcast -n com.ashkanrafiee.smsinject/.SeedReceiver -a com.ashkanrafiee.smsinject.SEED"
                 + " -e sender " + sender + " -e body64 " + b64 + " -e base " + base);
-        long deadline = System.currentTimeMillis() + 45_000;
-        while (System.currentTimeMillis() < deadline) {
+        long deadline = android.os.SystemClock.elapsedRealtime() + 45_000;
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
             try (android.database.Cursor c = ctx.getContentResolver().query(
                     android.provider.Telephony.Sms.Inbox.CONTENT_URI,
-                    new String[]{android.provider.Telephony.Sms.ADDRESS, android.provider.Telephony.Sms.BODY},
+                    new String[]{android.provider.Telephony.Sms.ADDRESS, android.provider.Telephony.Sms.BODY,
+                        android.provider.Telephony.Sms.DATE},
                     null, null, null)) {
                 if (c != null) {
                     while (c.moveToNext()) {
-                        if (sender.equals(c.getString(0)) && body.equals(c.getString(1))) return;
+                        if (sender.equals(c.getString(0)) && body.equals(c.getString(1))
+                                && base == c.getLong(2)) return;
                     }
                 }
             }
             Thread.sleep(150);
         }
-        throw new AssertionError("seeded SMS did not arrive in time: sender=" + sender);
+        throw new AssertionError("seeded SMS did not arrive in time: sender=" + sender + " date=" + base);
     }
 
     /** Starts the diagnostics screen and returns it, so the test can inspect its rendered views. */
@@ -580,8 +601,8 @@ public class ScanDiagnosticsTest {
     }
 
     private String waitFor(android.app.Activity act, String needle) throws Exception {
-        long deadline = System.currentTimeMillis() + 15_000;
-        while (System.currentTimeMillis() < deadline) {
+        long deadline = android.os.SystemClock.elapsedRealtime() + 15_000;
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
             String all = screenText(act);
             if (all.contains(needle)) return all;
             Thread.sleep(150);
@@ -590,6 +611,7 @@ public class ScanDiagnosticsTest {
     }
 
     @Test public void screen_emptyInbox_showsNothingToReport() throws Exception {
+        prepareInbox();
         ScanDiagnosticsActivity act = launch();
         try {
             String all = waitFor(act, ctx.getString(R.string.scan_diag_none_skipped));
@@ -601,6 +623,7 @@ public class ScanDiagnosticsTest {
     }
 
     @Test public void screen_seededMix_separatesRecognizedKnownBankAndUnknownSenders() throws Exception {
+        prepareInbox();
         seed(TEJARAT, "موجودی شما: 1,250,000 تومان", 1_710_000_000_000L);
         seed(TEJARAT, "پرداخت قبض انجام شد", 1_710_000_001_000L);
         seed(UNKNOWN_1, "card purchase 45,000 T", 1_710_000_002_000L);
@@ -631,6 +654,7 @@ public class ScanDiagnosticsTest {
     }
 
     @Test public void screen_allParsed_recognizedSendersStayReportable() throws Exception {
+        prepareInbox();
         seed(TEJARAT, "موجودی شما: 1,250,000 تومان", 1_710_000_000_000L);
         ScanDiagnosticsActivity act = launch();
         try {
@@ -654,6 +678,7 @@ public class ScanDiagnosticsTest {
     /** Launches the per-sender chooser with two sample messages and checks it renders both with the
      *  multi-selection controls, nothing preselected and counters at zero, without sending anything. */
     @Test public void senderScreen_listsMessagesAndOffersSelectionButDoesNotSend() throws Exception {
+        prepareScreenPreferences();
         android.content.Intent i = new android.content.Intent(ctx, SenderShareActivity.class)
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 .putExtra(SenderShareActivity.EXTRA_SENDER, UNKNOWN_1)
@@ -683,6 +708,16 @@ public class ScanDiagnosticsTest {
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
                 List<android.widget.CheckBox> checks = new ArrayList<>();
                 findChecks(act.getWindow().getDecorView(), checks);
+                assertEquals("two message choices and nine issue choices", 11, checks.size());
+                for (android.widget.CheckBox check : checks)
+                    assertNotNull("each selection control must be labeled", check.getContentDescription());
+                for (int message = 1; message <= 2; message++) {
+                    String description = ctx.getString(R.string.sender_share_message_checkbox, message);
+                    int matches = 0;
+                    for (android.widget.CheckBox check : checks)
+                        if (description.contentEquals(check.getContentDescription())) matches++;
+                    assertEquals("each message needs its own selection control", 1, matches);
+                }
                 for (android.widget.CheckBox c : checks) {
                     assertTrue("no message should be preselected", !c.isChecked());
                 }

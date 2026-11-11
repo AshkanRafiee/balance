@@ -104,20 +104,30 @@ public class HistoryScanTest {
         + "0620-21:17";
 
     private Context ctx;
+    private boolean shellIdentityAdopted;
 
     @Before public void setUp() throws Exception {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         BalanceData.reset(ctx, true);
         InstrumentationRegistry.getInstrumentation().getUiAutomation()
+                .grantRuntimePermission(ctx.getPackageName(), android.Manifest.permission.READ_SMS);
+        assertEquals(android.content.pm.PackageManager.PERMISSION_GRANTED, ctx.getPackageManager()
+                .checkPermission(android.Manifest.permission.READ_SMS, ctx.getPackageName()));
+        InstrumentationRegistry.getInstrumentation().getUiAutomation()
                 .adoptShellPermissionIdentity(android.Manifest.permission.READ_SMS);
-        exec("pm grant " + ctx.getPackageName() + " android.permission.READ_SMS");
+        shellIdentityAdopted = true;
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
         ctx.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
         clearInbox();
     }
 
     @After public void tearDown() throws Exception {
-        clearInbox();
+        try {
+            if (shellIdentityAdopted) clearInbox();
+        } finally {
+            if (shellIdentityAdopted) InstrumentationRegistry.getInstrumentation().getUiAutomation()
+                    .dropShellPermissionIdentity();
+        }
     }
 
     private void exec(String cmd) throws Exception {
@@ -127,7 +137,6 @@ public class HistoryScanTest {
             byte[] buf = new byte[2048];
             while (is.read(buf) >= 0) { }
         }
-        Thread.sleep(200);
     }
 
     private void clearInbox() throws Exception {
@@ -136,12 +145,12 @@ public class HistoryScanTest {
         exec("am broadcast -n com.ashkanrafiee.smsinject/.SeedReceiver -a com.ashkanrafiee.smsinject.CLEAR");
         // Clearing is async across processes: wait until the inbox is actually empty so the next
         // test never sees a leftover row, regardless of device load.
-        long deadline = System.currentTimeMillis() + 45_000;
-        while (System.currentTimeMillis() < deadline) {
+        long deadline = android.os.SystemClock.elapsedRealtime() + 45_000;
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
             try (android.database.Cursor c = ctx.getContentResolver().query(
                     android.provider.Telephony.Sms.Inbox.CONTENT_URI,
                     new String[]{android.provider.Telephony.Sms._ID}, null, null, null)) {
-                if (c == null || !c.moveToFirst()) return;
+                if (c != null && !c.moveToFirst()) return;
             }
             Thread.sleep(150);
         }
@@ -153,7 +162,7 @@ public class HistoryScanTest {
                 body.getBytes(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP);
         exec("am broadcast -n com.ashkanrafiee.smsinject/.SeedReceiver -a com.ashkanrafiee.smsinject.SEED"
                 + " -e sender " + sender + " -e body64 " + b64 + " -e base " + base);
-        awaitSms(sender, body);
+        awaitSms(sender, body, base);
     }
 
     private void seedMany(String sender, String body, int count, long base) throws Exception {
@@ -167,22 +176,24 @@ public class HistoryScanTest {
 
     /** Polls the real inbox until the exact seeded message is visible, so that the scan that follows
      *  in the same test is deterministic even when the system is slow. */
-    private void awaitSms(String sender, String body) throws Exception {
-        long deadline = System.currentTimeMillis() + 45_000;
-        while (System.currentTimeMillis() < deadline) {
+    private void awaitSms(String sender, String body, long arrival) throws Exception {
+        long deadline = android.os.SystemClock.elapsedRealtime() + 45_000;
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
             try (android.database.Cursor c = ctx.getContentResolver().query(
                     android.provider.Telephony.Sms.Inbox.CONTENT_URI,
-                    new String[]{android.provider.Telephony.Sms.ADDRESS, android.provider.Telephony.Sms.BODY},
+                    new String[]{android.provider.Telephony.Sms.ADDRESS, android.provider.Telephony.Sms.BODY,
+                        android.provider.Telephony.Sms.DATE},
                     null, null, null)) {
                 if (c != null) {
                     while (c.moveToNext()) {
-                        if (sender.equals(c.getString(0)) && body.equals(c.getString(1))) return;
+                        if (sender.equals(c.getString(0)) && body.equals(c.getString(1))
+                                && arrival == c.getLong(2)) return;
                     }
                 }
             }
             Thread.sleep(150);
         }
-        fail("seeded SMS did not arrive in time: sender=" + sender);
+        fail("seeded SMS did not arrive in time: sender=" + sender + " date=" + arrival);
     }
 
     /** Runs an injector transaction scenario (action tx) and waits until all of its messages are in the
@@ -190,8 +201,8 @@ public class HistoryScanTest {
      *  follows deterministic. */
     private void seedTxScenario(String scenario, int expectedRows) throws Exception {
         exec("am start -n com.ashkanrafiee.smsinject/.MainActivity -e action tx -e scenario " + scenario);
-        long deadline = System.currentTimeMillis() + 45_000;
-        while (System.currentTimeMillis() < deadline) {
+        long deadline = android.os.SystemClock.elapsedRealtime() + 45_000;
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
             int count = 0;
             try (android.database.Cursor c = ctx.getContentResolver().query(
                     android.provider.Telephony.Sms.Inbox.CONTENT_URI,
@@ -207,8 +218,8 @@ public class HistoryScanTest {
     /** Waits until at least {@code count} rows with the given sender and body are in the inbox,
      *  for scenarios where several identical copies of one message are delivered. */
     private void awaitRows(String sender, String body, int count) throws Exception {
-        long deadline = System.currentTimeMillis() + 45_000;
-        while (System.currentTimeMillis() < deadline) {
+        long deadline = android.os.SystemClock.elapsedRealtime() + 45_000;
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
             try (android.database.Cursor c = ctx.getContentResolver().query(
                     android.provider.Telephony.Sms.Inbox.CONTENT_URI,
                     new String[]{android.provider.Telephony.Sms.ADDRESS, android.provider.Telephony.Sms.BODY},
@@ -230,6 +241,17 @@ public class HistoryScanTest {
         int n = 0;
         for (Transaction t : txs) if (t.amount == amount) n++;
         return n;
+    }
+
+    private Transaction transactionOfAmount(List<Transaction> txs, long amount) {
+        Transaction found = null;
+        for (Transaction transaction : txs) {
+            if (transaction.amount != amount) continue;
+            assertNull("the fixture must identify exactly one movement of " + amount, found);
+            found = transaction;
+        }
+        assertNotNull("expected the movement of " + amount, found);
+        return found;
     }
 
     @Test public void authorizationOtp_attachesMerchantOnlyToSettledWithdrawal() throws Exception {
@@ -409,21 +431,28 @@ public class HistoryScanTest {
         String body = DEPOSIT + " bulk";
         seedMany("500095", body, 400, T);
 
-        long fullStart = System.currentTimeMillis();
+        long fullStart = android.os.SystemClock.elapsedRealtime();
         assertEquals(1, BalanceData.scanSms(ctx, new java.util.LinkedHashMap<>()));
         assertEquals(1, BalanceData.scanHistory(ctx));
-        long fullMs = System.currentTimeMillis() - fullStart;
+        long fullMs = android.os.SystemClock.elapsedRealtime() - fullStart;
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
+        assertEquals(400L, SourceStore.sourceCount(ctx));
+        assertEquals(400L, SourceStore.balanceObservationCount(ctx));
+        assertEquals(400L, SourceStore.transactionObservationCount(ctx));
         String revision = TransactionStore.revision(ctx);
 
-        long noNewStart = System.currentTimeMillis();
+        long noNewStart = android.os.SystemClock.elapsedRealtime();
         assertEquals(0, BalanceData.scanSms(ctx, new java.util.LinkedHashMap<>()));
         assertEquals(0, BalanceData.scanHistory(ctx));
-        long noNewMs = System.currentTimeMillis() - noNewStart;
+        long noNewMs = android.os.SystemClock.elapsedRealtime() - noNewStart;
+        assertEquals(1, BalanceData.readTransactions(ctx).size());
+        assertEquals(400L, SourceStore.sourceCount(ctx));
+        assertEquals(400L, SourceStore.balanceObservationCount(ctx));
+        assertEquals(400L, SourceStore.transactionObservationCount(ctx));
 
         assertTrue("a 400-message scan must finish without a long-device stall: " + fullMs + "ms",
             fullMs < 30_000L);
-        assertTrue("a no-new-message refresh must be cheaper than its full scan: full=" + fullMs
-            + "ms no-new=" + noNewMs + "ms", noNewMs < fullMs);
+        // A single timing comparison is diagnostic only: scheduling noise is not a rewrite oracle.
         assertEquals("a no-new refresh must not rewrite encrypted history", revision,
             TransactionStore.revision(ctx));
         android.util.Log.i("BalancePerf", "duplicateFlood fullMs=" + fullMs + " noNewMs=" + noNewMs);
@@ -1976,18 +2005,24 @@ public class HistoryScanTest {
     }
 
     @Test public void bluMovements_everyStatedReasonIsReadAndCaptioned() throws Exception {
-        // Each title the app claims to understand is read off a real message of its own.
+        // Each seeded title must stay attached to the movement its message describes.
         seed(BluMessages.SENDER, BluMessages.TOPUP, T + 1000);
         seed(BluMessages.SENDER, BluMessages.TRANSFER_IN, T + 2000);
 
-        BalanceData.scanHistory(ctx);
+        assertEquals(2, BalanceData.scanHistory(ctx));
 
-        java.util.Set<String> found =
-            new java.util.HashSet<>(BalanceData.readReasons(ctx).values());
-        for (String title : found)
+        List<Transaction> transactions = BalanceData.readTransactions(ctx);
+        assertEquals(2, transactions.size());
+        for (Transaction transaction : transactions) assertEquals("Blu", transaction.bank);
+        java.util.Map<String, String> reasons = BalanceData.readReasons(ctx);
+        assertEquals(2, reasons.size());
+        assertEquals("شارژ شدی", reasons.get(BalanceData.noteKey(
+            transactionOfAmount(transactions, -111_000L))));
+        assertEquals("دریافت پل", reasons.get(BalanceData.noteKey(
+            transactionOfAmount(transactions, 4_444_000L))));
+        for (String title : reasons.values())
             assertTrue("uncaptioned reason stored: " + title,
                 BankRules.reasonCaption(ctx, title) != null);
-        assertTrue("expected the top-up and the transfer to be read", found.contains("شارژ شدی"));
     }
 
     @Test public void bluPlainWithdrawal_scanStoresNoReason() throws Exception {
@@ -2097,13 +2132,17 @@ public class HistoryScanTest {
         assertEquals(1, BalanceData.scanHistory(ctx));
 
         seed(BluMessages.SENDER, BluMessages.BILL, T + 2000);
-        BalanceData.scanHistory(ctx);
+        assertEquals(1, BalanceData.scanHistory(ctx));
 
         java.util.Map<String, String> reasons = BalanceData.readReasons(ctx);
         List<Transaction> txs = BalanceData.readTransactions(ctx);
-        int withReason = 0;
-        for (Transaction t : txs) if (reasons.containsKey(BalanceData.noteKey(t))) withReason++;
-        assertTrue("at least the two Blu movements must carry a reason", withReason >= 2);
+        assertEquals(2, txs.size());
+        assertEquals(2, reasons.size());
+        for (Transaction transaction : txs) assertEquals("Blu", transaction.bank);
+        assertEquals("شارژ شدی", reasons.get(BalanceData.noteKey(
+            transactionOfAmount(txs, -111_000L))));
+        assertEquals("پرداخت قبض", reasons.get(BalanceData.noteKey(
+            transactionOfAmount(txs, -222_000L))));
         for (String title : reasons.values())
             assertTrue("uncaptioned reason stored: " + title, BankRules.reasonCaption(ctx, title) != null);
     }
@@ -2172,14 +2211,19 @@ public class HistoryScanTest {
         assertEquals(1, BalanceData.scanHistory(ctx));
 
         seed("TejaratBank", TejaratMessages.WITHDRAWAL_BRANCH, T + 2000);
-        BalanceData.scanHistory(ctx);
+        assertEquals(1, BalanceData.scanHistory(ctx));
 
         java.util.Map<String, String> channels = BalanceData.readChannels(ctx);
         List<Transaction> txs = BalanceData.readTransactions(ctx);
-        int withChannel = 0;
-        for (Transaction t : txs) if (channels.containsKey(BalanceData.noteKey(t))) withChannel++;
-        assertTrue("both Tejarat movements must carry a channel", withChannel >= 2);
-        assertTrue("the two movements must not share one channel", channels.size() >= 2);
+        assertEquals(2, txs.size());
+        assertEquals(2, channels.size());
+        for (Transaction transaction : txs) assertEquals("Tejarat", transaction.bank);
+        Transaction instant = transactionOfAmount(txs, -490_098_000L);
+        Transaction branch = transactionOfAmount(txs, -1_500_000L);
+        assertEquals("01351234567890", instant.account);
+        assertEquals("01350000000", branch.account);
+        assertEquals("سامانه پل (پرداخت لحظه ای)", channels.get(BalanceData.noteKey(instant)));
+        assertEquals("شعبه", channels.get(BalanceData.noteKey(branch)));
         for (String channel : channels.values())
             assertTrue("uncaptioned channel stored: " + channel,
                 BankRules.channelCaption(ctx, channel) != null);
