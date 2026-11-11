@@ -15,9 +15,12 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import org.junit.After;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.junit.runners.model.MultipleFailureException;
 
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.List;
 
 /**
  * The Eghtesad Novin withdrawal SMS shape: sender, dash-separated account behind the movement
@@ -43,6 +46,7 @@ public class EghtesadNovinBankTest {
 
     private Context context;
     private boolean providerTouched;
+    private boolean shellIdentityAdopted;
 
     @Test public void senderAccountBalanceAndWithdrawal_areReadFromTheCompleteFixture() {
         assertEquals(BANK, BankRules.resolve(EghtesadNovinMessages.SENDER));
@@ -68,12 +72,13 @@ public class EghtesadNovinBankTest {
     }
 
     @Test public void amountLine_doesNotReadTheAccountDigits() {
-        // Without the signed amount line the label scan would read the account's own leading
-        // digits ("برداشت: 314-…") as the movement; the signed "ریال" line is what carries it.
-        assertEquals(EghtesadNovinMessages.ACCOUNT,
-            BankRules.extractAccount(BANK, EghtesadNovinMessages.WITHDRAWAL));
-        assertEquals(MOVEMENT,
-            (long) BalanceData.extractTransaction(EghtesadNovinMessages.WITHDRAWAL));
+        String account = "987-654-3210987-0";
+        String body = EghtesadNovinMessages.WITHDRAWAL
+            .replace(EghtesadNovinMessages.ACCOUNT, account);
+        assertTrue("the account digits must actually change",
+            !body.equals(EghtesadNovinMessages.WITHDRAWAL));
+        assertEquals(account, BankRules.extractAccount(BANK, body));
+        assertEquals(Long.valueOf(MOVEMENT), BalanceData.extractTransaction(body));
     }
 
     @Test public void alternateSpellingsAndDigits_readTheSameMovement() {
@@ -94,6 +99,8 @@ public class EghtesadNovinBankTest {
             .replace("5/8-10:04", "۵/۸-۱۰:۰۴");
         assertEquals(MOVEMENT, (long) BalanceData.extractTransaction(persianDigits));
         assertEquals(BALANCE, BalanceData.extract(persianDigits));
+        assertEquals(persian(1405, 5, 8, 10, 4),
+            MessageDate.eventTime(persianDigits, ARRIVAL, BankRules.calendar(BANK)));
 
         String crlf = EghtesadNovinMessages.WITHDRAWAL.replace("\n", "\r\n");
         assertEquals(EghtesadNovinMessages.ACCOUNT, BankRules.extractAccount(BANK, crlf));
@@ -140,7 +147,6 @@ public class EghtesadNovinBankTest {
 
     @Test public void providerScan_storesEghtesadNovinMovementAndAccount_withoutReasonOrChannel()
             throws Exception {
-        providerTouched = true;
         prepareProvider();
         seed(EghtesadNovinMessages.SENDER, EghtesadNovinMessages.WITHDRAWAL, PROVIDER_ARRIVAL);
 
@@ -149,6 +155,7 @@ public class EghtesadNovinBankTest {
         assertEquals(1, transactions.size());
 
         Transaction transaction = transactions.get(0);
+        assertEquals(PROVIDER_ARRIVAL, transaction.date);
         assertEquals(BANK, transaction.bank);
         assertEquals(EghtesadNovinMessages.ACCOUNT, transaction.account);
         assertEquals(MOVEMENT, transaction.amount);
@@ -161,22 +168,49 @@ public class EghtesadNovinBankTest {
 
     @After public void tearDown() throws Exception {
         if (!providerTouched) return;
-        clearInbox();
-        context.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
-        context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        List<Throwable> failures = new ArrayList<>();
+        try {
+            clearInbox();
+        } catch (Throwable failure) {
+            failures.add(failure);
+        }
+        try {
+            BalanceData.reset(context, true);
+        } catch (Throwable failure) {
+            failures.add(failure);
+        }
+        try {
+            assertTrue("display preferences did not clear", context.getSharedPreferences(
+                BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit());
+        } catch (Throwable failure) {
+            failures.add(failure);
+        } finally {
+            if (shellIdentityAdopted) {
+                try {
+                    InstrumentationRegistry.getInstrumentation().getUiAutomation()
+                        .dropShellPermissionIdentity();
+                } catch (Throwable failure) {
+                    failures.add(failure);
+                }
+            }
+        }
+        MultipleFailureException.assertEmpty(failures);
     }
 
     private void prepareProvider() throws Exception {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        assertNotNull(context);
+        providerTouched = true;
         BalanceData.reset(context, true);
         InstrumentationRegistry.getInstrumentation().getUiAutomation()
             .adoptShellPermissionIdentity(android.Manifest.permission.READ_SMS);
+        shellIdentityAdopted = true;
         exec("pm grant " + context.getPackageName() + " android.permission.READ_SMS");
         exec("cmd appops set " + context.getPackageName()
             + " android:read_restricted_messages allow");
         exec("cmd appops set com.ashkanrafiee.smsinject WRITE_SMS allow");
-        context.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
-        context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        assertTrue("display preferences did not clear", context.getSharedPreferences(
+            BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit());
         clearInbox();
     }
 
@@ -214,7 +248,8 @@ public class EghtesadNovinBankTest {
             try (android.database.Cursor cursor = context.getContentResolver().query(
                     Telephony.Sms.Inbox.CONTENT_URI,
                     new String[]{Telephony.Sms._ID}, null, null, null)) {
-                if (cursor == null || !cursor.moveToFirst()) return;
+                assertNotNull("could not query the SMS inbox after CLEAR", cursor);
+                if (!cursor.moveToFirst()) return;
             }
             Thread.sleep(150L);
         }

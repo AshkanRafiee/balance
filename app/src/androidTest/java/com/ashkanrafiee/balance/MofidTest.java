@@ -18,8 +18,10 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import org.junit.After;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.junit.runners.model.MultipleFailureException;
 
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.LinkedHashMap;
@@ -53,6 +55,7 @@ public class MofidTest {
 
     private Context context;
     private boolean providerTouched;
+    private boolean shellIdentityAdopted;
 
     @Test public void senderVariants_resolveToCanonicalMofid_withLocalizedProductNames() {
         for (String sender : new String[]{SENDER, "+98 10 0087 00", "009810008700",
@@ -274,23 +277,47 @@ public class MofidTest {
 
     @After public void tearDown() throws Exception {
         if (!providerTouched) return;
-        clearInbox();
-        prefs().edit().clear().commit();
-        context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        List<Throwable> failures = new ArrayList<>();
+        try {
+            clearInbox();
+        } catch (Throwable failure) {
+            failures.add(failure);
+        }
+        try {
+            BalanceData.reset(context, true);
+        } catch (Throwable failure) {
+            failures.add(failure);
+        }
+        try {
+            assertTrue("display preferences did not clear", prefs().edit().clear().commit());
+        } catch (Throwable failure) {
+            failures.add(failure);
+        } finally {
+            if (shellIdentityAdopted) {
+                try {
+                    InstrumentationRegistry.getInstrumentation().getUiAutomation()
+                        .dropShellPermissionIdentity();
+                } catch (Throwable failure) {
+                    failures.add(failure);
+                }
+            }
+        }
+        MultipleFailureException.assertEmpty(failures);
     }
 
     private void prepareProvider() throws Exception {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        assertNotNull(context);
         providerTouched = true;
         BalanceData.reset(context, true);
         InstrumentationRegistry.getInstrumentation().getUiAutomation()
             .adoptShellPermissionIdentity(android.Manifest.permission.READ_SMS);
+        shellIdentityAdopted = true;
         exec("pm grant " + context.getPackageName() + " android.permission.READ_SMS");
         exec("cmd appops set " + context.getPackageName()
             + " android:read_restricted_messages allow");
         exec("cmd appops set com.ashkanrafiee.smsinject WRITE_SMS allow");
-        prefs().edit().clear().commit();
-        context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        assertTrue("display preferences did not clear", prefs().edit().clear().commit());
         clearInbox();
     }
 
@@ -328,7 +355,8 @@ public class MofidTest {
             try (android.database.Cursor cursor = context.getContentResolver().query(
                     Telephony.Sms.Inbox.CONTENT_URI,
                     new String[]{Telephony.Sms._ID}, null, null, null)) {
-                if (cursor == null || !cursor.moveToFirst()) return;
+                assertNotNull("could not query the SMS inbox after CLEAR", cursor);
+                if (!cursor.moveToFirst()) return;
             }
             Thread.sleep(150L);
         }

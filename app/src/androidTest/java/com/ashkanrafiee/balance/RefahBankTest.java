@@ -3,6 +3,7 @@ package com.ashkanrafiee.balance;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
 import android.provider.Telephony;
@@ -13,8 +14,11 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import org.junit.After;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.junit.runners.model.MultipleFailureException;
 
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 /** Refah's glued account and trailing-sign movement SMS layout. */
 @RunWith(AndroidJUnit4.class)
@@ -25,6 +29,7 @@ public class RefahBankTest {
     private static final long PROVIDER_ARRIVAL = 1_000_000_000L;
     private Context context;
     private boolean providerTouched;
+    private boolean shellIdentityAdopted;
 
     @Test public void senderAccountBalanceAndPurchase_areReadFromTemplate() {
         assertEquals(BANK, BankRules.resolve(RefahMessages.SENDER));
@@ -76,7 +81,6 @@ public class RefahBankTest {
     }
 
     @Test public void providerScan_storesRefahMovementAndAccount() throws Exception {
-        providerTouched = true;
         prepareProvider();
         seed(PROVIDER_SENDER, RefahMessages.CARD, PROVIDER_ARRIVAL);
 
@@ -85,6 +89,7 @@ public class RefahBankTest {
         assertEquals(1, transactions.size());
 
         Transaction transaction = transactions.get(0);
+        assertEquals(PROVIDER_ARRIVAL, transaction.date);
         assertEquals(BANK, transaction.bank);
         assertEquals(RefahMessages.ACCOUNT, transaction.account);
         assertEquals(-12_345_600L, transaction.amount);
@@ -93,22 +98,49 @@ public class RefahBankTest {
 
     @After public void tearDown() throws Exception {
         if (!providerTouched) return;
-        clearInbox();
-        context.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
-        context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        List<Throwable> failures = new ArrayList<>();
+        try {
+            clearInbox();
+        } catch (Throwable failure) {
+            failures.add(failure);
+        }
+        try {
+            BalanceData.reset(context, true);
+        } catch (Throwable failure) {
+            failures.add(failure);
+        }
+        try {
+            assertTrue("display preferences did not clear", context.getSharedPreferences(
+                BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit());
+        } catch (Throwable failure) {
+            failures.add(failure);
+        } finally {
+            if (shellIdentityAdopted) {
+                try {
+                    InstrumentationRegistry.getInstrumentation().getUiAutomation()
+                        .dropShellPermissionIdentity();
+                } catch (Throwable failure) {
+                    failures.add(failure);
+                }
+            }
+        }
+        MultipleFailureException.assertEmpty(failures);
     }
 
     private void prepareProvider() throws Exception {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        assertNotNull(context);
+        providerTouched = true;
         BalanceData.reset(context, true);
         InstrumentationRegistry.getInstrumentation().getUiAutomation()
             .adoptShellPermissionIdentity(android.Manifest.permission.READ_SMS);
+        shellIdentityAdopted = true;
         exec("pm grant " + context.getPackageName() + " android.permission.READ_SMS");
         exec("cmd appops set " + context.getPackageName()
             + " android:read_restricted_messages allow");
         exec("cmd appops set com.ashkanrafiee.smsinject WRITE_SMS allow");
-        context.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
-        context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        assertTrue("display preferences did not clear", context.getSharedPreferences(
+            BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit());
         clearInbox();
     }
 
@@ -146,7 +178,8 @@ public class RefahBankTest {
             try (android.database.Cursor cursor = context.getContentResolver().query(
                     Telephony.Sms.Inbox.CONTENT_URI,
                     new String[]{Telephony.Sms._ID}, null, null, null)) {
-                if (cursor == null || !cursor.moveToFirst()) return;
+                assertNotNull("could not query the SMS inbox after CLEAR", cursor);
+                if (!cursor.moveToFirst()) return;
             }
             Thread.sleep(150L);
         }

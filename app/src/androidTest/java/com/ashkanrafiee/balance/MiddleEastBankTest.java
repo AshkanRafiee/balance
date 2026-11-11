@@ -15,9 +15,12 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import org.junit.After;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.junit.runners.model.MultipleFailureException;
 
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.List;
 
 /**
  * The complete Middle East Bank SMS shape: sender, account, signed movement, date and reason.
@@ -44,6 +47,7 @@ public class MiddleEastBankTest {
 
     private Context context;
     private boolean providerTouched;
+    private boolean shellIdentityAdopted;
 
     private static String middleEastBody(String sign) {
         return "بانک خاورمیانه\n"
@@ -124,7 +128,6 @@ public class MiddleEastBankTest {
 
     @Test public void providerScan_storesMiddleEastMovementAndReason_withoutInventingChannel()
             throws Exception {
-        providerTouched = true;
         prepareProvider();
         seed(SENDER, DEPOSIT, PROVIDER_ARRIVAL);
 
@@ -133,6 +136,7 @@ public class MiddleEastBankTest {
         assertEquals(1, transactions.size());
 
         Transaction transaction = transactions.get(0);
+        assertEquals(PROVIDER_ARRIVAL, transaction.date);
         assertEquals(BANK, transaction.bank);
         assertEquals(ACCOUNT, transaction.account);
         assertEquals(MOVEMENT, transaction.amount);
@@ -144,19 +148,49 @@ public class MiddleEastBankTest {
 
     @After public void tearDown() throws Exception {
         if (!providerTouched) return;
-        clearInbox();
-        context.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
-        context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        List<Throwable> failures = new ArrayList<>();
+        try {
+            clearInbox();
+        } catch (Throwable failure) {
+            failures.add(failure);
+        }
+        try {
+            BalanceData.reset(context, true);
+        } catch (Throwable failure) {
+            failures.add(failure);
+        }
+        try {
+            assertTrue("display preferences did not clear", context.getSharedPreferences(
+                BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit());
+        } catch (Throwable failure) {
+            failures.add(failure);
+        } finally {
+            if (shellIdentityAdopted) {
+                try {
+                    InstrumentationRegistry.getInstrumentation().getUiAutomation()
+                        .dropShellPermissionIdentity();
+                } catch (Throwable failure) {
+                    failures.add(failure);
+                }
+            }
+        }
+        MultipleFailureException.assertEmpty(failures);
     }
 
     private void prepareProvider() throws Exception {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        assertNotNull(context);
+        providerTouched = true;
         BalanceData.reset(context, true);
         InstrumentationRegistry.getInstrumentation().getUiAutomation()
             .adoptShellPermissionIdentity(android.Manifest.permission.READ_SMS);
+        shellIdentityAdopted = true;
         exec("pm grant " + context.getPackageName() + " android.permission.READ_SMS");
-        context.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit();
-        context.getSharedPreferences(BalanceData.PREFS_DATA, Context.MODE_PRIVATE).edit().clear().commit();
+        exec("cmd appops set " + context.getPackageName()
+            + " android:read_restricted_messages allow");
+        exec("cmd appops set com.ashkanrafiee.smsinject WRITE_SMS allow");
+        assertTrue("display preferences did not clear", context.getSharedPreferences(
+            BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit());
         clearInbox();
     }
 
@@ -194,7 +228,8 @@ public class MiddleEastBankTest {
             try (android.database.Cursor cursor = context.getContentResolver().query(
                     Telephony.Sms.Inbox.CONTENT_URI,
                     new String[]{Telephony.Sms._ID}, null, null, null)) {
-                if (cursor == null || !cursor.moveToFirst()) return;
+                assertNotNull("could not query the SMS inbox after CLEAR", cursor);
+                if (!cursor.moveToFirst()) return;
             }
             Thread.sleep(150L);
         }
