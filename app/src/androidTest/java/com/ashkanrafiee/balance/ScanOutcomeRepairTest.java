@@ -2,6 +2,7 @@ package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.ContentProvider;
@@ -85,6 +86,94 @@ public class ScanOutcomeRepairTest {
         BalanceData.ScanOutcome history = BalanceData.scanHistoryOutcome(withProvider(0), null);
         assertTrue(history.succeeded());
         assertEquals(0, history.changed);
+    }
+
+    @Test public void repeatedEmptyScansSucceedWithoutRewritingEncryptedBalances() throws Exception {
+        Context provider = withProvider(0);
+        LinkedHashMap<String, Bank> balances = new LinkedHashMap<>();
+        String payload = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            BalanceData.ScanOutcome outcome = BalanceData.scanSmsOutcome(provider, balances, null);
+            assertEquals("empty balance scan " + attempt,
+                BalanceData.ScanOutcome.Status.SUCCESS, outcome.status);
+            assertEquals(0, outcome.changed);
+            String stored = DataGeneration.dataPrefs(context).getString(BalanceData.KEY_BALANCES, null);
+            assertNotNull(stored);
+            assertEquals("{}", BalanceData.decryptStorePayload(stored));
+            if (attempt == 0) payload = stored;
+            else assertEquals("repeat must keep the exact encrypted payload", payload, stored);
+            assertTrue(balances.isEmpty());
+            assertTrue(BalanceData.read(context).isEmpty());
+        }
+        for (int attempt = 0; attempt < 2; attempt++) {
+            BalanceData.ScanOutcome history = BalanceData.scanHistoryOutcome(provider, null);
+            assertEquals(BalanceData.ScanOutcome.Status.SUCCESS, history.status);
+            assertEquals(0, history.changed);
+            assertEquals(payload,
+                DataGeneration.dataPrefs(context).getString(BalanceData.KEY_BALANCES, null));
+            BalanceData.ScanOutcome reRead = BalanceData.reReadBankMessages(provider, balances, null);
+            assertEquals(BalanceData.ScanOutcome.Status.SUCCESS, reRead.status);
+            assertEquals(0, reRead.changed);
+            assertEquals(payload,
+                DataGeneration.dataPrefs(context).getString(BalanceData.KEY_BALANCES, null));
+        }
+    }
+
+    @Test public void emptyWritesPreserveNonemptyAndUnreadableStoredBalances() throws Exception {
+        SharedPreferences data = DataGeneration.dataPrefs(context);
+        LinkedHashMap<String, Bank> balances = new LinkedHashMap<>();
+        balances.put("Refah", new Bank("Refah", 900L, 1_000_000L, "Refah", null));
+        assertTrue(BalanceData.write(context, balances));
+        String payload = data.getString(BalanceData.KEY_BALANCES, null);
+        assertNotNull(payload);
+        assertFalse(BalanceData.write(context, new LinkedHashMap<>()));
+        assertEquals(payload, data.getString(BalanceData.KEY_BALANCES, null));
+        assertEquals(1, BalanceData.read(context).size());
+        assertEquals(900L, BalanceData.read(context).get("Refah").amount);
+
+        String legacy = BalanceData.serialize(balances);
+        assertTrue(data.edit().putString(BalanceData.KEY_BALANCES, legacy).commit());
+        assertFalse(BalanceData.write(context, new LinkedHashMap<>()));
+        assertEquals(legacy, data.getString(BalanceData.KEY_BALANCES, null));
+
+        for (String corrupt : new String[]{"not-an-encrypted-balance-payload", "{broken", "{}garbage",
+                BalanceData.encryptStorePayload("{}garbage"),
+                BalanceData.encryptStorePayload("not JSON"),
+                BalanceData.encryptStorePayload("{\"Refah\":{}}")}) {
+            data = DataGeneration.dataPrefs(context);
+            assertTrue(data.edit().putString(BalanceData.KEY_BALANCES, corrupt).commit());
+            assertFalse("an empty write must not replace an unreadable balance store",
+                BalanceData.write(context, new LinkedHashMap<>()));
+            assertEquals(corrupt, data.getString(BalanceData.KEY_BALANCES, null));
+            assertEquals(BalanceData.ScanOutcome.Status.SAVE_ERROR,
+                BalanceData.scanSmsOutcome(withProvider(0), new LinkedHashMap<>(), null).status);
+            assertEquals(corrupt,
+                DataGeneration.dataPrefs(context).getString(BalanceData.KEY_BALANCES, null));
+        }
+    }
+
+    @Test public void legacyEmptyBalancesMigrateOnceThenKeepEncryptedPayload() throws Exception {
+        for (String legacy : new String[]{"{}", "{ \n\t }"}) {
+            BalanceData.reset(context, true);
+            SharedPreferences data = DataGeneration.dataPrefs(context);
+            assertTrue(data.edit().putString(BalanceData.KEY_BALANCES, legacy).commit());
+            assertTrue(BalanceData.write(context, new LinkedHashMap<>()));
+            String payload = data.getString(BalanceData.KEY_BALANCES, null);
+            assertNotNull(payload);
+            assertFalse("legacy empty balances must be encrypted", payload.startsWith("{"));
+            assertEquals("{}", BalanceData.decryptStorePayload(payload));
+            assertTrue(BalanceData.write(context, new LinkedHashMap<>()));
+            assertEquals(payload, data.getString(BalanceData.KEY_BALANCES, null));
+
+            for (int attempt = 0; attempt < 2; attempt++) {
+                BalanceData.ScanOutcome outcome = BalanceData.scanSmsOutcome(
+                    withProvider(0), new LinkedHashMap<>(), null);
+                assertEquals(BalanceData.ScanOutcome.Status.SUCCESS, outcome.status);
+                assertEquals(0, outcome.changed);
+                assertEquals(payload,
+                    DataGeneration.dataPrefs(context).getString(BalanceData.KEY_BALANCES, null));
+            }
+        }
     }
 
     @Test public void failedCheckpointCommitIsNotSuccessful() {

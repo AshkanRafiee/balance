@@ -1052,23 +1052,30 @@ final class BalanceData {
         try {
             String existing = DataGeneration.dataPrefs(context).getString(KEY_BALANCES, null);
             if (map.isEmpty() && existing != null) {
-                Log.w(TAG, "refusing to persist empty balances over existing data");
-                return false;
-            }
-            if (existing != null && balancesEqual(map, existing)) return true;
+                boolean legacy = existing.indexOf('{') == 0;
+                String json = legacy ? existing : decrypt(existing);
+                // Accept only a complete empty JSON object, not JSONObject's permissive prefix
+                // parsing. An unreadable or nonempty payload must never be replaced by emptiness.
+                if (!json.matches("[ \\t\\r\\n]*\\{[ \\t\\r\\n]*\\}[ \\t\\r\\n]*")) {
+                    Log.w(TAG, "refusing to persist empty balances over existing data");
+                    return false;
+                }
+                if (!legacy) return true; // Verified empty-to-empty ciphertext stays unchanged.
+                // Valid legacy emptiness still needs to move into encrypted storage below.
+            } else if (existing != null && balancesEqual(map, existing)) return true;
             String json = serialize(map);
             return DataGeneration.dataPrefs(context).edit()
                 .putString(KEY_BALANCES, encrypt(json)).commit();
         } catch (Exception e) {
-            Log.w(TAG, "write failed", e);
+            // Parser exceptions may embed plaintext financial values; never put them in logs.
+            Log.w(TAG, "balance write failed");
             return false;
         }
     }
 
     /** Compares balance fields without depending on JSON object ordering, so a refresh that found
      * nothing new does not re-encrypt and commit the same preference payload. A malformed existing
-     * value deliberately falls through to the old write path, which gives the caller a chance to
-     * repair it instead of treating corruption as an unchanged store. */
+     * value fails closed rather than being treated as an unchanged store. */
     private static boolean balancesEqual(LinkedHashMap<String, Bank> current, String stored)
             throws Exception {
         // A plaintext JSON value is a legacy migration input. It must never count as unchanged:

@@ -1,6 +1,6 @@
 • Added Mofid Jet Card / Hami balance and transaction support.
-• Fixed Wepod detection and saved-balance preservation.
-• Fixed spaces splitting Wepod/Pasargad accounts, preserving history, notes, tags and exclusions.
+• Fixed Wepod detection and Wepod/Pasargad spacing without losing balances, history, notes, tags or exclusions.
 • Check exclusions for newly recognized Wepod accounts after updating.
 • Fixed scans reporting success when saved messages were missing after an update or restore.
-• Fixed some Blu withdrawals using the balance instead of the transaction amount.
+• Fixed Blu withdrawals showing the balance as the amount.
+• Fixed empty-inbox refresh errors; stopped financial details appearing in balance-save error logs.
