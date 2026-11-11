@@ -133,7 +133,7 @@ public class CommitmentReminderPlanningTest {
         CommitmentReminders.fireNow(new CountingContext(context), definition.id,
             new CommitmentReminderJobs.Token());
 
-        assertNull(notification(definition.id));
+        assertNotificationStaysAbsent(definition.id);
         assertTrue(reminderPrefs().getStringSet("fired_due", Collections.emptySet()).isEmpty());
         assertTrue(CommitmentReminders.scheduledIds(context).contains(definition.id));
     }
@@ -147,7 +147,7 @@ public class CommitmentReminderPlanningTest {
 
         CommitmentReminders.fireNow(context, definition.id, new CommitmentReminderJobs.Token());
 
-        assertNull(notification(definition.id));
+        assertNotificationStaysAbsent(definition.id);
         assertTrue(reminderPrefs().getStringSet("fired_due", Collections.emptySet()).isEmpty());
         assertTrue(CommitmentReminders.scheduledIds(context).contains(definition.id));
     }
@@ -199,25 +199,59 @@ public class CommitmentReminderPlanningTest {
     }
 
     @Test public void deliveredOneTimeReminderStaysPrivateAndVisibleUntilSettled() throws Exception {
-        Commitment definition = Commitment.create("Private loan", -500, Commitment.ONCE,
-            inDays(-1), null, true, 0);
-        CommitmentStore.upsert(context, definition);
-        CommitmentReminders.fireNow(new CountingContext(context), definition.id,
-            new CommitmentReminderJobs.Token());
-        plan();
+        String language = LocaleHelper.currentTag(context);
+        String currency = CurrencyHelper.currency(context);
+        int region = RegionHelper.region(context);
+        android.os.LocaleList locales = android.os.LocaleList.getDefault();
+        try {
+            LocaleHelper.setLanguage(context, "en");
+            CurrencyHelper.setCurrency(context, CurrencyHelper.CUSTOM_PREFIX + "credits");
+            RegionHelper.setRegion(context, RegionHelper.REGION_INTERNATIONAL);
+            Commitment definition = Commitment.create("Private loan", -500, Commitment.ONCE,
+                inDays(-1), null, true, 0);
+            CommitmentStore.upsert(context, definition);
+            CommitmentReminders.fireNow(new CountingContext(context), definition.id,
+                new CommitmentReminderJobs.Token());
+            plan();
 
-        Notification shown = awaitNotification(definition.id, true);
-        assertNotNull("removing the consumed alarm must not remove its notification", shown);
-        assertEquals(Notification.VISIBILITY_PRIVATE, shown.visibility);
-        assertNotNull(shown.publicVersion);
-        assertEquals(context.getString(R.string.app_name),
-            shown.publicVersion.extras.getCharSequence(Notification.EXTRA_TITLE).toString());
-        assertNull(shown.publicVersion.extras.getCharSequence(Notification.EXTRA_TEXT));
-        assertFalse(CommitmentReminders.scheduledIds(context).contains(definition.id));
+            Notification shown = awaitNotification(definition.id, true);
+            assertNotNull("removing the consumed alarm must not remove its notification", shown);
+            assertEquals(Notification.VISIBILITY_PRIVATE, shown.visibility);
+            assertEquals(definition.name,
+                shown.extras.getCharSequence(Notification.EXTRA_TITLE).toString());
+            java.time.LocalDate dueDay = java.time.Instant.ofEpochMilli(definition.start)
+                .atZone(java.time.ZoneId.systemDefault()).toLocalDate();
+            String detail = "-500 credits · " + dueDay.format(
+                java.time.format.DateTimeFormatter.ofPattern("d MMMM uuuu", java.util.Locale.US));
+            assertEquals("the delivered text must include this amount and exact due date", detail,
+                shown.extras.getCharSequence(Notification.EXTRA_TEXT).toString());
+            assertEquals(definition.name,
+                shown.extras.getCharSequence(Notification.EXTRA_TITLE_BIG).toString());
+            assertEquals(detail, shown.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString());
+            assertNotNull("the delivered reminder must open its due", shown.contentIntent);
+            assertNotNull(shown.publicVersion);
+            assertEquals(context.getString(R.string.app_name),
+                shown.publicVersion.extras.getCharSequence(Notification.EXTRA_TITLE).toString());
+            assertNull(shown.publicVersion.extras.getCharSequence(Notification.EXTRA_TEXT));
+            assertNull(shown.publicVersion.extras.getCharSequence(Notification.EXTRA_TITLE_BIG));
+            assertNull(shown.publicVersion.extras.getCharSequence(Notification.EXTRA_BIG_TEXT));
+            assertNull(shown.publicVersion.extras.getCharSequence(Notification.EXTRA_SUB_TEXT));
+            assertNull(shown.publicVersion.extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT));
+            assertFalse(CommitmentReminders.scheduledIds(context).contains(definition.id));
 
-        CommitmentStore.settle(context, definition.id, definition.start);
-        CommitmentReminders.fireNow(context, definition.id, new CommitmentReminderJobs.Token());
-        assertNull(awaitNotification(definition.id, false));
+            CommitmentStore.settle(context, definition.id, definition.start);
+            CommitmentReminders.fireNow(context, definition.id, new CommitmentReminderJobs.Token());
+            assertNull(awaitNotification(definition.id, false));
+        } finally {
+            try { LocaleHelper.setLanguage(context, language); }
+            finally {
+                try { CurrencyHelper.setCurrency(context, currency); }
+                finally {
+                    try { RegionHelper.setRegion(context, region); }
+                    finally { android.os.LocaleList.setDefault(locales); }
+                }
+            }
+        }
     }
 
     @Test public void fullResetRemovesDeliveredFinancialNotificationBeforeQueuedReplanning()
@@ -261,7 +295,7 @@ public class CommitmentReminderPlanningTest {
         CommitmentReminders.fireNow(context, definition.id, new CommitmentReminderJobs.Token());
 
         assertFalse(CommitmentReminders.scheduledIds(context).contains(definition.id));
-        assertNull(notification(definition.id));
+        assertNotificationStaysAbsent(definition.id);
     }
 
     @Test public void endedOverdueSeriesDoesNotRepeatOlderDebtsAfterLatestWasDelivered()
@@ -359,18 +393,25 @@ public class CommitmentReminderPlanningTest {
         Commitment definition = Commitment.create("Retry", -500, Commitment.ONCE,
             inDays(-1), null, true, 0);
         CommitmentStore.upsert(context, definition);
+        AtomicBoolean failureReached = new AtomicBoolean();
         Context failing = new CountingContext(context) {
             int notificationCalls;
             @Override public Object getSystemService(String name) {
-                if (NOTIFICATION_SERVICE.equals(name) && ++notificationCalls == 4)
+                if (NOTIFICATION_SERVICE.equals(name) && ++notificationCalls == 4) {
+                    failureReached.set(true);
                     throw new IllegalStateException("notification service temporarily unavailable");
+                }
                 return super.getSystemService(name);
             }
         };
         try {
             CommitmentReminders.fireNow(failing, definition.id, new CommitmentReminderJobs.Token());
             fail("notification failure must propagate to the durable dispatcher retry");
-        } catch (IllegalStateException expected) { }
+        } catch (IllegalStateException expected) {
+            assertEquals("notification service temporarily unavailable", expected.getMessage());
+        }
+        assertTrue("the injected fourth notification-service lookup must be reached",
+            failureReached.get());
         assertTrue(reminderPrefs().getStringSet("fired_due", Collections.emptySet()).isEmpty());
         assertNull(notification(definition.id));
 
@@ -510,6 +551,8 @@ public class CommitmentReminderPlanningTest {
         AtomicReference<Throwable> hookFailure = new AtomicReference<>();
         CountDownLatch returned = new CountDownLatch(1);
         try {
+            assertNotNull("observe the unrelated notification before reset can cancel anything",
+                awaitNotification("unrelated-test", 91, true));
             CommitmentReminderJobs.requestPlan(context);
             assertTrue(admission.await(5, TimeUnit.SECONDS));
             new Handler(Looper.getMainLooper()).post(() -> {
@@ -523,14 +566,17 @@ public class CommitmentReminderPlanningTest {
             assertNull(awaitNotification(definition.id, false));
             assertEquals("reset cleanup must never read the financial store", 0,
                 counted.dataPreferenceReads);
-            boolean unrelatedPresent = false;
-            for (StatusBarNotification shown : manager.getActiveNotifications())
-                if ("unrelated-test".equals(shown.getTag())) unrelatedPresent = true;
-            assertTrue("unrelated app notifications must be preserved", unrelatedPresent);
+            assertNotNull("unrelated app notifications must be preserved",
+                notification("unrelated-test", 91));
         } finally {
             release.countDown();
-            CommitmentJobIsolationListener.restore(context);
-            manager.cancel("unrelated-test", 91);
+            try {
+                CommitmentJobIsolationListener.restore(context);
+            } finally {
+                manager.cancel("unrelated-test", 91);
+                assertNull("the unrelated test notification must be cleaned up",
+                    awaitNotification("unrelated-test", 91, false));
+            }
         }
     }
 
@@ -582,29 +628,52 @@ public class CommitmentReminderPlanningTest {
     }
 
     private Notification notification(String id) {
+        return notification("commitment:" + id, 1);
+    }
+
+    private Notification notification(String tag, int id) {
         for (StatusBarNotification shown : context.getSystemService(NotificationManager.class)
                 .getActiveNotifications())
-            if (("commitment:" + id).equals(shown.getTag())) return shown.getNotification();
+            if (tag.equals(shown.getTag()) && id == shown.getId()) return shown.getNotification();
         return null;
     }
 
     private Notification awaitNotification(String id, boolean present) {
+        return awaitNotification("commitment:" + id, 1, present);
+    }
+
+    private Notification awaitNotification(String tag, int id, boolean present) {
         long deadline = SystemClock.elapsedRealtime() + 5000;
         Notification shown;
         // Both notify() and cancel() finish asynchronously in Android's notification service.
-        while (((shown = notification(id)) != null) != present
+        while (((shown = notification(tag, id)) != null) != present
                 && SystemClock.elapsedRealtime() < deadline)
             SystemClock.sleep(20);
         return shown;
+    }
+
+    private void assertNotificationStaysAbsent(String id) {
+        // Unlike cancellation after an observed post, initial absence proves nothing about
+        // queued notify() work. Observe a finite quiet window for these privacy-negative cases.
+        long deadline = SystemClock.elapsedRealtime() + 500;
+        do {
+            assertNull("no reminder may appear during the 500 ms privacy observation", notification(id));
+            if (SystemClock.elapsedRealtime() >= deadline) return;
+            SystemClock.sleep(20);
+        } while (true);
     }
 
     private void plan() throws Exception {
         long cursor = -1;
         Set<String> wanted = new HashSet<>();
         CommitmentReminderJobs.Token token = new CommitmentReminderJobs.Token();
+        int pages = 0;
         while (true) {
+            assertTrue("planning must finish within 100 pages", ++pages <= 100);
             CommitmentReminders.PlanPage page = CommitmentReminders.planPage(context, cursor,
                 wanted, false, token);
+            if (page.more) assertTrue("each nonfinal planning page must advance its cursor",
+                page.cursor > cursor);
             cursor = page.cursor;
             wanted = page.wanted;
             if (!page.more) break;
