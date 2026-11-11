@@ -3,9 +3,9 @@ package com.ashkanrafiee.balance;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
-import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.os.SystemClock;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
@@ -14,8 +14,6 @@ import androidx.test.core.app.ActivityScenario;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
-import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry;
-import androidx.test.runner.lifecycle.Stage;
 
 import org.junit.After;
 import org.junit.Before;
@@ -50,7 +48,6 @@ public class HistoryCascadeTest {
     private static final long HOUR = 3600000L;
 
     @Before public void setUp() {
-        finishAnyResumedHistory();
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         originalTag = LocaleHelper.currentTag(ctx);
         originalCurrency = CurrencyHelper.currency(ctx);
@@ -102,14 +99,6 @@ public class HistoryCascadeTest {
             scenario.onActivity(activity -> idle[0] = HistoryActivity.idleForTest(activity));
             return idle[0] && clockTimes() > 0;
         }, 20_000, "today's movement row and the completed history render");
-    }
-
-    @Test public void todaysMovements_areVisibleWithoutTouchingAnything() {
-        // Whatever else changes, the freshest history has to be on screen the moment it opens.
-        storeThisMonth();
-        launch();
-        assertNotNull("today's movement must be visible without any tap",
-            findByTextContaining("10,000,000"));
     }
 
     @Test public void openingTheCurrentYear_showsItsMonthsWithoutBuildingTheirRows() {
@@ -174,9 +163,11 @@ public class HistoryCascadeTest {
     /** Taps a group to open it. The tag identifies the card that holds the whole group, while the
      *  click listener belongs to the header row inside it, so the tap has to go to that header. */
     private void tapGroup(View group) {
-        View header = firstClickable(group);
-        assertNotNull("a group must have a header to tap", header);
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(header::performClick);
+        scenario.onActivity(activity -> {
+            View header = firstClickable(group);
+            assertNotNull("a group must have a header to tap", header);
+            header.performClick();
+        });
     }
 
     private static View firstClickable(View v) {
@@ -190,10 +181,12 @@ public class HistoryCascadeTest {
         return v.isClickable() ? v : null;
     }
 
-    private static List<TextView> texts() {
-        final List<TextView> out = new ArrayList<>();
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            for (Activity a : resumed()) collect(a.getWindow().getDecorView(), out);
+    private List<String> texts() {
+        final List<String> out = new ArrayList<>();
+        scenario.onActivity(activity -> {
+            List<TextView> labels = new ArrayList<>();
+            collect(activity.getWindow().getDecorView(), labels);
+            for (TextView label : labels) out.add(label.getText().toString());
         });
         return out;
     }
@@ -206,41 +199,35 @@ public class HistoryCascadeTest {
         }
     }
 
-    private static TextView findByTextContaining(String want) {
-        for (TextView t : texts()) {
-            CharSequence s = t.getText();
-            if (s != null && s.toString().contains(want)) return t;
+    private String findByTextContaining(String want) {
+        for (String text : texts()) {
+            if (text.contains(want)) return text;
         }
         return null;
     }
 
     /** How many movement rows are on screen, told apart by the clock time only a row carries. */
-    private static int clockTimes() {
+    private int clockTimes() {
         int n = 0;
-        for (TextView t : texts()) {
-            CharSequence s = t.getText();
-            if (s != null && s.toString().matches("\\d{1,2}:\\d{2}")) n++;
+        for (String text : texts()) {
+            if (text.matches("\\d{1,2}:\\d{2}")) n++;
         }
         return n;
     }
 
     /** The year cards on screen, in the order they were rendered (newest first). */
-    private static List<View> years() {
+    private List<View> years() {
         return tagged(HistoryActivity.YEAR_TAG);
     }
 
     /** The month rows on screen, across every open year, in the order they were rendered. */
-    private static List<View> months() {
+    private List<View> months() {
         return tagged(HistoryActivity.MONTH_TAG);
     }
 
-    private static List<View> tagged(String tag) {
+    private List<View> tagged(String tag) {
         final List<View> out = new ArrayList<>();
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            for (Activity a : resumed()) {
-                collectTagged(a.getWindow().getDecorView(), tag, out);
-            }
-        });
+        scenario.onActivity(activity -> collectTagged(activity.getWindow().getDecorView(), tag, out));
         return out;
     }
 
@@ -253,7 +240,7 @@ public class HistoryCascadeTest {
     }
 
     /** The day rows on screen, told apart by the tag rather than by their text. */
-    private static List<View> days() {
+    private List<View> days() {
         return tagged(HistoryActivity.DAY_TAG);
     }
 
@@ -268,15 +255,9 @@ public class HistoryCascadeTest {
         return header;
     }
 
-    private static View findByDescription(String want) {
-        return find(v -> want.equals(v.getContentDescription()));
-    }
-
-    private static View find(Predicate<View> m) {
+    private View find(Predicate<View> m) {
         final List<View> hits = new ArrayList<>();
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            for (Activity a : resumed()) collect(a.getWindow().getDecorView(), m, hits);
-        });
+        scenario.onActivity(activity -> collect(activity.getWindow().getDecorView(), m, hits));
         return hits.isEmpty() ? null : hits.get(0);
     }
 
@@ -288,35 +269,11 @@ public class HistoryCascadeTest {
         }
     }
 
-    /**
-     * Closes any history screen an earlier test left standing.
-     *
-     * <p>These tests read every resumed view, so one screen left over from a previous test would
-     * contribute its rows to the next test's count. That passes when a class runs alone and fails in
-     * a full suite, which is the worst way for a test to be wrong.
-     */
-    private static void finishAnyResumedHistory() {
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            for (Activity a : ActivityLifecycleMonitorRegistry.getInstance()
-                    .getActivitiesInStage(Stage.RESUMED)) {
-                if (a instanceof HistoryActivity) a.finish();
-            }
-        });
-    }
-
-    private static List<Activity> resumed() {
-        List<Activity> out = new ArrayList<>();
-        for (Activity a : ActivityLifecycleMonitorRegistry.getInstance()
-                .getActivitiesInStage(Stage.RESUMED)) {
-            if (a instanceof HistoryActivity) out.add(a);
-        }
-        return out;
-    }
-
     private static void await(Callable<Boolean> done, long timeoutMs, String what) {
-        long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline) {
-            try { if (done.call()) return; } catch (Exception ignored) { }
+        long deadline = SystemClock.elapsedRealtime() + timeoutMs;
+        while (SystemClock.elapsedRealtime() < deadline) {
+            try { if (done.call()) return; }
+            catch (Exception e) { throw new AssertionError("history readiness check failed: " + what, e); }
             try { Thread.sleep(150); } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;

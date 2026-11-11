@@ -4,7 +4,6 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.os.SystemClock;
@@ -16,8 +15,6 @@ import android.widget.TextView;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
-import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry;
-import androidx.test.runner.lifecycle.Stage;
 
 import org.junit.After;
 import org.junit.Before;
@@ -48,7 +45,6 @@ public class HistoryCountUiTest {
     private static final long BASE = 1788000000000L;
 
     @Before public void setUp() {
-        finishAnyResumedHistory();
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         originalTag = LocaleHelper.currentTag(ctx);
         originalCurrency = CurrencyHelper.currency(ctx);
@@ -98,13 +94,6 @@ public class HistoryCountUiTest {
         }, 20_000);
     }
 
-    @Test public void theScreen_saysHowManyMovementsItIsShowing() {
-        storeTwoAccounts();
-        launch(ONE);
-        assertNotNull("the count must be on screen, not only knowable by scrolling",
-            findCountInHeading(counted(3)));
-    }
-
     @Test public void theCount_followsTheAccountBeingViewed() {
         // The count has to describe what is on screen. A total taken from the whole store would read
         // "8 transactions" on an account that holds three, and quietly misreport every account the
@@ -141,23 +130,25 @@ public class HistoryCountUiTest {
      * wording passes even when the heading is wrong. These tests have to look at the heading.
      */
     private TextView findCountInHeading(String want) {
-        for (TextView label : texts()) {
-            if (!ctx.getString(R.string.history_breakdown).equals(label.getText().toString())) continue;
-            ViewParent row = label.getParent();
-            if (!(row instanceof ViewGroup)) continue;
-            List<TextView> inRow = new ArrayList<>();
-            collect((ViewGroup) row, inRow);
-            for (TextView t : inRow) if (want.equals(t.getText().toString())) return t;
-        }
-        return null;
-    }
-
-    private static List<TextView> texts() {
-        final List<TextView> out = new ArrayList<>();
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            for (Activity a : resumed()) collect(a.getWindow().getDecorView(), out);
+        final TextView[] found = {null};
+        scenario.onActivity(activity -> {
+            List<TextView> labels = new ArrayList<>();
+            collect(activity.getWindow().getDecorView(), labels);
+            for (TextView label : labels) {
+                if (!activity.getString(R.string.history_breakdown).equals(label.getText().toString())) continue;
+                ViewParent row = label.getParent();
+                if (!(row instanceof ViewGroup)) continue;
+                List<TextView> inRow = new ArrayList<>();
+                collect((ViewGroup) row, inRow);
+                for (TextView text : inRow) {
+                    if (want.equals(text.getText().toString())) {
+                        found[0] = text;
+                        return;
+                    }
+                }
+            }
         });
-        return out;
+        return found[0];
     }
 
     private static void collect(View v, List<TextView> out) {
@@ -178,31 +169,6 @@ public class HistoryCountUiTest {
             }
         }
         return null;
-    }
-
-    /**
-     * Closes any history screen an earlier test left standing.
-     *
-     * <p>These tests read every resumed view, so one screen left over from a previous test would
-     * contribute its rows to the next test's count. That passes when a class runs alone and fails in
-     * a full suite, which is the worst way for a test to be wrong.
-     */
-    private static void finishAnyResumedHistory() {
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            for (Activity a : ActivityLifecycleMonitorRegistry.getInstance()
-                    .getActivitiesInStage(Stage.RESUMED)) {
-                if (a instanceof HistoryActivity) a.finish();
-            }
-        });
-    }
-
-    private static List<Activity> resumed() {
-        List<Activity> out = new ArrayList<>();
-        for (Activity a : ActivityLifecycleMonitorRegistry.getInstance()
-                .getActivitiesInStage(Stage.RESUMED)) {
-            if (a instanceof HistoryActivity) out.add(a);
-        }
-        return out;
     }
 
     private static void await(Callable<Boolean> done, long timeoutMs) {

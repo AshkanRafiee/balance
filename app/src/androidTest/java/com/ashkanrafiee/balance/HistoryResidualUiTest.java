@@ -3,7 +3,7 @@ package com.ashkanrafiee.balance;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.os.SystemClock;
@@ -14,8 +14,6 @@ import android.widget.TextView;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
-import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry;
-import androidx.test.runner.lifecycle.Stage;
 
 import org.junit.After;
 import org.junit.Before;
@@ -156,7 +154,8 @@ public class HistoryResidualUiTest {
         launch();
         View row = findByDescriptionContaining("Unaccounted");
         assertNotNull("the row needs a spoken description", row);
-        assertTrue("the row must be reachable by touch", row.isClickable());
+        scenario.onActivity(activity ->
+            assertTrue("the row must be reachable by touch", row.isClickable()));
     }
 
     @Test public void aDetectedGap_showsTheExplanationsButton() {
@@ -193,8 +192,8 @@ public class HistoryResidualUiTest {
         await(() -> findByText("?") != null, 20_000);
         TextView headingAsk = findByText("؟");
         assertNotNull(headingAsk);
-        assertTrue("the Persian mark must be the heading button",
-            headingAsk.isClickable() && headingAsk.getContentDescription() != null);
+        scenario.onActivity(activity -> assertTrue("the Persian mark must be the heading button",
+            headingAsk.isClickable() && headingAsk.getContentDescription() != null));
         assertNotNull("the row badges keep the Latin mark", findByText("?"));
     }
 
@@ -203,11 +202,19 @@ public class HistoryResidualUiTest {
         // format argument would fail exactly there. Clicking for real is the only way to cover it.
         storeAGap();
         launch();
-        final View row = findByDescriptionContaining("Unaccounted");
-        assertNotNull(row);
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> row.performClick());
-        // The screen is still alive and the row is still there behind the dialog.
-        await(() -> findByDescriptionContaining("Unaccounted") != null, 10_000);
+        AlertDialog dialog = openExplanation(v -> {
+            CharSequence description = v.getContentDescription();
+            return description != null && description.toString().contains("Unaccounted");
+        });
+        try {
+            await(() -> dialogContains(dialog, ctx.getString(R.string.figure_calculation,
+                "283,000,000", "290,000,000", "-5,000,000", "-2,000,000")), 10_000);
+            assertTrue(dialogContains(dialog, ctx.getString(R.string.figure_title)));
+            assertTrue(dialogContains(dialog, ctx.getString(R.string.figure_residual_caution)));
+            assertTrue(dialogContains(dialog, ctx.getString(R.string.account_label) + " " + ACCOUNT));
+        } finally {
+            dismissExplanation(dialog);
+        }
     }
 
     @Test public void aDetectedGap_showsItsSavedNoteWithoutChangingAmberMeaning() {
@@ -220,40 +227,39 @@ public class HistoryResidualUiTest {
             findByText("cash withdrawal to check"));
         View row = findByDescriptionContaining("cash withdrawal to check");
         assertNotNull("the amber row must announce its note", row);
-        assertTrue("the row remains the explanation action", row.isClickable());
+        scenario.onActivity(activity ->
+            assertTrue("the row remains the explanation action", row.isClickable()));
     }
 
     @Test public void aDetectedGap_tappingTheExplanationsButton_survivesBuildingIt() {
         storeAGap();
         launch();
-        final View ask = findByDescription(ctx.getString(R.string.residual_explainer_cd));
-        assertNotNull(ask);
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> ask.performClick());
-        await(() -> findByDescription(ctx.getString(R.string.residual_explainer_cd)) != null, 10_000);
+        AlertDialog dialog = openExplanation(v ->
+            ctx.getString(R.string.residual_explainer_cd).contentEquals(
+                v.getContentDescription() == null ? "" : v.getContentDescription()));
+        try {
+            assertTrue(dialogContains(dialog, ctx.getString(R.string.residual_explainer_title)));
+            assertTrue(dialogContains(dialog, ctx.getString(R.string.residual_explainer_body)));
+            assertTrue(dialogContains(dialog, "Unaccounted amounts: 1"));
+            assertTrue(dialogContains(dialog, ACCOUNT));
+            assertTrue(dialogContains(dialog, "\u22122,000,000"));
+        } finally {
+            dismissExplanation(dialog);
+        }
     }
 
     // -----------------------------------------------------------------------
     // Silence when the books agree
     // -----------------------------------------------------------------------
 
-    @Test public void noGap_rendersNoUnaccountedRow() {
+    @Test public void noGap_keepsMovementsWithoutUnaccountedRowOrExplanationsButton() {
         storeNoGap();
         launch();
         assertTrue("a history that adds up must stay quiet",
             findByText(ctx.getString(R.string.residual_label)) == null);
-    }
-
-    @Test public void noGap_showsNoExplanationsButton() {
         // The button's absence is itself the reassurance, so it must not linger once a delayed
         // message has closed the last gap.
-        storeNoGap();
-        launch();
         assertTrue(findByDescription(ctx.getString(R.string.residual_explainer_cd)) == null);
-    }
-
-    @Test public void noGap_stillShowsTheMovementsThemselves() {
-        storeNoGap();
-        launch();
         assertNotNull("the movements must still be listed", findByTextContaining("7,000,000"));
     }
 
@@ -282,15 +288,6 @@ public class HistoryResidualUiTest {
     // Helpers
     // -----------------------------------------------------------------------
 
-    /** Every TextView under the resumed activity's decor view, read on the main thread. */
-    private static List<TextView> texts() {
-        final List<TextView> out = new ArrayList<>();
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            for (Activity a : resumed()) collect(a.getWindow().getDecorView(), out);
-        });
-        return out;
-    }
-
     private static void collect(View v, List<TextView> out) {
         if (v instanceof TextView) out.add((TextView) v);
         if (v instanceof ViewGroup) {
@@ -299,24 +296,21 @@ public class HistoryResidualUiTest {
         }
     }
 
-    private static TextView findByText(String want) {
-        for (TextView t : texts()) if (want.equals(t.getText().toString())) return t;
-        return null;
+    private TextView findByText(String want) {
+        return (TextView) findByDescription(v -> v instanceof TextView
+            && want.contentEquals(((TextView) v).getText()));
     }
 
-    private static TextView findByTextContaining(String want) {
-        for (TextView t : texts()) {
-            CharSequence s = t.getText();
-            if (s != null && s.toString().contains(want)) return t;
-        }
-        return null;
+    private TextView findByTextContaining(String want) {
+        return (TextView) findByDescription(v -> v instanceof TextView
+            && ((TextView) v).getText().toString().contains(want));
     }
 
-    private static View findByDescription(String want) {
+    private View findByDescription(String want) {
         return findByDescription(v -> want.equals(v.getContentDescription()));
     }
 
-    private static View findByDescriptionContaining(String want) {
+    private View findByDescriptionContaining(String want) {
         return findByDescription(v -> {
             CharSequence d = v.getContentDescription();
             return d != null && d.toString().contains(want);
@@ -325,24 +319,46 @@ public class HistoryResidualUiTest {
 
     private interface Match { boolean ok(View v); }
 
-    private static View findByDescription(Match m) {
-        final List<View> hits = new ArrayList<>();
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            for (Activity a : resumed()) {
-                View hit = find(a.getWindow().getDecorView(), m);
-                if (hit != null) hits.add(hit);
-            }
-        });
-        return hits.isEmpty() ? null : hits.get(0);
+    private View findByDescription(Match m) {
+        final View[] hit = {null};
+        scenario.onActivity(activity -> hit[0] = find(activity.getWindow().getDecorView(), m));
+        return hit[0];
     }
 
-    private static List<Activity> resumed() {
-        List<Activity> out = new ArrayList<>();
-        for (Activity a : ActivityLifecycleMonitorRegistry.getInstance()
-                .getActivitiesInStage(Stage.RESUMED)) {
-            if (a instanceof HistoryActivity) out.add(a);
-        }
-        return out;
+    private AlertDialog openExplanation(Match entry) {
+        final AlertDialog[] opened = {null};
+        scenario.onActivity(activity -> {
+            List<AlertDialog> before = HistoryActivity.shownDialogsForTest(activity);
+            assertTrue("no explanation should already be open", before.isEmpty());
+            View action = find(activity.getWindow().getDecorView(), entry);
+            assertNotNull("the explanation entry must exist", action);
+            assertTrue("the explanation entry must handle its click", action.performClick());
+            List<AlertDialog> after = HistoryActivity.shownDialogsForTest(activity);
+            assertTrue("the click must show one new dialog", after.size() == 1);
+            opened[0] = after.get(0);
+            assertTrue("the new explanation must be showing", opened[0].isShowing());
+        });
+        return opened[0];
+    }
+
+    private boolean dialogContains(AlertDialog dialog, String expected) {
+        final boolean[] contains = {false};
+        scenario.onActivity(activity -> {
+            assertTrue("the explanation must remain visible", dialog.isShowing());
+            contains[0] = find(dialog.getWindow().getDecorView(), v -> v instanceof TextView
+                && ((TextView) v).getText().toString().contains(expected)) != null;
+        });
+        return contains[0];
+    }
+
+    private void dismissExplanation(AlertDialog dialog) {
+        scenario.onActivity(activity -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick());
+        await(() -> {
+            final boolean[] dismissed = {false};
+            scenario.onActivity(activity -> dismissed[0] = !dialog.isShowing()
+                && !HistoryActivity.shownDialogsForTest(activity).contains(dialog));
+            return dismissed[0];
+        }, 10_000);
     }
 
     private static View find(View v, Match m) {
