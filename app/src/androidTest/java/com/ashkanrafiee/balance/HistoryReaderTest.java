@@ -15,13 +15,16 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Bounded history projection parity and residual compatibility tests. */
 @RunWith(AndroidJUnit4.class)
@@ -32,20 +35,34 @@ public class HistoryReaderTest {
     private Context context;
     private String originalLanguage;
     private String originalCurrency;
+    private Set<String> originalTimelineFiles;
 
     @Before public void setUp() {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         BalanceData.reset(context, true);
         originalLanguage = LocaleHelper.currentTag(context);
         originalCurrency = CurrencyHelper.currency(context);
+        originalTimelineFiles = timelineFiles();
         LocaleHelper.setLanguage(context, "en");
         CurrencyHelper.setCurrency(context, CurrencyHelper.CURRENCY_RIAL);
     }
 
     @After public void tearDown() {
-        LocaleHelper.setLanguage(context, originalLanguage);
-        CurrencyHelper.setCurrency(context, originalCurrency);
-        BalanceData.reset(context, true);
+        try {
+            HistoryWarmup.invalidate();
+            assertEquals("all reader snapshots must release their spool and wrapped key",
+                originalTimelineFiles, timelineFiles());
+        } finally {
+            try {
+                LocaleHelper.setLanguage(context, originalLanguage);
+            } finally {
+                try {
+                    CurrencyHelper.setCurrency(context, originalCurrency);
+                } finally {
+                    BalanceData.reset(context, true);
+                }
+            }
+        }
     }
 
     @Test public void summary_matchesHistoryFiltersAndTotals_forPageSizesOneAndTwo() throws Exception {
@@ -73,16 +90,18 @@ public class HistoryReaderTest {
             HistoryReader.Request request = new HistoryReader.Request(false, pageSize, BANK,
                 ACCOUNT, filter, "", null, Collections.singleton(requestedDay), 1, 4);
             HistoryReader.Result result = HistoryReader.summary(context, request);
-
-            assertFalse(result.residualsComplete);
-            assertEquals(expectedLists.total, result.total);
-            assertEquals(expected.size(), result.movementCount);
-            assertEquals(expectedLists.years.get(0).sum, result.years.get(0).stats.sum);
-            assertEquals(expectedLists.years.get(0).months.get(0).sum,
-                result.years.get(0).months.get(0).stats.sum);
-            assertEquals(1, result.requestedDayRows.get(requestedDay).transactions.size());
-            assertEquals(-10L, result.requestedDayRows.get(requestedDay).transactions.get(0).amount);
-            assertTrue(result.requestedDayRows.containsKey(requestedDay));
+            // Result is not AutoCloseable; the guard still closes it on assertion failures.
+            try (AutoCloseable snapshot = result::close) {
+                assertFalse(result.residualsComplete);
+                assertEquals(expectedLists.total, result.total);
+                assertEquals(expected.size(), result.movementCount);
+                assertEquals(expectedLists.years.get(0).sum, result.years.get(0).stats.sum);
+                assertEquals(expectedLists.years.get(0).months.get(0).sum,
+                    result.years.get(0).months.get(0).stats.sum);
+                assertEquals(1, result.requestedDayRows.get(requestedDay).transactions.size());
+                assertEquals(-10L, result.requestedDayRows.get(requestedDay).transactions.get(0).amount);
+                assertTrue(result.requestedDayRows.containsKey(requestedDay));
+            }
         }
     }
 
@@ -99,20 +118,21 @@ public class HistoryReaderTest {
         HistoryReader.Request request = new HistoryReader.Request(false, 1, BANK, ACCOUNT,
             filter, "", null, null, 0, 0);
         HistoryReader.Result result = HistoryReader.reference(context, request);
+        try (AutoCloseable snapshot = result::close) {
+            List<Transaction> scope = HistoryActivity.filterByAccount(
+                HistoryActivity.filterByBank(stored, BANK), ACCOUNT);
+            List<Residual> expectedResiduals = HistoryActivity.applyResidualFilters(
+                Residual.between(scope), filter, false);
+            List<Transaction> expectedTransactions = HistoryActivity.applyFilters(scope, filter, false);
+            HistoryActivity.Lists expectedLists = HistoryActivity.buildLists(expectedTransactions,
+                expectedResiduals, false);
 
-        List<Transaction> scope = HistoryActivity.filterByAccount(
-            HistoryActivity.filterByBank(stored, BANK), ACCOUNT);
-        List<Residual> expectedResiduals = HistoryActivity.applyResidualFilters(
-            Residual.between(scope), filter, false);
-        List<Transaction> expectedTransactions = HistoryActivity.applyFilters(scope, filter, false);
-        HistoryActivity.Lists expectedLists = HistoryActivity.buildLists(expectedTransactions,
-            expectedResiduals, false);
-
-        assertEquals(expectedTransactions.size(), result.visibleTransactions().size());
-        assertEquals(expectedResiduals.size(), result.visibleResiduals().size());
-        assertEquals(-2L, result.visibleResiduals().get(0).amount);
-        assertEquals(expectedLists.total, result.total);
-        assertEquals(expectedLists.years.get(0).n, result.years.get(0).stats.movementCount);
+            assertEquals(expectedTransactions.size(), result.visibleTransactions().size());
+            assertEquals(expectedResiduals.size(), result.visibleResiduals().size());
+            assertEquals(-2L, result.visibleResiduals().get(0).amount);
+            assertEquals(expectedLists.total, result.total);
+            assertEquals(expectedLists.years.get(0).n, result.years.get(0).stats.movementCount);
+        }
     }
 
     @Test public void summary_usesPointMetadataLookupsAfterAliasMigration() throws Exception {
@@ -132,11 +152,16 @@ public class HistoryReaderTest {
         HistoryReader.Request search = new HistoryReader.Request(false, 2, BANK, ACCOUNT,
             HistoryActivity.Filter.ALL, "groceries", null, null, 0, 0);
         HistoryReader.Result searched = HistoryReader.summary(context, search);
-        assertEquals(1L, searched.movementCount);
+        try (AutoCloseable snapshot = searched::close) {
+            assertEquals(1L, searched.movementCount);
+        }
 
         HistoryReader.Request tags = new HistoryReader.Request(false, 2, BANK, ACCOUNT,
             HistoryActivity.Filter.ALL, "", Collections.singletonList("food"), null, 0, 0);
-        assertEquals(1L, HistoryReader.summary(context, tags).movementCount);
+        HistoryReader.Result tagged = HistoryReader.summary(context, tags);
+        try (AutoCloseable snapshot = tagged::close) {
+            assertEquals(1L, tagged.movementCount);
+        }
     }
 
     @Test public void summary_reportsResidualLimitationAndDoesNotPretendFullRowsExist() throws Exception {
@@ -144,20 +169,21 @@ public class HistoryReaderTest {
             new Transaction(BANK, ACCOUNT, epoch(2026, 9, 10), 1L, null, "one", null))));
         HistoryReader.Result result = HistoryReader.summary(context,
             HistoryReader.Request.all(false, 1));
-
-        assertFalse(result.residualsComplete);
-        assertTrue(result.limitation.contains("does not calculate residuals"));
-        try {
-            result.visibleTransactions();
-            fail("summary must not expose an unbounded transaction list");
-        } catch (UnsupportedOperationException expected) {
-            // Explicit API limitation is the contract.
-        }
-        try {
-            result.visibleResiduals();
-            fail("summary must not claim residual parity");
-        } catch (UnsupportedOperationException expected) {
-            // Explicit API limitation is the contract.
+        try (AutoCloseable snapshot = result::close) {
+            assertFalse(result.residualsComplete);
+            assertTrue(result.limitation.contains("does not calculate residuals"));
+            try {
+                result.visibleTransactions();
+                fail("summary must not expose an unbounded transaction list");
+            } catch (UnsupportedOperationException expected) {
+                // Explicit API limitation is the contract.
+            }
+            try {
+                result.visibleResiduals();
+                fail("summary must not claim residual parity");
+            } catch (UnsupportedOperationException expected) {
+                // Explicit API limitation is the contract.
+            }
         }
     }
 
@@ -173,11 +199,15 @@ public class HistoryReaderTest {
             filter, "", null, null, 0, 0);
 
         HistoryReader.Result result = HistoryReader.summaryWithResiduals(context, request);
-        HistoryReader.Result reference = HistoryReader.reference(context, request);
-        assertTrue(result.residualsComplete);
-        assertEquals(reference.total, result.total);
-        assertEquals(reference.movementCount, result.movementCount);
-        assertEquals(-37L, result.total);
+        try (AutoCloseable snapshot = result::close) {
+            HistoryReader.Result reference = HistoryReader.reference(context, request);
+            try (AutoCloseable referenceSnapshot = reference::close) {
+                assertTrue(result.residualsComplete);
+                assertEquals(reference.total, result.total);
+                assertEquals(reference.movementCount, result.movementCount);
+                assertEquals(-37L, result.total);
+            }
+        }
     }
 
     @Test public void summaryWithResiduals_searchesAndLoadsResidualNotes() throws Exception {
@@ -188,16 +218,19 @@ public class HistoryReaderTest {
         assertTrue(BalanceData.writeTransactions(context, stored));
         Residual residual = Residual.between(stored).get(0);
         BalanceData.setNote(context, residual, "cash withdrawal");
+        assertEquals("cash withdrawal", BalanceData.getNote(context, residual));
         String day = CalDate.fromGregorian(2026, 9, 12, false).key();
         HistoryReader.Request request = new HistoryReader.Request(false, 1, BANK, ACCOUNT,
             HistoryActivity.Filter.ALL, "cash withdrawal", null, Collections.singleton(day), 1, 4);
 
         HistoryReader.Result result = HistoryReader.summaryWithResiduals(context, request);
-        assertEquals(0L, result.movementCount);
-        assertEquals(-2L, result.total);
-        HistoryReader.DayRows rows = result.requestedDayRows.get(day);
-        assertEquals(1, rows.residuals.size());
-        assertEquals("cash withdrawal", rows.metadata.get(BalanceData.residualNoteKey(residual)).note);
+        try (AutoCloseable snapshot = result::close) {
+            assertEquals(0L, result.movementCount);
+            assertEquals(-2L, result.total);
+            HistoryReader.DayRows rows = result.requestedDayRows.get(day);
+            assertEquals(1, rows.residuals.size());
+            assertEquals("cash withdrawal", rows.metadata.get(BalanceData.residualNoteKey(residual)).note);
+        }
     }
 
     @Test public void summaryConversionKeepsAggregatesAndOnlyRequestedDayRows() throws Exception {
@@ -211,25 +244,27 @@ public class HistoryReaderTest {
             HistoryActivity.Filter.ALL, "", null, Collections.singleton(requestedDay), 64, 128);
 
         HistoryReader.Result result = HistoryReader.summaryWithResiduals(context, request);
-        HistoryActivity.Lists lists = HistoryActivity.listsFromSummary(result);
+        try (AutoCloseable snapshot = result::close) {
+            HistoryActivity.Lists lists = HistoryActivity.listsFromSummary(result);
 
-        assertEquals(result.total, lists.total);
-        assertEquals(result.totalDeposits, lists.totalDep);
-        assertEquals(result.totalWithdrawals, lists.totalWit);
-        assertEquals(30L, lists.totalDep);
-        assertEquals(-10L, lists.totalWit);
-        assertEquals(result.movementCount, lists.years.get(0).n);
-        HistoryActivity.DayGroup selected = lists.years.get(0).months.get(0).days.get(0);
-        HistoryActivity.DayGroup collapsed = lists.years.get(0).months.get(0).days.get(1);
-        // Day headers keep their own gross pair through the summary conversion.
-        assertEquals(0L, selected.dep);
-        assertEquals(-10L, selected.wit);
-        assertEquals(30L, collapsed.dep);
-        assertEquals(0L, collapsed.wit);
-        assertEquals(1, selected.txs.size());
-        assertEquals(1, selected.lines.size());
-        assertTrue(collapsed.txs.isEmpty());
-        assertTrue(collapsed.lines.isEmpty());
+            assertEquals(result.total, lists.total);
+            assertEquals(result.totalDeposits, lists.totalDep);
+            assertEquals(result.totalWithdrawals, lists.totalWit);
+            assertEquals(30L, lists.totalDep);
+            assertEquals(-10L, lists.totalWit);
+            assertEquals(result.movementCount, lists.years.get(0).n);
+            HistoryActivity.DayGroup selected = lists.years.get(0).months.get(0).days.get(0);
+            HistoryActivity.DayGroup collapsed = lists.years.get(0).months.get(0).days.get(1);
+            // Day headers keep their own gross pair through the summary conversion.
+            assertEquals(0L, selected.dep);
+            assertEquals(-10L, selected.wit);
+            assertEquals(30L, collapsed.dep);
+            assertEquals(0L, collapsed.wit);
+            assertEquals(1, selected.txs.size());
+            assertEquals(1, selected.lines.size());
+            assertTrue(collapsed.txs.isEmpty());
+            assertTrue(collapsed.lines.isEmpty());
+        }
     }
 
     @Test public void requestedDayRows_pageBeyondInitialBatchIsReachable() throws Exception {
@@ -244,7 +279,7 @@ public class HistoryReaderTest {
         HistoryReader.Request request = new HistoryReader.Request(false, 1, BANK, ACCOUNT,
             HistoryActivity.Filter.ALL, "", null, Collections.singleton(key), 1, 1);
         HistoryReader.Result result = HistoryReader.summary(context, request);
-        try {
+        try (AutoCloseable snapshot = result::close) {
             HistoryReader.DayRows first = result.requestedDayRows.get(key);
             assertEquals(1, first.rows.size());
             assertEquals(1L, first.transactions.get(0).amount);
@@ -266,8 +301,6 @@ public class HistoryReaderTest {
                 third.firstCursor, true, 1);
             assertEquals(2L, back.transactions.get(0).amount);
             assertTrue(back.hasMore);
-        } finally {
-            result.close();
         }
     }
 
@@ -289,7 +322,7 @@ public class HistoryReaderTest {
         HistoryReader.Request request = new HistoryReader.Request(false, 2, BANK, ACCOUNT,
             HistoryActivity.Filter.ALL, "", null, Collections.singleton(denseDay), 64, 128);
         HistoryReader.Result result = HistoryReader.summary(context, request);
-        try {
+        try (AutoCloseable snapshot = result::close) {
             assertEquals(200L, result.movementCount);
             assertTrue(result.daySummaries.size() > 64);
             HistoryReader.DayRows first = result.requestedDayRows.get(denseDay);
@@ -301,8 +334,6 @@ public class HistoryReaderTest {
             assertFalse(last.hasMore);
             assertEquals(1L, first.transactions.get(0).amount);
             assertEquals(130L, last.transactions.get(1).amount);
-        } finally {
-            result.close();
         }
     }
 
@@ -324,7 +355,7 @@ public class HistoryReaderTest {
         HistoryReader.Request request = new HistoryReader.Request(false, 1, BANK, ACCOUNT,
             HistoryActivity.Filter.ALL, "MELLAT", null, null, 64, 1);
         HistoryReader.Result result = HistoryReader.summary(context, request);
-        try {
+        try (AutoCloseable snapshot = result::close) {
             assertEquals(70, result.daySummaries.size());
             int headers = 0;
             for (HistoryReader.YearSummary year : result.years) {
@@ -335,8 +366,6 @@ public class HistoryReaderTest {
                 null, false, 1);
             assertEquals(1, page.transactions.size());
             assertEquals(119L, page.transactions.get(0).amount);
-        } finally {
-            result.close();
         }
     }
 
@@ -350,12 +379,10 @@ public class HistoryReaderTest {
         };
         HistoryReader.Result result = HistoryReader.summaryWithResiduals(context,
             HistoryReader.Request.all(false, 1), progress);
-        try {
+        try (AutoCloseable snapshot = result::close) {
             assertEquals(Arrays.asList(R.string.history_stage_loading, R.string.history_stage_gaps,
                 R.string.history_stage_building), stages);
             assertTrue(result.residualsComplete);
-        } finally {
-            result.close();
         }
     }
 
@@ -382,21 +409,31 @@ public class HistoryReaderTest {
         HistoryReader.Request request = new HistoryReader.Request(false, 256, "Saman", "222",
             HistoryActivity.Filter.ALL, "", null, Arrays.asList(day1, day2), 2, 128);
         HistoryReader.Result result = HistoryReader.summaryWithResiduals(context, request);
+        try (AutoCloseable snapshot = result::close) {
+            assertTrue(result.residualsComplete);
+            assertEquals(2L, result.movementCount);
+            List<Residual> actual = new ArrayList<>();
+            for (HistoryReader.DayRows rows : result.requestedDayRows.values()) {
+                actual.addAll(rows.residuals);
+            }
+            actual.sort((a, b) -> Long.compare(b.toDate, a.toDate));
+            assertEquals(expected.size(), actual.size());
+            for (int i = 0; i < expected.size(); i++) {
+                assertEquals(expected.get(i).bank, actual.get(i).bank);
+                assertEquals(expected.get(i).toDate, actual.get(i).toDate);
+                assertEquals(expected.get(i).amount, actual.get(i).amount);
+            }
+        }
+    }
 
-        assertTrue(result.residualsComplete);
-        assertEquals(2L, result.movementCount);
-        List<Residual> actual = new ArrayList<>();
-        for (HistoryReader.DayRows rows : result.requestedDayRows.values()) {
-            actual.addAll(rows.residuals);
+    private Set<String> timelineFiles() {
+        Set<String> files = new HashSet<>();
+        File[] children = context.getNoBackupFilesDir().listFiles();
+        assertTrue("timeline directory must be readable", children != null);
+        for (File child : children) {
+            if (child.getName().startsWith("history-timeline-")) files.add(child.getName());
         }
-        actual.sort((a, b) -> Long.compare(b.toDate, a.toDate));
-        assertEquals(expected.size(), actual.size());
-        for (int i = 0; i < expected.size(); i++) {
-            assertEquals(expected.get(i).bank, actual.get(i).bank);
-            assertEquals(expected.get(i).toDate, actual.get(i).toDate);
-            assertEquals(expected.get(i).amount, actual.get(i).amount);
-        }
-        result.close();
+        return files;
     }
 
     private static long epoch(int year, int month, int day) {
