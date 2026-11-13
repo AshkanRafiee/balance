@@ -77,11 +77,11 @@ public class MofidPresentationTest {
     }
 
     @Test public void englishProductLabel_reachesDashboardHistoryAndWidget() {
-        verifyPresentation("en", "Mofid — Jet Card / Hami");
+        verifyPresentation("en", "Mofid (Hami)");
     }
 
     @Test public void persianProductLabel_reachesDashboardHistoryAndWidget() {
-        verifyPresentation("fa", "مفید — جت کارت / حامی");
+        verifyPresentation("fa", "مفید (حامی)");
     }
 
     private void verifyPresentation(String language, String label) {
