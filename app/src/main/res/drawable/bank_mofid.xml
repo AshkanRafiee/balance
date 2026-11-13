@@ -1,0 +1,47 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <group
+        android:scaleX="0.46"
+        android:scaleY="0.46"
+        android:translateX="2"
+        android:translateY="14.8">
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="@color/bank_logo_ink"
+            android:strokeWidth="2.8"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M 16.5 39 C 10.1 33.9 4.5 24.5 3.2 18.1 C 1.8 12.8 3.8 9.4 7.8 9.0 C 14.5 7.9 22.6 11.7 30.7 14.1 C 36 15.9 40.7 17.6 45.1 15.6 C 54.6 11.5 59.6 7.9 69.5 7.2 C 73.0 6.9 75.5 7.3 77.4 6.4 C 79.6 5.5 80 2.1 84.5 0.5" />
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="@color/bank_logo_ink"
+            android:strokeWidth="2.15"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M 20.6 39.3 C 15.1 32.8 10.9 26 10.1 21.4 C 9.3 16.7 11.2 16.2 13.7 17.4 C 22.1 21 34.4 24 44.8 25.8 C 53.6 27.3 60.9 32.8 68.7 37.2 C 72.7 38.9 78 38.3 82.9 38.2" />
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="@color/bank_logo_ink"
+            android:strokeWidth="2.8"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M 77 7.2 C 77.3 10.1 75.5 13.1 72.9 16.3 C 69.9 19.8 69.1 23.2 69.3 29.3 C 69.5 32.2 69.4 35.1 69.6 37.6" />
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="@color/bank_logo_ink"
+            android:strokeWidth="2.5"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M 76.9 7.2 C 81.1 9.6 84.1 8.7 87.6 8.0 C 90.0 7.5 90.8 6.0 92.0 4.8" />
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="@color/bank_logo_ink"
+            android:strokeWidth="2.8"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M 73.4 15.4 C 75.4 14.4 78.2 14.7 80 14.5" />
+    </group>
+</vector>

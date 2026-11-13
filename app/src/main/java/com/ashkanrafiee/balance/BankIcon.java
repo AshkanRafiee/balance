@@ -31,6 +31,7 @@ final class BankIcon {
         ICON_RES.put("Mellat", R.drawable.bank_mellat);
         ICON_RES.put("Melli", R.drawable.bank_melli);
         ICON_RES.put("Middle East", R.drawable.bank_middle_east);
+        ICON_RES.put("Mofid", R.drawable.bank_mofid);
         ICON_RES.put("Noor", R.drawable.bank_noor);
         ICON_RES.put("Parsian", R.drawable.bank_parsian);
         ICON_RES.put("Pasargad", R.drawable.bank_pasargad);

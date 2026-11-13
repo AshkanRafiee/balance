@@ -10,6 +10,7 @@ import android.os.LocaleList;
 import android.os.SystemClock;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.test.core.app.ActivityScenario;
@@ -87,8 +88,10 @@ public class MofidPresentationTest {
     private void verifyPresentation(String language, String label) {
         LocaleHelper.setLanguage(context, language);
         dashboard = ActivityScenario.launch(MainActivity.class);
-        await(dashboard, activity -> visibleLabel(
-            activity.findViewById(R.id.dashboard_bank_list), label), "dashboard product label");
+        await(dashboard, activity -> {
+            View list = activity.findViewById(R.id.dashboard_bank_list);
+            return visibleLabel(list, label) && visibleIcon(list);
+        }, "dashboard product label and icon");
         dashboard.close();
         dashboard = null;
 
@@ -102,8 +105,8 @@ public class MofidPresentationTest {
                     && description.toString().contains(label)
                     && description.toString().contains(activity.getString(R.string.history_withdrawal));
             });
-            return visibleLabel(movement, label);
-        }, "history movement product label");
+            return visibleLabel(movement, label) && visibleIcon(movement);
+        }, "history movement product label and icon");
 
         // Apply the actual row RemoteViews as a launcher does, using an unwrapped context.
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
@@ -111,7 +114,17 @@ public class MofidPresentationTest {
             TextView name = row.findViewById(R.id.bank_name);
             assertEquals(label, name.getText().toString());
             assertEquals(View.VISIBLE, name.getVisibility());
+            ImageView icon = row.findViewById(R.id.bank_icon);
+            assertEquals(View.VISIBLE, icon.getVisibility());
+            assertTrue(icon.getDrawable() != null);
         });
+    }
+
+    private static boolean visibleIcon(View root) {
+        return find(root, view -> view instanceof ImageView
+            && ((ImageView) view).getDrawable() != null
+            && view.isShown() && view.isAttachedToWindow()
+            && view.isLaidOut() && view.getWidth() > 0 && view.getHeight() > 0) != null;
     }
 
     private static boolean visibleLabel(View root, String label) {
