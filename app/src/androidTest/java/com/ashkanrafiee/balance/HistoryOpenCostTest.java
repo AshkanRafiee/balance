@@ -24,6 +24,8 @@ import org.junit.runner.RunWith;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -68,8 +70,8 @@ public class HistoryOpenCostTest {
         LocaleHelper.setLanguage(ctx, originalLanguage);
     }
 
-    /** Movements from the first of this month until today. The first open expands only a bounded
-     * recent-day window; older days remain collapsed until the user opens them. */
+    /** Movements from the first of this month until today, plus eight older populated days.
+     * A scoped open must leave older days collapsed even on the first day of a month. */
     private void seedCurrentMonth(int perDay) {
         boolean iran = RegionHelper.isIran(ctx);
         CalDate today = CalDate.today(iran);
@@ -81,11 +83,11 @@ public class HistoryOpenCostTest {
         c.set(Calendar.SECOND, 0);
         c.set(Calendar.MILLISECOND, 0);
         List<Transaction> txs = new ArrayList<>();
-        // Always include an older collapsed day, even on day one of either calendar's month.
-        c.add(Calendar.DAY_OF_MONTH, -1);
-        txs.add(new Transaction(BANK, ACCOUNT, c.getTimeInMillis(), 100_000L,
-            "older-month", null));
-        c.add(Calendar.DAY_OF_MONTH, 1);
+        c.add(Calendar.DAY_OF_MONTH, -8);
+        for (int day = 0; day < 8; day++, c.add(Calendar.DAY_OF_MONTH, 1)) {
+            txs.add(new Transaction(BANK, ACCOUNT, c.getTimeInMillis(), 100_000L,
+                "older-month-" + day, null));
+        }
         int n = 0;
         for (int day = 1; day <= today.day; day++, c.add(Calendar.DAY_OF_MONTH, 1)) {
             for (int k = 0; k < perDay; k++) {
@@ -93,28 +95,16 @@ public class HistoryOpenCostTest {
                     (k % 2 == 0 ? 1 : -1) * (100_000L + n * 37L), "sig" + (n++), null));
             }
         }
-        BalanceData.writeTransactions(ctx, txs);
-        seeded = txs.size();
-        int firstRecentDay = Math.max(1, today.day - 6);
-        expected = 0;
-        for (Transaction transaction : txs) {
-            Calendar row = Calendar.getInstance();
-            row.setTimeInMillis(transaction.date);
-            CalDate date = CalDate.fromGregorian(row.get(Calendar.YEAR),
-                row.get(Calendar.MONTH) + 1, row.get(Calendar.DAY_OF_MONTH), iran);
-            if (date.year == today.year && date.month == today.month
-                    && date.day >= firstRecentDay) expected++;
-        }
+        storeTransactions(txs);
     }
 
     /** How many movements the seeder wrote. */
     private int seeded;
 
-    /** How many movement rows a plain open has to build, or -1 when it only has to settle: an open
-     *  builds the month it opens, so a seeded year yields an unknown number of rows. */
+    /** How many movement rows the latest eight populated days contain. */
     private int expected;
 
-    /** {@code days} days of movements at roughly six a day, so every level of the breakdown has
+    /** A year of movements at six a day, so every level of the breakdown has
      *  something in it and the account is far larger than one screen. */
     private void seedLastYear() {
         Calendar c = Calendar.getInstance();
@@ -128,36 +118,53 @@ public class HistoryOpenCostTest {
                     (k % 2 == 0 ? 1 : -1) * (100_000L + n * 37L), "sig" + (n++), null));
             }
         }
+        storeTransactions(txs);
+    }
+
+    private void storeTransactions(List<Transaction> txs) {
         BalanceData.writeTransactions(ctx, txs);
         seeded = txs.size();
-        expected = -1; // only this month is open, so the row count is the test's business
+        boolean iran = RegionHelper.isIran(ctx);
+        Map<CalDate, Integer> rowsByDay = new TreeMap<>((a, b) -> b.compare(a));
+        for (Transaction transaction : txs) {
+            Calendar row = Calendar.getInstance();
+            row.setTimeInMillis(transaction.date);
+            CalDate date = CalDate.fromGregorian(row.get(Calendar.YEAR),
+                row.get(Calendar.MONTH) + 1, row.get(Calendar.DAY_OF_MONTH), iran);
+            rowsByDay.put(date, rowsByDay.getOrDefault(date, 0) + 1);
+        }
+        expected = 0;
+        int days = 0;
+        for (int rows : rowsByDay.values()) {
+            if (days++ == 8) break;
+            expected += rows;
+        }
     }
 
     @Test public void aCrowdedMonthOpensWithABoundedRecentWindow() {
-        // The regression: a normal open used to request every day of the current month, so a busy
+        // The regression: an account open used to request every day of the current month, so a busy
         // month built a large non-recycled tree before the user could interact with the screen.
         seedCurrentMonth(20);
         long openMs = openAndAwaitRows();
         int initialRows = clockTimes();
-        assertEquals("a plain open must show the bounded recent-day window", expected, initialRows);
-        assertTrue("a plain open must keep older month rows collapsed", initialRows < seeded);
+        assertEquals("an account open must show the latest eight populated days", expected,
+            initialRows);
+        assertTrue("an account open must keep older days collapsed", initialRows < seeded);
         assertTrue("a month of " + seeded + " movements must open within " + OPEN_BUDGET_MS
             + "ms, took " + openMs + "ms", openMs < OPEN_BUDGET_MS);
     }
 
-    @Test public void aBusyYearOpensQuicklyWithoutOpeningItsYears() {
-        // A plain open builds this month only, so a year of history costs no more to open than the
-        // month in it. Opening the older years too — which is what the cascade did — is what turned
-        // this into a screen that never finished.
+    @Test public void aBusyYearOpensQuicklyWithOnlyEightPopulatedDays() {
+        // An account open builds only the latest eight populated days, even across month or year
+        // boundaries. Cascading through entire years is what made the old screen slow.
         seedLastYear();
         long openMs = openAndAwaitRows();
         assertTrue("a year of history must open within " + OPEN_BUDGET_MS + "ms, took " + openMs
             + "ms", openMs < OPEN_BUDGET_MS);
-        // The whole point: a year of history is stored and an open builds the month it opens and
-        // nothing else. A cascade would have built all " + seeded + " of them in that one pass.
         int rows = clockTimes();
-        assertTrue("a plain open must not open the other years, built " + rows + " of " + seeded
-            + " rows", rows < seeded / 10);
+        assertEquals("an account open must build the latest eight populated days", expected, rows);
+        assertTrue("an account open must build at most eight days of six movements, built " + rows
+            + " of " + seeded + " rows", rows <= 8 * 6);
     }
 
     @Test public void eachOpenBuildsTheSameScreen() throws Exception {
@@ -191,7 +198,7 @@ public class HistoryOpenCostTest {
         assertEquals("scrolling must not build anything", before, viewCount());
     }
 
-    /** Opens the screen and waits until every row of the open month is on it. */
+    /** Opens the account's history and waits until its recent matching rows are on screen. */
     private long openAndAwaitRows() {
         Intent i = new Intent(ctx, HistoryActivity.class)
             .putExtra(HistoryActivity.EXTRA_BANK, BANK)
@@ -203,33 +210,23 @@ public class HistoryOpenCostTest {
         return SystemClock.uptimeMillis() - t0;
     }
 
-    /** Waits until the screen has settled.
-     *
-     *  <p>Where the seeder knows exactly how many rows the open month has to build, that count is the
-     *  signal: it is what a batched open would have reached only after scrolling. Where it does not
-     *  — an open builds the month it opens, so a seeded year yields an unknown number — the signal
-     *  is the screen simply having stopped growing. */
+    /** Waits for the expected recent matching rows and a completed render, not a loading header. */
     private void awaitRows() {
         long deadline = System.currentTimeMillis() + OPEN_BUDGET_MS * 2;
-        int seen = -1, stable = 0;
         while (System.currentTimeMillis() < deadline) {
-            int now = expected > 0 ? clockTimes() : viewCount();
-            boolean idle = historyIdle();
-            if (expected > 0 && now >= expected && idle) return;
-            if (now == seen && now > 0 && idle && yearCards() > 0) {
-                if (++stable >= 6) break;
-            } else {
-                stable = 0;
+            if (clockTimes() >= expected && historyIdle()) {
+                assertEquals("the recent matching days must build all their rows on open",
+                    expected, clockTimes());
+                return;
             }
-            seen = now;
             try { Thread.sleep(25); } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
             }
         }
-        if (expected > 0) {
-            assertEquals("the open month must build all of its rows on open", expected, clockTimes());
-        }
+        assertEquals("the recent matching days must build all their rows on open", expected,
+            clockTimes());
+        assertTrue("the history render must finish", historyIdle());
     }
 
     private boolean historyIdle() {
@@ -313,27 +310,6 @@ public class HistoryOpenCostTest {
         if (v instanceof ViewGroup) {
             ViewGroup g = (ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) collect(g.getChildAt(i), out);
-        }
-    }
-
-    /** The year cards on screen, told apart by the tag rather than by their text. Every year is
-     *  always on screen — they are closed, not absent — so this counts the top level, not what it
-     *  has opened. */
-    private static int yearCards() {
-        final AtomicInteger out = new AtomicInteger(0);
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            for (Activity a : resumed()) {
-                countTagged(a.getWindow().getDecorView(), HistoryActivity.YEAR_TAG, out);
-            }
-        });
-        return out.get();
-    }
-
-    private static void countTagged(View v, String tag, AtomicInteger out) {
-        if (tag.equals(v.getTag())) out.incrementAndGet();
-        if (v instanceof ViewGroup) {
-            ViewGroup g = (ViewGroup) v;
-            for (int i = 0; i < g.getChildCount(); i++) countTagged(g.getChildAt(i), tag, out);
         }
     }
 

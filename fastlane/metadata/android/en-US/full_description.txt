@@ -6,7 +6,7 @@ See your money clearly:
 - Latest balances by bank and account, a combined total, and accounts you can exclude
 - Configurable warnings for old balances, plus a home-screen widget
 - Explanations for individual account balances and history entries
-- Deposits and withdrawals by day, month and year; filters and search across history
+- Deposits and withdrawals by day, month and year; filter and search, with recent matches opened automatically and older history still expandable
 - Unaccounted rows for changes between balance statements that recorded transactions do not explain — not invented transactions or guesses about missing payments
 - Bank-stated reasons, payment channels and matched merchants when available; an OTP alone never confirms a transaction
 - Save private notes and reusable tags together; export your filtered view as CSV

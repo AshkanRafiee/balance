@@ -21,14 +21,15 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.function.Predicate;
 
 /**
- * How the breakdown opens: the current year, month and its days open by themselves, and from there
- * each level opens on its own. Opening a year shows its months and nothing more; opening a month
- * shows its days and nothing more.
+ * How the unfiltered breakdown opens: the current year, month and its recent calendar days open
+ * by themselves, and from there each level opens on its own. Opening a year shows its months and
+ * nothing more; opening a month shows its days and nothing more.
  *
  * <p>The levels are kept independent deliberately. Cascading them meant one tap on a year built a
  * whole year's movements in a single pass, which is a screen that takes seconds to appear, and a
@@ -64,18 +65,26 @@ public class HistoryCascadeTest {
         BalanceData.reset(ctx, true);
     }
 
-    /** 35 days back always lands in a different Jalali month, whichever day the test runs on. */
+    /** 35 days back always lands in a different Jalali or Gregorian month. */
     private static final long PREVIOUS_MONTH = 35L * 24 * HOUR;
 
-    /** 400 days back always lands in an earlier Jalali year, since a Jalali year is 365 or 366 days. */
+    /** 400 days back always lands in an earlier Jalali or Gregorian year. */
     private static final long PREVIOUS_YEAR = 400L * 24 * HOUR;
 
-    /** One movement today, and one in an earlier month that nothing has opened. */
-    private void storeThisMonth() {
+    /** Seeds today and an earlier month; returns whether both belong to the same calendar year. */
+    private boolean storeThisMonth() {
         long now = System.currentTimeMillis();
         BalanceData.writeTransactions(ctx, new ArrayList<>(java.util.Arrays.asList(
             new Transaction(MELLAT, ACCOUNT, now, 10_000_000L, "now", null),
             new Transaction(MELLAT, ACCOUNT, now - PREVIOUS_MONTH, 12_000_000L, "earlier", null))));
+        return calendarYear(now) == calendarYear(now - PREVIOUS_MONTH);
+    }
+
+    private int calendarYear(long time) {
+        Calendar date = Calendar.getInstance();
+        date.setTimeInMillis(time);
+        return CalDate.fromGregorian(date.get(Calendar.YEAR), date.get(Calendar.MONTH) + 1,
+            date.get(Calendar.DAY_OF_MONTH), RegionHelper.isIran(ctx)).year;
     }
 
     /** One movement today, and one in an earlier year that nothing has opened. */
@@ -88,8 +97,6 @@ public class HistoryCascadeTest {
 
     private void launch() {
         Intent i = new Intent(ctx, HistoryActivity.class)
-            .putExtra(HistoryActivity.EXTRA_BANK, MELLAT)
-            .putExtra(HistoryActivity.EXTRA_ACCOUNT, ACCOUNT)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         scenario = ActivityScenario.launch(i);
         // The export action is built synchronously, before any history rows exist. Wait for the
@@ -106,13 +113,23 @@ public class HistoryCascadeTest {
         // those brought its days, so an ordinary open built a year of movements in one pass. Only a
         // built row carries a clock time, and a collapsed month still shows its own net, so counting
         // clock times is what tells built rows from collapsed ones.
-        storeThisMonth();
+        boolean sameYear = storeThisMonth();
         launch();
         assertEquals("only this month's movements are built on a plain open", 1, clockTimes());
-        assertEquals("the year is on screen", 1, years().size());
-        assertEquals("its two months are on screen", 2, months().size());
+        assertEquals("every populated year is on screen", sameYear ? 1 : 2, years().size());
+        assertEquals("only the current year's months are on screen", sameYear ? 2 : 1,
+            months().size());
         assertEquals("only today's day is open with it", 1, days().size());
         assertNotNull("this month's movements are on screen", findByTextContaining("10,000,000"));
+
+        // Near New Year the earlier month belongs to a closed year. Opening that year must still
+        // stop at its months, without building any additional days or movements.
+        if (!sameYear) {
+            tapGroup(years().get(1));
+            await(() -> months().size() == 2, 10_000, "the older year to show its month");
+            assertEquals("opening a year must not have built any of its days", 1, days().size());
+            assertEquals("opening a year must not have built any of its movements", 1, clockTimes());
+        }
 
         // The other month opens to its days, and only then to its movements.
         tapGroup(collapsedHeader());
