@@ -56,6 +56,7 @@ public class HistoryFilteredExpansionTest {
     private SharedPreferences prefs;
     private ActivityScenario<HistoryActivity> scenario;
     private File exportFile;
+    private CountDownLatch renderRelease;
     private int originalRegion;
     private String originalLanguage;
     private LocaleList originalLocales;
@@ -86,6 +87,9 @@ public class HistoryFilteredExpansionTest {
     }
 
     @After public void tearDown() {
+        // Always unblock workers before waiting for idle, including after a failed assertion.
+        if (renderRelease != null) renderRelease.countDown();
+        HistoryActivity.setRenderGateForTest(null, null);
         try {
             if (scenario != null) {
                 try {
@@ -350,6 +354,67 @@ public class HistoryFilteredExpansionTest {
         scenario.recreate();
         await(HistoryActivity::idleForTest, "a legacy scoped restoration");
         assertPreserved(years, months, days, offset);
+    }
+
+    @Test public void openingNinthDayDuringRefresh_replansWithoutDroppingItsLoadedRows()
+            throws Exception {
+        List<CalDate> dates = sparseDays();
+        List<Transaction> stored = deposits(dates, 1);
+        assertTrue(BalanceData.writeTransactions(context, stored));
+        openHistory(true, true);
+        scenario.onActivity(activity -> assertExpansion(activity, dates.subList(0, 8)));
+
+        CountDownLatch renderStarted = new CountDownLatch(1);
+        renderRelease = new CountDownLatch(1);
+        HistoryActivity.setRenderGateForTest(renderStarted, renderRelease);
+        try {
+            BalanceData.setNote(context, stored.get(0), "refresh racing with ninth day");
+            scenario.onActivity(activity -> invoke(activity, "render"));
+            assertTrue("the refresh must pause after capturing the original eight-day plan",
+                renderStarted.await(10, TimeUnit.SECONDS));
+
+            // The ninth day is in the first unopened year. Its real headers load its page
+            // independently while the aggregate refresh is blocked outside the store lock.
+            tapGroup(HistoryActivity.YEAR_TAG, 2);
+            tapGroup(HistoryActivity.MONTH_TAG, 8);
+            tapGroup(HistoryActivity.DAY_TAG, 8);
+            String ninth = dates.get(8).key();
+            String evicted = dates.get(7).key();
+            await(activity -> pages(activity).containsKey(ninth)
+                    && !pages(activity).containsKey(evicted)
+                    && expansion(activity, "expandedDays").contains(ninth),
+                "the ninth day's page and eviction before the refresh is released");
+            Set<String> years = expansion("expandedYears");
+            Set<String> months = expansion("expandedMonths");
+            Set<String> days = expansion("expandedDays");
+            assertEquals(8, days.size());
+            assertFalse(days.contains(evicted));
+
+            renderRelease.countDown();
+            await(HistoryActivity::idleForTest, "the refresh replanned from the user's day choice");
+            scenario.onActivity(activity -> {
+                assertEquals("refresh must retain the manually opened year", years,
+                    expansion(activity, "expandedYears"));
+                assertEquals("refresh must retain the manually opened month", months,
+                    expansion(activity, "expandedMonths"));
+                assertEquals("same-scope refresh must retain the new day selection", days,
+                    expansion(activity, "expandedDays"));
+                assertEquals("every expanded day must still have a resident page",
+                    days, pages(activity).keySet());
+                assertEquals("opening a ninth day must not raise the page cap",
+                    8, pages(activity).size());
+                HistoryReader.DayRows page = pages(activity).get(ninth);
+                assertNotNull("the user's newly opened page must survive the old render", page);
+                assertEquals(1, page.transactions.size());
+                assertEquals(stored.get(8).sig, page.transactions.get(0).sig);
+                assertEquals("the new day must retain its actual rendered movement",
+                    8, clockTimes(activity.getWindow().getDecorView()));
+                assertEquals(10L, result(activity).movementCount);
+            });
+        } finally {
+            renderRelease.countDown();
+            HistoryActivity.setRenderGateForTest(null, null);
+        }
     }
 
     @Test public void clearingLastFilterAfterRecreation_restoresUnfilteredManualGroups()

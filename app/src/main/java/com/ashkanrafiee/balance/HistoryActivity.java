@@ -3148,6 +3148,17 @@ public final class HistoryActivity extends Activity {
                         finishRenderWork();
                         return;
                     }
+                    if (!expandedSnapshot.equals(expandedDays)) {
+                        // A day was opened or collapsed while this worker planned its pages.
+                        // Replan from those choices instead of replacing a newly opened day's
+                        // rows with the older page window and leaving an expanded, empty day.
+                        try { completed.close(); } catch (Exception e) {
+                            android.util.Log.w("BalanceHistory", "superseded page plan cleanup failed", e);
+                        }
+                        renderQueued = true;
+                        finishRenderWork();
+                        return;
+                    }
                     renderedTransactionsRevision = stableRevision ? transactionsRevision : null;
                     renderedMetadataRevision = stableRevision ? metadataRevision : null;
                     renderedState = state;
