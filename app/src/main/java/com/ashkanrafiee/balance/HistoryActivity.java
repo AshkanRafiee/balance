@@ -43,10 +43,7 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
@@ -1102,18 +1099,17 @@ public final class HistoryActivity extends Activity {
         showDialog(exportDialog);
         new Thread(() -> {
             final int[] error = {0};
-            File staged = null;
+            CsvExportStaging staged = null;
             try {
+                staged = CsvExportStaging.open(app);
                 final List<String> tokens = searchTokens(query);
                 // Render into an app-private file first. A source failure, metadata revision
                 // change, cancellation, or activity teardown therefore cannot leave a truncated
                 // picked document looking like a completed export.
-                staged = File.createTempFile("history-export-", ".csv", app.getCacheDir());
                 final String metadataRevision = MetadataStore.revision(app);
                 try (MetadataStore.LookupSession metadata =
                         MetadataStore.LookupSession.open(app);
-                        OutputStream out = new FileOutputStream(staged);
-                        OutputStreamWriter writer = new OutputStreamWriter(out,
+                        OutputStreamWriter writer = new OutputStreamWriter(staged.outputStream(),
                             StandardCharsets.UTF_8)) {
                     final CsvExport.TextLookup lookup = new CsvExport.TextLookup() {
                         @Override public String note(String key) throws Exception {
@@ -1165,13 +1161,21 @@ public final class HistoryActivity extends Activity {
                         throw new IOException("metadata changed during CSV export");
                     }
                 }
+                staged.finish();
+                staged.verify();
                 publishExport(resolver, uri, staged);
             } catch (Throwable e) {
                 error[0] = 1;
                 android.util.Log.w("BalanceHistory", "csv export failed", e);
             } finally {
-                if (staged != null && staged.exists() && !staged.delete()) {
-                    android.util.Log.w("BalanceHistory", "staged export cleanup failed");
+                if (staged != null) {
+                    try {
+                        staged.close();
+                    } catch (IOException cleanup) {
+                        // The key is already wiped. An encrypted orphan must not make a completed
+                        // user-selected CSV look like an unsuccessful export.
+                        android.util.Log.w("BalanceHistory", "staged export cleanup failed", cleanup);
+                    }
                 }
             }
             runOnUiThread(() -> {
@@ -1210,19 +1214,14 @@ public final class HistoryActivity extends Activity {
     /** Publishes only a completed private export. The destination is opened after all source and
      * metadata checks have passed; a provider failure after opening is removed best-effort so a
      * newly-created document cannot be mistaken for a complete CSV. */
-    private static void publishExport(android.content.ContentResolver resolver, Uri uri, File source)
+    private static void publishExport(android.content.ContentResolver resolver, Uri uri,
+            CsvExportStaging source)
             throws Exception {
         boolean opened = false;
-        try (InputStream in = new FileInputStream(source);
-                OutputStream out = resolver.openOutputStream(uri, "w")) {
+        try (OutputStream out = resolver.openOutputStream(uri, "w")) {
             if (out == null) throw new IOException("no output stream");
             opened = true;
-            byte[] buffer = new byte[8192];
-            int count;
-            while ((count = in.read(buffer)) != -1) {
-                if (count == 0) continue;
-                out.write(buffer, 0, count);
-            }
+            source.copyTo(out);
         } catch (Exception failure) {
             if (opened) {
                 try {

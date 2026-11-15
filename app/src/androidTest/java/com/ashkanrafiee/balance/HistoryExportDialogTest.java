@@ -118,6 +118,21 @@ public class HistoryExportDialogTest {
         }
     }
 
+    @Test public void writeExport_unwritableDestination_removesEncryptedStaging() throws Exception {
+        List<Transaction> transactions = new ArrayList<>();
+        transactions.add(new Transaction("bank_melli", "acc", System.currentTimeMillis(),
+            10_000L, "sig", "content"));
+        BalanceData.writeTransactions(ctx, transactions);
+        Intent intent = new Intent(ctx, HistoryActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        InstrumentationRegistry.getInstrumentation().startActivitySync(intent);
+        // A directory cannot be opened as a CSV file. The completed staging must still be removed.
+        exportAndJoin(history(), Uri.fromFile(ctx.getCacheDir()));
+        File[] staged = ctx.getCacheDir().listFiles(
+            (directory, name) -> name.startsWith("history-export-"));
+        assertTrue(staged != null && staged.length == 0);
+    }
+
     @Test public void writeExport_destroyedMidExport_leaksNoWindow() throws Exception {
         List<Transaction> txs = new ArrayList<>();
         long now = System.currentTimeMillis();

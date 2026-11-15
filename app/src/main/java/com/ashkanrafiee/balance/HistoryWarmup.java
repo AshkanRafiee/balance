@@ -174,6 +174,11 @@ final class HistoryWarmup {
     }
 
     private static void warmNow(Context context, long ticket, WorkProgress progress) throws Exception {
+        try {
+            CsvExportStaging.sweepOrphans(context);
+        } catch (java.io.IOException failure) {
+            Log.w(TAG, "CSV staging cleanup failed", failure);
+        }
         HistoryReader.Result result = null;
         List<HistoryReader.Result> discarded = new ArrayList<>();
         try {

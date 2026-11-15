@@ -1172,6 +1172,11 @@ final class BalanceData {
     /** Performs the idempotent cleanup and clears the marker only after every step commits. */
     private static void completeReset(Context context, boolean alsoNotes) {
         HistoryWarmup.invalidate();
+        try {
+            CsvExportStaging.sweepOrphans(context);
+        } catch (java.io.IOException failure) {
+            throw new IllegalStateException("CSV staging reset failed", failure);
+        }
         DataGeneration.prepareReset(context, alsoNotes);
         try {
             if (!CommitmentStore.clear(context))
