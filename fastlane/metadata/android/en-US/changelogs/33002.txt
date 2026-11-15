@@ -1,3 +1,5 @@
 • Filtered history now opens recent matching activity automatically; older history is still expandable.
 • Expanded and collapsed days stay as you left them when history refreshes.
 • Added a Mofid (Hami) icon for light and dark themes, with a shorter name.
+• Strengthened app locking and one-time-code removal from shared reports.
+• Your data now stays encrypted while preparing CSV exports; exported files remain unencrypted.
