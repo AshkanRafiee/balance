@@ -59,6 +59,9 @@ public final class StoreScreenshotsTest {
     private Application application;
     private Application.ActivityLifecycleCallbacks permissionPromptCallback;
     private LocaleList originalLocales;
+    private String originalLanguage;
+    private Integer originalRegion;
+    private String originalCurrency;
     private String originalTheme;
     private ActivityScenario<MainActivity> dashboard;
     private ActivityScenario<HistoryActivity> history;
@@ -91,6 +94,9 @@ public final class StoreScreenshotsTest {
 
         context = target;
         originalLocales = LocaleList.getDefault();
+        originalLanguage = LocaleHelper.currentTag(context);
+        originalRegion = RegionHelper.region(context);
+        originalCurrency = CurrencyHelper.currency(context);
         originalTheme = ThemeHelper.theme(context);
         BalanceData.reset(context, true);
         assertTrue("fixture preferences must reset", context.getSharedPreferences(
@@ -133,7 +139,12 @@ public final class StoreScreenshotsTest {
         if (dashboard != null) dashboard.close();
         if (application != null && permissionPromptCallback != null)
             application.unregisterActivityLifecycleCallbacks(permissionPromptCallback);
+        if (context != null && originalRegion != null) RegionHelper.setRegion(context, originalRegion);
+        if (context != null && originalCurrency != null)
+            CurrencyHelper.setCurrency(context, originalCurrency);
         if (context != null && originalTheme != null) ThemeHelper.setTheme(context, originalTheme);
+        if (context != null && originalLanguage != null)
+            LocaleHelper.setLanguage(context, originalLanguage);
         if (originalLocales != null) LocaleList.setDefault(originalLocales);
     }
 
