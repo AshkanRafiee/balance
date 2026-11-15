@@ -1,5 +1,7 @@
 package com.ashkanrafiee.balance;
 
+import android.app.Activity;
+import android.app.Application;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
@@ -7,6 +9,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.CancellationSignal;
 import android.os.Handler;
 import android.os.Looper;
@@ -77,6 +80,35 @@ public final class LockOverlay extends FrameLayout {
     private CancellationSignal fpCancel;
     /** Invalidates callbacks from a biometric prompt that was cancelled or replaced. */
     private int fingerprintGeneration;
+    /** A code check may finish after the entrance or its owning activity has changed. */
+    private int codeGeneration;
+    private boolean codePending;
+    private boolean codePromptAllowed = true;
+    // Verify mode can pause while the session is still unlocked, without the activity revealing
+    // the plain lock or disabling automatic fingerprint prompts. Observe that pause directly.
+    private final Application.ActivityLifecycleCallbacks codeLifecycle =
+        new Application.ActivityLifecycleCallbacks() {
+            @Override public void onActivityPaused(Activity activity) {
+                if (activity != ctx) return;
+                codePromptAllowed = false;
+                invalidateCodeAttempt();
+            }
+
+            @Override public void onActivityResumed(Activity activity) {
+                if (activity == ctx) codePromptAllowed = true;
+            }
+
+            @Override public void onActivityDestroyed(Activity activity) {
+                if (activity != ctx) return;
+                codePromptAllowed = false;
+                invalidateCodeAttempt();
+            }
+
+            @Override public void onActivityCreated(Activity activity, Bundle state) { }
+            @Override public void onActivityStarted(Activity activity) { }
+            @Override public void onActivityStopped(Activity activity) { }
+            @Override public void onActivitySaveInstanceState(Activity activity, Bundle state) { }
+        };
     private Handler cooldownHandler;
     private Runnable cooldownTimer;
 
@@ -316,6 +348,7 @@ public final class LockOverlay extends FrameLayout {
     }
 
     public void hide() {
+        invalidateCodeAttempt();
         cancelFingerprint();
         dropCooldownCountdown();
         if (getVisibility() != GONE) setVisibility(GONE);
@@ -341,8 +374,21 @@ public final class LockOverlay extends FrameLayout {
     }
 
     @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        codePromptAllowed = true;
+        if (ctx instanceof Activity) {
+            ((Activity) ctx).getApplication().registerActivityLifecycleCallbacks(codeLifecycle);
+        }
+    }
+
+    @Override
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
+        invalidateCodeAttempt();
+        if (ctx instanceof Activity) {
+            ((Activity) ctx).getApplication().unregisterActivityLifecycleCallbacks(codeLifecycle);
+        }
         cancelFingerprint();
         dropCooldownCountdown();
     }
@@ -354,6 +400,7 @@ public final class LockOverlay extends FrameLayout {
     private void configure() {
         // A previous prompt may have left the entry disabled (or a fingerprint session pending);
         // always start every appearance from a clean, fully interactive state.
+        invalidateCodeAttempt();
         busy = false;
         cancelFingerprint();
         setEntryEnabled(true);
@@ -426,7 +473,10 @@ public final class LockOverlay extends FrameLayout {
      *  (e.g. on the way back in, while resumed) turns it back on. */
     void setAutoFingerprintEnabled(boolean enabled) {
         fpPromptAllowed = enabled;
-        if (!enabled) cancelFingerprint();
+        if (!enabled) {
+            invalidateCodeAttempt();
+            cancelFingerprint();
+        }
     }
 
     private void applyFingerprintRow() {
@@ -519,7 +569,8 @@ public final class LockOverlay extends FrameLayout {
 
     /** Verifies the entered code on a worker thread (PBKDF2 is deliberately slow). */
     private void submit() {
-        if (busy || !LockManager.isEnabled(ctx)) return;
+        if (busy || !codePromptAllowed || !isAttachedToWindow()
+                || getVisibility() != VISIBLE || !LockManager.isEnabled(ctx)) return;
         if (LockManager.cooldownRemainingMs(ctx) > 0) {
             startCooldown();
             return;
@@ -533,21 +584,27 @@ public final class LockOverlay extends FrameLayout {
             showError(R.string.lock_validate_pin_length);
             return;
         }
+        final int generation = beginCodeAttempt();
+        new Thread(() -> {
+            boolean ok = LockManager.verify(ctx, code);
+            final boolean result = ok;
+            post(() -> finishAttempt(generation, result));
+        }).start();
+    }
+
+    private int beginCodeAttempt() {
+        codePending = true;
         busy = true;
         setEntryEnabled(false);
         setLoading(true);
         hideError();
-        new Thread(() -> {
-            boolean ok = LockManager.verify(ctx, code);
-            final boolean result = ok;
-            post(() -> finishAttempt(result));
-        }).start();
+        return ++codeGeneration;
     }
 
-    private void finishAttempt(boolean ok) {
-        busy = false;
-        setEntryEnabled(true);
-        setLoading(false);
+    private void finishAttempt(int generation, boolean ok) {
+        if (!codePending || generation != codeGeneration || !codePromptAllowed
+                || !isAttachedToWindow() || getVisibility() != VISIBLE) return;
+        invalidateCodeAttempt();
         if (ok) {
             success();
         } else if (LockManager.cooldownRemainingMs(ctx) > 0) {
@@ -561,6 +618,16 @@ public final class LockOverlay extends FrameLayout {
             }
             clearInput();
         }
+    }
+
+    /** Discard only the pending code UI; cooldowns and fingerprint prompts own their own state. */
+    private void invalidateCodeAttempt() {
+        codeGeneration++;
+        if (!codePending) return;
+        codePending = false;
+        busy = false;
+        setEntryEnabled(true);
+        setLoading(false);
     }
 
     /** Blocks code entry while a failed-attempt cooldown runs and counts it down on the error line,
