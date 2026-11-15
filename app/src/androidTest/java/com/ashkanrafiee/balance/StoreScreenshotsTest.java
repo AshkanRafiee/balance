@@ -11,6 +11,7 @@ import android.app.Application;
 import android.app.Instrumentation;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.os.Build;
 import android.os.Bundle;
@@ -52,11 +53,13 @@ import java.util.Locale;
 @RunWith(AndroidJUnit4.class)
 public final class StoreScreenshotsTest {
     private static final String ACCOUNT = "00000000001";
+    private static final long DEMO_TIME = System.currentTimeMillis();
     private Instrumentation instrumentation;
     private Context context;
     private Application application;
     private Application.ActivityLifecycleCallbacks permissionPromptCallback;
     private LocaleList originalLocales;
+    private String originalTheme;
     private ActivityScenario<MainActivity> dashboard;
     private ActivityScenario<HistoryActivity> history;
     private ActivityScenario<CommitmentsActivity> commitments;
@@ -88,6 +91,7 @@ public final class StoreScreenshotsTest {
 
         context = target;
         originalLocales = LocaleList.getDefault();
+        originalTheme = ThemeHelper.theme(context);
         BalanceData.reset(context, true);
         assertTrue("fixture preferences must reset", context.getSharedPreferences(
             BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit().clear().commit());
@@ -99,7 +103,6 @@ public final class StoreScreenshotsTest {
         BalanceData.setShowCommitments(context, true);
         BalanceData.setAutoHide(context, false);
         CurrencyHelper.setCurrency(context, CurrencyHelper.CURRENCY_TOMAN);
-        ThemeHelper.setTheme(context, ThemeHelper.THEME_LIGHT);
         application = (Application) context.getApplicationContext();
         permissionPromptCallback = new Application.ActivityLifecycleCallbacks() {
             @Override public void onActivityCreated(Activity activity, Bundle state) {
@@ -130,6 +133,7 @@ public final class StoreScreenshotsTest {
         if (dashboard != null) dashboard.close();
         if (application != null && permissionPromptCallback != null)
             application.unregisterActivityLifecycleCallbacks(permissionPromptCallback);
+        if (context != null && originalTheme != null) ThemeHelper.setTheme(context, originalTheme);
         if (originalLocales != null) LocaleList.setDefault(originalLocales);
     }
 
@@ -143,23 +147,33 @@ public final class StoreScreenshotsTest {
 
     private void capture(String language, String folder) throws Exception {
         seed(language);
-        // Give the overview room to show every account; commitments have their own full frame.
-        BalanceData.setShowCommitments(context, false);
         File directory = new File(context.getCacheDir(), "store-screenshots/" + folder);
         assertTrue("private screenshot directory must exist", directory.isDirectory() || directory.mkdirs());
+        // Both themes use the very same balances, dates, notes and commitments.
+        captureTheme(language, directory, true);
+        captureTheme(language, directory, false);
+    }
 
+    private void captureTheme(String language, File directory, boolean dark) throws Exception {
+        ThemeHelper.setTheme(context, dark ? ThemeHelper.THEME_DARK : ThemeHelper.THEME_LIGHT);
+        // Give the overview room to show every account; commitments have their own full frame.
+        BalanceData.setShowCommitments(context, false);
         dashboard = ActivityScenario.launch(MainActivity.class);
         await(() -> {
             boolean[] ready = {false};
             dashboard.onActivity(activity -> {
+                assertTheme(activity, dark);
                 View root = activity.getWindow().getDecorView();
                 ready[0] = activity.hasWindowFocus()
                     && findText(root, CurrencyHelper.amount(activity, 128_450_000L)) != null
+                    && findText(root, CurrencyHelper.amount(activity, 74_200_000L)) != null
+                    && findText(root, CurrencyHelper.amount(activity, 32_000_000L)) != null
+                    && findText(root, CurrencyHelper.amount(activity, 234_650_000L)) != null
                     && findText(root, BankRules.displayName(activity, "Blu")) != null;
             });
             return ready[0];
         }, "dashboard balances and commitments");
-        save(directory, "01-dashboard.png");
+        save(directory, dark ? "01-dashboard-dark.png" : "04-dashboard-light.png");
         dashboard.close();
         dashboard = null;
         BalanceData.setShowCommitments(context, true);
@@ -167,9 +181,11 @@ public final class StoreScreenshotsTest {
         history = ActivityScenario.launch(HistoryActivity.class);
         await(() -> {
             boolean[] ready = {false};
-            history.onActivity(activity -> ready[0] = activity.hasWindowFocus()
-                && HistoryActivity.idleForTest(activity)
-                && findText(activity.getWindow().getDecorView(), featuredNote) != null);
+            history.onActivity(activity -> {
+                assertTheme(activity, dark);
+                ready[0] = activity.hasWindowFocus() && HistoryActivity.idleForTest(activity)
+                    && findText(activity.getWindow().getDecorView(), featuredNote) != null;
+            });
             return ready[0];
         }, "history with synthetic transaction notes");
         history.onActivity(activity -> {
@@ -190,44 +206,68 @@ public final class StoreScreenshotsTest {
             });
             return visible[0];
         }, "visible synthetic transaction details");
-        save(directory, "02-history.png");
+        if (dark) save(directory, "02-history-dark.png");
 
-        // Use the same accessible transaction row a user taps, rather than rendering a mock detail.
-        history.onActivity(activity -> {
-            View note = findText(activity.getWindow().getDecorView(), featuredNote);
-            assertNotNull("featured transaction must be rendered", note);
-            View row = note;
-            while (!row.isClickable() && row.getParent() instanceof View)
-                row = (View) row.getParent();
-            assertTrue("featured transaction must open its native explanation", row.performClick());
-        });
-        await(() -> {
-            boolean[] ready = {false};
+        if (!dark) {
+            // Use the same accessible transaction row a user taps, rather than a mock detail.
+            history.onActivity(activity -> {
+                View note = findText(activity.getWindow().getDecorView(), featuredNote);
+                assertNotNull("featured transaction must be rendered", note);
+                View row = note;
+                while (!row.isClickable() && row.getParent() instanceof View)
+                    row = (View) row.getParent();
+                assertTrue("featured transaction must open its native explanation", row.performClick());
+            });
+            await(() -> {
+                boolean[] ready = {false};
+                history.onActivity(activity -> {
+                    for (android.app.AlertDialog dialog : HistoryActivity.shownDialogsForTest(activity)) {
+                        if (!dialog.isShowing() || dialog.getWindow() == null) continue;
+                        View root = dialog.getWindow().getDecorView();
+                        if (findText(root, activity.getString(R.string.figure_title)) == null) continue;
+                        ready[0] = root.isLaidOut() && root.hasWindowFocus()
+                            && containsText(root, activity.getString(R.string.figure_source_body))
+                            && containsText(root, "Demo data") && containsText(root, featuredNote);
+                    }
+                });
+                return ready[0];
+            }, "native explanation with synthetic source evidence and annotations");
+            instrumentation.waitForIdleSync();
             history.onActivity(activity -> {
                 for (android.app.AlertDialog dialog : HistoryActivity.shownDialogsForTest(activity)) {
                     if (!dialog.isShowing() || dialog.getWindow() == null) continue;
                     View root = dialog.getWindow().getDecorView();
                     if (findText(root, activity.getString(R.string.figure_title)) == null) continue;
-                    ready[0] = root.isLaidOut() && root.hasWindowFocus()
-                        && containsText(root, activity.getString(R.string.figure_source_body))
-                        && containsText(root, "Demo data") && containsText(root, featuredNote);
+                    android.widget.ScrollView scroll = findExplanationScroll(root, featuredNote);
+                    assertNotNull("explanation must have its native scrolling body", scroll);
+                    // Show the source and personal annotations, rather than clipping them below
+                    // the viewport in a text-heavy explanation.
+                    scroll.scrollTo(0, Math.max(0,
+                        scroll.getChildAt(0).getHeight() - scroll.getHeight()));
                 }
             });
-            return ready[0];
-        }, "native explanation with synthetic source evidence and annotations");
-        save(directory, "04-explanation.png");
+            save(directory, "05-explanation-light.png");
+        }
         history.close();
         history = null;
+        if (!dark) return;
 
         commitments = ActivityScenario.launch(CommitmentsActivity.class);
         String rent = localized(language, "Demo · apartment rent", "نمونه · اجاره خانه");
         await(() -> {
             boolean[] ready = {false};
-            commitments.onActivity(activity -> ready[0] = activity.hasWindowFocus()
-                && findText(activity.getWindow().getDecorView(), rent) != null);
+            commitments.onActivity(activity -> {
+                assertTheme(activity, dark);
+                View root = activity.getWindow().getDecorView();
+                ready[0] = activity.hasWindowFocus() && findText(root, rent) != null
+                    && findText(root, localized(language,
+                        "Demo · language course", "نمونه · کلاس زبان")) != null
+                    && findText(root, localized(language,
+                        "Demo · project payment", "نمونه · دریافتی پروژه")) != null;
+            });
             return ready[0];
         }, "synthetic commitments");
-        save(directory, "03-commitments.png");
+        save(directory, "03-commitments-dark.png");
         commitments.close();
         commitments = null;
     }
@@ -236,7 +276,7 @@ public final class StoreScreenshotsTest {
         LocaleHelper.setLanguage(context, language);
         RegionHelper.setRegion(context, "fa".equals(language)
             ? RegionHelper.REGION_IRAN : RegionHelper.REGION_INTERNATIONAL);
-        long now = System.currentTimeMillis();
+        long now = DEMO_TIME;
         LinkedHashMap<String, Bank> banks = new LinkedHashMap<>();
         banks.put(BalanceData.storageKey("Tejarat", ACCOUNT),
             new Bank("Tejarat", 128_450_000L, now - 60_000L, "TejaratBank", ACCOUNT));
@@ -357,6 +397,28 @@ public final class StoreScreenshotsTest {
             }
         }
         return null;
+    }
+
+    private static android.widget.ScrollView findExplanationScroll(View root, String note) {
+        // Standard alert layouts also contain a hidden framework message scroller.
+        if (!root.isShown()) return null;
+        if (root instanceof android.widget.ScrollView
+                && containsText(root, "Demo data") && containsText(root, note))
+            return (android.widget.ScrollView) root;
+        if (root instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) root;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                android.widget.ScrollView found = findExplanationScroll(group.getChildAt(i), note);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private static void assertTheme(Activity activity, boolean dark) {
+        assertEquals("capture must use the selected native theme",
+            dark ? Configuration.UI_MODE_NIGHT_YES : Configuration.UI_MODE_NIGHT_NO,
+            activity.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK);
     }
 
     private static boolean containsText(View root, String wanted) {
