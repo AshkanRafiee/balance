@@ -1,40 +1,63 @@
-# Balance
+<p align="center">
+  <img src="fastlane/metadata/android/en-US/images/icon.png" width="88" alt="Balance icon">
+</p>
 
-Balance turns supported financial SMS into a clear picture of your money: the latest balances, a combined total, transaction history and payment reminders. Everything is processed on your phone, without an account, cloud service, analytics or internet permission.
+<h1 align="center">Balance</h1>
 
-**Supports Persian SMS formats from Iranian banks and selected financial services only.** Accounts are shown separately when messages include an account number.
+<p align="center">
+  <strong>A clearer picture of your money. Without giving up your privacy.</strong>
+  <br>
+  No internet access · No sign-up · No ads or tracking
+</p>
 
-## What you can do
+<p align="center">
+  <a href="https://github.com/ashkanrafiee/balance/releases">Download APK</a> ·
+  <a href="https://f-droid.org/en/packages/com.ashkanrafiee.balance/">F-Droid</a> ·
+  <a href="https://cafebazaar.ir/app/com.ashkanrafiee.balance">Cafe Bazaar</a> ·
+  <a href="https://myket.ir/app/com.ashkanrafiee.balance">Myket</a>
+</p>
 
-- See balances by bank and account, exclude accounts from the total, spot old balances, and explain individual account balances.
-- Explore deposits and withdrawals by day, month or year; filtered history opens recent matching activity automatically, with older history still expandable. Search, save private notes and reusable tags together, and export the current view as CSV.
-- See bank-stated transaction reasons, payment channels and merchants when the messages provide enough information. An OTP alone never confirms a transaction.
-- Understand unexplained balance changes: amber **Unaccounted** rows show the difference between balance statements that recorded transactions do not explain. They are not invented transactions or estimates of when missing payments happened.
-- Track one-off or recurring payments and receipts on consistent schedules, with separate payable and receivable totals. Reminder taps open and highlight the due payment, keeping its name and amount visible; Android restrictions can delay reminders.
-- Keep a home-screen widget, make password-encrypted backups, and restore selected data. Backups require the same or a newer app version.
-- Choose Persian or English, a Persian or Gregorian calendar, and light or dark themes. Show amounts in Toman (10 Rial), Rial or with a custom unit label; a custom label does not convert currencies.
-- Hide balances when you choose, optionally hide them again automatically, or use a PIN, password or fingerprint lock. **Masking and automatic hiding are off by default.**
+Balance turns the bank SMS already on your Android phone into an overview of your balances and transaction history, with tools to plan upcoming payments. No bank login. No cloud connection. Just your money, easier to understand.
 
-## Your data stays yours
+> **Built for Persian SMS from Iranian banks and selected financial services.** Other countries and message formats are not currently supported.
 
-SMS access lets Balance read bank messages; turning it off does not delete saved data. Figures depend on the messages Balance can access, not a live connection to your bank. Missing, deleted or restricted messages can leave gaps, and old balances may no longer reflect your account.
+## Private by design, not just by promise
 
-Saved financial records are encrypted; CSV exports are not. Encrypted backups also include retained bank-message samples. Report, sharing, CSV export and backup only hand selected data to the app or location you choose. Review shared samples even though one-time password values are removed by Report.
+Balance has **no internet permission**. Your messages are processed on your phone, not uploaded to a server. There are no ads, analytics or tracking, and the app is [free and open source](LICENSE).
 
-For an unexpected result, refresh or safely re-read bank messages before deleting anything. Re-reading does not clear your saved data; check exclusions when newly recognized accounts appear. **A full reset is different and destructive:** it removes balances, history and commitments and requires two confirmations; deleted SMS cannot be recovered by scanning. Back up first. See [troubleshooting and reporting](CONTRIBUTING.md).
+- **Protect what you keep.** Saved financial records are encrypted. Add an optional PIN, password or fingerprint lock.
+- **Choose what others see.** Hide balances on demand, with optional automatic hiding. Balance hiding is off by default.
+- **Stay in control of sharing.** Export CSV or create password-encrypted backups where you choose. CSV files are **not encrypted**; backups also contain saved bank-message samples.
 
-## Download
+## More than a balance checker
 
-- [GitHub Releases](https://github.com/ashkanrafiee/balance/releases) — signed APKs; [Obtainium](https://obtainium.imranr.dev/) can keep them updated.
-- [F-Droid](https://f-droid.org/en/packages/com.ashkanrafiee.balance/)
-- [Cafe Bazaar](https://cafebazaar.ir/app/com.ashkanrafiee.balance) · [Myket](https://myket.ir/app/com.ashkanrafiee.balance)
+| Benefit | What you can do |
+| --- | --- |
+| **Your money at a glance** | See balances across banks and accounts, choose which count toward your total, and spot out-of-date figures. |
+| **History you can make sense of** | Explore deposits and withdrawals, search and filter your history, and add private notes and tags. See payment details when the bank's message includes them. |
+| **Clarity when something is missing** | Check the bank messages behind your figures when available. Spot balance changes the available transactions don't explain, without inventing missing payments. |
+| **A plan for what's next** | Track one-off and recurring payments and money you're expecting, with reminders and separate totals for what you owe and what's owed to you. |
 
-## Help improve Balance
+Make it yours with **Persian or English**, Persian or Gregorian calendars, Toman or Rial amounts, light or dark themes, and a home-screen widget.
 
-If a bank message, balance or transaction looks wrong, use **Report** to select examples and explain the problem. Nothing is emailed until you approve it in your mail app. You can also [open an issue](https://github.com/AshkanRafiee/balance/issues); please remove private information first.
+## A look inside
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for reporting, building and release guidance.
+<p align="center">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/01-dashboard.png" width="230" alt="Dashboard with a combined balance and individual bank accounts">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/02-history.png" width="230" alt="Searchable transaction history with deposits, withdrawals, notes and tags">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/03-commitments.png" width="230" alt="Scheduled payments and expected receipts with separate totals">
+</p>
+
+## Before you start
+
+Balance needs **SMS access** to read supported messages. It does not connect to your bank: missing messages can leave gaps, and the latest SMS balance may not be your current balance. Accounts are shown separately when Balance can recognize their account numbers. Android restrictions can delay reminders.
+
+Available for **Android 8.0+**. [Obtainium](https://obtainium.imranr.dev/) can keep GitHub downloads updated.
+
+## Help Balance grow
+
+Found a message that isn't recognized? Use **Report** in the app or [open an issue](https://github.com/AshkanRafiee/balance/issues). Review message samples and remove private information before sharing. See [help and contributing](CONTRIBUTING.md) for more guidance.
 
 ## Donate
 
-Balance is free and open source. You can support development through the [donation page](https://balance.ashkanrafiee.com/#donate).
+If Balance makes your day a little easier, you can [support its development](https://balance.ashkanrafiee.com/#donate).
