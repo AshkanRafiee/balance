@@ -333,11 +333,12 @@ final class ScanDiagnostics {
     /** Redacts explicit one-time-code values while preserving the rest of the bank layout. */
     static String sanitizeForReport(String body) {
         if (body == null || body.isEmpty()) return body == null ? "" : body;
-        String[] lines = body.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
         StringBuilder out = new StringBuilder(body.length());
         boolean redactNextNumericLine = false;
-        for (int i = 0; i < lines.length; i++) {
-            String original = lines[i];
+        for (int start = 0; start < body.length();) {
+            int end = start;
+            while (end < body.length() && body.charAt(end) != '\r' && body.charAt(end) != '\n') end++;
+            String original = body.substring(start, end);
             String normalized = TextNormalizer.normalize(original);
             boolean marker = OTP_MARKER.matcher(normalized).find();
             String line = marker ? redactDigitRuns(original) : original;
@@ -345,9 +346,21 @@ final class ScanDiagnostics {
             if (!marker && redactNextNumericLine && isNumericOtpLine(normalized)) {
                 line = redactDigitRuns(original);
             }
-            if (i > 0) out.append('\n');
             out.append(line);
-            redactNextNumericLine = marker && !containsOtpRun(normalized);
+            if (marker) {
+                redactNextNumericLine = !containsOtpRun(normalized);
+            } else if (redactNextNumericLine && !isOtpSeparatorLine(normalized)) {
+                // Only formatting may separate the marker from its value. The first meaningful
+                // line consumes the pending marker, whether it is a code or an unrelated field.
+                redactNextNumericLine = false;
+            }
+            if (end < body.length()) {
+                int next = end + 1;
+                if (body.charAt(end) == '\r' && next < body.length() && body.charAt(next) == '\n') next++;
+                out.append(body, end, next);
+                end = next;
+            }
+            start = end;
         }
         return out.toString();
     }
@@ -459,6 +472,18 @@ final class ScanDiagnostics {
             || cp == 0x061C || cp == 0x200C || cp == 0x200D || cp == 0x200E || cp == 0x200F
             || cp == 0xFEFF || (cp >= 0x202A && cp <= 0x202E)
             || (cp >= 0x2066 && cp <= 0x2069);
+    }
+
+    /** Blank/decorative lines do not end a pending OTP field. Keep the extra divider characters
+     * explicit rather than accepting arbitrary symbols (for example, a currency-only field). */
+    private static boolean isOtpSeparatorLine(String input) {
+        for (int i = 0; i < input.length();) {
+            int cp = input.codePointAt(i);
+            i += Character.charCount(cp);
+            if (!otpSeparator(cp) && cp != ':' && cp != '=' && cp != '_'
+                    && cp != '*' && cp != '|') return false;
+        }
+        return true;
     }
 
     private static boolean isNumericOtpLine(String input) {

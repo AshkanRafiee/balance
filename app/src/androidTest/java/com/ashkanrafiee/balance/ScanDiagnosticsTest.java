@@ -350,6 +350,92 @@ public class ScanDiagnosticsTest {
         assertEquals("Your passcode is [redacted]", txt);
     }
 
+    @Test public void sanitizeForReport_redactsOtpAcrossBlankAndSeparatorLines() {
+        String[] markers = {"OTP:", "Passcode:", "One-time code:", "رمز پویا:",
+            "کد تأیید:", "كُد تَأْيِيد:"};
+        String[] gaps = {"\n\n", "\n \t\u00A0\n", "\n---\n===\n:\n_*|\n",
+            "\r\n\r\n", "\r\r"};
+        for (String marker : markers) {
+            for (String gap : gaps) {
+                assertEquals(marker + gap + "[redacted]",
+                    ScanDiagnostics.sanitizeForReport(marker + gap + "123456"));
+            }
+        }
+    }
+
+    @Test public void sanitizeForReport_preservesCrlfAndBidiSeparatorLayout() {
+        String prefix = "Account:1234567890\r\nرمز پویا:\r\n\r\n"
+            + "\u2066\u200F\u2069\r\n-\u202E-\u202C-\r\n";
+        String suffix = "\r\nAmount:120,000\rBalance:450,000\n";
+        assertEquals(prefix + "[redacted]" + suffix,
+            ScanDiagnostics.sanitizeForReport(prefix + "۱۲\u202E۳۴۵۶" + suffix));
+    }
+
+    @Test public void sanitizeForReport_redactsUnicodeAndSeparatedCodesAfterGap() {
+        String prefix = "OTP:\n\n---\n";
+        String[] codes = {"123456", "۱۲۳۴۵۶", "١٢٣٤٥٦", "１２３４５６", "①②③④",
+            "𝟙𝟚𝟛𝟜", "1 2 3 4", "12-34", "1\u200B2\u20603\u0301\u20664"};
+        for (String code : codes) {
+            assertEquals(prefix + "[redacted]",
+                ScanDiagnostics.sanitizeForReport(prefix + code));
+        }
+    }
+
+    @Test public void sanitizeForReport_meaningfulContentEndsPendingOtp() {
+        String prefix = "OTP:\n\n---\n";
+        String[] fields = {"Account:\n1234567890", "Amount: 123,456",
+            "مبلغ:\n۱۲۳۴۵۶", "Payment complete", "$", "123,456", "12:34", "123456 Rial"};
+        for (String field : fields) {
+            String body = prefix + field + "\n\n654321";
+            assertEquals(body, ScanDiagnostics.sanitizeForReport(body));
+        }
+    }
+
+    @Test public void sanitizeForReport_pendingOtpKeepsExistingNumericBounds() {
+        String prefix = "OTP:\n\n---\n";
+        for (String nonCode : new String[]{"123", "12345678901234567"}) {
+            String body = prefix + nonCode + "\n\n654321";
+            assertEquals(body, ScanDiagnostics.sanitizeForReport(body));
+        }
+        assertEquals(prefix + "[redacted]",
+            ScanDiagnostics.sanitizeForReport(prefix + "1234567890123456"));
+    }
+
+    @Test public void sanitizeForReport_redactsOnlyFirstNumericValueAfterMarker() {
+        assertEquals("OTP:\n\n[redacted]\n\n---\n654321",
+            ScanDiagnostics.sanitizeForReport("OTP:\n\n123456\n\n---\n654321"));
+        assertEquals("OTP: [redacted]\n\n---\n654321",
+            ScanDiagnostics.sanitizeForReport("OTP: 123456\n\n---\n654321"));
+    }
+
+    @Test public void sanitizeForReport_laterMarkerStartsNewPendingOtp() {
+        assertEquals("OTP:\n\nBalance:\n123456\nرمز پویا:\n---\n\n[redacted]",
+            ScanDiagnostics.sanitizeForReport(
+                "OTP:\n\nBalance:\n123456\nرمز پویا:\n---\n\n۶۵۴۳۲۱"));
+    }
+
+    @Test public void sanitizeForReport_preservesOrdinaryFinancialFieldsAndLineEndings() {
+        String body = "Account:1234567890\r\n\r\nAmount:120,000\rBalance:۱۲۳٬۴۵۶\n";
+        assertEquals(body, ScanDiagnostics.sanitizeForReport(body));
+        assertEquals("", ScanDiagnostics.sanitizeForReport(null));
+        assertEquals("", ScanDiagnostics.sanitizeForReport(""));
+    }
+
+    @Test public void reports_redactOtpAfterGapAtBothReportEntryPoints() {
+        String body = "OTP:\n\n---\n123456\nAmount:789,000";
+        List<ScanDiagnostics.Message> samples = java.util.Collections.singletonList(
+            new ScanDiagnostics.Message(body, 0L));
+        ScanDiagnostics.SenderHit sender = new ScanDiagnostics.SenderHit("ADBBANK", null, 1, samples);
+        String[] reports = {
+            ScanDiagnostics.reportText(java.util.Collections.singletonList(sender)),
+            ScanDiagnostics.senderReport("ADBBANK", 1, samples)
+        };
+        for (String report : reports) {
+            assertTrue(report.contains("```\nOTP:\n\n---\n[redacted]\nAmount:789,000\n```"));
+            assertFalse(report.contains("123456"));
+        }
+    }
+
     @Test public void senderReport_noIssues_omitsTheLine() {
         List<ScanDiagnostics.Message> sel = new ArrayList<>();
         sel.add(new ScanDiagnostics.Message("lay out 1,000 Toman", 1000L));
