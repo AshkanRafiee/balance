@@ -43,9 +43,9 @@ Make it yours with **Persian or English**, Persian or Gregorian calendars, Toman
 ## A look inside
 
 <p align="center">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/01-dashboard.png" width="230" alt="Dashboard with a combined balance and individual bank accounts">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/02-history.png" width="230" alt="Searchable transaction history with deposits, withdrawals, notes and tags">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/03-commitments.png" width="230" alt="Scheduled payments and expected receipts with separate totals">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/01-dashboard-dark.png" width="230" alt="Dashboard with a combined balance and individual bank accounts">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/02-history-dark.png" width="230" alt="Searchable transaction history with deposits, withdrawals, notes and tags">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/03-commitments-dark.png" width="230" alt="Scheduled payments and expected receipts with separate totals">
 </p>
 
 ## Before you start
