@@ -4,22 +4,17 @@ Balance reads supported Iranian financial SMS on-device. Helping us keep the
 supported message formats up to date — or report a problem — is the most valuable
 contribution you can make.
 
+For everyday use, see the [Balance user guide](docs/USER-GUIDE.md).
+
 ## What Balance can and cannot detect
 
-- Balance recognizes the **balance messages of about 40 Iranian banks** (sender
-  aliases and message layouts).
-- Only a handful of those banks state a **machine-readable account number** in
-  their SMS. For those banks Balance splits the balance — and history — per
-  account. Without an account number, Balance shows the latest reported balance
-  for that institution, not the sum of several accounts. It cannot
-  distinguish multiple accounts when messages do not identify them.
-- History entries (deposits/withdrawals) also come from the same message
-  layouts. A message layout we have not seen before can therefore mean a wrong
-  or missing transaction in history, even when the balance looks fine.
+See [supported bank SMS](docs/USER-GUIDE.md#get-started-with-bank-sms) and
+[how accounts appear](docs/USER-GUIDE.md#read-balances-and-history) in the
+user guide. An unsupported layout can cause a wrong or missing transaction in
+history even when the balance looks fine.
 
-If your balance, account split or history is wrong, it is almost always because
-a message format differs from the ones we have on file. Tell us about it and we
-will add or fix the rule.
+If the relevant SMS is still available but Balance shows the wrong balance,
+account or history entry, send a sample so we can check the rule.
 
 ## See what Balance skipped, right in the app
 
@@ -64,40 +59,19 @@ We integrate reported bank formats into the next update either way.
 
 ## Before you report: refresh without deleting data
 
-Start with pull-to-refresh: on the bank list it checks balances; on history it
-checks balances and transactions. This is not a reset. If a message still looks
-wrong, use the Data menu's safe re-read to check bank messages again without
-deleting commitments, notes, tags, excluded-account choices, retained history or
-saved message sources. You can also use **Report** to share a redacted example;
-you do not need to erase your data to report a problem.
+Try [refreshing or re-reading bank messages safely](docs/USER-GUIDE.md#refresh-safely-or-report-a-problem).
+Tell us whether any relevant SMS are missing or Android is restricting access.
+You do not need to erase your data to report a problem.
 
-Scans can only read messages Android makes available to Balance. A missing or
-deleted message, denied SMS permission, or Android restrictions can leave gaps;
-a scan is not a live check against your bank. Tell us if any of these apply.
-
-When an update starts recognizing separate accounts, check which accounts are
-excluded from your total. For Wepod, a saved balance can follow its newly recognized
-account when a uniquely matching saved message proves the link. If the newest SMS
-was deleted and that evidence is missing or ambiguous, splitting accounts may
-instead use older inbox balances; re-reading cannot guarantee recovering the newer
-balance. Do not reset your data to try to resolve this.
+For Wepod, a saved balance can follow its newly recognized account when a
+uniquely matching saved message proves the link. If the newest SMS was deleted
+and that evidence is missing or ambiguous, splitting accounts may instead use
+older inbox balances; re-reading cannot guarantee recovering the newer balance.
+Do not reset your data to try to resolve this.
 
 ### A full reset is destructive
 
-Use the Data menu's full reset only when you intend to remove saved financial
-data and rebuild what can be read from the current inbox. It requires a second
-confirmation; it is not the first troubleshooting step.
-
-- **Back up first** with **Data → Create backup**. Keep the password safe;
-  restoring requires the same or a newer app version. Reset does not delete
-  backup files.
-- Saved balances, transaction history and **commitments are deleted**. Inbox
-  messages can rebuild supported balances and history, but not your commitments
-  or transactions whose SMS have been deleted.
-- Notes and tags are deleted only if you choose the additional deletion option.
-- Excluded accounts are included in the combined total again. Display and lock
-  preferences remain unchanged.
-
+See [what a full reset deletes](docs/USER-GUIDE.md#only-reset-if-you-want-to-rebuild-from-the-inbox).
 If you have already reset, mention it in the report; do not reset again just to
 file an issue.
 
@@ -162,112 +136,14 @@ everyone.
 
 ## Build from source
 
-Use a trusted JDK distribution and Google's official Android SDK tools. The
-release workflow uses Temurin JDK 21, Android platform 36 and build-tools 36.0.0;
-the app's Java source compatibility is 17. Install the SDK packages with the
-official `sdkmanager` and point `ANDROID_HOME` at your SDK installation:
+Install JDK 21 and Google's [Android SDK command-line tools](https://developer.android.com/tools/sdkmanager).
+Set `JAVA_HOME` to your JDK and `ANDROID_HOME` to your Android SDK. From the
+repository root, install the required SDK packages and use the included Gradle
+wrapper to build a debug APK:
 
 ```sh
-sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
-bash ./gradlew assembleDebug
-bash ./gradlew assembleRelease
+sdkmanager "platforms;android-36" "build-tools;36.0.0"
+./gradlew :app:assembleDebug
 ```
 
-Use the checked-in Gradle wrapper rather than downloading Gradle from an
-unverified mirror. Its official distribution URL and SHA-256 checksum are in
-`gradle/wrapper/gradle-wrapper.properties`. The project currently uses Gradle
-8.14.5 and Android Gradle Plugin 8.13.0. Check the build files and
-`.github/workflows/release.yml` if these versions change.
-
-### Running tests safely
-
-Use a **disposable emulator**, never a phone: provider tests seed and clear the
-real SMS inbox. Tests sharing app data must run serially. Do not use Gradle's
-`connected*AndroidTest` tasks across a remote/Docker adb connection; build the
-APKs with Gradle, then invoke instrumentation directly.
-
-```sh
-bash ./gradlew --no-watch-fs :app:assembleDebug :app:assembleDebugAndroidTest
-adb -s emulator-5554 install -r -t -g app/build/outputs/apk/debug/app-debug.apk
-adb -s emulator-5554 install -r -t -g app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-```
-
-Build the companion `sms-injector` project and install its debug APK on the same
-emulator first. It supplies `com.ashkanrafiee.smsinject/.SeedReceiver`, used by
-scan tests. After every reinstall, grant the required app ops:
-
-```sh
-adb -s emulator-5554 shell cmd appops set com.ashkanrafiee.smsinject WRITE_SMS allow
-adb -s emulator-5554 shell cmd appops set com.ashkanrafiee.balance android:read_restricted_messages allow
-python3 tools/run_instrumentation.py
-```
-
-The Python 3.9+ Linux runner rejects physical-device serials, verifies the
-emulator property, installed/local debug APK hashes, helper and SMS permissions,
-and prevents concurrent cooperating runs. Rebuild and reinstall after source
-changes; hash matching cannot prove that an APK was built from current sources.
-`--no-watch-fs` avoids stale file-watcher snapshots on shared/container filesystems.
-It does not install APKs or change device settings automatically. Avoid running
-raw adb instrumentation concurrently with it.
-
-Progress is printed per test; logs, JSONL results and a summary are saved under
-`app/build/test-results/instrumentation/`. Success requires all announced tests,
-an `OK` summary, the final instrumentation code and zero failures—not just an
-adb exit code of zero. Assumption skips are reported separately. The default
-overall limit is four hours; `--timeout` accepts seconds. An interrupt or timeout
-attempts to stop both remote packages and the local adb client; check any cleanup
-errors before starting another run. `--serial`, `--output` and `--classes` allow
-an explicitly selected emulator, output directory or class/method filter:
-
-```sh
-python3 tools/run_instrumentation.py --classes com.ashkanrafiee.balance.ReconcileTest
-```
-
-Before accepting a parser change or release, run **both startup methods in
-separate invocations**, then the full suite. These exact single-method selections
-automatically omit the isolation listener so it cannot initialize the parser
-first. Running both in one process does not check both initialization orders.
-
-```sh
-python3 tools/run_instrumentation.py --classes 'com.ashkanrafiee.balance.ParserRevisionInitializationTest#balanceDataInitializedFirst_keepsTheHistoryRevisionCurrent'
-python3 tools/run_instrumentation.py --classes 'com.ashkanrafiee.balance.ParserRevisionInitializationTest#bankRulesInitializedFirst_keepsTheHistoryRevisionCurrent'
-python3 tools/run_instrumentation.py
-```
-
-Host-only runner checks use the standard library and never contact adb:
-
-```sh
-python3 -m unittest discover -s tools -v
-```
-
-### Release signing
-
-A release build is unsigned when no keystore is configured, which supports
-source-based distribution builds. For a locally signed release, create
-`signing.properties` next to the root `build.gradle`, using your own values:
-
-```properties
-storeFile=/path/to/balance-release.jks
-storeType=JKS
-storePassword=YOUR_STORE_PASSWORD
-keyAlias=YOUR_KEY_ALIAS
-keyPassword=YOUR_KEY_PASSWORD
-```
-
-Keep the keystore and passwords outside version control. `signing.properties`
-and `*.jks` are gitignored; never attach them to reports or build logs. The
-GitHub release workflow restores signing files from repository secrets.
-
-### Version numbers and release metadata
-
-The repository uses `major.minor.patch` for `versionName` and derives
-`versionCode` with **`major * 10000 + minor * 1000 + patch`**. For example,
-`1.22.0` gives `10000 + 22000 + 0 = 32000`. Recompute the value from the intended
-version before changing `app/build.gradle`; do not substitute another project's
-formula. The release tag, build version and store changelog filename
-(`fastlane/metadata/android/<locale>/changelogs/<versionCode>.txt`) must agree.
-
-Keep README and English/Persian store descriptions accurate for the shipped
-behavior. Each `full_description.txt` must remain under 4000 characters. Write
-product-level changelogs at release time. Never move a published release tag;
-later changes belong to a new release.
+The APK is at `app/build/outputs/apk/debug/app-debug.apk`.
