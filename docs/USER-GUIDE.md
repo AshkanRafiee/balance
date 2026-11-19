@@ -60,10 +60,20 @@ calendar and time zone it was set up with even if you change your display
 calendar or travel.
 
 Use **Mark paid** or **Mark received** on individual dues. Balance does not
-make payments or automatically mark a due from bank SMS. Payable and receivable
-totals are separate from your bank balances and from each other. The dashboard
-card shows what remains for this month plus overdue amounts, not the lifetime
-total of a recurring commitment.
+make payments or automatically mark a due from bank SMS.
+
+You can edit the amount of any recurring due shown, even after marking it paid
+or received. This changes only that date, not the regular amount or other dates.
+Reset the due amount to use the regular amount again. If the date is no longer
+on the schedule or you switch between paying and receiving, the edit stops
+applying. It applies again if that date and the original direction return,
+unless you enter a replacement for the same date in the meantime.
+
+Payable and receivable totals are separate from your bank balances and from
+each other. Outstanding totals exclude dues marked paid or received, but the
+total for a series with an end date or set count includes them. A series that
+continues indefinitely has no lifetime total. The dashboard card shows what
+remains for this month plus overdue amounts.
 
 Turn on **Remind me** when editing a commitment to choose how early to be
 notified. Android must allow notifications. If exact alarms are off, the
@@ -104,8 +114,11 @@ parse. This is separate from the SMS in your messaging app.
   and cannot recover it for you.
 - **Data → Restore backup** needs the backup password and the same or a newer
   Balance version than the one that created the file. Choose which sections
-  to merge. Older backup balances do not replace newer saved ones. Bringing
-  back deleted commitments is a separate, unchecked option.
+  to merge. Older backup balances do not replace newer saved ones. Restored
+  commitments keep their saved per-date amount edits. If the same commitment
+  already exists, merging keeps its current settings and amount edits. It won't
+  bring back an old amount edit you reset. Bringing back deleted commitments is
+  a separate, unchecked option.
 
 Export and backup files go to the location you choose. Copying or sharing
 sends selected information to the Android clipboard or the app you choose.

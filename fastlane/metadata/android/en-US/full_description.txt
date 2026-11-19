@@ -10,7 +10,7 @@ See your money clearly:
 - Unaccounted rows for changes between balance statements that recorded transactions do not explain — not invented transactions or guesses about missing payments
 - Bank-stated reasons, payment channels and matched merchants when available; an OTP alone never confirms a transaction
 - Save private notes and reusable tags together; export your filtered view as CSV
-- One-off and recurring payments and receipts on consistent schedules, with separate payable and receivable totals
+- One-off and recurring payments and receipts on consistent schedules, with editable amounts for individual recurring dues and separate payable and receivable totals
 - Reminder taps open and highlight the due payment with its name and amount visible; Android restrictions can delay delivery
 
 Choose how it looks:
