@@ -13,6 +13,7 @@ import android.os.Looper;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
+import android.text.method.TextKeyListener;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.CheckBox;
@@ -1086,14 +1087,12 @@ public final class CommitmentsActivity extends Activity {
             margin(0, 4, 0, 8));
         form.addView(text(getString(current.isPayment() ? R.string.commitments_edit_due_payment
             : R.string.commitments_edit_due_receipt), 14, muted));
-        EditText amount = new EditText(this);
+        EditText amount = amountField();
         amount.setId(View.generateViewId());
         TextView amountLabel = text(getString(R.string.commitments_amount_hint,
             CurrencyHelper.label(this)), 13, muted, medium());
         amountLabel.setLabelFor(amount.getId());
         form.addView(amountLabel, margin(0, 12, 0, 0));
-        amount.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        amount.setTypeface(Fonts.text(this), Typeface.NORMAL);
         amount.setText(formatMagnitude(current.amountAt(row.date)));
         amount.setSelectAllOnFocus(true);
         form.addView(amount, new LinearLayout.LayoutParams(-1, -2));
@@ -1249,11 +1248,9 @@ public final class CommitmentsActivity extends Activity {
 
         LinearLayout amountRow = new LinearLayout(this);
         amountRow.setOrientation(LinearLayout.HORIZONTAL);
-        EditText amount = new EditText(this);
+        EditText amount = amountField();
         amount.setHint(getString(R.string.commitments_amount_hint, CurrencyHelper.label(this)));
-        amount.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         if (existing != null) amount.setText(formatMagnitude(existing.amount));
-        amount.setTypeface(Fonts.text(this), Typeface.NORMAL);
         amountRow.addView(amount, new LinearLayout.LayoutParams(0, -2, 1));
         form.addView(amountRow, margin(0, 8, 0, 0));
 
@@ -1664,6 +1661,17 @@ public final class CommitmentsActivity extends Activity {
 
     private boolean isToman() {
         return CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(this));
+    }
+
+    private EditText amountField() {
+        EditText field = new EditText(this);
+        field.setSingleLine(true);
+        // Keep the numeric keyboard, but let the parser validate pasted input as entered.
+        // The platform numeric filter can silently drop the Persian decimal separator.
+        field.setKeyListener(TextKeyListener.getInstance());
+        field.setRawInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        field.setTypeface(Fonts.text(this), Typeface.NORMAL);
+        return field;
     }
 
     /** A stored rial magnitude written in the display currency. Toman keeps one decimal place

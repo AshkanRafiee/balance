@@ -339,7 +339,10 @@ public class CommitmentsInteractionTest {
                 activity.getString(R.string.commitments_edit_due_receipt)));
             EditText amount = findEditText(editor.getWindow().getDecorView(), "100");
             assertNotNull(amount);
-            amount.setText("123.4");
+            // Editable replacement follows the same input-filter path as a paste.
+            String localizedAmount = "۱۲۳٫۴";
+            amount.getText().replace(0, amount.length(), localizedAmount);
+            assertEquals(localizedAmount, amount.getText().toString());
             assertTrue(editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick());
             View updatedTarget = activity.getWindow().getDecorView().findViewWithTag(target.getTag());
             assertNotNull(updatedTarget);
