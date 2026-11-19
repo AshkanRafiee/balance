@@ -14,8 +14,11 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.math.BigInteger;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.List;
 
 /** The commitment model, its store and its recurrence engine (pure logic plus store round trip). */
@@ -248,13 +251,13 @@ public class CommitmentTest {
         long start = Commitment.millisOf(2026, 10, 7, CalendarSystem.GREGORIAN);
         Commitment c = Commitment.create("daily", -20, Commitment.DAILY, start,
             Commitment.millisOf(2026, 10, 9, CalendarSystem.GREGORIAN), false, 0);
-        assertEquals(Long.valueOf(-60), Commitment.totalAmount(c, CalendarSystem.GREGORIAN));
+        assertEquals(BigInteger.valueOf(-60), Commitment.totalAmount(c, CalendarSystem.GREGORIAN));
 
         List<Long> paid = new ArrayList<>();
         paid.add(start);
         Commitment settled = new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
             false, paid, c.remind, c.remindBeforeMs);
-        assertEquals(Long.valueOf(-60), Commitment.totalAmount(settled, CalendarSystem.GREGORIAN));
+        assertEquals(BigInteger.valueOf(-60), Commitment.totalAmount(settled, CalendarSystem.GREGORIAN));
     }
 
     @Test public void totalAmount_openEndedHasNoFiniteTotal() {
@@ -267,21 +270,25 @@ public class CommitmentTest {
         long start = Commitment.millisOf(2026, 10, 7, CalendarSystem.GREGORIAN);
         Commitment c = Commitment.create("long", 1, Commitment.DAILY, start,
             Long.MAX_VALUE, false, 0);
-        Long total = Commitment.totalAmount(c, CalendarSystem.GREGORIAN);
+        BigInteger total = Commitment.totalAmount(c, CalendarSystem.GREGORIAN);
         assertNotNull(total);
         assertTrue(total.longValue() > Commitment.MAX_TOTAL_OCCURRENCES);
     }
 
-    @Test public void totalAmount_returnsNullOnlyWhenMultiplicationOverflows() {
+    @Test public void totalAmount_staysExactWhenAmountsExceedLongRange() {
         long start = Commitment.millisOf(2026, 10, 7, CalendarSystem.GREGORIAN);
         Commitment minOnce = Commitment.create("min", Long.MIN_VALUE, Commitment.ONCE, start,
             null, false, 0);
-        assertEquals(Long.valueOf(Long.MIN_VALUE),
+        assertEquals(BigInteger.valueOf(Long.MIN_VALUE),
             Commitment.totalAmount(minOnce, CalendarSystem.GREGORIAN));
 
         Commitment overflow = Commitment.create("overflow", Long.MAX_VALUE, Commitment.DAILY,
-            start, day(start, 1), false, 0);
-        assertNull(Commitment.totalAmount(overflow, CalendarSystem.GREGORIAN));
+            start, day(start, 1), false, 0, CalendarSystem.GREGORIAN, ZoneId.systemDefault());
+        BigInteger max = BigInteger.valueOf(Long.MAX_VALUE);
+        assertEquals(max.add(max), Commitment.totalAmount(overflow, CalendarSystem.GREGORIAN));
+        Commitment reduced = overflow.withOccurrenceAmounts(Collections.singletonMap(start, 1L));
+        assertEquals(max.add(BigInteger.ONE),
+            Commitment.totalAmount(reduced, CalendarSystem.GREGORIAN));
     }
 
     // ---- settlement -----------------------------------------------------------------

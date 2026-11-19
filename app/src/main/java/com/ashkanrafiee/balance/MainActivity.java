@@ -41,6 +41,7 @@ import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
+import java.math.BigInteger;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -246,6 +247,11 @@ public class MainActivity extends Activity {
             pendingLockAction = null;
             lockOverlay.showLock();
         }
+    }
+
+    private String commitmentMagnitude(BigInteger amount) {
+        return CommitmentsActivity.displayMagnitude(this, LocaleHelper.isPersian(this),
+            amount.abs());
     }
 
     private void scheduleReminders() {
@@ -1744,8 +1750,8 @@ public class MainActivity extends Activity {
                     view.commitmentSummaryGood, view.hasCommitments);
                 if (view.commitmentSummary != null) {
                     CommitmentsActivity.Summary summary = view.commitmentSummary;
-                    java.util.Collections.addAll(state, summary.overduePay, summary.thisMonthPay,
-                        summary.overdueReceive, summary.thisMonthReceive);
+                    java.util.Collections.addAll(state, summary.remainingPay(),
+                        summary.remainingReceive());
                 }
             }
             for (java.util.Map.Entry<String, Bank> entry : view.banks.entrySet()) {
@@ -1909,13 +1915,13 @@ public class MainActivity extends Activity {
                     ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 4, 0));
             } else {
                 CommitmentsActivity.Summary summary = view.commitmentSummary;
-                long pay = summary.overduePay + summary.thisMonthPay;
-                long receive = summary.overdueReceive + summary.thisMonthReceive;
                 LinearLayout values = ExpressiveUi.row(this);
-                values.addView(commitmentValue(R.string.commitments_remaining_payable, pay,
-                    R.color.negative), new LinearLayout.LayoutParams(0, -2, 1));
-                values.addView(commitmentValue(R.string.commitments_remaining_receivable, receive,
-                    R.color.accent), new LinearLayout.LayoutParams(0, -2, 1));
+                values.addView(commitmentValue(R.string.commitments_remaining_payable,
+                    summary.remainingPay(), R.color.negative),
+                    new LinearLayout.LayoutParams(0, -2, 1));
+                values.addView(commitmentValue(R.string.commitments_remaining_receivable,
+                    summary.remainingReceive(), R.color.accent),
+                    new LinearLayout.LayoutParams(0, -2, 1));
                 card.addView(values, ExpressiveUi.widthMatch(this, 12, 0));
             }
             if (view.commitmentSummaryFailed && view.commitmentSummaryGood)
@@ -1939,12 +1945,12 @@ public class MainActivity extends Activity {
             card.addView(retry, ExpressiveUi.widthMatch(this, 6, 0));
         }
 
-        private LinearLayout commitmentValue(int labelRes, long amount, int colorRes) {
+        private LinearLayout commitmentValue(int labelRes, BigInteger amount, int colorRes) {
             LinearLayout column = ExpressiveUi.column(this);
             TextView label = ExpressiveUi.label(this, getString(labelRes), 11,
                 ExpressiveUi.color(this, R.color.muted));
             TextView value = ExpressiveUi.heading(this, view.hidden ? "••••••"
-                : CurrencyHelper.amount(MainActivity.this, Math.abs(amount)), 19);
+                : commitmentMagnitude(amount), 19);
             value.setTextColor(ExpressiveUi.color(this, colorRes));
             column.addView(label);
             column.addView(value, ExpressiveUi.widthMatch(this, 4, 0));
@@ -3345,8 +3351,6 @@ public class MainActivity extends Activity {
                 ensureCommitmentSummary();
             }
             CommitmentsActivity.Summary summary = commitmentSummary;
-            long pay = summary.overduePay + summary.thisMonthPay;
-            long receive = summary.overdueReceive + summary.thisMonthReceive;
             if (!hasCommitments) {
                 Paint.Align emptyAlign = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
                 float emptyX = rtl ? right : left;
@@ -3363,9 +3367,9 @@ public class MainActivity extends Activity {
                 payCenter, top + 41, 10, muted, Paint.Align.CENTER);
             text(c, fit(getString(R.string.commitments_remaining_receivable), 10, columnWidth),
                 receiveCenter, top + 41, 10, muted, Paint.Align.CENTER);
-            text(c, fit(hidden ? "••••••" : displayAmount(Math.abs(pay)), 11, columnWidth),
+            text(c, fit(hidden ? "••••••" : displayAmount(summary.remainingPay()), 11, columnWidth),
                 payCenter, top + 60, 11, resColor(R.color.negative), Paint.Align.CENTER);
-            text(c, fit(hidden ? "••••••" : displayAmount(Math.abs(receive)), 11, columnWidth),
+            text(c, fit(hidden ? "••••••" : displayAmount(summary.remainingReceive()), 11, columnWidth),
                 receiveCenter, top + 60, 11, accent, Paint.Align.CENTER);
         }
 
@@ -3378,8 +3382,8 @@ public class MainActivity extends Activity {
             return CalDate.monthName(civil[1], iran, persian) + " " + year;
         }
 
-        String displayAmount(long rial) {
-            return CurrencyHelper.amount(MainActivity.this, rial) + " "
+        String displayAmount(BigInteger rial) {
+            return commitmentMagnitude(rial) + " "
                 + CurrencyHelper.label(MainActivity.this);
         }
 

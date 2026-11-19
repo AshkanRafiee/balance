@@ -2,6 +2,7 @@ package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -11,6 +12,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 
 import java.io.StringWriter;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -54,10 +56,91 @@ public class CommitmentStoreTest {
             false, Collections.singletonList(day), 0,
             Collections.singletonList(civilDay(day, 1)), false, 0);
         assertTrue(CommitmentStore.upsert(context, once));
+        assertFalse(CommitmentStore.setOccurrenceAmount(context, "once-marks", day, true, -200L));
         assertEquals("{\"paidThrough\":0,\"paid\":[],\"unpaid\":[]}", exportedSettlements("once-marks"));
         assertTrue(CommitmentStore.settle(context, "once-marks", day));
         assertTrue(CommitmentStore.get(context, "once-marks").done);
         assertEquals("{\"paidThrough\":0,\"paid\":[],\"unpaid\":[]}", exportedSettlements("once-marks"));
+    }
+
+    @Test public void occurrenceEditsAreIndependentOfSettlementAndResetToTheCurrentDefault()
+            throws Exception {
+        CalendarSystem cal = CalendarSystem.GREGORIAN;
+        long first = Commitment.millisOf(2026, 3, 7, cal);
+        long second = civilDay(first, 1);
+        long last = civilDay(first, 2);
+        Commitment c = Commitment.create("Daily", -100, Commitment.DAILY, first, last,
+            false, 0, cal, FIXTURE_ZONE);
+        assertTrue(CommitmentStore.upsert(context, c));
+        assertTrue(CommitmentStore.setOccurrenceAmount(context, c.id, first, true, -180L));
+        assertTrue(CommitmentStore.setOccurrenceAmount(context, c.id, second, true, -30L));
+        assertTrue(CommitmentStore.settle(context, c.id, first));
+        assertTrue(CommitmentStore.setOccurrenceAmount(context, c.id, first, true, -200L));
+
+        Commitment saved = CommitmentStore.read(context).get(0);
+        assertEquals(-200, saved.amountAt(first));
+        assertEquals(-30, saved.amountAt(second));
+        assertEquals(-100, saved.amountAt(last));
+        assertEquals(BigInteger.valueOf(-330), Commitment.totalAmount(saved, cal));
+        assertTrue(saved.isSettled(first));
+        assertFalse(saved.isSettled(second));
+        assertTrue(CommitmentStore.undo(context, c.id, first));
+        assertEquals(-200, CommitmentStore.get(context, c.id).amountAt(first));
+
+        Commitment renamed = new Commitment(c.id, "New name", -120, c.frequency, first, last,
+            false, null, 0, null, false, 0, c.schedule)
+            .withOccurrenceAmounts(saved.occurrenceAmounts);
+        assertTrue(CommitmentStore.upsert(context, renamed));
+        assertTrue(CommitmentStore.setOccurrenceAmount(context, c.id, first, true, null));
+        Commitment reset = CommitmentStore.get(context, c.id);
+        assertNull(reset.occurrenceAmountOverride(first));
+        assertEquals(-120, reset.amountAt(first));
+        assertEquals(-30, reset.amountAt(second));
+        assertEquals(BigInteger.valueOf(-270), Commitment.totalAmount(reset, cal));
+    }
+
+    @Test public void staleAndInvalidOccurrenceEditsCannotAlterOrMoveAnOverride() throws Exception {
+        CalendarSystem cal = CalendarSystem.GREGORIAN;
+        long first = Commitment.millisOf(2026, 1, 31, cal);
+        long due = Commitment.millisOf(2026, 2, 28, cal);
+        long last = Commitment.millisOf(2026, 3, 31, cal);
+        Commitment c = Commitment.create("Monthly", -100, Commitment.MONTHLY, first, last,
+            false, 0, cal, FIXTURE_ZONE);
+        assertTrue(CommitmentStore.upsert(context, c));
+        String before = CommitmentStore.revision(context);
+        assertTrue(CommitmentStore.setOccurrenceAmount(context, c.id, due, true, -100L));
+        assertFalse(CommitmentStore.setOccurrenceAmount(context, c.id, due, true, 0L));
+        assertFalse(CommitmentStore.setOccurrenceAmount(context, c.id, due, true, 100L));
+        assertFalse(CommitmentStore.setOccurrenceAmount(context, c.id, due + 1, true, -500L));
+        assertEquals(before, CommitmentStore.revision(context));
+        assertTrue(CommitmentStore.setOccurrenceAmount(context, c.id, due, true, -500L));
+        Commitment edited = CommitmentStore.get(context, c.id);
+
+        // February 28 is also a weekly due. Moving the start one day makes that date disappear.
+        long movedStart = civilDay(first, 1);
+        Commitment moved = new Commitment(c.id, c.name, c.amount, Commitment.WEEKLY,
+            movedStart, last, false, null, 0, null, false, 0, new CommitmentSchedule(cal, FIXTURE_ZONE,
+                CommitmentSchedule.day(movedStart, FIXTURE_ZONE), c.schedule.last))
+            .withOccurrenceAmounts(edited.occurrenceAmounts);
+        assertTrue(CommitmentStore.upsert(context, moved));
+        assertFalse(CommitmentStore.setOccurrenceAmount(context, c.id, due, true, -800L));
+        Commitment storedMoved = CommitmentStore.get(context, c.id);
+        assertNull(storedMoved.occurrenceAmountOverride(due));
+        assertEquals(Commitment.totalAmount(moved.withOccurrenceAmounts(Collections.emptyMap()), cal),
+            Commitment.totalAmount(storedMoved, cal));
+
+        Commitment receive = new Commitment(c.id, c.name, 100L, c.frequency, first, last,
+            false, null, 0, null, false, 0, c.schedule)
+            .withOccurrenceAmounts(edited.occurrenceAmounts);
+        assertTrue(CommitmentStore.upsert(context, receive));
+        assertFalse(CommitmentStore.setOccurrenceAmount(context, c.id, due, true, null));
+        assertEquals(100, CommitmentStore.get(context, c.id).amountAt(due));
+        assertEquals(BigInteger.valueOf(300), Commitment.totalAmount(receive, cal));
+
+        assertTrue(CommitmentStore.upsert(context, c.withOccurrenceAmounts(edited.occurrenceAmounts)));
+        assertEquals(-500, CommitmentStore.get(context, c.id).amountAt(due));
+        assertTrue(CommitmentStore.delete(context, c.id));
+        assertFalse(CommitmentStore.setOccurrenceAmount(context, c.id, due, true, -900L));
     }
 
     private String exportedSettlements(String id) throws Exception {

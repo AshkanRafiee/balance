@@ -9,8 +9,12 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** The commitments screen grouping: overdue dues, windowed months and their totals. */
 @RunWith(AndroidJUnit4.class)
@@ -35,7 +39,8 @@ public class CommitmentsViewTest {
             new ArrayList<Commitment>(), CalendarSystem.GREGORIAN, OCT_7_NOON, 12);
         assertTrue(summary.overdue.isEmpty());
         assertTrue(summary.months.isEmpty());
-        assertEquals(0, summary.payTotal + summary.receiveTotal);
+        assertEquals(BigInteger.ZERO, summary.payTotal);
+        assertEquals(BigInteger.ZERO, summary.receiveTotal);
     }
 
     @Test public void currentMonth_groupsItsDuesInOrderWithTotals() {
@@ -50,10 +55,10 @@ public class CommitmentsViewTest {
         assertEquals("salary", october.rows.get(0).commitment.name);
         assertEquals("rent", october.rows.get(1).commitment.name);
         assertEquals("gift", october.rows.get(2).commitment.name);
-        assertEquals(-7000, october.pay);
-        assertEquals(9000, october.receive);
+        assertAmount(-7000, october.pay);
+        assertAmount(9000, october.receive);
         assertEquals("current-month dues are not duplicated as overdue", 1, summary.overdue.size());
-        assertEquals(0, summary.overdueReceive);
+        assertAmount(0, summary.overdueReceive);
     }
 
     @Test public void series_continueThroughTheWindowAndAcrossYears() {
@@ -68,8 +73,8 @@ public class CommitmentsViewTest {
         assertEquals(9, summary.months.get(11).month);
         assertEquals(2, summary.months.get(11).rows.size());
         // Twelve monthly rents, the one-time gift, and the September rent sitting overdue.
-        assertEquals(-5000 * 13 - 2000, summary.payTotal);
-        assertEquals(9000 * 12, summary.receiveTotal);
+        assertAmount(-5000 * 13 - 2000, summary.payTotal);
+        assertAmount(9000 * 12, summary.receiveTotal);
     }
 
     @Test public void overdue_collectsUnsettledPastDues() {
@@ -82,8 +87,8 @@ public class CommitmentsViewTest {
         // Six September daily dues plus the September rent. The October salary belongs only to
         // the current-month group, not to overdue as well.
         assertEquals(7, summary.overdue.size());
-        assertEquals(-100 * 6 - 5000, summary.overduePay);
-        assertEquals(0, summary.overdueReceive);
+        assertAmount(-100 * 6 - 5000, summary.overduePay);
+        assertAmount(0, summary.overdueReceive);
         // Settling the rent leaves only the daily dues overdue.
         List<Commitment> settled = new ArrayList<>();
         for (Commitment c : commitments) {
@@ -99,7 +104,7 @@ public class CommitmentsViewTest {
         assertEquals(6, resettled.overdue.size());
         assertEquals(1, resettled.settledMonths.size());
         assertEquals("rent", resettled.settledMonths.get(0).rows.get(0).commitment.name);
-        assertEquals(-600, resettled.overduePay);
+        assertAmount(-600, resettled.overduePay);
     }
 
     @Test public void settledDues_showWithoutBeingSummed() {
@@ -119,7 +124,7 @@ public class CommitmentsViewTest {
         }
         assertTrue(october != null);
         assertEquals(3, october.rows.size());
-        assertEquals(-5000, october.pay);
+        assertAmount(-5000, october.pay);
         assertTrue(summary.settledMonths.isEmpty());
     }
 
@@ -148,8 +153,8 @@ public class CommitmentsViewTest {
         assertEquals("salary", october.rows.get(0).commitment.name);
         assertEquals("rent", october.rows.get(1).commitment.name);
         assertEquals("gift", october.rows.get(2).commitment.name);
-        assertEquals(-5000, october.pay);
-        assertEquals(0, october.receive);
+        assertAmount(-5000, october.pay);
+        assertAmount(0, october.receive);
     }
 
     @Test public void olderPaid_keepsPreviousRecurringAndOneTimeRowsOutOfOverdue() {
@@ -176,7 +181,8 @@ public class CommitmentsViewTest {
         assertEquals(2, summary.settledMonths.size());
         assertTrue(!summary.settledMonths.get(0).rows.isEmpty());
         assertTrue(!summary.settledMonths.get(1).rows.isEmpty());
-        assertEquals(0, summary.overduePay + summary.overdueReceive);
+        assertAmount(0, summary.overduePay);
+        assertAmount(0, summary.overdueReceive);
     }
 
     @Test public void overdueRecurringDuesOlderThanAYearRemainVisibleAndCounted() {
@@ -186,16 +192,77 @@ public class CommitmentsViewTest {
             java.util.Collections.singletonList(old), CalendarSystem.GREGORIAN, OCT_7_NOON, 12);
         assertEquals(CommitmentsActivity.MAX_OVERDUE_ROWS, summary.overdue.size());
         assertTrue(summary.overdueCount > 366);
-        assertEquals(-100L * summary.overdueCount, summary.overduePay);
+        assertAmount(-100L * summary.overdueCount, summary.overduePay);
     }
 
     @Test public void heroTotal_coversThisMonthPlusOverdue() {
         CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
             sample(), CalendarSystem.GREGORIAN, OCT_7_NOON, 12);
-        assertEquals(-5000, summary.overduePay);
-        assertEquals(0, summary.overdueReceive);
-        assertEquals(-7000, summary.thisMonthPay);
-        assertEquals(9000, summary.thisMonthReceive);
+        assertAmount(-5000, summary.overduePay);
+        assertAmount(0, summary.overdueReceive);
+        assertAmount(-7000, summary.thisMonthPay);
+        assertAmount(9000, summary.thisMonthReceive);
+    }
+
+    @Test public void customDues_changeTheCorrectGroupsButSettledDuesAreExcluded() {
+        CalendarSystem cal = CalendarSystem.GREGORIAN;
+        java.time.ZoneId zone = java.time.ZoneId.systemDefault();
+        long august = Commitment.millisOf(2026, 8, 5, cal);
+        long september = Commitment.millisOf(2026, 9, 5, cal);
+        long october = Commitment.millisOf(2026, 10, 5, cal);
+        long november = Commitment.millisOf(2026, 11, 5, cal);
+        Commitment pay = Commitment.create("rent", -5000, Commitment.MONTHLY, august,
+            november, false, 0, cal, zone);
+        Map<Long, Long> payEdits = new HashMap<>();
+        payEdits.put(august, -12000L);
+        payEdits.put(september, -7000L);
+        payEdits.put(october, -3000L);
+        pay = pay.withOccurrenceAmounts(payEdits)
+            .withSettlements(false, Arrays.asList(august), null);
+        Commitment receive = Commitment.create("salary", 9000, Commitment.MONTHLY, september,
+            november, false, 0, cal, zone);
+        Map<Long, Long> receiveEdits = new HashMap<>();
+        receiveEdits.put(september, 12000L);
+        receiveEdits.put(october, 22000L);
+        receiveEdits.put(november, 2000L);
+        receive = receive.withOccurrenceAmounts(receiveEdits)
+            .withSettlements(false, Arrays.asList(october), null);
+
+        CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
+            Arrays.asList(pay, receive), cal, OCT_7_NOON, 12);
+        assertAmount(-7000, summary.overduePay);
+        assertAmount(12000, summary.overdueReceive);
+        assertAmount(-3000, summary.thisMonthPay);
+        assertAmount(0, summary.thisMonthReceive);
+        assertAmount(-10000, summary.remainingPay());
+        assertAmount(12000, summary.remainingReceive());
+        assertAmount(-15000, summary.payTotal);
+        assertAmount(14000, summary.receiveTotal);
+        assertEquals(-12000, summary.settledMonths.get(0).rows.get(0).amount);
+        assertEquals(22000, summary.months.get(0).rows.get(1).amount);
+        assertTrue(summary.months.get(0).rows.get(1).settled);
+        assertAmount(-5000, summary.months.get(1).pay);
+        assertAmount(2000, summary.months.get(1).receive);
+    }
+
+    @Test public void summaries_doNotOverflowSignedAmounts() {
+        CalendarSystem cal = CalendarSystem.GREGORIAN;
+        long september = Commitment.millisOf(2026, 9, 5, cal);
+        long october = Commitment.millisOf(2026, 10, 5, cal);
+        Commitment pay = Commitment.create("rent", Long.MIN_VALUE, Commitment.MONTHLY,
+            september, october, false, 0);
+        Commitment receive = Commitment.create("salary", Long.MAX_VALUE, Commitment.MONTHLY,
+            september, october, false, 0);
+        CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
+            Arrays.asList(pay, receive), cal, OCT_7_NOON, 12);
+        assertEquals(new BigInteger("-18446744073709551616"), summary.remainingPay());
+        assertEquals(new BigInteger("18446744073709551614"), summary.remainingReceive());
+        assertEquals(summary.remainingPay(), summary.payTotal);
+        assertEquals(summary.remainingReceive(), summary.receiveTotal);
+    }
+
+    private static void assertAmount(long expected, BigInteger actual) {
+        assertEquals(BigInteger.valueOf(expected), actual);
     }
 
     @Test public void onceFrequency_hidesEndDateControls() {

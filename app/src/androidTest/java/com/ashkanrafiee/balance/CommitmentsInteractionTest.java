@@ -3,12 +3,14 @@ package com.ashkanrafiee.balance;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import android.Manifest;
 import android.app.AlertDialog;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
@@ -16,9 +18,11 @@ import android.os.LocaleList;
 import android.os.SystemClock;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.TextView;
 
+import androidx.lifecycle.Lifecycle;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -32,13 +36,13 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 
 /**
- * The commitments screen's two layers of interaction: an occurrence settles exactly its due day,
- * while the definition remains available through Manage, and the dashboard distinguishes an empty
- * definition list from a list with no currently remaining dues.
+ * The commitments screen's two layers of interaction: a due can be edited or settled independently,
+ * while the series stays in Manage and the dashboard displays the remaining amounts.
  */
 @RunWith(AndroidJUnit4.class)
 public class CommitmentsInteractionTest {
@@ -53,6 +57,8 @@ public class CommitmentsInteractionTest {
     private int originalRegion;
     private boolean originalShowCommitments;
     private boolean originalOnboardingSeen;
+    private boolean originalAutoHide;
+    private boolean originalHidden;
     private List<Commitment> originalCommitments;
     private ActivityScenario<CommitmentsActivity> commitmentsScenario;
     private ActivityScenario<MainActivity> mainScenario;
@@ -65,13 +71,16 @@ public class CommitmentsInteractionTest {
         originalRegion = RegionHelper.region(ctx);
         originalShowCommitments = BalanceData.getShowCommitments(ctx);
         originalOnboardingSeen = BalanceData.isOnboardingSeen(ctx);
+        originalAutoHide = BalanceData.isAutoHide(ctx);
+        originalHidden = BalanceData.isHidden(ctx);
         // Detach lazy settlement lists before clear() invalidates their store revision, keeping
         // the original frozen calendar/zone rather than recapturing it during restoration.
         List<Commitment> snapshot = new ArrayList<>();
         for (Commitment c : BalanceData.readCommitments(ctx)) {
             snapshot.add(new Commitment(c.id, c.name, c.amount, c.frequency, c.start, c.end,
                 c.done, new ArrayList<>(c.paid), c.legacyPaidThrough, new ArrayList<>(c.unpaid),
-                c.remind, c.remindBeforeMs).withSchedule(c.schedule));
+                c.remind, c.remindBeforeMs).withSchedule(c.schedule)
+                .withOccurrenceAmounts(c.occurrenceAmounts));
         }
         originalCommitments = snapshot;
         LockManager.disable(ctx);
@@ -111,6 +120,9 @@ public class CommitmentsInteractionTest {
     private void restoreSettings() {
         try {
             BalanceData.setShowCommitments(ctx, originalShowCommitments);
+            BalanceData.setAutoHide(ctx, originalAutoHide);
+            ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit()
+                .putBoolean(BalanceData.KEY_HIDDEN, originalHidden).apply();
         } finally {
             try {
                 BalanceData.setOnboardingSeen(ctx, originalOnboardingSeen);
@@ -129,11 +141,11 @@ public class CommitmentsInteractionTest {
         }
     }
 
-    @Test public void monthlyPaymentOccurrence_hasNoRowEditorAndMarkUndoKeepsExactDate() {
+    @Test public void monthlyPaymentOccurrence_hasSeparateEditAndMarkUndoKeepsExactDate() {
         assertOccurrenceRoundTrip(-125_000L, R.string.commitments_mark_paid);
     }
 
-    @Test public void monthlyReceiptOccurrence_hasNoRowEditorAndMarkUndoKeepsExactDate() {
+    @Test public void monthlyReceiptOccurrence_hasSeparateEditAndMarkUndoKeepsExactDate() {
         assertOccurrenceRoundTrip(275_000L, R.string.commitments_mark_received);
     }
 
@@ -154,6 +166,8 @@ public class CommitmentsInteractionTest {
             assertFalse("an occurrence row must not open the series editor", row.isClickable());
             assertFalse("a row without a listener must return false from performClick",
                 row.performClick());
+            assertNotNull("editing the due must be a distinct row action",
+                findText(row, activity.getString(R.string.commitments_edit_due)));
             assertTrue("the settle action must remain clickable", action.performClick());
         });
 
@@ -172,6 +186,8 @@ public class CommitmentsInteractionTest {
             View row = (View) undo.getParent();
             assertFalse("the settled occurrence row must remain non-clickable", row.isClickable());
             assertFalse(row.performClick());
+            assertNotNull("a settled due still has an Edit action",
+                findText(row, activity.getString(R.string.commitments_edit_due)));
             assertTrue("Undo must remain a direct row action", undo.performClick());
         });
 
@@ -179,6 +195,169 @@ public class CommitmentsInteractionTest {
         assertEquals(1, restored.size());
         assertTrue("Undo must remove only the marked occurrence date", restored.get(0).paid.isEmpty());
         assertFalse(restored.get(0).done);
+    }
+
+    @Test public void editAndResetARecurringDue_withoutChangingItsSiblingOrSettlement() throws Exception {
+        Calendar current = Calendar.getInstance();
+        current.set(Calendar.DAY_OF_MONTH, 1);
+        long next = Commitment.startOfDay(current.getTimeInMillis());
+        current.add(Calendar.MONTH, -1);
+        long due = Commitment.startOfDay(current.getTimeInMillis());
+        Commitment source = Commitment.create("monthly rent", -125_000L, Commitment.MONTHLY,
+            due, next, false, 0);
+        BalanceData.writeCommitments(ctx, singleton(source));
+        commitmentsScenario = ActivityScenario.launch(CommitmentsActivity.class);
+        // Simulate a newer saved amount after the row was rendered.
+        assertTrue(CommitmentStore.setOccurrenceAmount(ctx, source.id, due, true, -150_000L));
+        commitmentsScenario.onActivity(activity -> {
+            AlertDialog editor = openDueEditor(activity, activity.getWindow().getDecorView());
+            View form = editor.getWindow().getDecorView();
+            assertNotNull(findText(form, source.name));
+            assertNotNull(findText(form, activity.getString(R.string.commitments_edit_due_payment)));
+            EditText amount = findEditText(form, "150000");
+            assertNotNull("editing must prefill the current effective magnitude", amount);
+            TextView save = editor.getButton(AlertDialog.BUTTON_POSITIVE);
+            amount.setText("0");
+            assertFalse(save.isEnabled());
+            amount.setText("225000");
+            assertTrue(save.isEnabled());
+            assertTrue(save.performClick());
+            View screen = activity.getWindow().getDecorView();
+            assertNotNull(findText(screen, "−225,000"));
+            assertNotNull(findText(screen, "−125,000"));
+            clickText(screen, activity.getString(R.string.commitments_mark_paid));
+        });
+        Commitment marked = CommitmentStore.get(ctx, source.id);
+        assertEquals(-225_000L, marked.amountAt(due));
+        assertTrue(marked.isSettled(due));
+        assertEquals(-125_000L, marked.amountAt(next));
+        assertFalse(marked.isSettled(next));
+
+        commitmentsScenario.onActivity(activity -> {
+            View screen = activity.getWindow().getDecorView();
+            clickText(screen, activity.getString(R.string.commitments_show_older_paid, 1));
+            TextView undo = findText(screen, activity.getString(R.string.commitments_undo));
+            assertNotNull(undo);
+            AlertDialog editor = openDueEditor(activity, (View) undo.getParent());
+            EditText amount = findEditText(editor.getWindow().getDecorView(), "225000");
+            assertNotNull(amount);
+            amount.setText("75000");
+            assertTrue(editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick());
+        });
+        Commitment changed = CommitmentStore.get(ctx, source.id);
+        assertEquals(-75_000L, changed.amountAt(due));
+        assertTrue("editing the amount must not undo a settlement", changed.isSettled(due));
+        assertEquals(-125_000L, changed.amountAt(next));
+
+        commitmentsScenario.onActivity(activity -> {
+            View screen = activity.getWindow().getDecorView();
+            assertNotNull("the older paid group must stay expanded after editing",
+                findText(screen, activity.getString(R.string.commitments_hide_older_paid)));
+            TextView undo = findText(screen, activity.getString(R.string.commitments_undo));
+            assertNotNull(undo);
+            assertTrue(undo.performClick());
+            AlertDialog editor = openDueEditor(activity, screen);
+            assertNotNull(findEditText(editor.getWindow().getDecorView(), "75000"));
+            TextView reset = editor.getButton(AlertDialog.BUTTON_NEUTRAL);
+            assertEquals(activity.getString(R.string.commitments_reset_due_amount),
+                reset.getText().toString());
+            assertTrue(reset.performClick());
+        });
+        Commitment reset = CommitmentStore.get(ctx, source.id);
+        assertNull(reset.occurrenceAmountOverride(due));
+        assertEquals(-125_000L, reset.amountAt(due));
+        assertFalse(reset.isSettled(due));
+        assertEquals(-125_000L, reset.amountAt(next));
+    }
+
+    @Test public void oneTimeDueIsOnlyEditedFromManage() {
+        Commitment once = Commitment.create("single bill", -1000, Commitment.ONCE,
+            Commitment.startOfDay(System.currentTimeMillis()), null, false, 0);
+        BalanceData.writeCommitments(ctx, singleton(once));
+        commitmentsScenario = ActivityScenario.launch(CommitmentsActivity.class);
+        commitmentsScenario.onActivity(activity -> {
+            View screen = activity.getWindow().getDecorView();
+            assertNotNull(findText(screen, once.name));
+            assertNull(findText(screen, activity.getString(R.string.commitments_edit_due)));
+            assertNotNull(openSeriesEditor(activity, once.name));
+        });
+    }
+
+    @Test public void dueEditorIsSecureAndDismissedOnPause() {
+        long due = Commitment.startOfDay(System.currentTimeMillis());
+        Commitment source = Commitment.create("private bill", -1000L, Commitment.MONTHLY,
+            due, null, false, 0);
+        BalanceData.writeCommitments(ctx, singleton(source));
+        LockManager.enable(ctx, "test-password", false, false);
+        commitmentsScenario = ActivityScenario.launch(CommitmentsActivity.class);
+        commitmentsScenario.onActivity(activity -> {
+            View screen = activity.getWindow().getDecorView();
+            assertTrue(LockManager.isSessionLocked());
+            clickText(screen, activity.getString(R.string.commitments_edit_due));
+            assertNull(dialogField(activity, "activeDialog"));
+            EditText code = findEditText(screen, "");
+            assertNotNull(code);
+            code.setText("test-password");
+            TextView unlock = findText(screen, activity.getString(R.string.lock_action_unlock));
+            assertNotNull(unlock);
+            assertTrue(((View) unlock.getParent()).performClick());
+        });
+        long deadline = SystemClock.uptimeMillis() + 15000;
+        while (LockManager.isSessionLocked() && SystemClock.uptimeMillis() < deadline)
+            SystemClock.sleep(20);
+        assertFalse("verification must finish", LockManager.isSessionLocked());
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        AlertDialog[] opened = {null};
+        commitmentsScenario.onActivity(activity -> {
+            opened[0] = openDueEditor(activity, activity.getWindow().getDecorView());
+            assertTrue((opened[0].getWindow().getAttributes().flags
+                & WindowManager.LayoutParams.FLAG_SECURE) != 0);
+        });
+        commitmentsScenario.moveToState(Lifecycle.State.STARTED);
+        commitmentsScenario.onActivity(activity -> {
+            assertFalse(opened[0].isShowing());
+            assertNull(dialogField(activity, "activeDialog"));
+        });
+    }
+
+    @Test public void aFutureReminderTargetCanBeEdited_andAStaleSaveDoesNotRetarget() throws Exception {
+        CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_TOMAN);
+        long future = Commitment.millisOf(2090, 1, 15, CalendarSystem.GREGORIAN);
+        Commitment source = Commitment.create("future rebate", 1_000L, Commitment.MONTHLY,
+            future, null, false, 0);
+        BalanceData.writeCommitments(ctx, singleton(source));
+        commitmentsScenario = ActivityScenario.launch(CommitmentReminders
+            .dueIntent(ctx, source.id, future).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        AlertDialog[] opened = {null};
+        commitmentsScenario.onActivity(activity -> {
+            View target = activity.getWindow().getDecorView()
+                .findViewWithTag("reminder-due:" + source.id + ":" + future);
+            assertNotNull(target);
+            AlertDialog editor = openDueEditor(activity, target);
+            assertNotNull(findText(editor.getWindow().getDecorView(), "15 January 2090"));
+            assertNotNull(findText(editor.getWindow().getDecorView(),
+                activity.getString(R.string.commitments_edit_due_receipt)));
+            EditText amount = findEditText(editor.getWindow().getDecorView(), "100");
+            assertNotNull(amount);
+            amount.setText("123.4");
+            assertTrue(editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick());
+            View updatedTarget = activity.getWindow().getDecorView().findViewWithTag(target.getTag());
+            assertNotNull(updatedTarget);
+            assertNotNull(findText(updatedTarget, "+123.4"));
+            opened[0] = openDueEditor(activity, updatedTarget);
+        });
+        assertEquals(1234L, CommitmentStore.get(ctx, source.id).amountAt(future));
+        assertTrue(CommitmentStore.delete(ctx, source.id));
+        commitmentsScenario.onActivity(activity -> {
+            EditText amount = findEditText(opened[0].getWindow().getDecorView(), "123.4");
+            assertNotNull(amount);
+            amount.setText("9999");
+            assertTrue(opened[0].getButton(AlertDialog.BUTTON_POSITIVE).performClick());
+            assertFalse(opened[0].isShowing());
+            assertNotNull(activity.getWindow().getDecorView()
+                .findViewWithTag("reminder-due-unavailable"));
+        });
+        assertNull(CommitmentStore.get(ctx, source.id));
     }
 
     @Test public void dashboardGuidanceAppearsOnlyWithoutDefinitions() {
@@ -220,7 +399,39 @@ public class CommitmentsInteractionTest {
         assertRemainingZeroes(futureOnly);
     }
 
-    @Test public void editor_preservesNonMinuteReminderWithoutAnInvalidChipSelection() {
+    @Test public void dashboardShowsExactEffectiveAmountsAndExcludesSettledOverrides() {
+        assertEquals(android.content.pm.PackageManager.PERMISSION_GRANTED,
+            ctx.checkSelfPermission(Manifest.permission.READ_SMS));
+        long today = Commitment.startOfDay(System.currentTimeMillis());
+        Commitment first = Commitment.create("custom due", -100L, Commitment.MONTHLY,
+            today, null, false, 0, CalendarSystem.GREGORIAN, java.time.ZoneId.systemDefault())
+            .withOccurrenceAmounts(Collections.singletonMap(today, Long.MIN_VALUE));
+        Commitment second = Commitment.create("one-time due", -1000L, Commitment.ONCE,
+            today, null, false, 0);
+        Commitment settled = Commitment.create("settled receipt", 50L, Commitment.MONTHLY,
+            today, null, false, 0, CalendarSystem.GREGORIAN, java.time.ZoneId.systemDefault())
+            .withSettlements(false, Collections.singletonList(today), null)
+            .withOccurrenceAmounts(Collections.singletonMap(today, 500L));
+        BalanceData.writeCommitments(ctx, java.util.Arrays.asList(first, second, settled));
+        BalanceData.setAutoHide(ctx, false);
+        ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit()
+            .putBoolean(BalanceData.KEY_HIDDEN, false).apply();
+        mainScenario = ActivityScenario.launch(MainActivity.class);
+
+        List<String> drawn = drawCommitmentsCard();
+        String unit = CurrencyHelper.label(LocaleHelper.wrap(ctx));
+        String expected = "9,223,372,036,854,776,808";
+        assertTrue(drawn.contains(expected + " " + unit));
+        assertTrue(drawn.contains("0 " + unit));
+        mainScenario.onActivity(activity -> {
+            View card = activity.findViewById(R.id.dashboard_commitments_card);
+            assertNotNull(card);
+            assertNotNull(findText(card, expected));
+            assertNotNull(findText(card, "0"));
+        });
+    }
+
+    @Test public void editor_preservesRawReminderAndARecentDueEdit() throws Exception {
         long rawLeadMs = 30L * 60_000L + 1L;
         long due = Commitment.startOfDay(System.currentTimeMillis());
         Commitment source = Commitment.create("raw reminder", -100_000L, Commitment.MONTHLY,
@@ -232,25 +443,7 @@ public class CommitmentsInteractionTest {
         commitmentsScenario = ActivityScenario.launch(CommitmentsActivity.class);
         AlertDialog[] opened = {null};
         commitmentsScenario.onActivity(activity -> {
-            String manageLabel = LocaleHelper.wrap(ctx).getString(R.string.commitments_manage);
-            TextView manage = findText(activity.getWindow().getDecorView(), manageLabel);
-            assertNotNull("the commitments screen must show Manage", manage);
-            assertTrue(manage.performClick());
-
-            AlertDialog manageDialog = dialogField(activity, "manageDialogWindow");
-            assertNotNull("the manage dialog must be showing", manageDialog);
-            TextView definition = findText(manageDialog.getWindow().getDecorView(), source.name);
-            assertNotNull("the reminder definition must be listed", definition);
-            View clickable = definition;
-            while (clickable != null && !clickable.isClickable()) {
-                android.view.ViewParent parent = clickable.getParent();
-                clickable = parent instanceof View ? (View) parent : null;
-            }
-            assertNotNull("the reminder row must be clickable", clickable);
-            assertTrue(clickable.performClick());
-
-            AlertDialog editor = dialogField(activity, "activeDialog");
-            assertNotNull("the editor must open synchronously from the row click", editor);
+            AlertDialog editor = openSeriesEditor(activity, source.name);
             opened[0] = editor;
             EditText lead = findEditText(editor.getWindow().getDecorView(), String.valueOf(rawLeadMs));
             assertNotNull("a raw reminder must reopen with its exact milliseconds", lead);
@@ -259,6 +452,7 @@ public class CommitmentsInteractionTest {
             assertNotNull("the editor must expose the current name", name);
             name.setText(changedName);
         });
+        assertTrue(CommitmentStore.setOccurrenceAmount(ctx, source.id, due, true, -150_000L));
         // onShow posts the real save listener; an immediate click above only dismisses by default.
         commitmentsScenario.onActivity(activity -> {
             assertSame("save must target this scenario's exact editor", opened[0],
@@ -287,6 +481,43 @@ public class CommitmentsInteractionTest {
         assertEquals(source.schedule.zone, persisted.schedule.zone);
         assertEquals(source.schedule.first, persisted.schedule.first);
         assertEquals(source.schedule.last, persisted.schedule.last);
+        assertEquals(-150_000L, persisted.amountAt(due));
+    }
+
+    @Test public void seriesEditKeepsDormantOverrideAndRestoresItWithOriginalDirection()
+            throws Exception {
+        long due = Commitment.startOfDay(System.currentTimeMillis());
+        Commitment source = Commitment.create("monthly bill", -1000L, Commitment.MONTHLY,
+            due, due, false, 0, CalendarSystem.GREGORIAN, java.time.ZoneId.systemDefault())
+            .withOccurrenceAmounts(Collections.singletonMap(due, -1500L));
+        BalanceData.writeCommitments(ctx, singleton(source));
+        commitmentsScenario = ActivityScenario.launch(CommitmentsActivity.class);
+
+        changeSeriesDirection(source, R.string.commitments_receive,
+            "Total −1,500 · regular amount −1,000", "1 of 1 remaining · −1,500 total");
+        Commitment receipt = CommitmentStore.get(ctx, source.id);
+        assertEquals(Long.valueOf(-1500L), receipt.occurrenceAmounts.get(due));
+        assertNull(receipt.occurrenceAmountOverride(due));
+        assertEquals(1000L, receipt.amountAt(due));
+
+        changeSeriesDirection(source, R.string.commitments_pay,
+            "Total +1,000 · regular amount +1,000", "1 of 1 remaining · +1,000 total");
+        Commitment restored = CommitmentStore.get(ctx, source.id);
+        assertEquals(-1500L, restored.amountAt(due));
+    }
+
+    private void changeSeriesDirection(Commitment source, int direction, String manageAmount,
+            String seriesSummary) {
+        AlertDialog[] opened = {null};
+        commitmentsScenario.onActivity(activity -> {
+            opened[0] = openSeriesEditor(activity, source.name, manageAmount);
+            View editor = opened[0].getWindow().getDecorView();
+            assertNotNull(findText(editor, seriesSummary));
+            clickText(editor, activity.getString(direction));
+        });
+        commitmentsScenario.onActivity(activity ->
+            assertTrue(opened[0].getButton(AlertDialog.BUTTON_POSITIVE).performClick()));
+        awaitEditorDismissed(opened[0]);
     }
 
     private void awaitEditorDismissed(AlertDialog expected) {
@@ -468,6 +699,45 @@ public class CommitmentsInteractionTest {
         day = Math.min(day, c.getActualMaximum(Calendar.DAY_OF_MONTH));
         return Commitment.millisOf(c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, day,
             CalendarSystem.GREGORIAN);
+    }
+
+    private static AlertDialog openDueEditor(CommitmentsActivity activity, View row) {
+        clickText(row, activity.getString(R.string.commitments_edit_due));
+        AlertDialog dialog = dialogField(activity, "activeDialog");
+        assertNotNull("the occurrence amount editor must open", dialog);
+        assertTrue(dialog.isShowing());
+        return dialog;
+    }
+
+    private static AlertDialog openSeriesEditor(CommitmentsActivity activity, String name) {
+        return openSeriesEditor(activity, name, null);
+    }
+
+    private static AlertDialog openSeriesEditor(CommitmentsActivity activity, String name,
+            String expectedAmount) {
+        clickText(activity.getWindow().getDecorView(), activity.getString(R.string.commitments_manage));
+        AlertDialog manage = dialogField(activity, "manageDialogWindow");
+        assertNotNull(manage);
+        View list = manage.getWindow().getDecorView();
+        if (expectedAmount != null) assertNotNull(findText(list, expectedAmount));
+        View definition = findText(list, name);
+        assertNotNull("Manage must list the commitment", definition);
+        View clickable = definition;
+        while (clickable != null && !clickable.isClickable()) {
+            android.view.ViewParent parent = clickable.getParent();
+            clickable = parent instanceof View ? (View) parent : null;
+        }
+        assertNotNull("the Manage row must be clickable", clickable);
+        assertTrue(clickable.performClick());
+        AlertDialog editor = dialogField(activity, "activeDialog");
+        assertNotNull("the series editor must open", editor);
+        return editor;
+    }
+
+    private static void clickText(View root, String label) {
+        TextView button = findText(root, label);
+        assertNotNull("missing action: " + label, button);
+        assertTrue(button.performClick());
     }
 
     private static TextView findText(View root, String wanted) {

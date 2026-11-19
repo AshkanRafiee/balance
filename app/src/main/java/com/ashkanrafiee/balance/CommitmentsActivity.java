@@ -53,10 +53,12 @@ public final class CommitmentsActivity extends Activity {
         final Commitment commitment;
         final long date;
         final boolean settled;
+        final long amount;
         Row(Commitment commitment, long date, boolean settled) {
             this.commitment = commitment;
             this.date = date;
             this.settled = settled;
+            this.amount = commitment.amountAt(date);
         }
     }
 
@@ -64,8 +66,8 @@ public final class CommitmentsActivity extends Activity {
     static final class MonthGroup {
         final int year;
         final int month;
-        long pay;
-        long receive;
+        BigInteger pay = BigInteger.ZERO;
+        BigInteger receive = BigInteger.ZERO;
         final List<Row> rows = new ArrayList<>();
         MonthGroup(int year, int month) {
             this.year = year;
@@ -80,13 +82,21 @@ public final class CommitmentsActivity extends Activity {
         final List<Row> overdue = new ArrayList<>();
         final List<MonthGroup> settledMonths = new ArrayList<>();
         final List<MonthGroup> months = new ArrayList<>();
-        long overduePay;
-        long overdueReceive;
+        BigInteger overduePay = BigInteger.ZERO;
+        BigInteger overdueReceive = BigInteger.ZERO;
         long overdueCount;
-        long payTotal;
-        long receiveTotal;
-        long thisMonthPay;
-        long thisMonthReceive;
+        BigInteger payTotal = BigInteger.ZERO;
+        BigInteger receiveTotal = BigInteger.ZERO;
+        BigInteger thisMonthPay = BigInteger.ZERO;
+        BigInteger thisMonthReceive = BigInteger.ZERO;
+
+        BigInteger remainingPay() {
+            return overduePay.add(thisMonthPay);
+        }
+
+        BigInteger remainingReceive() {
+            return overdueReceive.add(thisMonthReceive);
+        }
     }
 
     /** Groups commitments into the screen's window: every unsettled-or-not overdue due, then the
@@ -129,9 +139,11 @@ public final class CommitmentsActivity extends Activity {
                     if (!present) settledMonth.rows.add(new Row(c, at, true));
                 } else {
                     summary.overdueCount++;
-                    addOverdueRow(summary, new Row(c, at, false));
-                    if (c.isPayment()) summary.overduePay += c.amount;
-                    else summary.overdueReceive += c.amount;
+                    Row row = new Row(c, at, false);
+                    addOverdueRow(summary, row);
+                    BigInteger amount = BigInteger.valueOf(row.amount);
+                    if (c.isPayment()) summary.overduePay = summary.overduePay.add(amount);
+                    else summary.overdueReceive = summary.overdueReceive.add(amount);
                 }
             }, MAX_OVERDUE_OCCURRENCES);
         }
@@ -178,11 +190,12 @@ public final class CommitmentsActivity extends Activity {
                         }
                     }
                     if (group == null) continue;
-                    boolean settled = c.isSettled(at);
-                    group.rows.add(new Row(c, at, settled));
-                    if (!settled) {
-                        if (c.isPayment()) group.pay += c.amount;
-                        else group.receive += c.amount;
+                    Row row = new Row(c, at, c.isSettled(at));
+                    group.rows.add(row);
+                    if (!row.settled) {
+                        BigInteger amount = BigInteger.valueOf(row.amount);
+                        if (c.isPayment()) group.pay = group.pay.add(amount);
+                        else group.receive = group.receive.add(amount);
                     }
                 }
             }
@@ -197,8 +210,8 @@ public final class CommitmentsActivity extends Activity {
         summary.payTotal = summary.overduePay;
         summary.receiveTotal = summary.overdueReceive;
         for (MonthGroup group : summary.months) {
-            summary.payTotal += group.pay;
-            summary.receiveTotal += group.receive;
+            summary.payTotal = summary.payTotal.add(group.pay);
+            summary.receiveTotal = summary.receiveTotal.add(group.receive);
         }
         for (MonthGroup group : summary.months) {
             if (group.year == currentCivil[0] && group.month == currentCivil[1]) {
@@ -256,6 +269,7 @@ public final class CommitmentsActivity extends Activity {
     private LockOverlay lockOverlay;
     private ReminderTarget reminderTarget;
     private boolean reminderRevealPending;
+    private boolean olderPaidExpanded;
 
     /** Keep the exact due across the lock and recreation, not a mutable 'next due' lookup. */
     static final class ReminderTarget {
@@ -623,8 +637,7 @@ public final class CommitmentsActivity extends Activity {
 
         heroCard(summary);
         buttonsRow();
-        if (reminderTarget != null
-                && !(LockManager.isEnabled(this) && LockManager.isSessionLocked())) {
+        if (reminderTarget != null && !commitmentsLocked()) {
             reminderDueCard(commitments);
         }
 
@@ -717,17 +730,17 @@ public final class CommitmentsActivity extends Activity {
         });
     }
 
-    private long yearPay(Summary summary, int year) {
-        long total = 0;
+    private BigInteger yearPay(Summary summary, int year) {
+        BigInteger total = BigInteger.ZERO;
         for (MonthGroup group : summary.months)
-            if (group.year == year) total += group.pay;
+            if (group.year == year) total = total.add(group.pay);
         return total;
     }
 
-    private long yearReceive(Summary summary, int year) {
-        long total = 0;
+    private BigInteger yearReceive(Summary summary, int year) {
+        BigInteger total = BigInteger.ZERO;
         for (MonthGroup group : summary.months)
-            if (group.year == year) total += group.receive;
+            if (group.year == year) total = total.add(group.receive);
         return total;
     }
 
@@ -741,14 +754,12 @@ public final class CommitmentsActivity extends Activity {
         TextView totalLabel = text(getString(R.string.commitments_total), 12,
             ExpressiveUi.color(this, R.color.expressive_on_primary_container), medium());
         hero.addView(totalLabel, new LinearLayout.LayoutParams(-2, -2));
-        long pay = summary.overduePay + summary.thisMonthPay;
-        long receive = summary.overdueReceive + summary.thisMonthReceive;
         LinearLayout values = new LinearLayout(this);
         values.setOrientation(LinearLayout.HORIZONTAL);
         TextView payable = bold(getString(R.string.commitments_payable) + "\n"
-            + signedAmount(pay), 22, negativeColor);
+            + signedAmount(summary.remainingPay()), 22, negativeColor);
         TextView receivable = bold(getString(R.string.commitments_receivable) + "\n"
-            + signedAmount(receive), 22, accent);
+            + signedAmount(summary.remainingReceive()), 22, accent);
         payable.setLineSpacing(0, 1.05f);
         receivable.setLineSpacing(0, 1.05f);
         values.addView(payable, new LinearLayout.LayoutParams(0, -2, 1));
@@ -806,26 +817,20 @@ public final class CommitmentsActivity extends Activity {
             row.setPadding(dp(14), dp(12), dp(14), dp(12));
             row.setBackground(rounded(card, 14));
 
-            LinearLayout heading = new LinearLayout(this);
-            heading.setOrientation(LinearLayout.HORIZONTAL);
-            heading.setGravity(Gravity.CENTER_VERTICAL);
             TextView name = text(c.name, 15, fg, medium());
             name.setSingleLine(true);
             name.setEllipsize(android.text.TextUtils.TruncateAt.END);
             applyUserTextDirection(name);
-            heading.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
-            Long total = Commitment.totalAmount(c, cal);
+            row.addView(name, new LinearLayout.LayoutParams(-1, -2));
+            BigInteger total = Commitment.totalAmount(c, cal);
+            boolean customized = c.frequency != Commitment.ONCE && !c.occurrenceAmounts.isEmpty();
+            String regular = signedAmount(c.amount);
             String amountLabel = total == null
-                ? getString(R.string.commitments_each_amount, signedAmount(c.amount))
-                : getString(R.string.commitments_total_each_amount, signedAmount(total),
-                    signedAmount(c.amount));
-            TextView amount = bold(amountLabel, 14, valueColor(total == null ? c.amount : total));
-            amount.setGravity(Gravity.END);
-            amount.setMaxLines(2);
-            LinearLayout.LayoutParams amountLp = new LinearLayout.LayoutParams(-2, -2);
-            amountLp.setMarginStart(dp(12));
-            heading.addView(amount, amountLp);
-            row.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+                ? getString(customized ? R.string.commitments_regular_amount
+                    : R.string.commitments_each_amount, regular)
+                : getString(customized ? R.string.commitments_total_regular_amount
+                    : R.string.commitments_total_each_amount, signedAmount(total), regular);
+            row.addView(bold(amountLabel, 14, valueColor(c.amount)), margin(0, 4, 0, 0));
 
             String ending = c.end == null ? getString(R.string.commitments_series_open)
                 : getString(R.string.commitments_series_ends, dateText(c.end, cal,
@@ -907,23 +912,25 @@ public final class CommitmentsActivity extends Activity {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setBackground(rounded(chipBg, 14));
-        final boolean[] expanded = {false};
         final boolean[] built = {false};
         TextView toggle = text(getString(R.string.commitments_show_older_paid, olderCount), 14, fg, medium());
         toggle.setPadding(dp(14), dp(13), dp(14), dp(13));
         LinearLayout months = new LinearLayout(this);
         months.setOrientation(LinearLayout.VERTICAL);
-        months.setVisibility(View.GONE);
-        toggle.setOnClickListener(v -> {
-            expanded[0] = !expanded[0];
-            if (expanded[0] && !built[0]) {
+        Runnable update = () -> {
+            if (olderPaidExpanded && !built[0]) {
                 for (MonthGroup group : summary.settledMonths) months.addView(settledMonthCard(group));
                 built[0] = true;
             }
-            months.setVisibility(expanded[0] ? View.VISIBLE : View.GONE);
-            toggle.setText(expanded[0]
+            months.setVisibility(olderPaidExpanded ? View.VISIBLE : View.GONE);
+            toggle.setText(olderPaidExpanded
                 ? getString(R.string.commitments_hide_older_paid)
                 : getString(R.string.commitments_show_older_paid, olderCount));
+        };
+        update.run();
+        toggle.setOnClickListener(v -> {
+            olderPaidExpanded = !olderPaidExpanded;
+            update.run();
         });
         box.addView(toggle, new LinearLayout.LayoutParams(-1, -2));
         box.addView(months, new LinearLayout.LayoutParams(-1, -2));
@@ -941,7 +948,7 @@ public final class CommitmentsActivity extends Activity {
         return box;
     }
 
-    private LinearLayout yearHeader(int year, long pay, long receive) {
+    private LinearLayout yearHeader(int year, BigInteger pay, BigInteger receive) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -992,17 +999,32 @@ public final class CommitmentsActivity extends Activity {
             name.setPaintFlags(name.getPaintFlags() | android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
         }
         info.addView(name, new LinearLayout.LayoutParams(-1, -2));
-        info.addView(text(dateText(row.date, iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN,
-            row.commitment.schedule == null ? java.time.ZoneId.systemDefault()
-                : row.commitment.schedule.zone), 12, muted), new LinearLayout.LayoutParams(-2, -2));
+        String date = occurrenceDateText(row.commitment, row.date);
+        info.addView(text(date, 12, muted), new LinearLayout.LayoutParams(-2, -2));
         line.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView figure = bold(signedAmount(row.commitment.amount), 15,
-            row.settled ? muted : valueColor(row.commitment.amount));
+        TextView figure = bold(signedAmount(row.amount), 15,
+            row.settled ? muted : valueColor(row.amount));
         if (row.settled) {
             figure.setPaintFlags(
                 figure.getPaintFlags() | android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
         }
-        line.addView(figure, new LinearLayout.LayoutParams(-2, -2));
+        if (row.commitment.frequency == Commitment.ONCE) {
+            line.addView(figure, new LinearLayout.LayoutParams(-2, -2));
+        } else {
+            // Stacking the amount with the date leaves room for two distinct touch targets.
+            info.addView(figure, new LinearLayout.LayoutParams(-2, -2));
+            TextView edit = ExpressiveUi.button(this, getString(R.string.commitments_edit_due),
+                false);
+            edit.setTextColor(accent);
+            edit.setMinWidth(dp(48));
+            edit.setPadding(dp(8), dp(8), dp(8), dp(8));
+            edit.setContentDescription(getString(R.string.commitments_edit_due_description,
+                row.commitment.name, date));
+            edit.setOnClickListener(v -> editOccurrence(row));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.setMarginStart(dp(8));
+            line.addView(edit, lp);
+        }
         if (row.settled) {
             TextView undo = ExpressiveUi.button(this,
                 getString(R.string.commitments_undo), false);
@@ -1026,6 +1048,118 @@ public final class CommitmentsActivity extends Activity {
             line.addView(pay, lp);
         }
         return line;
+    }
+
+    private String occurrenceDateText(Commitment c, long due) {
+        return dateText(due, iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN,
+            c.schedule == null ? java.time.ZoneId.systemDefault() : c.schedule.zone);
+    }
+
+    private boolean commitmentsLocked() {
+        return LockManager.isEnabled(this) && LockManager.isSessionLocked();
+    }
+
+    private void editOccurrence(Row row) {
+        if (pausing || commitmentsLocked()) return;
+        final Commitment current;
+        try {
+            BalanceData.ensureResetComplete(this);
+            current = CommitmentStore.get(this, row.commitment.id);
+            if (current == null || current.frequency == Commitment.ONCE
+                    || current.isPayment() != row.commitment.isPayment()
+                    || !current.hasOccurrence(row.date)) {
+                showStaleOccurrence();
+                return;
+            }
+        } catch (Exception unavailable) {
+            showOccurrenceEditError(R.string.commitments_edit_due_load_failed);
+            return;
+        }
+
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(24), dp(8), dp(24), dp(8));
+        TextView name = text(current.name, 16, fg, medium());
+        applyUserTextDirection(name);
+        form.addView(name);
+        form.addView(text(occurrenceDateText(current, row.date), 14, muted),
+            margin(0, 4, 0, 8));
+        form.addView(text(getString(current.isPayment() ? R.string.commitments_edit_due_payment
+            : R.string.commitments_edit_due_receipt), 14, muted));
+        EditText amount = new EditText(this);
+        amount.setId(View.generateViewId());
+        TextView amountLabel = text(getString(R.string.commitments_amount_hint,
+            CurrencyHelper.label(this)), 13, muted, medium());
+        amountLabel.setLabelFor(amount.getId());
+        form.addView(amountLabel, margin(0, 12, 0, 0));
+        amount.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        amount.setTypeface(Fonts.text(this), Typeface.NORMAL);
+        amount.setText(formatMagnitude(current.amountAt(row.date)));
+        amount.setSelectAllOnFocus(true);
+        form.addView(amount, new LinearLayout.LayoutParams(-1, -2));
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(form);
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+            .setTitle(R.string.commitments_edit_due_title)
+            .setView(scroll)
+            .setPositiveButton(R.string.note_save, null)
+            .setNegativeButton(R.string.lock_cancel, null);
+        if (current.occurrenceAmountOverride(row.date) != null)
+            builder.setNeutralButton(R.string.commitments_reset_due_amount, null);
+        AlertDialog dialog = builder.create();
+        if (LockManager.isEnabled(this) && dialog.getWindow() != null)
+            dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+        dialog.setOnDismissListener(d -> {
+            if (activeDialog == dialog) activeDialog = null;
+        });
+        dialog.show();
+        activeDialog = dialog;
+        TextView save = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        save.setOnClickListener(v -> {
+            Long parsed = parseAmount(amount.getText().toString(), current.isPayment());
+            if (parsed != null) saveOccurrenceAmount(dialog, current, row.date, parsed);
+        });
+        TextView reset = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+        if (reset != null) {
+            reset.setOnClickListener(v -> saveOccurrenceAmount(dialog, current, row.date, null));
+        }
+        save.setEnabled(parseAmount(amount.getText().toString(), current.isPayment()) != null);
+        amount.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                save.setEnabled(parseAmount(s.toString(), current.isPayment()) != null);
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+    }
+
+    private void saveOccurrenceAmount(AlertDialog dialog, Commitment current, long due, Long amount) {
+        if (activeDialog != dialog || !dialog.isShowing() || pausing || commitmentsLocked()) return;
+        try {
+            if (!CommitmentStore.setOccurrenceAmount(this, current.id, due, current.isPayment(),
+                    amount)) {
+                dialog.dismiss();
+                showStaleOccurrence();
+                return;
+            }
+        } catch (Exception unavailable) {
+            showOccurrenceEditError(R.string.commitments_edit_due_save_failed);
+            return;
+        }
+        dialog.dismiss();
+        // A write changes the store revision. Re-arm without clearing which reminders fired.
+        CommitmentReminders.scheduleAll(this);
+        render();
+    }
+
+    private void showStaleOccurrence() {
+        showOccurrenceEditError(R.string.commitments_edit_due_stale);
+        render();
+    }
+
+    private void showOccurrenceEditError(int message) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
 
     private void markSettled(Row row) {
@@ -1648,31 +1782,29 @@ public final class CommitmentsActivity extends Activity {
         if (title == null || title.isEmpty() || signedAmount == null || start == null
                 || remindBeforeMs < 0) return false;
         try {
-            Commitment updated;
+            boolean saved;
             if (existing == null) {
-                updated = Commitment.create(title, signedAmount, frequency, start, end,
+                Commitment updated = Commitment.create(title, signedAmount, frequency, start, end,
                     remind, remindBeforeMs, calendar, zone);
+                saved = updated != null && CommitmentStore.upsert(this, updated);
             } else {
-                BalanceData.ensureResetComplete(this);
-                // The editor may have been open while another screen changed this definition.
-                // Fetch again so the upsert reuses the current lazy settlement lists rather than
-                // attempting to write an invalidated snapshot or dropping a newer mark.
-                Commitment current = CommitmentStore.get(this, existing.id);
-                if (current == null) {
-                    showCommitmentError(null);
-                    return false;
+                // Hold the same lock as the store across the latest read and write, retaining
+                // its lazy settlement lists and all overrides (including dormant ones).
+                synchronized (BalanceData.class) {
+                    BalanceData.ensureResetComplete(this);
+                    Commitment current = CommitmentStore.get(this, existing.id);
+                    if (current == null) return false;
+                    Commitment updated = new Commitment(current.id, title, signedAmount,
+                        frequency, start, end, current.done, current.paid,
+                        current.legacyPaidThrough, current.unpaid, remind, remindBeforeMs);
+                    if (current.schedule != null) updated = updated.withSchedule(
+                        CommitmentSchedule.capture(updated, current.schedule.calendar,
+                            current.schedule.zone));
+                    saved = CommitmentStore.upsert(this,
+                        updated.withOccurrenceAmounts(current.occurrenceAmounts));
                 }
-                updated = new Commitment(current.id, title, signedAmount, frequency, start, end,
-                    current.done, current.paid, current.legacyPaidThrough, current.unpaid,
-                    remind, remindBeforeMs);
-                if (current.schedule != null) updated = updated.withSchedule(
-                    CommitmentSchedule.capture(updated, current.schedule.calendar, current.schedule.zone));
             }
-            if (updated == null) {
-                showCommitmentError(null);
-                return false;
-            }
-            CommitmentStore.upsert(this, updated);
+            if (!saved) return false;
         } catch (Exception error) {
             showCommitmentError(error);
             return false;
@@ -1718,9 +1850,13 @@ public final class CommitmentsActivity extends Activity {
         List<Long> dues = Commitment.occurrences(c, cal, now - 366L * 86400000L,
             now + 365L * 86400000L);
         int remaining = 0;
-        for (long at : dues) if (!c.isSettled(at)) remaining++;
-        return getString(R.string.commitments_series, remaining, dues.size(),
-            signedAmount(BigInteger.valueOf(c.amount).multiply(BigInteger.valueOf(remaining))));
+        BigInteger total = BigInteger.ZERO;
+        for (long at : dues) {
+            if (c.isSettled(at)) continue;
+            remaining++;
+            total = total.add(BigInteger.valueOf(c.amountAt(at)));
+        }
+        return getString(R.string.commitments_series, remaining, dues.size(), signedAmount(total));
     }
 
     // ====================================================================
@@ -1806,21 +1942,17 @@ public final class CommitmentsActivity extends Activity {
     }
 
     private String signedAmount(BigInteger n) {
-        String mag = displayMagnitude(n.abs());
+        String mag = displayMagnitude(this, persian, n.abs());
         if (n.signum() == 0) return mag;
         String sign = n.signum() < 0 ? "−" : "+";
         if (!persian) return sign + mag;
         return "⁦" + sign + mag + "⁩";
     }
 
-    /** Formats a signed-long magnitude without Math.abs overflow or toman truncation. */
-    private String displayMagnitude(long n) {
-        return displayMagnitude(BigInteger.valueOf(n).abs());
-    }
-
-    private String displayMagnitude(BigInteger magnitude) {
+    /** Formats exact commitment magnitudes, including the last rial when showing toman. */
+    static String displayMagnitude(Context context, boolean persian, BigInteger magnitude) {
         BigDecimal display = new BigDecimal(magnitude);
-        boolean toman = isToman();
+        boolean toman = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(context));
         if (toman) display = display.movePointLeft(1);
         NumberFormat numbers = NumberFormat.getNumberInstance(
             persian ? new Locale("fa") : Locale.US);

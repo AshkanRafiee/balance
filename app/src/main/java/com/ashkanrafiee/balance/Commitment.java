@@ -1,13 +1,17 @@
 package com.ashkanrafiee.balance;
 
+import java.math.BigInteger;
+import java.time.LocalDate;
 import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
-import java.time.LocalDate;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 /** A user-defined commitment: money the user will pay or receive, once or on a schedule.
@@ -31,6 +35,8 @@ final class Commitment {
     static final int WEEKLY = 2;
     static final int MONTHLY = 3;
     static final int YEARLY = 4;
+    /** Sparse manual edits share one encrypted definition row. Keep that row readable. */
+    static final int MAX_OCCURRENCE_AMOUNTS = 20_000;
 
     /** Historical limits, retained for source compatibility only. Not retention limits. */
     @Deprecated static final int MAX_NAME_LENGTH = 64;
@@ -67,6 +73,9 @@ final class Commitment {
     final long remindBeforeMs;
     /** Null only for a legacy definition not yet migrated by the store. */
     final CommitmentSchedule schedule;
+    /** Amount edits by exact home-zone due instant, independent of settlement. Edits for dates
+     *  or payment directions no longer in the schedule are retained but not applied. */
+    final Map<Long, Long> occurrenceAmounts;
 
     /** An immutable store-backed list. contains() must perform an individual-date lookup. */
     abstract static class SettlementList extends AbstractList<Long> {}
@@ -99,6 +108,14 @@ final class Commitment {
     Commitment(String id, String name, long amount, int frequency, long start, Long end,
             boolean done, List<Long> paid, long legacyPaidThrough, List<Long> unpaid,
             boolean remind, long remindBeforeMs, CommitmentSchedule schedule) {
+        this(id, name, amount, frequency, start, end, done, paid, legacyPaidThrough, unpaid,
+            remind, remindBeforeMs, schedule, Collections.emptyMap());
+    }
+
+    private Commitment(String id, String name, long amount, int frequency, long start, Long end,
+            boolean done, List<Long> paid, long legacyPaidThrough, List<Long> unpaid,
+            boolean remind, long remindBeforeMs, CommitmentSchedule schedule,
+            Map<Long, Long> occurrenceAmounts) {
         this.id = id;
         this.name = name;
         this.amount = amount;
@@ -112,16 +129,25 @@ final class Commitment {
         this.remind = remind;
         this.remindBeforeMs = remindBeforeMs;
         this.schedule = schedule;
+        this.occurrenceAmounts = occurrenceAmounts;
     }
 
     Commitment withSchedule(CommitmentSchedule value) {
         return new Commitment(id, name, amount, frequency, start, end, done, paid,
-            legacyPaidThrough, unpaid, remind, remindBeforeMs, value);
+            legacyPaidThrough, unpaid, remind, remindBeforeMs, value, occurrenceAmounts);
     }
 
     Commitment withSettlements(boolean done, List<Long> paid, List<Long> unpaid) {
         return new Commitment(id, name, amount, frequency, start, end, done, paid,
-            legacyPaidThrough, unpaid, remind, remindBeforeMs, schedule);
+            legacyPaidThrough, unpaid, remind, remindBeforeMs, schedule, occurrenceAmounts);
+    }
+
+    Commitment withOccurrenceAmounts(Map<Long, Long> amounts) {
+        if (amounts.size() > MAX_OCCURRENCE_AMOUNTS)
+            throw new IllegalArgumentException("too many occurrence amounts");
+        return new Commitment(id, name, amount, frequency, start, end, done, paid,
+            legacyPaidThrough, unpaid, remind, remindBeforeMs, schedule, amounts.isEmpty()
+                ? Collections.emptyMap() : Collections.unmodifiableMap(new TreeMap<>(amounts)));
     }
 
     /** Legacy data did not record its creation calendar/zone. Freeze only the current
@@ -198,8 +224,17 @@ final class Commitment {
         if (paid == null || unpaid == null) return null;
         if (!(paid instanceof SettlementList) && !(unpaid instanceof SettlementList)
                 && !Collections.disjoint(paid, unpaid)) return null;
+        for (Map.Entry<Long, Long> edit : c.occurrenceAmounts.entrySet()) {
+            long due = edit.getKey();
+            // Time-zone rules can change between saving and loading. Validate the shape of the
+            // old instant here; only use it when it still matches an exact generated due.
+            if (c.schedule == null || due <= 0 || due % 1000 != 0
+                    || edit.getValue() == null || edit.getValue() == 0)
+                return null;
+        }
         return new Commitment(c.id, name, c.amount, frequency, c.start, end,
-            c.done, paid, c.legacyPaidThrough, unpaid, c.remind, c.remindBeforeMs, c.schedule);
+            c.done, paid, c.legacyPaidThrough, unpaid, c.remind, c.remindBeforeMs, c.schedule,
+            c.occurrenceAmounts);
     }
 
     private static List<Long> normalizeDates(List<Long> dates) {
@@ -227,21 +262,36 @@ final class Commitment {
         return amount < 0;
     }
 
+    /** The override only while this date is still due in the matching payment direction. */
+    Long occurrenceAmountOverride(long due) {
+        if (frequency == ONCE) return null;
+        Long override = occurrenceAmounts.get(due);
+        return override != null && (override < 0) == isPayment() && hasOccurrence(due)
+            ? override : null;
+    }
+
+    long amountAt(long due) {
+        Long override = occurrenceAmountOverride(due);
+        return override == null ? amount : override;
+    }
+
     /**
      * The signed total of every child in a finite series. A recurring commitment without an end
      * date has no finite total and returns {@code null}; its per-occurrence amount remains useful
-     * to show in the management list. A finite total that cannot fit the stored amount type also
-     * returns {@code null} rather than overflowing into a misleading value.
+     * to show in the management list. Only the sparse overrides need to be visited, not the dues.
      */
-    static Long totalAmount(Commitment c, CalendarSystem cal) {
+    static BigInteger totalAmount(Commitment c, CalendarSystem cal) {
         if (c == null || cal == null || c.end == null && c.frequency != ONCE) return null;
-        try {
-            long occurrences = countOccurrences(c, cal);
-            if (occurrences <= 0) return null;
-            return Math.multiplyExact(occurrences, c.amount);
-        } catch (ArithmeticException overflow) {
-            return null;
+        long occurrences = countOccurrences(c, cal);
+        if (occurrences <= 0) return null;
+        BigInteger regular = BigInteger.valueOf(c.amount);
+        BigInteger total = regular.multiply(BigInteger.valueOf(occurrences));
+        if (c.frequency == ONCE) return total;
+        for (long due : c.occurrenceAmounts.keySet()) {
+            Long override = c.occurrenceAmountOverride(due);
+            if (override != null) total = total.add(BigInteger.valueOf(override).subtract(regular));
         }
+        return total;
     }
 
     /** Constant-space, constant-time count, including very long finite schedules. */
@@ -339,14 +389,22 @@ final class Commitment {
             if (end != null) e.put("end", end.longValue());
             if (done) e.put("done", true);
             if (includeSettlements && !paid.isEmpty()) {
-                org.json.JSONArray settled = new org.json.JSONArray();
+                JSONArray settled = new JSONArray();
                 for (Long day : paid) settled.put(day.longValue());
                 e.put("paid", settled);
             }
             if (includeSettlements && !unpaid.isEmpty()) {
-                org.json.JSONArray reopened = new org.json.JSONArray();
+                JSONArray reopened = new JSONArray();
                 for (Long day : unpaid) reopened.put(day.longValue());
                 e.put("unpaid", reopened);
+            }
+            if (!occurrenceAmounts.isEmpty()) {
+                JSONArray edits = new JSONArray();
+                for (Map.Entry<Long, Long> edit : occurrenceAmounts.entrySet()) {
+                    edits.put(new JSONArray().put(edit.getKey().longValue())
+                        .put(edit.getValue().longValue()));
+                }
+                e.put("occurrenceAmounts", edits);
             }
             if (legacyPaidThrough > 0) e.put("paidThrough", legacyPaidThrough);
             if (remind) e.put("remind", true);
@@ -374,10 +432,26 @@ final class Commitment {
             return normalized(new Commitment((String) id, (String) name, amount, (int) freq,
                 start, end, booleanFromJson(e, "done"), paid, legacyPaidThrough, unpaid,
                 booleanFromJson(e, "remind"), lead, e.has("schedule")
-                    ? CommitmentSchedule.fromJson(e.getJSONObject("schedule")) : null));
+                    ? CommitmentSchedule.fromJson(e.getJSONObject("schedule")) : null)
+                .withOccurrenceAmounts(amountsFromJson(e)));
         } catch (Exception ex) {
             return null;
         }
+    }
+
+    private static Map<Long, Long> amountsFromJson(JSONObject e) throws Exception {
+        if (!e.has("occurrenceAmounts")) return Collections.emptyMap();
+        Map<Long, Long> amounts = new TreeMap<>();
+        JSONArray edits = e.getJSONArray("occurrenceAmounts");
+        if (edits.length() > MAX_OCCURRENCE_AMOUNTS)
+            throw new IllegalArgumentException("too many occurrence amounts");
+        for (int i = 0; i < edits.length(); i++) {
+            JSONArray edit = edits.getJSONArray(i);
+            if (edit.length() != 2
+                    || amounts.put(exactLong(edit.get(0)), exactLong(edit.get(1))) != null)
+                throw new IllegalArgumentException("invalid occurrence amount");
+        }
+        return amounts;
     }
 
     /** JSONObject.getLong coerces overflowing/fractional doubles; never use it for money/dates. */
@@ -398,7 +472,7 @@ final class Commitment {
     private static List<Long> datesFromJson(JSONObject e, String key) throws Exception {
         List<Long> dates = new ArrayList<>();
         if (!e.has(key)) return dates;
-        org.json.JSONArray array = e.getJSONArray(key);
+        JSONArray array = e.getJSONArray(key);
         for (int i = 0; i < array.length(); i++) {
             long date = exactLong(array.get(i));
             if (date <= 0) throw new IllegalArgumentException("invalid settlement date");

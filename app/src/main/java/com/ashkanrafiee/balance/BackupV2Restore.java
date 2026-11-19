@@ -22,9 +22,11 @@ import java.nio.charset.CodingErrorAction;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import javax.crypto.Cipher;
@@ -89,6 +91,7 @@ final class BackupV2Restore {
     private static final int COMMITMENT_PAID = 1 << 10;
     private static final int COMMITMENT_UNPAID = 1 << 11;
     private static final int COMMITMENT_SCHEDULE = 1 << 12;
+    private static final int COMMITMENT_OCCURRENCE_AMOUNTS = 1 << 13;
 
     private static final int TRANSACTION_BANK = 1;
     private static final int TRANSACTION_DATE = 1 << 1;
@@ -1064,6 +1067,7 @@ final class BackupV2Restore {
         boolean hasPaid = false;
         boolean hasUnpaid = false;
         CommitmentSchedule schedule = null;
+        Map<Long, Long> occurrenceAmounts = Collections.emptyMap();
         int seen = 0;
 
         json.beginObject();
@@ -1084,6 +1088,7 @@ final class BackupV2Restore {
                 case "paid": bit = COMMITMENT_PAID; break;
                 case "unpaid": bit = COMMITMENT_UNPAID; break;
                 case "schedule": bit = COMMITMENT_SCHEDULE; break;
+                case "occurrenceAmounts": bit = COMMITMENT_OCCURRENCE_AMOUNTS; break;
                 default: throw invalid("unknown commitment field");
             }
             if ((seen & bit) != 0) throw invalid("duplicate commitment field");
@@ -1100,6 +1105,7 @@ final class BackupV2Restore {
                 case "remind": remind = requiredBoolean(json); break;
                 case "remindBefore": remindBefore = exactLong(json); break;
                 case "schedule": schedule = readCommitmentSchedule(json); break;
+                case "occurrenceAmounts": occurrenceAmounts = readOccurrenceAmounts(json); break;
                 case "paid":
                     hasPaid = readSettlementDates(json, stage, ordinal, true);
                     break;
@@ -1127,11 +1133,32 @@ final class BackupV2Restore {
             throw invalid("recurring commitment has one-time state");
         }
 
+        // Dates and signs that no longer match the current recurrence remain stored. This also
+        // keeps old edit identities readable after a time-zone rules update.
         Commitment definition = Commitment.normalized(new Commitment(id, name, amount,
-            (int) frequency, start, end, done, java.util.Collections.emptyList(), paidThrough,
-            java.util.Collections.emptyList(), remind, remindBefore, schedule));
+            (int) frequency, start, end, done, Collections.emptyList(), paidThrough,
+            Collections.emptyList(), remind, remindBefore, schedule)
+            .withOccurrenceAmounts(occurrenceAmounts));
         if (definition == null) throw invalid("invalid commitment definition");
         stage.addCommitmentDefinition(ordinal, definition);
+    }
+
+    private static Map<Long, Long> readOccurrenceAmounts(JsonReader json) throws Exception {
+        Map<Long, Long> amounts = new LinkedHashMap<>();
+        json.beginArray();
+        while (json.hasNext()) {
+            if (amounts.size() == Commitment.MAX_OCCURRENCE_AMOUNTS)
+                throw invalid("too many occurrence amounts");
+            json.beginArray();
+            long due = exactLong(json);
+            long amount = exactLong(json);
+            if (json.hasNext() || due <= 0 || amount == 0)
+                throw invalid("invalid occurrence amount");
+            json.endArray();
+            if (amounts.put(due, amount) != null) throw invalid("duplicate occurrence amount date");
+        }
+        json.endArray();
+        return amounts;
     }
 
     private static CommitmentSchedule readCommitmentSchedule(JsonReader json) throws Exception {
@@ -1492,7 +1519,8 @@ final class BackupV2Restore {
      * list. The coordinator's streaming helper is intentionally called on the editor: it must
      * inspect only the explicit settlement row for this date, preserving a local explicit state and
      * adding an incoming mark only when no local explicit state exists. A legacy paidThrough
-     * watermark is not expanded into history.
+     * watermark is not expanded into history. Occurrence amounts belong to the definition and
+     * stay entirely local for an existing ID, including dates reset to the default.
      */
     private static void mergeCommitments(Context context, InputStage stage,
             BackupManager.RestoreResult result, boolean includeDeleted) throws Exception {
@@ -1519,7 +1547,8 @@ final class BackupV2Restore {
                     Commitment watermark = new Commitment(local.id, local.name, local.amount,
                         local.frequency, local.start, local.end, local.done, local.paid,
                         definition.legacyPaidThrough, local.unpaid, local.remind,
-                        local.remindBeforeMs, local.schedule);
+                        local.remindBeforeMs, local.schedule)
+                        .withOccurrenceAmounts(local.occurrenceAmounts);
                     editor.upsert(watermark);
                     changed[0] = true;
                     local = watermark;
@@ -1793,8 +1822,12 @@ final class BackupV2Restore {
             ContentValues values = new ContentValues();
             values.put("ordinal", ordinal);
             values.put("id_digest", digest("commitment\n" + definition.id));
-            values.put("payload", codec.encrypt(definition.definitionJson().toString(),
-                commitmentIdentity(ordinal)));
+            String payload = codec.encrypt(definition.definitionJson().toString(),
+                commitmentIdentity(ordinal));
+            if (!definition.occurrenceAmounts.isEmpty()
+                    && payload.length() > CommitmentStore.MAX_EDITED_DEFINITION_PAYLOAD)
+                throw invalid("edited commitment definition too large");
+            values.put("payload", payload);
             try {
                 db.insertOrThrow("commitment_definitions", null, values);
             } catch (SQLiteConstraintException e) {

@@ -5,6 +5,7 @@ import static org.junit.Assert.*;
 import android.content.Context;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+import java.math.BigInteger;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Arrays;
@@ -58,7 +59,7 @@ public class CommitmentScheduleTest {
         assertEquals(expected, Commitment.occurrences(c, CalendarSystem.JALALI, from, to));
         Commitment finite = Commitment.create("Rent", -123, Commitment.MONTHLY, c.start, to,
             false, 0).freezeSchedule(CalendarSystem.GREGORIAN, ZoneId.of("UTC"));
-        assertEquals(Long.valueOf(-492), Commitment.totalAmount(finite, CalendarSystem.JALALI));
+        assertEquals(BigInteger.valueOf(-492), Commitment.totalAmount(finite, CalendarSystem.JALALI));
     }
 
     @Test public void deviceZoneChangesDoNotMoveIdentitiesOrPaidState() throws Exception {
@@ -66,6 +67,7 @@ public class CommitmentScheduleTest {
         long paid = day(2026, 3, 31, "America/New_York");
         c = c.withSettlements(false, Collections.singletonList(paid), Collections.emptyList());
         CommitmentStore.upsert(context, c);
+        assertTrue(CommitmentStore.setOccurrenceAmount(context, c.id, paid, true, -500L));
         TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Kiritimati"));
         RegionHelper.setRegion(context, RegionHelper.REGION_IRAN);
         Commitment restored = CommitmentStore.get(context, c.id);
@@ -73,6 +75,8 @@ public class CommitmentScheduleTest {
         assertEquals(CalendarSystem.GREGORIAN, restored.schedule.calendar);
         assertTrue(restored.hasOccurrence(paid));
         assertTrue(restored.isSettled(paid));
+        assertEquals(-500L, restored.amountAt(paid));
+        assertEquals(-123L, restored.amountAt(day(2026, 2, 28, "America/New_York")));
         assertFalse(restored.isSettled(day(2026, 2, 28, "America/New_York")));
         assertEquals(LocalDate.of(2026, 1, 31), restored.schedule.first);
     }

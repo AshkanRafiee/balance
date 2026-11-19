@@ -16,6 +16,7 @@ import org.junit.runner.RunWith;
 
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.List;
 import java.util.HashSet;
 import java.util.Set;
@@ -127,6 +128,17 @@ public class CommitmentReminderTest {
         assertTrue(loanDetail.contains(NotificationAmounts.format(ctx, -9000)));
         assertFalse("same-time dues must stay distinguishable", rentTitle.equals(loanTitle)
             && rentDetail.equals(loanDetail));
+    }
+
+    @Test public void notificationContentUsesTheAmountOfTheNotifiedDue() {
+        long due = inDays(5);
+        Commitment daily = Commitment.create("Loan", -5000, Commitment.DAILY, due, null,
+            true, 0).freezeSchedule(CalendarSystem.GREGORIAN, java.time.ZoneId.systemDefault())
+            .withOccurrenceAmounts(Collections.singletonMap(due, -9000L));
+        assertTrue(CommitmentReminders.notificationDetail(ctx, daily, due)
+            .startsWith(NotificationAmounts.format(ctx, -9000)));
+        assertTrue(CommitmentReminders.notificationDetail(ctx, daily, inDays(6))
+            .startsWith(NotificationAmounts.format(ctx, -5000)));
     }
 
     /** Exercise the worker core synchronously; public requests deliberately do not drain jobs. */

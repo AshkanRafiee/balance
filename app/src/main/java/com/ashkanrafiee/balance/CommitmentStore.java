@@ -22,8 +22,11 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 
 import javax.crypto.Mac;
@@ -55,6 +58,8 @@ final class CommitmentStore {
     static final String KEY_STORE_TOKEN = KEY_COMMITMENT_STORE_TOKEN;
     static final int MAX_PAGE_SIZE = 1000;
     private static final int PAGE_SIZE = 256;
+    // The encrypted, Base64-encoded cell plus SQLite metadata must fit in Android's CursorWindow.
+    static final int MAX_EDITED_DEFINITION_PAYLOAD = 1_200_000;
     private static final String DEFINITIONS = "definitions";
     private static final String SETTLEMENTS = "settlements";
     private static final String META = "store_meta";
@@ -243,6 +248,15 @@ final class CommitmentStore {
     static boolean isSettled(Context context, Commitment definition, long date) throws Exception {
         if (definition == null) return false;
         return isSettled(context, definition.id, date);
+    }
+
+    /** Sets the signed amount for exactly one current recurring due, or resets it with null.
+     *  True also means already saved; false means the target or amount is no longer valid. */
+    static boolean setOccurrenceAmount(Context context, String id, long date,
+            boolean expectedPayment, Long amount) throws Exception {
+        requireId(id);
+        requireDate(date);
+        return access(context, true, s -> s.setOccurrenceAmount(id, date, expectedPayment, amount));
     }
 
     /** Explicit clear also discards a malformed legacy source and resets store metadata. */
@@ -543,6 +557,13 @@ final class CommitmentStore {
         if (c.legacyPaidThrough > 0) writer.name("paidThrough").value(c.legacyPaidThrough);
         if (c.remind) writer.name("remind").value(true);
         if (c.remindBeforeMs > 0) writer.name("remindBefore").value(c.remindBeforeMs);
+        if (!c.occurrenceAmounts.isEmpty()) {
+            writer.name("occurrenceAmounts").beginArray();
+            for (Map.Entry<Long, Long> edit : c.occurrenceAmounts.entrySet()) {
+                writer.beginArray().value(edit.getKey()).value(edit.getValue()).endArray();
+            }
+            writer.endArray();
+        }
         writer.name("paid").beginArray();
         for (Long date : c.paid) writer.value(date);
         writer.endArray();
@@ -829,9 +850,12 @@ final class CommitmentStore {
 
         String definitionPayload(Commitment c) throws Exception {
             String lookup = definitionLookup(c.id);
-            return rows.encrypt(new JSONObject().put("version", 1)
+            String payload = rows.encrypt(new JSONObject().put("version", 1)
                 .put("owner", owner).put("definition", c.definitionJson()).toString(),
                 definitionIdentity(lookup));
+            if (!c.occurrenceAmounts.isEmpty() && payload.length() > MAX_EDITED_DEFINITION_PAYLOAD)
+                throw new IllegalArgumentException("edited commitment definition too large");
+            return payload;
         }
 
         ContentValues settlementValues(long rowId, long date, boolean settled) throws Exception {
@@ -878,6 +902,28 @@ final class CommitmentStore {
             if (c.frequency == Commitment.ONCE) return c.done;
             Settlement mark = mark(definition.rowId, date);
             return mark != null ? mark.settled : c.legacyPaidThrough > 0 && date <= c.legacyPaidThrough;
+        }
+
+        boolean setOccurrenceAmount(String id, long date, boolean expectedPayment, Long amount)
+                throws Exception {
+            Definition definition = find(id, true);
+            if (definition == null) return false;
+            Commitment c = definition.value;
+            if (c.frequency == Commitment.ONCE || c.isPayment() != expectedPayment
+                    || !c.hasOccurrence(date)
+                    || amount != null && (amount == 0 || (amount < 0) != expectedPayment))
+                return false;
+            Long current = c.occurrenceAmountOverride(date);
+            if (Objects.equals(current, amount) || amount != null && amount == c.amount
+                    && current == null) return true;
+            Map<Long, Long> edits = new TreeMap<>(c.occurrenceAmounts);
+            if (amount == null || amount == c.amount) edits.remove(date);
+            else edits.put(date, amount);
+            ContentValues values = new ContentValues();
+            values.put("payload", definitionPayload(c.withOccurrenceAmounts(edits)));
+            db.update(DEFINITIONS, values, "id=?", new String[]{Long.toString(definition.rowId)});
+            touch();
+            return true;
         }
 
         boolean settle(String id, long date, boolean settled) throws Exception {

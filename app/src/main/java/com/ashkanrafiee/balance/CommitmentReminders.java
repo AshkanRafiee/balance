@@ -558,7 +558,7 @@ final class CommitmentReminders {
     /** Amount and due day as data only: localizable without a translatable sentence. */
     static String notificationDetail(Context context, Commitment c, long due) {
         if (c == null) throw new NullPointerException("commitment");
-        return NotificationAmounts.format(context, c.amount) + " · " + dueText(context, c, due);
+        return NotificationAmounts.format(context, c.amountAt(due)) + " · " + dueText(context, c, due);
     }
 
     /** The due is part of PendingIntent identity: an older notification must never be retargeted
