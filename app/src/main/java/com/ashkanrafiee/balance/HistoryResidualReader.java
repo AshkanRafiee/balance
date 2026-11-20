@@ -4,6 +4,7 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.os.CancellationSignal;
 import android.util.Base64;
 
 import org.json.JSONObject;
@@ -155,11 +156,17 @@ final class HistoryResidualReader {
         }
 
         void emit(Visitor visitor, int pageSize) throws Exception {
+            emit(visitor, pageSize, null);
+        }
+
+        void emit(Visitor visitor, int pageSize, CancellationSignal cancel) throws Exception {
             requirePageSize(pageSize);
             if (visitor == null) throw new NullPointerException("visitor");
             if (closed || emitted || !stagingOpen)
                 throw new IllegalStateException("residual staging is not emitting");
             emitted = true;
+            stage.cancel = cancel;
+            stage.checkCancellation();
             stage.db.setTransactionSuccessful();
             stage.db.endTransaction();
             stagingOpen = false;
@@ -256,6 +263,7 @@ final class HistoryResidualReader {
             long[] nextResidualOrdinal = {0};
             try (CursorPage page = new CursorPage(stage.db, TRANSACTIONS, pageSize)) {
                 while (page.next()) {
+                    stage.checkCancellation();
                     while (page.cursor.moveToNext()) {
                         String slot = page.cursor.getString(0);
                         long date = page.cursor.getLong(1);
@@ -329,6 +337,7 @@ final class HistoryResidualReader {
         List<ResidualRecord> batch = new ArrayList<>(pageSize);
         try (CursorPage page = new CursorPage(stage.db, CANDIDATES, pageSize)) {
             while (page.next()) {
+                stage.checkCancellation();
                 while (page.cursor.moveToNext()) {
                     String slot = page.cursor.getString(0);
                     long date = page.cursor.getLong(1);
@@ -406,6 +415,7 @@ final class HistoryResidualReader {
             try {
                 long position = 0;
                 while (true) {
+                    stage.checkCancellation();
                     int best = -1;
                     for (int i = 0; i < inputCount; i++) {
                         if (heads[i].row == null) continue;
@@ -611,6 +621,12 @@ final class HistoryResidualReader {
     }
 
     private static final class Stage implements AutoCloseable {
+        private CancellationSignal cancel;
+
+        void checkCancellation() {
+            if (cancel != null) cancel.throwIfCanceled();
+        }
+
         SQLiteDatabase db;
         EncryptedRowCodec codec;
         Mac slotMac;

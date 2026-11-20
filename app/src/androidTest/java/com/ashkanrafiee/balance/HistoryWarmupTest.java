@@ -321,6 +321,87 @@ public class HistoryWarmupTest {
         warmed.close();
     }
 
+    @Test public void foregroundRefreshStopsActiveWarmAndPreservesItsReplacement() throws Exception {
+        seed();
+        // An early tap during the first transaction pass and a later one during residual work.
+        for (int stopAt : new int[]{R.string.history_stage_loading, R.string.history_stage_gaps}) {
+            HistoryWarmup.invalidate();
+            Set<String> before = timelineFiles();
+            CountDownLatch entered = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            CountDownLatch restarted = new CountDownLatch(1);
+            List<Integer> stages = Collections.synchronizedList(new ArrayList<>());
+            HistoryWarmup.warm(context, onStage(stage -> {
+                stages.add(stage);
+                if (stage == stopAt) {
+                    entered.countDown();
+                    await(release);
+                }
+            }));
+            Set<String> interruptedFiles;
+            try {
+                assertTrue(entered.await(15, TimeUnit.SECONDS));
+                interruptedFiles = timelineFiles();
+                interruptedFiles.removeAll(before);
+                assertFalse("worker owns an actual in-flight timeline", interruptedFiles.isEmpty());
+                // The worker holds BalanceData.class throughout this handshake. A foreground
+                // request must not wait for it to finish, including when another tap supersedes
+                // the requested refill before that cancelled worker has unwound.
+                InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                    HistoryWarmup.cancelWarm();
+                    HistoryWarmup.warm(context, onStage(stage -> stages.add(-1)));
+                    HistoryWarmup.cancelWarm();
+                    HistoryWarmup.warm(context, onStage(stage -> restarted.countDown()));
+                });
+            } finally {
+                release.countDown();
+            }
+            assertTrue("new warm was not lost", restarted.await(15, TimeUnit.SECONDS));
+            try (HistoryReader.Result fresh = awaitDefault()) {
+                assertNotNull(fresh);
+                assertEquals(2, fresh.movementCount);
+                assertEquals("interrupted pass did not finish building", Integer.valueOf(stopAt),
+                    stages.get(stages.size() - 1));
+                assertFalse("superseded refill must not start", stages.contains(-1));
+                assertTrue("cancelled writer released its spool and key",
+                    Collections.disjoint(interruptedFiles, timelineFiles()));
+            }
+        }
+    }
+
+    @Test public void cancellingAQueuedWarmLeavesDemandReadAndCachedScopeUsable() throws Exception {
+        seedScopes();
+        HistoryReader.Request request = new HistoryReader.Request(RegionHelper.isIran(context),
+            HistoryReader.DEFAULT_PAGE_SIZE, "Mellat", "111", HistoryActivity.Filter.ALL, "",
+            null, Collections.singleton(dayKey()), 0, 8);
+        // The demand read owns the store when the refresh arrives. It must finish, publish its
+        // exact snapshot, and retain independent handles even if another refresh arrives later.
+        try (HistoryReader.Result demand = HistoryReader.summaryWithResiduals(context, request,
+                onStage(stage -> {
+                    if (stage == R.string.history_stage_loading) {
+                        HistoryWarmup.warm(context);
+                        HistoryWarmup.cancelWarm();
+                    }
+                }))) {
+            HistoryWarmup.remember(request.banks, request.accounts, request.filter, "",
+                request.selectedTags, request.iran, context, demand);
+            HistoryWarmup.cancelWarm();
+            try (HistoryReader.Result hit = takeScope("Mellat", "111")) {
+                assertNotNull(hit);
+                assertSame(demand.revisionStamp, hit.revisionStamp);
+                assertEquals(1L, hit.requestedDayRows.get(dayKey()).transactions.get(0).amount);
+            }
+            assertNull(takeDefault());
+        }
+    }
+
+    private static WorkProgress onStage(java.util.function.IntConsumer observer) {
+        return new WorkProgress() {
+            @Override public void stage(int stage) { observer.accept(stage); }
+            @Override public void progress(long done, long total) {}
+        };
+    }
+
     @Test public void rewarmFlag_hitsImmediatelyWithoutConsumingEntry() throws Exception {
         seed();
         HistoryWarmup.warmNow(context);

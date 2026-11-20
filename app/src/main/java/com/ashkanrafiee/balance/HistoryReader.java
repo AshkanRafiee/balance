@@ -1,6 +1,7 @@
 package com.ashkanrafiee.balance;
 
 import android.content.Context;
+import android.os.CancellationSignal;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -209,7 +210,7 @@ final class HistoryReader {
      * populated only by {@link #reference(Context, Request)}; the normal path exposes all rows by
      * keyset pages through its encrypted timeline.
      */
-    static final class Result {
+    static final class Result implements AutoCloseable {
         final boolean reference;
         final boolean residualsComplete;
         final String limitation;
@@ -308,7 +309,7 @@ final class HistoryReader {
         }
 
         /** Releases the encrypted disk snapshot held by this result. Safe to call more than once. */
-        synchronized void close() throws Exception {
+        @Override public synchronized void close() throws Exception {
             HistoryTimeline old = timeline;
             timeline = null;
             if (old != null) old.close();
@@ -460,12 +461,17 @@ final class HistoryReader {
     /** Same as {@link #summaryWithResiduals(Context, Request)} with advisory progress. */
     static Result summaryWithResiduals(Context context, Request request, WorkProgress progress)
             throws Exception {
-        return timelineSummary(context, request, true, progress, null);
+        return timelineSummary(context, request, true, progress, null, null);
     }
 
     static Result summaryWithResiduals(Context context, Request request, WorkProgress progress,
             SeedPages seedPages) throws Exception {
-        return timelineSummary(context, request, true, progress, seedPages);
+        return timelineSummary(context, request, true, progress, seedPages, null);
+    }
+
+    static Result speculativeSummary(Context context, Request request, WorkProgress progress,
+            CancellationSignal cancel) throws Exception {
+        return timelineSummary(context, request, true, progress, null, cancel);
     }
 
     /**
@@ -476,7 +482,7 @@ final class HistoryReader {
      */
     private static Result timelineSummary(Context context, Request request, boolean residuals)
             throws Exception {
-        return timelineSummary(context, request, residuals, null, null);
+        return timelineSummary(context, request, residuals, null, null, null);
     }
 
     /**
@@ -490,11 +496,12 @@ final class HistoryReader {
 
     /** Same as {@link #timelineSummary(Context, Request, boolean)} with advisory progress. */
     private static Result timelineSummary(Context context, Request request, boolean residuals,
-            WorkProgress progress, SeedPages seedPages) throws Exception {
+            WorkProgress progress, SeedPages seedPages, CancellationSignal cancel) throws Exception {
         if (context == null) throw new NullPointerException("context");
         if (request == null) throw new NullPointerException("request");
         BalanceData.ensureResetComplete(context);
         synchronized (BalanceData.class) {
+            if (cancel != null) cancel.throwIfCanceled();
             HistoryTimeline.Builder timeline = HistoryTimeline.open(context);
             Accumulator accumulator = new Accumulator(context, request, timeline);
             try (MetadataStore.LookupSession metadata = MetadataStore.LookupSession.open(context)) {
@@ -510,8 +517,13 @@ final class HistoryReader {
                         stageResiduals && !memoryResiduals
                             ? HistoryResidualReader.Staging.open(context) : null) {
                     if (progress != null) progress.stage(R.string.history_stage_loading);
-                    List<Transaction> matchingBatch = new ArrayList<>(256);
-                    TransactionStore.forEach(context, request.pageSize, transaction -> {
+                    // Speculation decrypts and spools only a small batch between checkpoints.
+                    int batchSize = cancel == null ? 256 : 32;
+                    List<Transaction> matchingBatch = new ArrayList<>(batchSize);
+                    int pageSize = cancel == null ? request.pageSize
+                        : Math.min(batchSize, request.pageSize);
+                    TransactionStore.forEach(context, pageSize, transaction -> {
+                        if (cancel != null) cancel.throwIfCanceled();
                         // Scope narrowing precedes all other filters. Residual detection needs the
                         // whole bank/account scope, so staging happens before narrowing predicates.
                         if (!inScope(transaction, request)) return;
@@ -523,7 +535,7 @@ final class HistoryReader {
                         }
                         if (!matchesMovementFilter(transaction, request)) return;
                         matchingBatch.add(transaction);
-                        if (matchingBatch.size() == 256) {
+                        if (matchingBatch.size() == batchSize) {
                             matcher.addMatchingTransactions(matchingBatch, accumulator);
                             matchingBatch.clear();
                         }
@@ -535,10 +547,12 @@ final class HistoryReader {
                             if (!matchesResidualFilter(residual, request)) return;
                             if (!matcher.matchesResidual(residual)) return;
                             accumulator.addResidual(residual);
-                        }, request.pageSize);
+                        }, pageSize, cancel);
                     } else if (memoryScope != null) {
                         if (progress != null) progress.stage(R.string.history_stage_gaps);
+                        if (cancel != null) cancel.throwIfCanceled();
                         for (Residual residual : Residual.between(memoryScope)) {
+                            if (cancel != null) cancel.throwIfCanceled();
                             if (!matchesResidualFilter(residual, request)) continue;
                             if (!matcher.matchesResidual(residual)) continue;
                             accumulator.addResidual(residual);
@@ -546,7 +560,8 @@ final class HistoryReader {
                     }
                 }
                 if (progress != null) progress.stage(R.string.history_stage_building);
-                return accumulator.result(false, residuals, null, null, metadata, seedPages);
+                if (cancel != null) cancel.throwIfCanceled();
+                return accumulator.result(false, residuals, null, null, metadata, seedPages, cancel);
             } finally {
                 accumulator.close();
             }
@@ -610,7 +625,7 @@ final class HistoryReader {
         Accumulator accumulator = new Accumulator(context, request);
         for (Transaction transaction : visibleTransactions) accumulator.addTransaction(transaction);
         for (Residual residual : visibleResiduals) accumulator.addResidual(residual);
-        return accumulator.result(true, true, visibleTransactions, visibleResiduals, null, null);
+        return accumulator.result(true, true, visibleTransactions, visibleResiduals, null, null, null);
     }
 
     /** Explicitly named compatibility entry point; it is intentionally not the bounded path. */
@@ -937,7 +952,8 @@ final class HistoryReader {
         }
 
         Result result(boolean reference, boolean residualsComplete, List<Transaction> transactions,
-                List<Residual> residuals, MetadataStore.LookupSession metadata, SeedPages seedPages)
+                List<Residual> residuals, MetadataStore.LookupSession metadata, SeedPages seedPages,
+                CancellationSignal cancel)
                 throws Exception {
             HistoryTimeline snapshot = timeline == null ? null : timeline.finish();
             timeline = null;
@@ -948,6 +964,7 @@ final class HistoryReader {
                 for (MutableYear yearGroup : years.values()) {
                     List<MonthSummary> monthResults = new ArrayList<>();
                     for (MutableMonth monthGroup : yearGroup.months.values()) {
+                        if (cancel != null) cancel.throwIfCanceled();
                         List<DaySummary> dayResultsForMonth = new ArrayList<>();
                         for (MutableDay dayGroup : monthGroup.days.values()) {
                             DaySummary day = new DaySummary(dayGroup.date, dayGroup.stats.freeze());
@@ -965,6 +982,7 @@ final class HistoryReader {
                     Set<String> keys = seedPages == null ? request.requestedDayKeys
                         : seedPages.select(Collections.unmodifiableSet(dayResults.keySet()));
                     for (String key : keys) {
+                        if (cancel != null) cancel.throwIfCanceled();
                         rowResults.put(key, fromPage(metadata, snapshot,
                             snapshot.firstPage(key, request.maxRowsPerDay), request.iran));
                     }

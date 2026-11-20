@@ -1,6 +1,8 @@
 package com.ashkanrafiee.balance;
 
 import android.content.Context;
+import android.os.CancellationSignal;
+import android.os.OperationCanceledException;
 import android.util.Log;
 
 import java.io.File;
@@ -41,9 +43,8 @@ final class HistoryWarmup {
             task.run();
         }, "history-warmup"));
     static { WORKER.setRemoveOnCancelPolicy(true); }
-    private static boolean warming;
-    private static long warmingEpoch;
-    private static Context pendingWarm;
+    private static WarmJob warming;
+    private static WarmJob pendingWarm;
     private static volatile long epoch;
     private static final LinkedHashMap<Fingerprint, Entry> CACHE =
         new LinkedHashMap<>(MAX_ENTRIES, 0.75f, true);
@@ -52,34 +53,61 @@ final class HistoryWarmup {
 
     /** Dispatch only: never waits for the store monitor or performs disk work on the caller. */
     static void warm(Context context) {
+        warm(context, null);
+    }
+
+    static void warm(Context context, WorkProgress progress) {
         if (context == null) return;
         Context app = context.getApplicationContext();
-        if (app == null) app = context;
-        final Context application = app;
-        final long ticket;
         synchronized (DISPATCH_LOCK) {
-            if (warming) {
-                if (warmingEpoch != epoch) pendingWarm = application;
-                return;
+            if (warming != null && !warming.cancel.isCanceled() && warming.ticket == epoch) return;
+            WarmJob job = new WarmJob(app != null ? app : context, progress);
+            if (warming != null) {
+                pendingWarm = job;
+            } else {
+                warming = job;
+                WORKER.execute(job);
             }
-            warming = true;
-            ticket = warmingEpoch = epoch;
         }
-        WORKER.execute(() -> {
+    }
+
+    /** Yield only speculative work. Do not invalidate retained results or touch the store. */
+    static void cancelWarm() {
+        synchronized (DISPATCH_LOCK) {
+            pendingWarm = null;
+            if (warming != null) warming.cancel.cancel();
+        }
+    }
+
+    private static final class WarmJob implements Runnable {
+        final Context app;
+        final WorkProgress progress;
+        final long ticket = epoch;
+        final CancellationSignal cancel = new CancellationSignal();
+
+        WarmJob(Context app, WorkProgress progress) {
+            this.app = app;
+            this.progress = progress;
+        }
+
+        @Override public void run() {
             try {
-                warmNow(application, ticket, null);
+                warmNow(app, ticket, progress, cancel);
+            } catch (OperationCanceledException e) {
+                if (!cancel.isCanceled() || e.getSuppressed().length != 0)
+                    Log.w(TAG, "history warm-up failed", e);
             } catch (Exception e) {
                 Log.w(TAG, "history warm-up failed", e);
             } finally {
-                Context again;
                 synchronized (DISPATCH_LOCK) {
-                    warming = false;
-                    again = pendingWarm;
+                    // Hand off under the same lock as cancelWarm: no detached retry can
+                    // unexpectedly start after a second foreground request has cancelled it.
+                    warming = pendingWarm;
                     pendingWarm = null;
+                    if (warming != null) WORKER.execute(warming);
                 }
-                if (again != null) warm(again);
             }
-        });
+        }
     }
 
     /**
@@ -170,10 +198,12 @@ final class HistoryWarmup {
     static void warmNow(Context context, WorkProgress progress) throws Exception {
         final long ticket;
         synchronized (LOCK) { ticket = epoch; }
-        warmNow(context, ticket, progress);
+        warmNow(context, ticket, progress, new CancellationSignal());
     }
 
-    private static void warmNow(Context context, long ticket, WorkProgress progress) throws Exception {
+    private static void warmNow(Context context, long ticket, WorkProgress progress,
+            CancellationSignal cancel) throws Exception {
+        cancel.throwIfCanceled();
         try {
             CsvExportStaging.sweepOrphans(context);
         } catch (java.io.IOException failure) {
@@ -182,8 +212,9 @@ final class HistoryWarmup {
         HistoryReader.Result result = null;
         List<HistoryReader.Result> discarded = new ArrayList<>();
         try {
-            BalanceData.ensureResetComplete(context);
             synchronized (BalanceData.class) {
+                cancel.throwIfCanceled();
+                BalanceData.ensureResetComplete(context);
                 boolean iran = RegionHelper.isIran(context);
                 HistoryReader.RevisionStamp current = HistoryReader.RevisionStamp.current(context, iran);
                 synchronized (LOCK) {
@@ -200,11 +231,12 @@ final class HistoryWarmup {
                     HistoryActivity.Filter.ALL, "", Collections.emptyList(),
                     HistoryReader.defaultSeedDays(today), 0,
                     HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
-                result = HistoryReader.summaryWithResiduals(context, request, progress);
+                result = HistoryReader.speculativeSummary(context, request, progress, cancel);
                 // The result carries revisions captured inside its own cross-store snapshot.
                 // Check date/timezone again: a midnight/configuration change rejects this pass.
                 current = HistoryReader.RevisionStamp.current(context, RegionHelper.isIran(context));
                 synchronized (LOCK) {
+                    cancel.throwIfCanceled();
                     if (ticket != epoch || !current.sameData(result.revisionStamp)
                             || !today.key().equals(result.revisionStamp.today)) return;
                     Fingerprint key = new Fingerprint(null, null, HistoryActivity.Filter.ALL, "",

@@ -2865,6 +2865,10 @@ public class MainActivity extends Activity {
         }
 
         void refresh(boolean hard, boolean alsoNotes, boolean silent, boolean reRead) {
+            if (!silent) {
+                HistoryWarmup.cancelWarm();
+                historyWarmPending = true;
+            }
             if (refreshing) {
                 // A scan is already running: remember the request so the moment it completes we
                 // scan again and pick up whatever arrived while the first pass was in flight. A
