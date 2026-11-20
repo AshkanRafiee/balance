@@ -3203,7 +3203,7 @@ final class BalanceData {
         if (stored == null || stored.isEmpty() || out == null) return true;
         Map<String, Set<String>> candidates = new LinkedHashMap<>();
         List<AuthorizationEvidence> authorizations = new ArrayList<>();
-        List<SettlementEvidence> settlements = new ArrayList<>();
+        Map<String, List<SettlementEvidence>> settlementsByBankAndAmount = new HashMap<>();
         try {
             SourceStore.forEachSourceWithObservations(context, 256, (source, transactions, balances) -> {
                 BankRules.Authorization authorization = BankRules.extractAuthorization(
@@ -3216,9 +3216,11 @@ final class BalanceData {
                 for (SourceStore.TransactionObservation observation : transactions) {
                     Transaction transaction = observation.transaction;
                     if (observation.parserRevision != latestParserRevision) continue;
-                    if (transaction != null && transaction.balance != null)
-                        settlements.add(new SettlementEvidence(source.bank, source.arrivalTime,
-                            transaction));
+                    if (transaction != null && transaction.balance != null) {
+                        String key = settlementKey(source.bank, transaction.amount);
+                        settlementsByBankAndAmount.computeIfAbsent(key, ignored -> new ArrayList<>())
+                            .add(new SettlementEvidence(source.arrivalTime, transaction));
+                    }
                 }
             });
         } catch (Exception e) {
@@ -3228,14 +3230,21 @@ final class BalanceData {
             Log.w(TAG, "authorization source scan failed; deferring merchants", e);
             return false;
         }
-        Map<String, List<SettlementEvidence>> settlementsByBankAndAmount = new HashMap<>();
-        for (SettlementEvidence settlement : settlements) {
-            String key = settlement.bank + "|" + settlement.transaction.amount;
-            settlementsByBankAndAmount.computeIfAbsent(key, ignored -> new ArrayList<>())
-                .add(settlement);
+        if (authorizations.isEmpty()) return true; // The complete archive was still validated.
+        Map<String, List<Transaction>> clockedCandidates = new HashMap<>();
+        for (AuthorizationEvidence evidence : authorizations) {
+            BankRules.Authorization authorization = evidence.authorization;
+            if (authorization.hour >= 0)
+                clockedCandidates.computeIfAbsent(settlementKey(authorization.bank,
+                    -authorization.amount), ignored -> new ArrayList<>());
         }
         Map<String, Set<Transaction>> storedByIdentity = new HashMap<>();
         for (Transaction transaction : stored) {
+            if (!clockedCandidates.isEmpty() && transaction.balance != null) {
+                List<Transaction> bucket = clockedCandidates.get(settlementKey(transaction.bank,
+                    transaction.amount));
+                if (bucket != null) bucket.add(transaction);
+            }
             if (transaction.sig != null)
                 addStoredIdentity(storedByIdentity, "sig", transaction.sig, transaction);
             if (transaction.content != null)
@@ -3243,9 +3252,9 @@ final class BalanceData {
         }
         for (AuthorizationEvidence authorization : authorizations) {
             Set<Transaction> matches = new HashSet<>();
-            String settlementKey = authorization.authorization.bank + "|"
-                + (-authorization.authorization.amount);
-            List<SettlementEvidence> possible = settlementsByBankAndAmount.get(settlementKey);
+            String key = settlementKey(authorization.authorization.bank,
+                -authorization.authorization.amount);
+            List<SettlementEvidence> possible = settlementsByBankAndAmount.get(key);
             if (possible != null) {
                 for (SettlementEvidence settlement : possible) {
                     Transaction storedTransaction = storedTransactionForObservation(storedByIdentity,
@@ -3263,7 +3272,7 @@ final class BalanceData {
             // transactions restored before source fingerprints existed. Clockless layouts must use
             // source arrival times and cannot safely use this fallback.
             if (authorization.authorization.hour >= 0) {
-                for (Transaction transaction : stored) {
+                for (Transaction transaction : clockedCandidates.get(key)) {
                     if (authorizationMatches(authorization.authorization, authorization.arrival,
                             transaction)) matches.add(transaction);
                 }
@@ -3323,14 +3332,16 @@ final class BalanceData {
     }
 
     private static final class SettlementEvidence {
-        final String bank;
         final long arrival;
         final Transaction transaction;
-        SettlementEvidence(String bank, long arrival, Transaction transaction) {
-            this.bank = bank;
+        SettlementEvidence(long arrival, Transaction transaction) {
             this.arrival = arrival;
             this.transaction = transaction;
         }
+    }
+
+    private static String settlementKey(String bank, long amount) {
+        return bank + "|" + amount;
     }
 
     private static boolean authorizationMatches(BankRules.Authorization authorization, long arrival,

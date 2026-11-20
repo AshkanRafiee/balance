@@ -322,15 +322,27 @@ public class HistoryScanTest {
             clock.get(Calendar.SECOND));
         Transaction legacy = new Transaction("Pasargad", null, base, -45_500_000L,
             900_000L, null, null);
-        BalanceData.writeTransactions(ctx, Collections.singletonList(legacy));
+        List<Transaction> retained = new java.util.ArrayList<>(java.util.Arrays.asList(legacy,
+            new Transaction("Blu", null, base, legacy.amount, 100L, null, null),
+            new Transaction("Pasargad", null, base, -legacy.amount, 100L, null, null),
+            new Transaction("Pasargad", null, base - 5 * 60_000L, legacy.amount, 100L, null, null),
+            new Transaction("Pasargad", "unconfirmed", base, legacy.amount, null, null, null)));
+        assertTrue(BalanceData.writeTransactions(ctx, retained));
         seed("B.Pasargad", "پاسارگاد\nخرید\nفروشگاه نمونه\n"
             + "مبلغ:45,500,000\nرمز:72552\n" + eventClock, base);
 
         assertEquals(0, BalanceData.scanHistory(ctx));
-        List<Transaction> transactions = BalanceData.readTransactions(ctx);
-        assertEquals(1, transactions.size());
-        assertEquals("فروشگاه نمونه",
-            BalanceData.readMerchants(ctx).get(BalanceData.noteKey(transactions.get(0))));
+        assertEquals(retained.size(), BalanceData.readTransactions(ctx).size());
+        assertEquals(Collections.singletonMap(BalanceData.noteKey(legacy), "فروشگاه نمونه"),
+            BalanceData.readMerchants(ctx));
+
+        // A later restore supplies a second valid candidate with no source fingerprint. The
+        // retained authorization is now ambiguous even though neither candidate is in the inbox.
+        retained.add(new Transaction("Pasargad", "another", base, legacy.amount, 100L, null, null));
+        assertTrue(BalanceData.writeTransactions(ctx, retained));
+        assertTrue(prefs().edit().putBoolean(BalanceData.KEY_MERCHANT_EVIDENCE_PENDING, true).commit());
+        assertTrue(BalanceData.scanHistoryOutcome(ctx, null).succeeded());
+        assertTrue(BalanceData.readMerchants(ctx).isEmpty());
     }
 
     @Test public void clockedAuthorization_allowsTheOneMinuteMidnightRollover() throws Exception {
