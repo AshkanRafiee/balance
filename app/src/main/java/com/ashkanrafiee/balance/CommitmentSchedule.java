@@ -42,7 +42,8 @@ final class CommitmentSchedule {
         return new int[]{j.year, j.month, j.day};
     }
 
-    private LocalDate date(int year, int month, int day) {
+    /** Convert calendar fields without resolving a midnight in the device zone. */
+    static LocalDate civilDate(CalendarSystem calendar, int year, int month, int day) {
         int[] g = calendar.toGregorian(year, month, day);
         return LocalDate.of(g[0], g[1], g[2]);
     }
@@ -57,7 +58,7 @@ final class CommitmentSchedule {
             + Math.multiplyExact(index, frequency == Commitment.YEARLY ? 12L : 1L);
         int year = Math.toIntExact(Math.floorDiv(monthIndex, 12));
         int month = (int) Math.floorMod(monthIndex, 12) + 1;
-        return date(year, month, Math.min(anchor[2], calendar.daysInMonth(year, month)));
+        return civilDate(calendar, year, month, Math.min(anchor[2], calendar.daysInMonth(year, month)));
     }
 
     private long indexAt(LocalDate date, int frequency) {

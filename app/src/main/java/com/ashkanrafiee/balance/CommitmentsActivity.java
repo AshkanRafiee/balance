@@ -107,11 +107,10 @@ public final class CommitmentsActivity extends Activity {
             int upcomingMonths) {
         Summary summary = new Summary();
         if (commitments == null || cal == null) return summary;
-        long today = Commitment.startOfDay(nowMs);
-        int[] currentCivil = Commitment.civilDay(today, cal);
-        long currentMonthStart = Commitment.millisOf(currentCivil[0], currentCivil[1], 1, cal);
-        java.time.LocalDate lastOverdueDay = CommitmentSchedule.day(currentMonthStart - 1,
-            java.time.ZoneId.systemDefault());
+        int[] currentCivil = Commitment.civilDay(nowMs, cal);
+        java.time.LocalDate firstDay = CommitmentSchedule.civilDate(cal, currentCivil[0],
+            currentCivil[1], 1);
+        java.time.LocalDate lastOverdueDay = firstDay.minusDays(1);
         for (Commitment c : commitments) {
             if (c == null) continue;
             CommitmentOutstanding overdue = new CommitmentOutstanding(c, cal, lastOverdueDay);
@@ -165,13 +164,13 @@ public final class CommitmentsActivity extends Activity {
         }
         if (!windowMonths.isEmpty()) {
             MonthGroup last = windowMonths.get(windowMonths.size() - 1);
-            long windowStart = Commitment.millisOf(windowMonths.get(0).year,
-                windowMonths.get(0).month, 1, cal);
-            long windowEnd = Commitment.millisOf(last.year, last.month,
-                cal.daysInMonth(last.year, last.month), cal);
+            java.time.LocalDate afterWindow = CommitmentSchedule.civilDate(cal, last.year,
+                last.month, cal.daysInMonth(last.year, last.month)).plusDays(1);
             for (Commitment c : commitments) {
                 if (c == null) continue;
-                for (long at : Commitment.occurrences(c, cal, windowStart, windowEnd)) {
+                CommitmentSchedule schedule = c.scheduleForDisplay(cal);
+                long from = schedule.instant(firstDay), through = schedule.instant(afterWindow) - 1;
+                schedule.visit(c.frequency, from, through, at -> {
                     int[] dueCivil = c.dueCivil(at, cal);
                     MonthGroup group = null;
                     for (MonthGroup candidate : windowMonths) {
@@ -180,7 +179,7 @@ public final class CommitmentsActivity extends Activity {
                             break;
                         }
                     }
-                    if (group == null) continue;
+                    if (group == null) return;
                     Row row = new Row(c, at, c.isSettled(at));
                     group.rows.add(row);
                     if (!row.settled) {
@@ -188,7 +187,7 @@ public final class CommitmentsActivity extends Activity {
                         if (c.isPayment()) group.pay = group.pay.add(amount);
                         else group.receive = group.receive.add(amount);
                     }
-                }
+                }, -1);
             }
         }
         for (MonthGroup group : windowMonths) {

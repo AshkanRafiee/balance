@@ -2,7 +2,6 @@ package com.ashkanrafiee.balance;
 
 import java.math.BigInteger;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.List;
 
 /** The two amounts on the dashboard: unpaid overdue dues plus the current display month. */
@@ -17,9 +16,9 @@ final class DashboardCommitments {
             long now) {
         DashboardCommitments totals = new DashboardCommitments();
         if (commitments.isEmpty()) return totals;
-        int[] day = Commitment.civilDay(Commitment.startOfDay(now), calendar);
-        long last = Commitment.millisOf(day[0], day[1], calendar.daysInMonth(day[0], day[1]), calendar);
-        LocalDate lastDay = CommitmentSchedule.day(last, ZoneId.systemDefault());
+        int[] day = Commitment.civilDay(now, calendar);
+        LocalDate lastDay = CommitmentSchedule.civilDate(calendar, day[0], day[1],
+            calendar.daysInMonth(day[0], day[1]));
         for (Commitment c : commitments) {
             BigInteger amount = new CommitmentOutstanding(c, calendar, lastDay).amount;
             if (c.isPayment()) totals.pay = totals.pay.add(amount);

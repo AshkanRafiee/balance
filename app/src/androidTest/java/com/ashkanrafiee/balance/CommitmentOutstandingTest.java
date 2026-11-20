@@ -5,6 +5,7 @@ import static org.junit.Assert.assertTrue;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.math.BigInteger;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
@@ -14,11 +15,16 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
+import org.junit.After;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 @RunWith(AndroidJUnit4.class)
 public class CommitmentOutstandingTest {
+    private final TimeZone originalZone = TimeZone.getDefault();
+    @After public void restoreZone() { TimeZone.setDefault(originalZone); }
+
     private static final CalendarSystem G = CalendarSystem.GREGORIAN, J = CalendarSystem.JALALI;
     private static final ZoneId UTC = ZoneId.of("UTC");
 
@@ -137,6 +143,7 @@ public class CommitmentOutstandingTest {
     }
 
     @Test public void crossingASkippedCivilDayKeepsBothRowsAndTheirSharedSettlementConsistent() {
+        TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
         ZoneId home = ZoneId.of("Pacific/Kiritimati");
         LocalDate dec30 = LocalDate.of(1994, 12, 30), jan1 = dec30.plusDays(2);
         long first = day(dec30, home), shared = day(jan1, home);
@@ -148,7 +155,66 @@ public class CommitmentOutstandingTest {
             List<Commitment> items = Collections.singletonList(c);
             BigInteger expected = BigInteger.valueOf(paid ? 10 : 50);
             assertEquals(expected, DashboardCommitments.summarize(items, G, now).remainingReceive());
-            assertEquals(expected, CommitmentsActivity.summarize(items, G, now, 1).remainingReceive());
+            CommitmentsActivity.Summary january = CommitmentsActivity.summarize(items, G, now, 1);
+            assertEquals(2, january.months.get(0).rows.size());
+            assertEquals(BigInteger.TEN, january.overdueReceive);
+            assertEquals(expected, january.remainingReceive());
+            long decemberNow = day(dec30, UTC);
+            assertEquals(BigInteger.TEN, DashboardCommitments.summarize(items, G, decemberNow)
+                .remainingReceive());
+            assertEquals(BigInteger.TEN, CommitmentsActivity.summarize(items, G, decemberNow, 1)
+                .remainingReceive());
+        }
+    }
+
+    @Test public void repeatedDisplayMidnightDoesNotClassifyNovemberFirstAsOverdue() {
+        TimeZone.setDefault(TimeZone.getTimeZone("America/Havana"));
+        ZoneId home = ZoneId.systemDefault();
+        LocalDate first = LocalDate.of(2020, 10, 31);
+        List<Commitment> items = Collections.singletonList(Commitment.create("daily", 1,
+            Commitment.DAILY, day(first, home), day(first.plusDays(1), home), false, 0, G, home));
+        for (String instant : new String[]{"2020-11-01T04:00:00Z", "2020-11-01T05:00:00Z"}) {
+            long now = Instant.parse(instant).toEpochMilli();
+            CommitmentsActivity.Summary detail = CommitmentsActivity.summarize(items, G, now, 1);
+            assertEquals(1, detail.overdueCount);
+            assertEquals(BigInteger.ONE, detail.thisMonthReceive);
+            assertEquals(BigInteger.valueOf(2), detail.remainingReceive());
+            assertEquals(BigInteger.valueOf(2), DashboardCommitments.summarize(items, G, now)
+                .remainingReceive());
+        }
+    }
+
+    @Test public void nonexistentLastDisplayDayStillExistsInTheScheduleHomeZone() {
+        TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Kiritimati"));
+        LocalDate dec30 = LocalDate.of(1994, 12, 30);
+        long now = day(dec30, ZoneId.systemDefault());
+        List<Commitment> items = Collections.singletonList(Commitment.create("daily", 1,
+            Commitment.DAILY, day(dec30, UTC), day(dec30.plusDays(2), UTC), false, 0, G, UTC));
+        assertEquals(BigInteger.valueOf(2), DashboardCommitments.summarize(items, G, now)
+            .remainingReceive());
+        CommitmentsActivity.Summary detail = CommitmentsActivity.summarize(items, G, now, 1);
+        assertEquals(0, detail.overdueCount);
+        assertEquals(2, detail.months.get(0).rows.size());
+        assertEquals(BigInteger.valueOf(2), detail.remainingReceive());
+    }
+
+    @Test public void watermarkDuringGooseBayReplayIncludesFirstButNotSecondMidnightAsADue() {
+        TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
+        ZoneId home = ZoneId.of("America/Goose_Bay");
+        long first = Instant.parse("1988-10-30T02:00:00Z").toEpochMilli();
+        long replay = Instant.parse("1988-10-30T02:30:00Z").toEpochMilli();
+        long second = Instant.parse("1988-10-30T04:00:00Z").toEpochMilli();
+        LocalDate oct30 = LocalDate.of(1988, 10, 30);
+        for (long watermark : new long[]{0L, replay}) {
+            Commitment c = new Commitment("daily", "daily", 5, Commitment.DAILY, first,
+                day(oct30.plusDays(1), home), false,
+                watermark == 0 ? Collections.singletonList(second) : null, watermark,
+                watermark != 0 ? Collections.singletonList(second) : null,
+                false, 0, new CommitmentSchedule(G, home, oct30, oct30.plusDays(1)));
+            BigInteger expected = BigInteger.valueOf(watermark == 0 ? 10 : 5);
+            List<Commitment> items = Collections.singletonList(c);
+            assertEquals(expected, DashboardCommitments.summarize(items, G, replay).remainingReceive());
+            assertEquals(expected, CommitmentsActivity.summarize(items, G, replay, 1).remainingReceive());
         }
     }
 }

@@ -196,6 +196,11 @@ final class Commitment {
             schedule == null ? java.time.ZoneId.systemDefault() : schedule.zone);
     }
 
+    CommitmentSchedule scheduleForDisplay(CalendarSystem displayCalendar) {
+        return schedule != null ? schedule
+            : CommitmentSchedule.capture(this, displayCalendar, java.time.ZoneId.systemDefault());
+    }
+
     static long scheduleStartOfDay(Commitment c, long at) {
         return c.schedule == null ? startOfDay(at)
             : c.schedule.instant(CommitmentSchedule.day(at, c.schedule.zone));

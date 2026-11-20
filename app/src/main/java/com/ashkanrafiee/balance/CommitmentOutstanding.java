@@ -3,7 +3,6 @@ package com.ashkanrafiee.balance;
 import java.math.BigInteger;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -25,8 +24,7 @@ final class CommitmentOutstanding {
         this.c = c;
         // Before migration a series follows the displayed calendar and device zone. Interpret
         // its anchor the same way without moving any of its exact settlement identities.
-        schedule = c.schedule != null ? c.schedule
-            : CommitmentSchedule.capture(c, displayCalendar, ZoneId.systemDefault());
+        schedule = c.scheduleForDisplay(displayCalendar);
         // The requested day comes from a representable display timestamp, but the next home
         // midnight can fall beyond the last representable millisecond. Ends remain inclusive.
         Instant next = lastDay.plusDays(1).atStartOfDay(schedule.zone).toInstant();
