@@ -22,7 +22,9 @@ android { namespace 'com.ashkanrafiee.balance'; compileSdk 36
     buildTypes {
         release {
             if (signingValues['storeFile']) signingConfig signingConfigs.release
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
             // Drop source.properties/META-INF version-control info so the tagged build is byte-for-byte
             // reproducible by F-Droid and third parties (AGP 8.3+ bundles VCS info by default).
             vcsInfo { include false }
