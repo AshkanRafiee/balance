@@ -103,6 +103,37 @@ public class HistoryWarmupTest {
         assertEquals("last owner deletes the spool and wrapped key", before, timelineFiles());
     }
 
+    @Test public void defaultSeedDates_endAtTodayAndStayInTheActiveMonth() {
+        assertEquals(Collections.singleton(CalDate.of(1405, 1, 1).key()),
+            HistoryReader.defaultSeedDays(CalDate.of(1405, 1, 1)));
+        List<String> expected = new ArrayList<>();
+        for (int day = 28; day >= 22; day--) expected.add(CalDate.of(2026, 2, day).key());
+        assertEquals(expected, new ArrayList<>(HistoryReader.defaultSeedDays(CalDate.of(2026, 2, 28))));
+    }
+
+    @Test public void warmLoadsOnlyDefaultDatesAndLeavesOlderDaysPageable() throws Exception {
+        Calendar older = Calendar.getInstance();
+        older.add(Calendar.DAY_OF_MONTH, -8);
+        Transaction old = new Transaction("Mellat", "111", older.getTimeInMillis(), 9L,
+            null, "old", "old");
+        assertTrue(BalanceData.writeTransactions(context, Collections.singletonList(old)));
+        boolean iran = RegionHelper.isIran(context);
+        String oldKey = CalDate.fromGregorian(older.get(Calendar.YEAR),
+            older.get(Calendar.MONTH) + 1, older.get(Calendar.DAY_OF_MONTH), iran).key();
+        HistoryWarmup.warmNow(context);
+        HistoryReader.Result warm = takeDefault();
+        assertNotNull(warm);
+        try {
+            assertEquals(HistoryReader.defaultSeedDays(CalDate.today(iran)),
+                warm.requestedDayRows.keySet());
+            assertFalse(warm.requestedDayRows.containsKey(oldKey));
+            assertEquals(9L, HistoryReader.readPage(context, warm, oldKey, null, false, 1)
+                .transactions.get(0).amount);
+        } finally {
+            warm.close();
+        }
+    }
+
     @Test public void metadataMismatch_discardsAndRearmsCache() throws Exception {
         seed();
         HistoryWarmup.warmNow(context);

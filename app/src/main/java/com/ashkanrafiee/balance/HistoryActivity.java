@@ -73,10 +73,8 @@ import java.util.concurrent.CountDownLatch;
  * (a ContentObserver, like the main screen), silently re-rendering on completion.
  */
 public final class HistoryActivity extends Activity {
-    /** Keep the first history frame small on older devices; other days remain one tap away. */
-    private static final int INITIAL_EXPANDED_DAY_LIMIT = 7;
     /** Keep the initial recent pages plus one explicitly opened older day in memory. */
-    private static final int MAX_LOADED_DAY_PAGES = INITIAL_EXPANDED_DAY_LIMIT + 1;
+    private static final int MAX_LOADED_DAY_PAGES = HistoryReader.DEFAULT_EXPANDED_DAYS + 1;
     /** A narrowing can match rows across an unbounded number of days; the other matching days keep
      *  their complete summaries and open with their rows on tap, while only this bounded first
      *  window gets rows materialized immediately. */
@@ -2534,10 +2532,7 @@ public final class HistoryActivity extends Activity {
         expandedMonths.add(now.year + "/" + now.month);
         // Keep the unfiltered baseline even when the first result is bank/account-scoped.
         // Missing dates cost no views and may have matches once the scope is cleared.
-        int firstDay = Math.max(1, now.day - INITIAL_EXPANDED_DAY_LIMIT + 1);
-        for (int day = now.day; day >= firstDay; day--) {
-            expandedDays.add(CalDate.of(now.year, now.month, day).key());
-        }
+        expandedDays.addAll(HistoryReader.defaultSeedDays(now));
     }
 
     private CalDate now() {
@@ -3301,10 +3296,7 @@ public final class HistoryActivity extends Activity {
                 // of a busy month at once creates a large non-recycled view tree and can make older
                 // devices look hung or run out of memory; collapsed days still show their totals
                 // and are expanded on demand.
-                CalDate current = CalDate.today(iran);
-                int firstDay = Math.max(1, current.day - INITIAL_EXPANDED_DAY_LIMIT + 1);
-                for (int day = current.day; day >= firstDay; day--) {
-                    String key = CalDate.of(current.year, current.month, day).key();
+                for (String key : HistoryReader.defaultSeedDays(CalDate.today(iran))) {
                     if (visible.contains(key)) requested.add(key);
                 }
             }

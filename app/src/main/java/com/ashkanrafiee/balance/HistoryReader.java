@@ -38,6 +38,17 @@ final class HistoryReader {
     static final int DEFAULT_MAX_REQUESTED_DAYS = 64;
     /** Source-compatible name; it selects the initial/page batch size now. */
     static final int DEFAULT_MAX_ROWS_PER_DAY = 128;
+    static final int DEFAULT_EXPANDED_DAYS = 7;
+
+    /** Unfiltered history opens recent dates back to the start of the active calendar month. */
+    static Set<String> defaultSeedDays(CalDate today) {
+        Set<String> days = new LinkedHashSet<>();
+        int first = Math.max(1, today.day - DEFAULT_EXPANDED_DAYS + 1);
+        for (int day = today.day; day >= first; day--) {
+            days.add(CalDate.of(today.year, today.month, day).key());
+        }
+        return days;
+    }
 
     static final String SUMMARY_RESIDUAL_LIMITATION =
         "Summary mode does not calculate residuals; use the explicit reference mode until "

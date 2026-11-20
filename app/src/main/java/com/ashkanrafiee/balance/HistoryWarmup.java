@@ -195,13 +195,10 @@ final class HistoryWarmup {
                     if (CACHE.containsKey(key) || CACHE.size() == MAX_ENTRIES) return;
                 }
                 CalDate today = CalDate.today(iran);
-                Set<String> days = new LinkedHashSet<>();
-                for (int day = 1; day <= CalDate.daysInMonth(today.year, today.month, iran); day++) {
-                    days.add(CalDate.of(today.year, today.month, day).key());
-                }
                 HistoryReader.Request request = new HistoryReader.Request(iran,
                     HistoryReader.DEFAULT_PAGE_SIZE, (String) null, (String) null,
-                    HistoryActivity.Filter.ALL, "", Collections.emptyList(), days, 0,
+                    HistoryActivity.Filter.ALL, "", Collections.emptyList(),
+                    HistoryReader.defaultSeedDays(today), 0,
                     HistoryReader.DEFAULT_MAX_ROWS_PER_DAY);
                 result = HistoryReader.summaryWithResiduals(context, request, progress);
                 // The result carries revisions captured inside its own cross-store snapshot.
