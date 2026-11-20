@@ -199,6 +199,7 @@ public final class DashboardSmsRefreshTest {
         LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
         saved.put("Saman", new Bank("Saman", 5_000_000L, System.currentTimeMillis(), SENDER));
         BalanceData.write(context, saved);
+        HistoryWarmup.invalidate();
         CountDownLatch automaticStarted = new CountDownLatch(1);
         CountDownLatch automaticRelease = new CountDownLatch(1);
         CountDownLatch manualStarted = new CountDownLatch(1);
@@ -212,6 +213,8 @@ public final class DashboardSmsRefreshTest {
             MainActivity.setRefreshGateForTest(manualStarted, manualRelease);
             automaticRelease.countDown();
             assertTrue("the queued manual scan must run", manualStarted.await(10, TimeUnit.SECONDS));
+            assertFalse("history warm-up must wait for the queued balance pass",
+                hasWarmHistory());
             scenario.onActivity(activity -> {
                 assertTrue("the queued manual pass must retain visible-refresh ownership",
                     findBalanceView(activity.getWindow().getDecorView()).refreshVisible);
@@ -224,6 +227,16 @@ public final class DashboardSmsRefreshTest {
             manualRelease.countDown();
         }
         await(this::dashboardIdle, 45_000);
+        await(this::hasWarmHistory, 20_000);
+    }
+
+    private boolean hasWarmHistory() throws Exception {
+        HistoryReader.Result result = HistoryWarmup.take((String) null, null,
+            HistoryActivity.Filter.ALL, "", java.util.Collections.emptyList(),
+            RegionHelper.isIran(context), context);
+        if (result == null) return false;
+        result.close();
+        return true;
     }
 
     private static MainActivity.BalanceView findBalanceView(View view) {

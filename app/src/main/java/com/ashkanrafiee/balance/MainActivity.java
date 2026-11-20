@@ -73,6 +73,7 @@ public class MainActivity extends Activity {
     private DashboardScreen dashboard;
     private boolean smsRequested;
     private boolean mainResumed;
+    private boolean historyWarmPending;
     private String pendingBackupPassword;
     private LockOverlay lockOverlay;
     private Runnable pendingLockAction;
@@ -123,6 +124,7 @@ public class MainActivity extends Activity {
             pendingLockAction = null;
             updateSecureFlag();
             if (action != null) action.run();
+            warmHistoryWhenIdle();
         });
         lockOverlay.setCancelListener(() -> {
             pendingLockAction = null;
@@ -227,9 +229,9 @@ public class MainActivity extends Activity {
             // Start the reload now rather than on the first draw, so the fresh summary is
             // usually ready before the card paints; the last summary stays up meanwhile.
             view.ensureCommitmentSummary();
+            historyWarmPending = true;
             view.refreshSilent();
             view.scheduleMonthRefresh();
-            HistoryWarmup.warm(this);
             if (dashboard != null) dashboard.render();
         }
         registerSmsObserver();
@@ -256,6 +258,16 @@ public class MainActivity extends Activity {
 
     private void scheduleReminders() {
         CommitmentReminders.scheduleAll(getApplicationContext());
+    }
+
+    /** A speculative history read shares the balance scan's store monitor. Give the visible
+     *  dashboard and any queued refresh first use of it, including after a calendar change. */
+    private void warmHistoryWhenIdle() {
+        if (!historyWarmPending || !mainResumed || isFinishing() || isDestroyed()
+                || view == null || view.refreshing
+                || (LockManager.isSessionLocked() && LockManager.isEnabled(this))) return;
+        historyWarmPending = false;
+        HistoryWarmup.warm(this);
     }
 
     /**
@@ -1534,7 +1546,8 @@ public class MainActivity extends Activity {
             view.invalidate();
         }
         if (dashboard != null) dashboard.render();
-        HistoryWarmup.warm(this);
+        historyWarmPending = true;
+        warmHistoryWhenIdle();
         BalanceWidgetProvider.push(this);
     }
 
@@ -2991,6 +3004,7 @@ public class MainActivity extends Activity {
             if (refreshAgain && !isFinishing() && !isDestroyed())
                 refresh(pendingHard, pendingNotes, silent && !pendingVisible,
                     pendingReRead && !pendingHard);
+            else warmHistoryWhenIdle();
         }
 
         void value(Canvas c, long n, float x, float baseline, float width,
