@@ -67,6 +67,8 @@ final class SourceStore {
         "id", "source_id", "source_digest", "dedupe_digest", "payload"
     };
     private static final ThreadLocal<Boolean> ACTIVE = new ThreadLocal<>();
+    // Instrumentation counts actual data cursors without intercepting other workers' reads.
+    static final ThreadLocal<SQLiteDatabase.CursorFactory> cursorFactoryForTest = new ThreadLocal<>();
 
     private SourceStore() {}
 
@@ -329,12 +331,18 @@ final class SourceStore {
         requirePageSize(pageSize);
         if (visitor == null) throw new NullPointerException("visitor");
         read(context, session -> {
-            // The observations are resolved against the already-decoded parent: reloading the
-            // parent row per observation (a query plus a decrypt each) turns a large source
-            // store into minutes of backup work on a real inbox.
-            visitSources(session, pageSize, source -> visitor.accept(source,
-                transactionObservations(session, source),
-                balanceObservations(session, source)));
+            // Walk the two (source_id, id) indexes alongside the ascending source stream. This
+            // validates the entire archive without opening two new cursors per physical SMS.
+            try (Cursor transactions = orderedObservations(session, TRANSACTION_TABLE);
+                 Cursor balances = orderedObservations(session, BALANCE_TABLE)) {
+                transactions.moveToFirst();
+                balances.moveToFirst();
+                visitSources(session, pageSize, source -> visitor.accept(source,
+                    observationsForParent(transactions, source, session::decodeTransaction),
+                    observationsForParent(balances, source, session::decodeBalance)));
+                if (!transactions.isAfterLast() || !balances.isAfterLast())
+                    throw new Exception("observation source is missing");
+            }
             return null;
         });
     }
@@ -705,26 +713,24 @@ final class SourceStore {
         return out;
     }
 
-    /** Same as above but verified against the already-decoded parent instead of reloading it
-     *  from the database once per observation row. */
-    private static List<TransactionObservation> transactionObservations(Session session,
-            Source parent) throws Exception {
-        List<TransactionObservation> out = new ArrayList<>();
-        try (Cursor cursor = session.db.query(TRANSACTION_TABLE, OBSERVATION_COLUMNS,
-                "source_id=?", new String[]{Long.toString(parent.id)}, null, null, "id ASC")) {
-            while (cursor.moveToNext()) out.add(session.decodeTransaction(cursor, parent));
-        }
-        return out;
+    private static Cursor orderedObservations(Session session, String table) {
+        return session.db.query(table, OBSERVATION_COLUMNS, null, null, null, null,
+            "source_id ASC, id ASC");
     }
 
-    /** Same as above but verified against the already-decoded parent instead of reloading it
-     *  from the database once per observation row. */
-    private static List<BalanceObservation> balanceObservations(Session session, Source parent)
-            throws Exception {
-        List<BalanceObservation> out = new ArrayList<>();
-        try (Cursor cursor = session.db.query(BALANCE_TABLE, OBSERVATION_COLUMNS,
-                "source_id=?", new String[]{Long.toString(parent.id)}, null, null, "id ASC")) {
-            while (cursor.moveToNext()) out.add(session.decodeBalance(cursor, parent));
+    private interface ObservationDecoder<T> {
+        T decode(Cursor cursor, Source parent) throws Exception;
+    }
+
+    private static <T> List<T> observationsForParent(Cursor cursor, Source parent,
+            ObservationDecoder<T> decoder) throws Exception {
+        List<T> out = new ArrayList<>();
+        while (!cursor.isAfterLast()) {
+            long sourceId = cursor.getLong(1);
+            if (sourceId > parent.id) break;
+            if (sourceId < parent.id) throw new Exception("observation source is missing");
+            out.add(decoder.decode(cursor, parent));
+            cursor.moveToNext();
         }
         return out;
     }
@@ -1238,7 +1244,7 @@ final class SourceStore {
     private static final class Helper extends SQLiteOpenHelper {
         Helper(Context context) {
             // The default handler may delete a corrupt database. Preserve it for recovery instead.
-            super(context, DB_NAME, null, DB_VERSION, db -> {
+            super(context, DB_NAME, cursorFactoryForTest.get(), DB_VERSION, db -> {
                 throw new SQLiteException("source database is corrupt; preserved for recovery");
             });
         }

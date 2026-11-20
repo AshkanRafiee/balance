@@ -6,10 +6,12 @@ import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
+import android.database.sqlite.SQLiteCursor;
 import android.database.sqlite.SQLiteDatabase;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -21,6 +23,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /** Encrypted, uncapped source evidence and immutable parser observations. */
@@ -150,6 +153,78 @@ public class SourceStoreTest {
         final int[] streamed = {0};
         SourceStore.forEachSource(context, 37, source -> streamed[0]++);
         assertEquals(total, streamed[0]);
+    }
+
+    @Test public void groupedVisitStreamsSourcesAndTheirObservationsInInsertionOrder()
+            throws Exception {
+        SourceStore.runInTransaction(context, editor -> {
+            SourceStore.Source first = editor.capture("Refah", "first", 10L, 1);
+            editor.capture("Refah", "empty", 20L, 1);
+            SourceStore.Source last = editor.capture("Refah", "last", 30L, 1);
+            Transaction tx = new Transaction("Refah", null, 30L, -5L, 95L, "sig", "content");
+            // Observation insertion order deliberately differs from source and revision order.
+            editor.observeTransaction(last, 2, tx);
+            editor.observeBalance(last, 2, "Refah", null, 30L, 95L);
+            editor.observeTransaction(first, 1, tx);
+            editor.observeBalance(first, 1, "Refah", null, 10L, 90L);
+            editor.observeTransaction(last, 1, tx);
+            editor.observeBalance(last, 1, "Refah", null, 30L, 96L);
+            return null;
+        });
+
+        List<String> visited = new ArrayList<>();
+        int[] dataCursors = {0};
+        SourceStore.cursorFactoryForTest.set((db, driver, table, query) -> {
+            if (SourceStore.TABLE.equals(table) || SourceStore.TRANSACTION_TABLE.equals(table)
+                    || SourceStore.BALANCE_TABLE.equals(table)) dataCursors[0]++;
+            return new SQLiteCursor(driver, table, query);
+        });
+        try {
+            SourceStore.forEachSourceWithObservations(context, 1, (source, transactions, balances) -> {
+                visited.add(source.rawBody);
+                for (SourceStore.TransactionObservation tx : transactions) {
+                    assertEquals(source.physicalIdentity, tx.sourceIdentity);
+                    visited.add("t" + tx.parserRevision);
+                }
+                for (SourceStore.BalanceObservation balance : balances) {
+                    assertEquals(source.physicalIdentity, balance.sourceIdentity);
+                    visited.add("b" + balance.balance);
+                }
+            });
+        } finally {
+            SourceStore.cursorFactoryForTest.remove();
+        }
+        assertEquals("one cursor per evidence table across all pages", 3, dataCursors[0]);
+        assertEquals(Arrays.asList("first", "t1", "b90", "empty", "last", "t2", "t1",
+            "b95", "b96"), visited);
+    }
+
+    @Test public void groupedVisitRejectsCorruptObservationsEvenWhenCallerIgnoresThem()
+            throws Exception {
+        for (String table : new String[]{SourceStore.TRANSACTION_TABLE, SourceStore.BALANCE_TABLE}) {
+            SourceStore.clear(context);
+            SourceStore.capture(context, "Refah", "first", 10L, 1);
+            SourceStore.Source last = SourceStore.capture(context, "Refah", "last", 20L, 1);
+            if (table.equals(SourceStore.TRANSACTION_TABLE))
+                SourceStore.observeTransaction(context, last, 1,
+                    new Transaction("Refah", null, 20L, -5L, 95L, "sig", "content"));
+            else SourceStore.observeBalance(context, last, 1, 20L, 95L);
+            try (SQLiteDatabase db = SQLiteDatabase.openDatabase(
+                    DataGeneration.context(context).getDatabasePath(SourceStore.DB_NAME).getPath(),
+                    null, SQLiteDatabase.OPEN_READWRITE)) {
+                ContentValues values = new ContentValues();
+                values.put("payload", "damaged");
+                assertEquals(1, db.update(table, values, null, null));
+            }
+            List<String> visited = new ArrayList<>();
+            try {
+                SourceStore.forEachSourceWithObservations(context, 1,
+                    (source, transactions, balances) -> visited.add(source.rawBody));
+                fail("accepted damaged " + table);
+            } catch (Exception expected) {
+                assertEquals(Arrays.asList("first"), visited);
+            }
+        }
     }
 
     @Test public void corruptPayloadFailsAndDatabaseRemainsForRecovery() throws Exception {
