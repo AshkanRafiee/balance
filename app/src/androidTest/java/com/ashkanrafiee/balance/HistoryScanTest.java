@@ -587,7 +587,7 @@ public class HistoryScanTest {
             .putBoolean(BalanceData.KEY_RESET_IN_PROGRESS, true)
             .putBoolean(BalanceData.KEY_RESET_ALSO_NOTES, false)
             .putLong(BalanceData.KEY_HISTORY_THROUGH, T + 1000)
-            .putInt(BalanceData.KEY_HISTORY_RULES_VERSION, BalanceData.HISTORY_RULES_VERSION)
+            .putInt(BalanceData.KEY_HISTORY_RULES_VERSION, BalanceData.historyRulesVersion())
             .putInt(BalanceData.KEY_HISTORY_SCHEMA, BalanceData.HISTORY_SCHEMA)
             .commit());
 
@@ -679,7 +679,7 @@ public class HistoryScanTest {
         // forever; the single stored movement is untouched.
         assertEquals(1, BalanceData.scanHistory(ctx));
         assertEquals(arrival, historyWatermark());
-        assertEquals(BalanceData.HISTORY_RULES_VERSION,
+        assertEquals(BalanceData.historyRulesVersion(),
             prefs().getInt(BalanceData.KEY_HISTORY_RULES_VERSION, -1));
         assertEquals(1, BalanceData.readTransactions(ctx).size());
     }
@@ -1134,7 +1134,7 @@ public class HistoryScanTest {
         BalanceData.setNote(ctx, legacy, "legacy note");
         BalanceData.setTags(ctx, legacy, Collections.singletonList("legacy tag"));
         prefs().edit().putLong(BalanceData.KEY_HISTORY_THROUGH, T + 1000)
-            .putInt(BalanceData.KEY_HISTORY_RULES_VERSION, BalanceData.HISTORY_RULES_VERSION)
+            .putInt(BalanceData.KEY_HISTORY_RULES_VERSION, BalanceData.historyRulesVersion())
             .putInt(BalanceData.KEY_HISTORY_SCHEMA, 1).commit();
         assertEquals(1, BalanceData.scanHistory(ctx));
         List<Transaction> saved = BalanceData.readTransactions(ctx);
@@ -1465,7 +1465,7 @@ public class HistoryScanTest {
         clearInbox();
         seed("b.pasargad", secondBody, T + 1100);
         prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+            BalanceData.historyRulesVersion() - 1).commit();
         assertEquals(1, BalanceData.scanHistory(ctx));
         List<Transaction> saved = BalanceData.readTransactions(ctx);
         assertEquals(1, saved.size());
@@ -1635,7 +1635,7 @@ public class HistoryScanTest {
         BalanceData.writeTransactions(ctx, java.util.Arrays.asList(
             new Transaction("Saman", T + 1000, 999_999L, "stale-sig")));
         prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+            BalanceData.historyRulesVersion() - 1).commit();
 
         int added = BalanceData.scanHistory(ctx);
 
@@ -1644,7 +1644,7 @@ public class HistoryScanTest {
         assertEquals(1, txs.size());
         assertEquals(200000L, txs.get(0).amount);
         assertFalse("stale-sig".equals(txs.get(0).sig));
-        assertEquals(BalanceData.HISTORY_RULES_VERSION,
+        assertEquals(BalanceData.historyRulesVersion(),
             prefs().getInt(BalanceData.KEY_HISTORY_RULES_VERSION, -1));
     }
 
@@ -1660,7 +1660,7 @@ public class HistoryScanTest {
         clearInbox();
         seed("500095", WITHDRAWAL, T + 2000);
         prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+            BalanceData.historyRulesVersion() - 1).commit();
 
         int added = BalanceData.scanHistory(ctx);
 
@@ -1669,7 +1669,7 @@ public class HistoryScanTest {
         assertEquals(2, txs.size());
         assertEquals(-120000L, txs.get(0).amount);   // present withdrawal re-processed, newest first
         assertEquals(200000L, txs.get(1).amount);    // deleted deposit preserved as an orphan
-        assertEquals(BalanceData.HISTORY_RULES_VERSION,
+        assertEquals(BalanceData.historyRulesVersion(),
             prefs().getInt(BalanceData.KEY_HISTORY_RULES_VERSION, -1));
     }
 
@@ -1682,7 +1682,7 @@ public class HistoryScanTest {
 
         clearInbox();
         prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+            BalanceData.historyRulesVersion() - 1).commit();
 
         int added = BalanceData.scanHistory(ctx);
 
@@ -1779,7 +1779,7 @@ public class HistoryScanTest {
         seed("TejaratBank", TEJARAT_LATE_MOVEMENT, at(2026, 9, 10, 9, 0));
         ctx.getSharedPreferences(BalanceData.PREFS_PREF, Context.MODE_PRIVATE).edit()
             .putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-                BalanceData.HISTORY_RULES_VERSION - 1).commit();
+                BalanceData.historyRulesVersion() - 1).commit();
         assertEquals("a full rebuild reprocesses all three inbox movements", 3,
             BalanceData.scanHistory(ctx));
 
@@ -1918,7 +1918,7 @@ public class HistoryScanTest {
         // The user empties their inbox, then the app updates and rebuilds under the new rules.
         clearInbox();
         prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+            BalanceData.historyRulesVersion() - 1).commit();
         assertEquals("an empty inbox can add nothing", 0, BalanceData.scanHistory(ctx));
 
         List<Residual> after = Residual.between(BalanceData.readTransactions(ctx));
@@ -1946,7 +1946,7 @@ public class HistoryScanTest {
         assertEquals(2, BalanceData.readTransactions(ctx).size());
 
         prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+            BalanceData.historyRulesVersion() - 1).commit();
         int added = BalanceData.scanHistory(ctx);
 
         assertEquals(1, added);
@@ -1969,7 +1969,7 @@ public class HistoryScanTest {
         clearInbox();
         seed("500095", DEPOSIT, T + 2000);            // only the newer copy remains
         prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+            BalanceData.historyRulesVersion() - 1).commit();
 
         int added = BalanceData.scanHistory(ctx);
 
@@ -2128,7 +2128,7 @@ public class HistoryScanTest {
 
         // A rules bump makes the next scan re-read the message already in the inbox.
         prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+            BalanceData.historyRulesVersion() - 1).commit();
         assertEquals(1, BalanceData.scanHistory(ctx));
 
         Transaction rescanned = BalanceData.readTransactions(ctx).get(0);
@@ -2266,7 +2266,7 @@ public class HistoryScanTest {
         BalanceData.setNote(ctx, t, "for my number, not my brother's");
 
         prefs().edit().putInt(BalanceData.KEY_HISTORY_RULES_VERSION,
-            BalanceData.HISTORY_RULES_VERSION - 1).commit();
+            BalanceData.historyRulesVersion() - 1).commit();
         assertEquals(1, BalanceData.scanHistory(ctx));
 
         Transaction rescanned = BalanceData.readTransactions(ctx).get(0);

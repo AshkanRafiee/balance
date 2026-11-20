@@ -135,8 +135,10 @@ final class BalanceData {
     static final int SORT_DATE_RECENT = 3;
     static final int SORT_DATE_OLDEST = 4;
 
-    /** Bumped whenever the movement-message recognition rules change, forcing a full history re-scan. */
-    static final int HISTORY_RULES_VERSION = BankRules.VERSION;
+    /** Read at scan time: preference access must not initialize the bank rule tables. */
+    static int historyRulesVersion() {
+        return BankRules.VERSION;
+    }
 
     /** Persisted recent-movement window for balance-chain reconciliation across split scans. */
     static final String KEY_RECENT_MOVEMENTS = "recent_movements";
@@ -158,88 +160,95 @@ final class BalanceData {
     private static final String KEY_ALIAS = "balance_enc_key";
     private static final String TRANSFORM = "AES/GCM/NoPadding";
     private static final int GCM_TAG_BITS = 128;
-    private static final Pattern balance = Pattern.compile(
-        "(?:\u0645\u0648\u062c\u0648\u062f\u06cc \u062d\u0633\u0627\u0628" +
-        "|\u0645\u0627\u0646\u062f\u0647 \u062d\u0633\u0627\u0628" +
-        "|\u0645\u0648\u062c\u0648\u062f\u06cc" +
-        "|\u0645\u0627\u0646\u062f\u0647" +
-        "|available balance|balance|bal)" +
-        "[^\\d]{0,12}?([0-9][0-9,]*)",
-        Pattern.CASE_INSENSITIVE);
-    private static final Pattern otp = Pattern.compile(
-        "(?<![\u0621-\u0640A-Za-z])" +
-        "(?:\u0631\u0645\u0632|\u067e\u0648\u06cc\u0627" +
-        "|\u06a9\u062f \\s*\u062a\u0627\u06cc\u06cc\u062f" +
-        "|\u06a9\u062f \\s*\u062a\u0623\u06cc\u06cc\u062f" +
-        "|otp|code)",
-        Pattern.CASE_INSENSITIVE);
-    /** The transaction amount in a money-movement message. Most banks write it after the "مبلغ"
-     *  (amount) label, possibly with an explicit sign (some banks, e.g. Parsian, write "مبلغ:500,000-"
-     *  where the trailing minus marks a withdrawal). */
-    private static final Pattern amountLabel = Pattern.compile(
-        "(?:\u0645\u0628\u0644\u063A)[^\\d]{0,12}?([+-]?\\s*[0-9][0-9,]*\\s*[+-]?)");
-    /** The amount written directly after a deposit/withdrawal label, as Tejarat does with
-     *  "برداشت: 490,098,000 ریال". Matching one of these also resolves the direction: a label that
-     *  feeds the amount is authoritative, so a payment-method word like "پرداخت" in the same message
-     *  does not make a deposit look ambiguous. A label must stay on the amount's line so a
-     *  sentence ending in a movement word cannot consume the following balance line. */
-    private static final Pattern depositLabel = Pattern.compile(
-        "(?:\u0648\u0627\u0631\u06CC\u0632)[^\\d\\r\\n]{0,12}?([0-9][0-9,]*)");
-    private static final Pattern withdrawalLabel = Pattern.compile(
-        "(?:\u0628\u0631\u062F\u0627\u0634\u062A)[^\\d\\r\\n]{0,12}?([0-9][0-9,]*)");
-    /** A bare number standing next to "ریال" (e.g. Blu's "400,000 ریال از حساب شما پرید"). The stated
-     *  resulting balance is removed first, so this captures the moved amount rather than the balance. */
-    private static final Pattern rialAmount = Pattern.compile("([0-9][0-9,]*)\\s*\u0631\u06CC\u0627\u0644");
-    /** A bare, signed amount standing at the start of the message, as Resalat writes it
-     *  ("-200,000,000" on its own line, resulting balance on the last). The explicit sign tells the
-     *  direction, so no label or keyword is needed. */
-    private static final Pattern signedAmount = Pattern.compile(
-        "(?m)^[ \\t\\u202A-\\u202E]*([+-])[ \\t]*([0-9][0-9,]*)[ \\t\\u202A-\\u202E]*$");
-    /** A bare, signed amount on its own line with the sign after the number, as Mehr Iran writes it
-     *  ("400,000-" on its own line, resulting balance on the last). Allowing RTL bidi marks around
-     *  the amount and holding the whole line to the shape "digits, optional sign" keeps unsigned
-     *  balances, account lines and date lines from matching; the explicit sign gives the direction. */
-    private static final Pattern bareSignedAmount = Pattern.compile(
-        "(?m)^[ \\t\\u202A-\\u202E]*([0-9][0-9,]*)[ \\t\\u202A-\\u202E]*([+-])[ \\t\\u202A-\\u202E]*$");
-    /** A bare, signed amount followed by "ریال" on its own line, as Eghtesad Novin writes it
-     *  ("-3,100,000ريال" under its "برداشت:" account line). Resolved with the whole-line signed
-     *  shapes before the deposit/withdrawal label scan, so that scan never mistakes the account's
-     *  own digits ("برداشت: 126-…") for the movement amount. The whole-line anchors keep the
-     *  labeled balance, account, phone and date lines out, and the explicit sign gives the
-     *  direction with no keyword needed. */
-    private static final Pattern signedRialAmount = Pattern.compile(
-        "(?m)^[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*([+-])[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*([0-9][0-9,]*)[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*\u0631\u06CC\u0627\u0644[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*$");
-    /** A line of "<label>:<amount><sign>" where the sign trails the number, as Melli writes it
-     *  ("انتقالي:1,000,000-", "خريداينترنتي:7,600,000-", "حواله پل:7,700,000+"). The line ending in
-     *  an explicit sign distinguishes the moved amount from balances and account numbers (which are
-     *  unsigned), and the sign itself carries the direction — so "حواله پل:7,700,000+" is a deposit
-     *  even though "حواله" is a withdrawal keyword. */
-    private static final Pattern labeledSignedAmount = Pattern.compile(
-        "(?m)^([^\\r\\n:0-9][^\\r\\n:]{0,39}):[ \\t]*([0-9][0-9,]*)[ \\t]*([+-])[ \\t]*$");
-    /** Refah's glued purchase/card labels, whose trailing sign gives the direction ("خرید…-" /
-     *  "کارت…-"). Restricting this matcher to the observed movement labels keeps arbitrary signed
-     *  account or balance lines from being read as an amount. */
-    private static final Pattern gluedLabeledSignedAmount = Pattern.compile(
-        "(?m)^[ \\t]*(?:خرید|کارت)[ \\t]*([0-9][0-9,]*)[ \\t]*([+-])[ \\t]*$");
-    /** A line of "<label>:<sign><amount>" where the sign leads the number, as Maskan writes it
-     *  ("خريد:-1,500,000", "انتقال اينترنت:+50,000,000"). The bank wraps the figure in
-     *  direction marks, so the separators tolerate the invisible bidi run the same way the bare
-     *  signed shapes do. The explicit sign decides the direction — so "انتقال اينترنت:+…" is a
-     *  deposit even though "انتقال" is a withdrawal keyword — and the required sign keeps the
-     *  unsigned balance, account and date lines out. */
-    private static final Pattern leadingLabeledSignedAmount = Pattern.compile(
-        "(?m)^([^\\r\\n:0-9][^\\r\\n:]{0,39}):[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*([+-])[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*([0-9][0-9,]*)[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*$");
-    private static final String[] DEPOSIT_KEYWORDS = {
-        "\u0648\u0627\u0631\u06cc\u0632", "\u062f\u0631\u06cc\u0627\u0641\u062a",
-        "\u0628\u0633\u062a\u0627\u0646\u06a9\u0627\u0631", "\u0627\u0641\u0632\u0627\u06cc\u0634",
-        "\u0639\u0648\u062f\u062a", "\u0628\u0631\u06af\u0634\u062a",
-        "\u0628\u0647 \u062d\u0633\u0627\u0628", "\u0646\u0634\u0633\u062a"};
-    private static final String[] WITHDRAWAL_KEYWORDS = {
-        "\u0628\u0631\u062f\u0627\u0634\u062a", "\u062e\u0631\u06cc\u062f",
-        "\u062e\u0631\u06cc\u062f\u0627\u0631\u06cc", "\u067e\u0631\u062f\u0627\u062e\u062a",
-        "\u0628\u062f\u0647\u06a9\u0627\u0631", "\u06a9\u0627\u0647\u0634",
-        "\u0627\u0646\u062a\u0642\u0627\u0644", "\u062d\u0648\u0627\u0644\u0647",
-        "\u06a9\u0627\u0631\u0645\u0632\u062f", "\u0642\u0628\u0636"};
+
+    /** Initialized on the first SMS parse, independently of preferences and stored balances. */
+    private static final class SmsPatterns {
+        private static final Pattern balance = Pattern.compile(
+            "(?:\u0645\u0648\u062c\u0648\u062f\u06cc \u062d\u0633\u0627\u0628" +
+            "|\u0645\u0627\u0646\u062f\u0647 \u062d\u0633\u0627\u0628" +
+            "|\u0645\u0648\u062c\u0648\u062f\u06cc" +
+            "|\u0645\u0627\u0646\u062f\u0647" +
+            "|available balance|balance|bal)" +
+            "[^\\d]{0,12}?([0-9][0-9,]*)",
+            Pattern.CASE_INSENSITIVE);
+        private static final Pattern otp = Pattern.compile(
+            "(?<![\u0621-\u0640A-Za-z])" +
+            "(?:\u0631\u0645\u0632|\u067e\u0648\u06cc\u0627" +
+            "|\u06a9\u062f \\s*\u062a\u0627\u06cc\u06cc\u062f" +
+            "|\u06a9\u062f \\s*\u062a\u0623\u06cc\u06cc\u062f" +
+            "|otp|code)",
+            Pattern.CASE_INSENSITIVE);
+        /** The transaction amount in a money-movement message. Most banks write it after the "مبلغ"
+         *  (amount) label, possibly with an explicit sign (some banks, e.g. Parsian, write "مبلغ:500,000-"
+         *  where the trailing minus marks a withdrawal). */
+        private static final Pattern amountLabel = Pattern.compile(
+            "(?:\u0645\u0628\u0644\u063A)[^\\d]{0,12}?([+-]?\\s*[0-9][0-9,]*\\s*[+-]?)");
+        /** The amount written directly after a deposit/withdrawal label, as Tejarat does with
+         *  "برداشت: 490,098,000 ریال". Matching one of these also resolves the direction: a label that
+         *  feeds the amount is authoritative, so a payment-method word like "پرداخت" in the same message
+         *  does not make a deposit look ambiguous. A label must stay on the amount's line so a
+         *  sentence ending in a movement word cannot consume the following balance line. */
+        private static final Pattern depositLabel = Pattern.compile(
+            "(?:\u0648\u0627\u0631\u06CC\u0632)[^\\d\\r\\n]{0,12}?([0-9][0-9,]*)");
+        private static final Pattern withdrawalLabel = Pattern.compile(
+            "(?:\u0628\u0631\u062F\u0627\u0634\u062A)[^\\d\\r\\n]{0,12}?([0-9][0-9,]*)");
+        /** A bare number standing next to "ریال" (e.g. Blu's "400,000 ریال از حساب شما پرید"). The stated
+         *  resulting balance is removed first, so this captures the moved amount rather than the balance. */
+        private static final Pattern rialAmount = Pattern.compile("([0-9][0-9,]*)\\s*\u0631\u06CC\u0627\u0644");
+        /** A bare, signed amount standing at the start of the message, as Resalat writes it
+         *  ("-200,000,000" on its own line, resulting balance on the last). The explicit sign tells the
+         *  direction, so no label or keyword is needed. */
+        private static final Pattern signedAmount = Pattern.compile(
+            "(?m)^[ \\t\\u202A-\\u202E]*([+-])[ \\t]*([0-9][0-9,]*)[ \\t\\u202A-\\u202E]*$");
+        /** A bare, signed amount on its own line with the sign after the number, as Mehr Iran writes it
+         *  ("400,000-" on its own line, resulting balance on the last). Allowing RTL bidi marks around
+         *  the amount and holding the whole line to the shape "digits, optional sign" keeps unsigned
+         *  balances, account lines and date lines from matching; the explicit sign gives the direction. */
+        private static final Pattern bareSignedAmount = Pattern.compile(
+            "(?m)^[ \\t\\u202A-\\u202E]*([0-9][0-9,]*)[ \\t\\u202A-\\u202E]*([+-])[ \\t\\u202A-\\u202E]*$");
+        /** A bare, signed amount followed by "ریال" on its own line, as Eghtesad Novin writes it
+         *  ("-3,100,000ريال" under its "برداشت:" account line). Resolved with the whole-line signed
+         *  shapes before the deposit/withdrawal label scan, so that scan never mistakes the account's
+         *  own digits ("برداشت: 126-…") for the movement amount. The whole-line anchors keep the
+         *  labeled balance, account, phone and date lines out, and the explicit sign gives the
+         *  direction with no keyword needed. */
+        private static final Pattern signedRialAmount = Pattern.compile(
+            "(?m)^[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*([+-])[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*([0-9][0-9,]*)[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*\u0631\u06CC\u0627\u0644[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*$");
+        /** A line of "<label>:<amount><sign>" where the sign trails the number, as Melli writes it
+         *  ("انتقالي:1,000,000-", "خريداينترنتي:7,600,000-", "حواله پل:7,700,000+"). The line ending in
+         *  an explicit sign distinguishes the moved amount from balances and account numbers (which are
+         *  unsigned), and the sign itself carries the direction — so "حواله پل:7,700,000+" is a deposit
+         *  even though "حواله" is a withdrawal keyword. */
+        private static final Pattern labeledSignedAmount = Pattern.compile(
+            "(?m)^([^\\r\\n:0-9][^\\r\\n:]{0,39}):[ \\t]*([0-9][0-9,]*)[ \\t]*([+-])[ \\t]*$");
+        /** Refah's glued purchase/card labels, whose trailing sign gives the direction ("خرید…-" /
+         *  "کارت…-"). Restricting this matcher to the observed movement labels keeps arbitrary signed
+         *  account or balance lines from being read as an amount. */
+        private static final Pattern gluedLabeledSignedAmount = Pattern.compile(
+            "(?m)^[ \\t]*(?:خرید|کارت)[ \\t]*([0-9][0-9,]*)[ \\t]*([+-])[ \\t]*$");
+        /** A line of "<label>:<sign><amount>" where the sign leads the number, as Maskan writes it
+         *  ("خريد:-1,500,000", "انتقال اينترنت:+50,000,000"). The bank wraps the figure in
+         *  direction marks, so the separators tolerate the invisible bidi run the same way the bare
+         *  signed shapes do. The explicit sign decides the direction — so "انتقال اينترنت:+…" is a
+         *  deposit even though "انتقال" is a withdrawal keyword — and the required sign keeps the
+         *  unsigned balance, account and date lines out. */
+        private static final Pattern leadingLabeledSignedAmount = Pattern.compile(
+            "(?m)^([^\\r\\n:0-9][^\\r\\n:]{0,39}):[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*([+-])[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*([0-9][0-9,]*)[ \\t\\u200C\\u200D\\u200E\\u200F\\u202A-\\u202E]*$");
+        private static final String[] DEPOSIT_KEYWORDS = {
+            "\u0648\u0627\u0631\u06cc\u0632", "\u062f\u0631\u06cc\u0627\u0641\u062a",
+            "\u0628\u0633\u062a\u0627\u0646\u06a9\u0627\u0631", "\u0627\u0641\u0632\u0627\u06cc\u0634",
+            "\u0639\u0648\u062f\u062a", "\u0628\u0631\u06af\u0634\u062a",
+            "\u0628\u0647 \u062d\u0633\u0627\u0628", "\u0646\u0634\u0633\u062a"};
+        private static final String[] WITHDRAWAL_KEYWORDS = {
+            "\u0628\u0631\u062f\u0627\u0634\u062a", "\u062e\u0631\u06cc\u062f",
+            "\u062e\u0631\u06cc\u062f\u0627\u0631\u06cc", "\u067e\u0631\u062f\u0627\u062e\u062a",
+            "\u0628\u062f\u0647\u06a9\u0627\u0631", "\u06a9\u0627\u0647\u0634",
+            "\u0627\u0646\u062a\u0642\u0627\u0644", "\u062d\u0648\u0627\u0644\u0647",
+            "\u06a9\u0627\u0631\u0645\u0632\u062f", "\u0642\u0628\u0636"};
+
+        private static final Pattern EVENT_REFERENCE = Pattern.compile(
+            "(?:شماره\\s*(?:پیگیری|تراکنش|مرجع)|کد\\s*پیگیری|شناسه\\s*تراکنش|(?i:ref(?:erence)?))\\s*[:：#-]?\\s*([0-9]{3,})");
+    }
 
     private BalanceData() {}
 
@@ -2186,8 +2195,9 @@ final class BalanceData {
             // moved backward since the last scan; fall back to a full rescan so messages dated after
             // the rollback are not skipped forever by the incremental "newer than watermark" read.
             long now = System.currentTimeMillis();
+            int rulesVersion = historyRulesVersion();
             boolean full = resetWasPending || hwm == 0 || hwm > now
-                || prefs.getInt(KEY_HISTORY_RULES_VERSION, -1) != HISTORY_RULES_VERSION
+                || prefs.getInt(KEY_HISTORY_RULES_VERSION, -1) != rulesVersion
                 || prefs.getInt(KEY_HISTORY_SCHEMA, -1) != HISTORY_SCHEMA
                 || retrySourceEvidence(context, KEY_SOURCE_PENDING_HISTORY,
                     KEY_SOURCE_FAILURE_HISTORY, KEY_SOURCE_RETRY_HISTORY);
@@ -2269,7 +2279,7 @@ final class BalanceData {
                         MessageDate.eventTime(body, arrival, BankRules.calendar(bank)), evidence});
                 }
                 if (rows.isEmpty()) {
-                    sourcesSaved = captureSources(context, sourceRows, HISTORY_RULES_VERSION,
+                    sourcesSaved = captureSources(context, sourceRows, rulesVersion,
                         KEY_SOURCE_PENDING_HISTORY, KEY_SOURCE_FAILURE_HISTORY);
                     holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_HISTORY,
                         sourcesSaved);
@@ -2297,7 +2307,7 @@ final class BalanceData {
                     completed = true;
                     SharedPreferences.Editor emptyEditor = prefs.edit();
                     if (full) {
-                        emptyEditor.putInt(KEY_HISTORY_RULES_VERSION, HISTORY_RULES_VERSION);
+                        emptyEditor.putInt(KEY_HISTORY_RULES_VERSION, rulesVersion);
                         emptyEditor.putInt(KEY_HISTORY_SCHEMA, HISTORY_SCHEMA);
                     }
                     if (!holdWatermark && newest > 0)
@@ -2495,7 +2505,7 @@ final class BalanceData {
                         lastBalanceDates.put(key, balanceDate);
                     }
                 }
-                boolean sourcesCaptured = captureSources(context, sourceRows, HISTORY_RULES_VERSION,
+                boolean sourcesCaptured = captureSources(context, sourceRows, rulesVersion,
                     KEY_SOURCE_PENDING_HISTORY, KEY_SOURCE_FAILURE_HISTORY);
                 sourcesSaved = sourcesCaptured;
                 holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_HISTORY, sourcesCaptured);
@@ -2778,7 +2788,7 @@ final class BalanceData {
             // full rebuild as done (or advancing past rows that failed) would skip the correction
             // forever until the next manual version bump.
             if (completed && !holdWatermark && full)
-                editor.putInt(KEY_HISTORY_RULES_VERSION, HISTORY_RULES_VERSION);
+                editor.putInt(KEY_HISTORY_RULES_VERSION, rulesVersion);
             if (completed && !holdWatermark && full)
                 editor.putInt(KEY_HISTORY_SCHEMA, HISTORY_SCHEMA);
             if (completed && !holdWatermark && newest > 0)
@@ -3427,8 +3437,6 @@ final class BalanceData {
     }
 
     static final long DUPLICATE_DELIVERY_MS = 2 * 60_000L;
-    private static final Pattern EVENT_REFERENCE = Pattern.compile(
-        "(?:شماره\\s*(?:پیگیری|تراکنش|مرجع)|کد\\s*پیگیری|شناسه\\s*تراکنش|(?i:ref(?:erence)?))\\s*[:：#-]?\\s*([0-9]{3,})");
 
     /** Stated dates distinguish events exactly. Clockless copies may be duplicate deliveries only
      *  within two minutes; an amount/balance pair is never a lifetime identity. Card numbers are not
@@ -3439,7 +3447,7 @@ final class BalanceData {
         if (base == null) return null;
         boolean dated = date < Long.MAX_VALUE && MessageDate.eventTime(body, date + 1,
             BankRules.calendar(bank)) == date;
-        Matcher ref = EVENT_REFERENCE.matcher(normalizeLetters(digits(body)));
+        Matcher ref = SmsPatterns.EVENT_REFERENCE.matcher(normalizeLetters(digits(body)));
         String reference = ref.find() ? ref.group(1) : "";
         return "e2:" + base + ":" + (dated ? "d" : "a") + ":" + reference + ":" + date;
     }
@@ -3547,8 +3555,8 @@ final class BalanceData {
     static long extract(String raw) {
         if (raw == null) return -1;
         String s = normalizeLetters(digits(raw.replace("\u066C", ",").replace("\u060C", ",")));
-        if (otp.matcher(s).find()) return -1;
-        Matcher m = balance.matcher(s);
+        if (SmsPatterns.otp.matcher(s).find()) return -1;
+        Matcher m = SmsPatterns.balance.matcher(s);
         String n = null;
         while (m.find()) n = m.group(1);
         if (n == null) return -1;
@@ -3574,7 +3582,7 @@ final class BalanceData {
     static Long extractTransaction(String raw) {
         if (raw == null) return null;
         String s = normalizeLetters(raw);
-        if (otp.matcher(s).find()) return null;
+        if (SmsPatterns.otp.matcher(s).find()) return null;
         String n = s;
 
         long amount = -1;
@@ -3584,7 +3592,7 @@ final class BalanceData {
         // A signed amount on its own line is unambiguous. Resolve it before broad "مبلغ" scans:
         // a later explanatory sentence can contain that word and a following date, which must never
         // be mistaken for the movement amount.
-        Matcher leadingSigned = signedAmount.matcher(n);
+        Matcher leadingSigned = SmsPatterns.signedAmount.matcher(n);
         if (leadingSigned.find()) {
             sign = leadingSigned.group(1).equals("-") ? -1 : 1;
             amount = toLong(leadingSigned.group(2));
@@ -3594,7 +3602,7 @@ final class BalanceData {
         // the same reason: Eghtesad Novin states its account behind the "برداشت:" label, so the
         // label scan below would otherwise read the account's own leading digits as the amount.
         if (amount <= 0) {
-            Matcher leadingSignedRial = signedRialAmount.matcher(n);
+            Matcher leadingSignedRial = SmsPatterns.signedRialAmount.matcher(n);
             if (leadingSignedRial.find()) {
                 sign = leadingSignedRial.group(1).equals("-") ? -1 : 1;
                 amount = toLong(leadingSignedRial.group(2));
@@ -3602,7 +3610,7 @@ final class BalanceData {
         }
 
         // 1) Amount following the "مبلغ" label, with an optional explicit sign.
-        String g = amount > 0 ? null : lastGroup(amountLabel, n);
+        String g = amount > 0 ? null : lastGroup(SmsPatterns.amountLabel, n);
         if (g != null) {
             String t = g.trim();
             if (t.startsWith("-") || t.endsWith("-")) sign = -1;
@@ -3613,8 +3621,8 @@ final class BalanceData {
 
         // 2) Amount written right after a "واریز:"/"برداشت:" label.
         if (amount <= 0) {
-            String d = lastGroup(depositLabel, n);
-            String w = lastGroup(withdrawalLabel, n);
+            String d = lastGroup(SmsPatterns.depositLabel, n);
+            String w = lastGroup(SmsPatterns.withdrawalLabel, n);
             if (d == null && w != null) {
                 amount = toLong(w);
                 labelDir = -1;
@@ -3629,7 +3637,7 @@ final class BalanceData {
         //    so a label that happens to contain a keyword of the opposite kind ("حواله" is a
         //    withdrawal keyword but is a deposit here) cannot flip it.
         if (amount <= 0) {
-            Matcher ml = labeledSignedAmount.matcher(n);
+            Matcher ml = SmsPatterns.labeledSignedAmount.matcher(n);
             if (ml.find()) {
                 amount = toLong(ml.group(2));
                 sign = ml.group(3).equals("-") ? -1 : 1;
@@ -3640,7 +3648,7 @@ final class BalanceData {
         // movements. The explicit sign decides the direction and the allowlisted labels keep the
         // account, balance, date, and time lines out.
         if (amount <= 0) {
-            Matcher mg = gluedLabeledSignedAmount.matcher(n);
+            Matcher mg = SmsPatterns.gluedLabeledSignedAmount.matcher(n);
             if (mg.find()) {
                 amount = toLong(mg.group(1));
                 sign = mg.group(2).equals("-") ? -1 : 1;
@@ -3652,7 +3660,7 @@ final class BalanceData {
         //    direction for the same reason as the trailing-sign shape above, and the required
         //    sign keeps the unsigned balance, account and date lines out.
         if (amount <= 0) {
-            Matcher mll = leadingLabeledSignedAmount.matcher(n);
+            Matcher mll = SmsPatterns.leadingLabeledSignedAmount.matcher(n);
             if (mll.find()) {
                 amount = toLong(mll.group(3));
                 sign = mll.group(2).equals("-") ? -1 : 1;
@@ -3661,12 +3669,12 @@ final class BalanceData {
 
         // 4) A bare number adjacent to "ریال", excluding the resulting balance itself.
         if (amount <= 0) {
-            Matcher mb = balance.matcher(n);
+            Matcher mb = SmsPatterns.balance.matcher(n);
             while (mb.find()) {
                 String v = mb.group(1);
                 n = n.replace(v, "").replace(v.replace(",", ""), "");
             }
-            Matcher mc = rialAmount.matcher(n);
+            Matcher mc = SmsPatterns.rialAmount.matcher(n);
             long best = -1;
             while (mc.find()) best = Math.max(best, toLong(mc.group(1)));
             if (best > 0) amount = best;
@@ -3675,7 +3683,7 @@ final class BalanceData {
         // 5) A bare signed amount at the start of the message (e.g. Resalat's "-200,000,000" first
         //    line, with the resulting balance at the end). The explicit sign is the direction.
         if (amount <= 0) {
-            Matcher ms = signedAmount.matcher(n);
+            Matcher ms = SmsPatterns.signedAmount.matcher(n);
             if (ms.find()) {
                 sign = ms.group(1).equals("-") ? -1 : 1;
                 amount = toLong(ms.group(2));
@@ -3686,7 +3694,7 @@ final class BalanceData {
         //    leading-sign form (Mehr Iran writes "400,000-" alone, then the resulting balance). The
         //    whole-line shape keeps the unsigned account, date and balance lines out.
         if (amount <= 0) {
-            Matcher mbs = bareSignedAmount.matcher(n);
+            Matcher mbs = SmsPatterns.bareSignedAmount.matcher(n);
             if (mbs.find()) {
                 sign = mbs.group(2).equals("-") ? -1 : 1;
                 amount = toLong(mbs.group(1));
@@ -3699,8 +3707,8 @@ final class BalanceData {
         if (sign != 0) direction = sign;
         else if (labelDir != 0) direction = labelDir;
         else {
-            boolean deposit = containsAny(n, DEPOSIT_KEYWORDS);
-            boolean withdrawal = containsAny(n, WITHDRAWAL_KEYWORDS);
+            boolean deposit = containsAny(n, SmsPatterns.DEPOSIT_KEYWORDS);
+            boolean withdrawal = containsAny(n, SmsPatterns.WITHDRAWAL_KEYWORDS);
             if (deposit == withdrawal) return null;
             direction = deposit ? 1 : -1;
         }
@@ -3727,7 +3735,8 @@ final class BalanceData {
         Long txn = extractTransaction(body);
         if (txn == null) {
             String n = normalizeLetters(digits(body.replace("\u066C", ",").replace("\u060C", ",")));
-            if (!containsAny(n, DEPOSIT_KEYWORDS) && !containsAny(n, WITHDRAWAL_KEYWORDS)) return null;
+            if (!containsAny(n, SmsPatterns.DEPOSIT_KEYWORDS)
+                    && !containsAny(n, SmsPatterns.WITHDRAWAL_KEYWORDS)) return null;
             if (!hasPrev) return null;
             long delta = stated - prevBalance;
             if (delta == 0) return null;

@@ -439,7 +439,7 @@ final class BankRules {
             String line = cleanAuthorizationLine(raw);
             if (line.isEmpty()) continue;
             rawLines.add(line);
-            lines.add(BalanceData.normalizeLetters(line));
+            lines.add(TextNormalizer.normalize(line));
         }
         int amountIndex = -1;
         int actionIndex = -1;
@@ -655,7 +655,7 @@ final class BankRules {
         if (bank == null || body == null) return null;
         Pattern p = ACCOUNT_PATTERNS.get(bank);
         if (p == null) return null;
-        Matcher m = p.matcher(BalanceData.normalizeLetters(digitsToAscii(body)));
+        Matcher m = p.matcher(TextNormalizer.normalize(digitsToAscii(body)));
         if (!m.find()) return null;
         return m.groupCount() == 0 ? m.group(0) : m.group(1);
     }
@@ -775,7 +775,7 @@ final class BankRules {
         if (bank == null || body == null) return null;
         Pattern p = REASON_PATTERNS.get(bank);
         if (p == null) return null;
-        Matcher m = p.matcher(BalanceData.normalizeLetters(Digits.ascii(body)));
+        Matcher m = p.matcher(TextNormalizer.normalize(Digits.ascii(body)));
         if (!m.find()) return null;
         String title = normalizeReason(m.group(1));
         return title.isEmpty() || !REASON_CAPTION_RES.containsKey(title) ? null : title;
@@ -900,7 +900,7 @@ final class BankRules {
         if (bank == null || body == null) return null;
         Pattern p = CHANNEL_PATTERNS.get(bank);
         if (p == null) return null;
-        Matcher m = p.matcher(BalanceData.normalizeLetters(Digits.ascii(body)));
+        Matcher m = p.matcher(TextNormalizer.normalize(Digits.ascii(body)));
         if (!m.find()) return null;
         String channel = normalizeChannel(m.group(1));
         return channel.isEmpty() || !CHANNEL_CAPTION_RES.containsKey(channel) ? null : channel;
@@ -918,7 +918,7 @@ final class BankRules {
      *  here in a way it does not for a reason: the bank writes the label with the Arabic yeh, so the
      *  same word read back through the label can arrive with the Persian one. */
     static String normalizeChannel(String raw) {
-        return normalizeStated(BalanceData.normalizeLetters(raw));
+        return normalizeStated(TextNormalizer.normalize(raw));
     }
 
     // Last, so every table the fingerprint folds has been built: static initializers run in the order

@@ -176,7 +176,7 @@ public class MofidTest {
         seed(SENDER, WITHDRAWAL, ARRIVAL + 1_000L);
         assertTrue(prefs().edit()
             .putInt(BalanceData.KEY_RULES_VERSION, BankRules.VERSION - 1)
-            .putInt(BalanceData.KEY_HISTORY_RULES_VERSION, BalanceData.HISTORY_RULES_VERSION - 1)
+            .putInt(BalanceData.KEY_HISTORY_RULES_VERSION, BalanceData.historyRulesVersion() - 1)
             .commit());
 
         assertEquals(1, BalanceData.scanSms(context, saved));
@@ -184,7 +184,7 @@ public class MofidTest {
         assertNewestBalance(saved);
         assertHistory();
         assertEquals(BankRules.VERSION, prefs().getInt(BalanceData.KEY_RULES_VERSION, -1));
-        assertEquals(BalanceData.HISTORY_RULES_VERSION,
+        assertEquals(BalanceData.historyRulesVersion(),
             prefs().getInt(BalanceData.KEY_HISTORY_RULES_VERSION, -1));
         assertEquals(0, BalanceData.scanHistory(context));
         assertHistory();
