@@ -207,7 +207,14 @@ public class HistoryOpenCostTest {
         long t0 = SystemClock.uptimeMillis();
         InstrumentationRegistry.getInstrumentation().startActivitySync(i);
         awaitRows();
-        return SystemClock.uptimeMillis() - t0;
+        long elapsed = SystemClock.uptimeMillis() - t0;
+        if (InstrumentationRegistry.getArguments().getString("reportOpenCost") != null) {
+            android.os.Bundle metrics = new android.os.Bundle();
+            metrics.putString("stream", "\nHistory: " + seeded + " seeded movements, " + expected
+                + " visible rows, open-to-ready " + elapsed + " ms\n");
+            InstrumentationRegistry.getInstrumentation().sendStatus(2, metrics);
+        }
+        return elapsed;
     }
 
     /** Waits for the expected recent matching rows and a completed render, not a loading header. */
