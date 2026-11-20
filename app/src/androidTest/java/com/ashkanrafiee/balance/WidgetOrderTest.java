@@ -157,6 +157,10 @@ public class WidgetOrderTest {
         assertEquals("Tejarat", widget.get(0).name);
         assertEquals("Mellat", widget.get(1).name);
         assertEquals("1110000333", widget.get(1).account);
+        android.view.View header = BalanceWidgetProvider.buildViews(ctx).apply(ctx, null);
+        android.widget.TextView total = header.findViewById(R.id.widget_total);
+        assertEquals(CurrencyHelper.amount(WidgetTheme.context(ctx), 7_000_000),
+            total.getText().toString());
     }
 
     /** Accounts rank independently, not in bank groups, and keep their own balances in every mode. */

@@ -16,6 +16,8 @@ import android.os.SystemClock;
 import android.util.Log;
 import android.view.View;
 import android.widget.RemoteViews;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class BalanceWidgetProvider extends AppWidgetProvider {
@@ -253,8 +255,10 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         boolean hidden = BalanceData.isWidgetHidden(c);
         long total = 0;
         try {
-            for (java.util.Map.Entry<String, Bank> e : BalanceData.read(c).entrySet())
-                if (!BalanceData.isExcluded(c, e.getKey())) total += e.getValue().amount;
+            Map<String, Bank> banks = BalanceData.read(c);
+            Set<String> excluded = BalanceData.getExcluded(c);
+            for (Map.Entry<String, Bank> e : banks.entrySet())
+                if (!BalanceData.isExcluded(excluded, e.getKey())) total += e.getValue().amount;
         } catch (Exception e) {
             Log.w(TAG, "widget balance store unreadable", e);
             return unreadableViews(c);
