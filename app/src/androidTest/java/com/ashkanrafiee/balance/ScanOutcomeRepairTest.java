@@ -147,6 +147,10 @@ public class ScanOutcomeRepairTest {
         assertTrue(scan(provider, false).succeeded());
         assertEquals(plain, BalanceData.decryptStorePayload(
             data.getString(BalanceData.KEY_RECENT_MOVEMENTS, null)));
+
+        assertTrue(data.edit().putInt(BalanceData.KEY_RECENT_MOVEMENTS, 42).commit());
+        assertTrue("a malformed window must not stall the scan cursor", scan(provider, false).succeeded());
+        assertFalse(data.contains(BalanceData.KEY_RECENT_MOVEMENTS));
     }
 
     @Test public void emptyWritesPreserveNonemptyAndUnreadableStoredBalances() throws Exception {

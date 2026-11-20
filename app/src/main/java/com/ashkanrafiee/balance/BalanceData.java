@@ -1682,8 +1682,7 @@ final class BalanceData {
         Map<String, Bank> balanceSnapshots = full ? new HashMap<>(current) : java.util.Collections.emptyMap();
         // Without balance rows an incremental scan cannot change an encrypted window. Still
         // migrate a legacy plaintext window and rebuild (or clear) the window on full scans.
-        boolean updateWindow = full || !rowsByKey.isEmpty() || DataGeneration.dataPrefs(context)
-            .getString(KEY_RECENT_MOVEMENTS, "").startsWith("{");
+        boolean updateWindow = full || !rowsByKey.isEmpty() || windowNeedsMigration(context);
         Map<String, List<Reconcile.Entry>> windows = full ? new HashMap<>()
             : updateWindow ? loadRecentMovements(context) : java.util.Collections.emptyMap();
         for (Map.Entry<String, List<Object[]>> e : rowsByKey.entrySet()) {
@@ -4064,6 +4063,16 @@ final class BalanceData {
                 stored.set(i + 1, a);
                 changed = true;
             }
+        }
+    }
+
+    private static boolean windowNeedsMigration(Context context) {
+        try {
+            String raw = DataGeneration.dataPrefs(context).getString(KEY_RECENT_MOVEMENTS, null);
+            return raw != null && raw.startsWith("{");
+        } catch (ClassCastException wrongType) {
+            // Keep the existing loader's recovery for an unusable preference.
+            return true;
         }
     }
 
