@@ -1564,6 +1564,10 @@ public class MainActivity extends Activity {
         private final ImageButton lockButton;
         private boolean rtl;
         private List<Object> renderedContent;
+        private List<Object> renderedCommitments;
+        private boolean renderedMaskIcon, renderedLockIcon;
+        private TextView heroStatus;
+        private View commitmentsView;
 
         DashboardScreen(Context context) {
             super(context);
@@ -1730,42 +1734,58 @@ public class MainActivity extends Activity {
             }
             if (view == null) return;
             rtl = getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
-            setButtonIcon(maskButton, view.hidden ? R.drawable.ic_visibility_off
-                : R.drawable.ic_visibility, view.hidden);
-            setButtonIcon(refreshButton, R.drawable.ic_refresh, false);
-            setButtonIcon(lockButton, R.drawable.ic_lock, LockManager.isEnabled(MainActivity.this));
+            boolean initial = renderedContent == null;
+            if (initial || renderedMaskIcon != view.hidden) {
+                renderedMaskIcon = view.hidden;
+                setButtonIcon(maskButton, view.hidden ? R.drawable.ic_visibility_off
+                    : R.drawable.ic_visibility, view.hidden);
+            }
+            if (initial) setButtonIcon(refreshButton, R.drawable.ic_refresh, false);
+            boolean locked = LockManager.isEnabled(MainActivity.this);
+            if (initial || renderedLockIcon != locked) {
+                renderedLockIcon = locked;
+                setButtonIcon(lockButton, R.drawable.ic_lock, locked);
+            }
             pull.setRefreshing(view.refreshVisible);
             List<Object> state = contentState();
-            if (state.equals(renderedContent)) return;
+            List<Object> commitments = commitmentState();
+            if (state.equals(renderedContent)) {
+                if (!view.status.contentEquals(heroStatus.getText())) heroStatus.setText(view.status);
+                if (!java.util.Objects.equals(commitments, renderedCommitments)) {
+                    // This card sits between the hero and banks. Updating it here keeps focused
+                    // bank controls attached to the same ScrollView during a summary reload.
+                    if (commitmentsView != null) content.removeView(commitmentsView);
+                    addCommitments(commitments);
+                }
+                return;
+            }
             renderedContent = state;
             content.removeAllViews();
             content.addView(buildOverviewLabel(), ExpressiveUi.widthMatch(this, 4, 12));
             content.addView(buildHeroCard(), ExpressiveUi.widthMatch(this, 0, 14));
-            if (view.commitmentsCard) content.addView(buildCommitmentsCard(),
-                ExpressiveUi.widthMatch(this, 0, 14));
+            addCommitments(commitments);
             if (view.smsBanner) content.addView(buildSmsBanner(),
                 ExpressiveUi.widthMatch(this, 0, 14));
             content.addView(buildBanksHeader(), ExpressiveUi.widthMatch(this, 4, 8));
             content.addView(buildBanks(), ExpressiveUi.widthMatch(this, 0, 0));
         }
 
+        private void addCommitments(List<Object> state) {
+            renderedCommitments = state;
+            commitmentsView = state == null ? null : buildCommitmentsCard();
+            if (commitmentsView != null) content.addView(commitmentsView, 2,
+                ExpressiveUi.widthMatch(this, 0, 14));
+        }
+
         /** Compare what is actually drawn, not mutable Bank identities or scan activity. */
         private List<Object> contentState() {
             List<Object> state = new java.util.ArrayList<>();
-            java.util.Collections.addAll(state, view.hidden, view.status, view.total, view.sortMode,
-                view.smsBanner, view.commitmentsCard, view.banks.isEmpty() && view.refreshing,
+            boolean empty = view.banks.isEmpty();
+            java.util.Collections.addAll(state, view.hidden, empty ? view.status : null, view.total,
+                view.sortMode, view.smsBanner, empty && view.refreshing,
                 CurrencyHelper.currency(MainActivity.this), RegionHelper.region(MainActivity.this),
+                getResources().getConfiguration().getLocales(),
                 new java.util.HashSet<>(view.excluded));
-            if (view.commitmentsCard) {
-                java.util.Collections.addAll(state, commitmentMonthLabel(),
-                    view.commitmentSummaryLoaded, view.commitmentSummaryFailed,
-                    view.commitmentSummaryGood, view.hasCommitments);
-                if (view.commitmentSummary != null) {
-                    DashboardCommitments summary = view.commitmentSummary;
-                    java.util.Collections.addAll(state, summary.remainingPay(),
-                        summary.remainingReceive());
-                }
-            }
             for (java.util.Map.Entry<String, Bank> entry : view.banks.entrySet()) {
                 Bank bank = entry.getValue();
                 java.util.Collections.addAll(state, entry.getKey(), bank.name, bank.account,
@@ -1774,6 +1794,15 @@ public class MainActivity extends Activity {
                     BalanceData.staleDays(MainActivity.this, bank.date));
             }
             return state;
+        }
+
+        private List<Object> commitmentState() {
+            if (!view.commitmentsCard) return null;
+            DashboardCommitments summary = view.commitmentSummary;
+            return java.util.Arrays.asList(commitmentMonthLabel(), view.commitmentSummaryLoaded,
+                view.commitmentSummaryFailed, view.commitmentSummaryGood, view.hasCommitments,
+                summary == null ? null : summary.remainingPay(),
+                summary == null ? null : summary.remainingReceive());
         }
 
         private void setButtonIcon(ImageButton button, int drawableRes, boolean selected) {
@@ -1852,11 +1881,11 @@ public class MainActivity extends Activity {
             else unitLp.setMarginStart(ExpressiveUi.dp(this, 10));
             amountRow.addView(unit, unitLp);
             hero.addView(amountRow, new LinearLayout.LayoutParams(-1, -2));
-            TextView status = ExpressiveUi.label(this, view.status, 12,
+            heroStatus = ExpressiveUi.label(this, view.status, 12,
                 ExpressiveUi.color(this, R.color.expressive_on_primary_container));
-            status.setAlpha(.82f);
-            status.setMaxLines(2);
-            hero.addView(status, ExpressiveUi.widthMatch(this, 4, 16));
+            heroStatus.setAlpha(.82f);
+            heroStatus.setMaxLines(2);
+            hero.addView(heroStatus, ExpressiveUi.widthMatch(this, 4, 16));
             TextView history = ExpressiveUi.button(this,
                 getString(R.string.dashboard_open_history), true);
             history.setSingleLine(true);

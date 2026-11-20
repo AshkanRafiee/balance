@@ -161,28 +161,72 @@ public final class DashboardSmsRefreshTest {
 
     @Test public void explicitRefreshShowsProgressEvenWithSavedBalances() throws Exception {
         LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
-        saved.put("Saman", new Bank("Saman", 5_000_000L, System.currentTimeMillis(), SENDER));
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < 24; i++) {
+            String account = String.valueOf(1000 + i);
+            saved.put("Saman|" + account, new Bank("Saman", 5_000_000L + i, now, SENDER, account));
+        }
         BalanceData.write(context, saved);
         scenario = ActivityScenario.launch(MainActivity.class);
         await(this::dashboardIdle, 45_000);
+        await(() -> {
+            boolean[] laidOut = {false};
+            scenario.onActivity(activity -> {
+                ViewGroup banks = activity.findViewById(R.id.dashboard_bank_list);
+                laidOut[0] = banks != null && banks.getChildCount() > 12
+                    && banks.getChildAt(12).getTop() > 0;
+            });
+            return laidOut[0];
+        }, 10_000);
         CountDownLatch started = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         MainActivity.setRefreshGateForTest(started, release);
+        ViewGroup[] list = {null};
+        View[] row = {null};
+        android.widget.ScrollView[] scroll = {null};
+        android.graphics.drawable.Drawable[] refreshBackground = {null};
+        int[] y = {0};
         try {
-            scenario.onActivity(activity -> activity.findViewById(R.id.dashboard_refresh_button)
-                .performClick());
+            scenario.onActivity(activity -> {
+                list[0] = activity.findViewById(R.id.dashboard_bank_list);
+                row[0] = list[0].getChildAt(12);
+                View ancestor = list[0];
+                while (!(ancestor instanceof android.widget.ScrollView))
+                    ancestor = (View) ancestor.getParent();
+                scroll[0] = (android.widget.ScrollView) ancestor;
+                scroll[0].scrollTo(0, list[0].getTop() + row[0].getTop());
+                row[0].setFocusableInTouchMode(true);
+                assertTrue(row[0].requestFocus());
+                y[0] = scroll[0].getScrollY();
+                assertTrue("fixture must be scrolled", y[0] > 0);
+                View refresh = activity.findViewById(R.id.dashboard_refresh_button);
+                refreshBackground[0] = refresh.getBackground();
+                refresh.performClick();
+            });
             assertTrue("manual refresh must start the scan", started.await(10, TimeUnit.SECONDS));
             scenario.onActivity(activity -> {
                 assertNotNull("saved content remains during manual refresh",
                     activity.findViewById(R.id.dashboard_bank_list));
                 assertTrue("manual refresh must visibly acknowledge the action",
                     hasVisibleProgress(activity.getWindow().getDecorView()));
+                assertTrue(hasText(activity.findViewById(R.id.dashboard_total_card),
+                    activity.getString(R.string.status_refreshing)));
+                assertSame(list[0], activity.findViewById(R.id.dashboard_bank_list));
+                assertSame(row[0], activity.getCurrentFocus());
+                assertEquals(y[0], scroll[0].getScrollY());
+                assertSame(refreshBackground[0],
+                    activity.findViewById(R.id.dashboard_refresh_button).getBackground());
             });
         } finally {
             MainActivity.setRefreshGateForTest(null, null);
             release.countDown();
         }
         await(this::dashboardIdle, 45_000);
+        scenario.onActivity(activity -> {
+            assertSame(list[0], activity.findViewById(R.id.dashboard_bank_list));
+            assertSame(row[0], activity.getCurrentFocus());
+            assertEquals(y[0], scroll[0].getScrollY());
+        });
     }
 
     private boolean dashboardIdle() {
@@ -196,10 +240,16 @@ public final class DashboardSmsRefreshTest {
 
     @Test public void disabledCardSkipsWorkAndDropsAnInFlightResultUntilReenabled()
             throws Exception {
+        LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
+        saved.put("Saman", new Bank("Saman", 5_000_000L, System.currentTimeMillis(), SENDER));
+        BalanceData.write(context, saved);
+        View[] banks = {null};
         scenario = ActivityScenario.launch(MainActivity.class);
         await(this::dashboardIdle, 45_000);
         scenario.onActivity(activity -> {
             MainActivity.BalanceView view = findBalanceView(activity.getWindow().getDecorView());
+            banks[0] = activity.findViewById(R.id.dashboard_bank_list);
+            assertNotNull(banks[0]);
             view.invalidateCommitmentSummary();
             assertFalse("disabled at startup", view.commitmentSummaryLoaded);
             assertFalse("invalidation while disabled must not start a worker",
@@ -217,6 +267,8 @@ public final class DashboardSmsRefreshTest {
             findBalanceView(activity.getWindow().getDecorView()).updateSmsBanner();
         });
         await(() -> summarySettled(true), 20_000);
+        scenario.onActivity(activity -> assertSame("a card summary change keeps bank controls",
+            banks[0], activity.findViewById(R.id.dashboard_bank_list)));
     }
 
     private boolean summarySettled(boolean visible) {
