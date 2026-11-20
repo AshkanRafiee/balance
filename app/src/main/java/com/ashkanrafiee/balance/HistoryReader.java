@@ -713,10 +713,14 @@ final class HistoryReader {
         void addMatchingTransactions(List<Transaction> transactions, Accumulator accumulator)
                 throws Exception {
             if (transactions == null || transactions.isEmpty()) return;
+            if (request.selectedTags.isEmpty() && tokens.isEmpty()) {
+                // Scope, date and direction have already been applied; no metadata keys are needed.
+                for (Transaction transaction : transactions) accumulator.addTransaction(transaction);
+                return;
+            }
             List<String> keys = new ArrayList<>(transactions.size());
             for (Transaction transaction : transactions) keys.add(BalanceData.noteKey(transaction));
-            Map<String, List<String>> tags = request.selectedTags.isEmpty() && tokens.isEmpty()
-                ? Collections.emptyMap() : metadata.tagsFor(keys);
+            Map<String, List<String>> tags = metadata.tagsFor(keys);
             Map<String, String> notes = tokens.isEmpty() ? Collections.emptyMap()
                 : metadata.texts(MetadataStore.NOTES, keys);
             Map<String, String> reasons = tokens.isEmpty() ? Collections.emptyMap()

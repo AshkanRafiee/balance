@@ -2616,19 +2616,18 @@ public final class HistoryActivity extends Activity {
         expandedYears.clear();
         expandedMonths.clear();
         expandedDays.clear();
-        boolean expandAll = BalanceData.getExpandAllHistory(this);
-        for (YearGroup y : years) {
-            if (expandAll) expandedYears.add(y.key());
-            for (MonthGroup m : y.months) {
-                if (expandAll) expandedMonths.add(m.key());
-                for (DayGroup d : m.days) {
-                    if (loadedDayPages.containsKey(d.key())) {
-                        expandedYears.add(y.key());
-                        expandedMonths.add(m.key());
-                        expandedDays.add(d.key());
-                    }
-                }
+        if (BalanceData.getExpandAllHistory(this)) {
+            for (YearGroup y : years) {
+                expandedYears.add(y.key());
+                for (MonthGroup m : y.months) expandedMonths.add(m.key());
             }
+        }
+        // Only the parents of the bounded page window need opening on a normal scoped launch.
+        for (String dayKey : loadedDayPages.keySet()) {
+            CalDate date = historyResult.daySummaries.get(dayKey).date;
+            expandedYears.add(String.valueOf(date.year));
+            expandedMonths.add(date.year + "/" + date.month);
+            expandedDays.add(dayKey);
         }
     }
 
@@ -4130,7 +4129,8 @@ public final class HistoryActivity extends Activity {
             tag.setBackground(rounded(chipBg, 8));
             dateWrap.addView(tag);
         }
-        TextView date = text(dateText(g.date), 13, fg);
+        String dayLabel = dateText(g.date);
+        TextView date = text(dayLabel, 13, fg);
         LinearLayout.LayoutParams dateParams = new LinearLayout.LayoutParams(-2, -2);
         dateParams.setMarginStart(dp(6));
         dateWrap.addView(date, dateParams);
@@ -4148,7 +4148,7 @@ public final class HistoryActivity extends Activity {
         TextView sum = bold(signedAmount(g.sum), 13, valueColor(g.sum));
         fitToWidth(sum, 13, 10, 0);
         head.addView(sum, sumParams);
-        head.setContentDescription(state(dateText(g.date), g.sum, open));
+        head.setContentDescription(state(dayLabel, g.sum, open));
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
 
         // Gross in/out below the header, but only where the net hides something: on a mixed
@@ -4177,7 +4177,7 @@ public final class HistoryActivity extends Activity {
                     rows.addView(sep, slp);
                 }
                 Line line = lines.get(i);
-                rows.addView(line.residual != null ? residualRow(line.residual) : txRow(line.tx),
+                rows.addView(line.residual != null ? residualRow(line.residual) : txRow(line.tx, dayLabel),
                     new LinearLayout.LayoutParams(-1, -2));
             }
             box.addView(rows, new LinearLayout.LayoutParams(-1, -2));
@@ -4308,7 +4308,8 @@ public final class HistoryActivity extends Activity {
         colLp.setMarginStart(dp(9));
         row.addView(col, colLp);
 
-        TextView amt = bold(signedAmount(r.amount), 13, warnFg);
+        String amountText = signedAmount(r.amount);
+        TextView amt = bold(amountText, 13, warnFg);
         fitToWidth(amt, 13, 10, 0);
         row.addView(amt, new LinearLayout.LayoutParams(-2, -2));
         cell.addView(row, new LinearLayout.LayoutParams(-1, -2));
@@ -4325,7 +4326,7 @@ public final class HistoryActivity extends Activity {
             addChip(cell, note, false, badgeBg, badgeFg, null, 37);
         }
         StringBuilder description = new StringBuilder(
-            getString(R.string.residual_row_cd, signedAmount(r.amount)));
+            getString(R.string.residual_row_cd, amountText));
         if (note != null && !note.isEmpty()) {
             description.append(' ').append(getString(R.string.row_fact_note, note));
         }
@@ -4578,7 +4579,7 @@ public final class HistoryActivity extends Activity {
      *  the badge/name are dropped — but the account number stays in both scopes, because a movement's
      *  account is meaningful even in the combined view. Tapping opens the figure's evidence and its
      *  separate personal annotation; the note editor remains available from those details. */
-    private LinearLayout txRow(final Transaction t) {
+    private LinearLayout txRow(final Transaction t, String dayLabel) {
         LinearLayout cell = new LinearLayout(this);
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setPaddingRelative(dp(4), dp(3), dp(4), dp(3));
@@ -4599,17 +4600,20 @@ public final class HistoryActivity extends Activity {
 
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
+        String bankName = BankRules.displayName(this, t.bank);
         if (!perBank) {
-            TextView name = text(BankRules.displayName(this, t.bank), 13, fg);
+            TextView name = text(bankName, 13, fg);
             col.addView(name, new LinearLayout.LayoutParams(-2, -2));
         }
-        TextView time = text(timeText(t.date), perBank ? 13 : 11, perBank ? fg : muted);
+        String clock = timeText(t.date);
+        TextView time = text(clock, perBank ? 13 : 11, perBank ? fg : muted);
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-2, -2);
         if (!perBank) tp.topMargin = dp(2);
         col.addView(time, tp);
+        String accountText = t.account == null ? "" : getString(R.string.account_label) + " "
+            + digits(t.account);
         if (t.account != null) {
-            TextView account = text(getString(R.string.account_label) + " " + digits(t.account),
-                10.5f, muted);
+            TextView account = text(accountText, 10.5f, muted);
             LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(-2, -2);
             ap.topMargin = dp(1);
             col.addView(account, ap);
@@ -4618,7 +4622,8 @@ public final class HistoryActivity extends Activity {
         colLp.setMarginStart(dp(9));
         row.addView(col, colLp);
 
-        TextView amt = bold(signedAmount(t.amount), 13, valueColor(t.amount));
+        String amountText = signedAmount(t.amount);
+        TextView amt = bold(amountText, 13, valueColor(t.amount));
         fitToWidth(amt, 13, 10, 0);
         row.addView(amt, new LinearLayout.LayoutParams(-2, -2));
         cell.addView(row, new LinearLayout.LayoutParams(-1, -2));
@@ -4649,14 +4654,10 @@ public final class HistoryActivity extends Activity {
         // rescan can bring back — would never be heard at all. Each clause is a whole sentence, so they
         // read in order in either language rather than running into each other.
         List<String> said = new ArrayList<>(6);
-        String accountText = t.account == null ? "" : getString(R.string.account_label) + " "
-            + digits(t.account);
-        said.add(getString(R.string.history_row_identity,
-            BankRules.displayName(this, t.bank), accountText,
-            dateText(calOf(t.date, iranCalendar)), timeText(t.date)));
+        said.add(getString(R.string.history_row_identity, bankName, accountText, dayLabel, clock));
         said.add(getString(R.string.history_row_amount,
             t.amount >= 0 ? getString(R.string.history_deposit)
-                : getString(R.string.history_withdrawal), signedAmount(t.amount)));
+                : getString(R.string.history_withdrawal), amountText));
         if (caption != null) said.add(getString(R.string.row_fact_reason, caption));
         if (channel != null) said.add(getString(R.string.row_fact_channel, channel));
         if (merchant != null) said.add(getString(R.string.row_fact_merchant, merchant));

@@ -230,6 +230,17 @@ public class HistoryRowFactsUiTest {
         String said = spoken(row);
         assertTrue(said.contains("Tejarat"));
         assertTrue(said.contains("Account 01350000000"));
+        java.util.Calendar local = java.util.Calendar.getInstance();
+        local.setTimeInMillis(movement.date);
+        boolean iran = RegionHelper.isIran(ctx);
+        CalDate day = CalDate.fromGregorian(local.get(java.util.Calendar.YEAR),
+            local.get(java.util.Calendar.MONTH) + 1, local.get(java.util.Calendar.DAY_OF_MONTH), iran);
+        String dayLabel = CalDate.monthName(day.month, iran, false) + " " + day.day + " " + day.year;
+        String time = String.format(java.util.Locale.US, "%02d:%02d",
+            local.get(java.util.Calendar.HOUR_OF_DAY), local.get(java.util.Calendar.MINUTE));
+        assertNotNull("the enclosing day shows the movement date", findByText(dayLabel));
+        assertTrue(said.contains(dayLabel));
+        assertTrue(said.contains(time));
         assertTrue(said.contains("Withdrawal"));
         assertTrue(said.contains("−220,000"));
         assertTrue(said.contains(ctx.getString(R.string.row_fact_note, "rent for Ali")));
