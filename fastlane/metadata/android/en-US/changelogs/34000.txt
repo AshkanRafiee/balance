@@ -1,3 +1,4 @@
 • Change the amount of a recurring payment or receipt for just one date. Other dates keep their usual amount, and you can reset the change at any time.
 • Fixed entry of commitment amounts with Persian digits and a decimal separator, such as ۱۲۳٫۴.
 • When you refresh your balances, the refresh now takes priority over loading transaction history in the background.
+• Balance now shows its logo while opening.
