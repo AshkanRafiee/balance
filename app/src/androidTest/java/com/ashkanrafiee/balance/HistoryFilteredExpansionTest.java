@@ -155,6 +155,15 @@ public class HistoryFilteredExpansionTest {
             assertEquals("rows, not just summaries, must be built for all eight days",
                 135, clockTimes(activity.getWindow().getDecorView()));
         });
+        HistoryReader.Result cached = HistoryWarmup.take(BANK, ACCOUNT, HistoryActivity.Filter.ALL,
+            "", java.util.Collections.emptyList(), false, context);
+        assertNotNull("a cold scoped open caches its own view", cached);
+        try {
+            assertEquals("reopening needs no page decrypts for the initial sparse-day window",
+                dayKeys(dates.subList(0, 8)), cached.requestedDayRows.keySet());
+        } finally {
+            cached.close();
+        }
         assertExportCount(138);
     }
 

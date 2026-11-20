@@ -3049,12 +3049,9 @@ public final class HistoryActivity extends Activity {
         new Thread(() -> {
             HistoryReader.Result result = null;
             try {
-                final String transactionsRevision = TransactionStore.revision(app);
-                final String metadataRevision = MetadataStore.revision(app);
-                if (hadRenderedResult && transactionsRevision != null
-                        && transactionsRevision.equals(previousTransactions)
-                        && sameRevision(metadataRevision, previousMetadata)
-                        && state.equals(previousState)) {
+                if (hadRenderedResult && state.equals(previousState) && previousTransactions != null
+                        && previousTransactions.equals(TransactionStore.revision(app))
+                        && sameRevision(MetadataStore.revision(app), previousMetadata)) {
                     deliverRender(() -> {
                         if (gen == renderGen && !lifecycleStale(uiGen)) {
                             restoreScrollAfterLayout(gen, uiGen);
@@ -3073,11 +3070,16 @@ public final class HistoryActivity extends Activity {
 
                 // A cached default/scoped snapshot retains its complete timeline even when it
                 // lacks an expanded day's rows. Reuse that summary and read only missing pages.
+                HistoryReader.SeedPages plan = visible -> plannedExpandedDays(visible,
+                    expandedSnapshot, seededSnapshot, expandAll, expansionKey, expansionActive,
+                    previousExpansionKey, savedPreNarrowingDays, iran);
+                final Map<String, HistoryReader.DayRows> initialPages;
                 synchronized (BalanceData.class) {
                     result = HistoryWarmup.take(banks, accounts, f, query, tagSelection, iran,
-                        app, true);
+                        app, false);
                     if (result == null) {
-                        // One full summary pass; bounded pages come from its encrypted timeline.
+                        // The demand read owns the store: build only this scope, including its
+                        // bounded initial pages, with the summary's already-open metadata session.
                         HistoryReader.Request planRequest = new HistoryReader.Request(
                             iran, HistoryReader.DEFAULT_PAGE_SIZE, banks, accounts, f, query,
                             tagSelection, Collections.emptySet(), 0,
@@ -3085,45 +3087,18 @@ public final class HistoryActivity extends Activity {
                         Runnable hook = summaryReadHookForTest;
                         if (hook != null) hook.run();
                         result = HistoryReader.summaryWithResiduals(
-                            app, planRequest, renderProgress);
-                    }
-                    // Remember before releasing the existing store monitor so a speculative
-                    // warm-up can reuse demand's work. The cache retains its own handle.
-                    HistoryWarmup.remember(banks, accounts, f, query, tagSelection, iran, app, result);
-                }
-                Set<String> requestedDays = plannedExpandedDays(result, expandedSnapshot,
-                    seededSnapshot, expandAll, expansionKey, expansionActive,
-                    previousExpansionKey, savedPreNarrowingDays, iran);
-                if (requestedDays.size() > MAX_INITIAL_NARROWED_DAY_PAGES) {
-                    // Apply the same bounded page plan to fresh and cached summaries.
-                    requestedDays = new java.util.LinkedHashSet<>(
-                        new ArrayList<>(requestedDays).subList(0,
-                            MAX_INITIAL_NARROWED_DAY_PAGES));
-                }
-                final java.util.Map<String, HistoryReader.DayRows> initialPages =
-                    new java.util.LinkedHashMap<>();
-                Set<String> missingDays = new java.util.LinkedHashSet<>();
-                for (String dayKey : requestedDays) {
-                    HistoryReader.DayRows cached = result.requestedDayRows.get(dayKey);
-                    if (cached != null) initialPages.put(dayKey, cached);
-                    else missingDays.add(dayKey);
-                }
-                if (!missingDays.isEmpty()) {
-                    // One shared metadata session for every missing seed page.
-                    try (MetadataStore.LookupSession metadata =
-                            MetadataStore.LookupSession.open(app)) {
-                        for (String dayKey : missingDays) {
-                            initialPages.put(dayKey, HistoryReader.readPage(metadata, result, dayKey,
-                                HistoryReader.DEFAULT_MAX_ROWS_PER_DAY));
-                        }
+                            app, planRequest, renderProgress, plan);
+                        initialPages = result.requestedDayRows;
+                        HistoryWarmup.remember(banks, accounts, f, query, tagSelection, iran,
+                            app, result);
+                    } else {
+                        initialPages = seedPagesForHit(app, result,
+                            plan.select(result.daySummaries.keySet()));
                     }
                 }
                 final Lists lists = listsFromSummary(result, initialPages);
                 final List<Residual> requestedResiduals = residualsFromPages(initialPages);
                 final HistoryReader.Result completed = result;
-                final boolean stableRevision = sameRevision(transactionsRevision,
-                    TransactionStore.revision(app)) && sameRevision(metadataRevision,
-                    MetadataStore.revision(app));
                 deliverRender(() -> {
                     if (gen != renderGen || lifecycleStale(uiGen)
                             || isDestroyed() || isFinishing()) {
@@ -3153,8 +3128,8 @@ public final class HistoryActivity extends Activity {
                         finishRenderWork();
                         return;
                     }
-                    renderedTransactionsRevision = stableRevision ? transactionsRevision : null;
-                    renderedMetadataRevision = stableRevision ? metadataRevision : null;
+                    renderedTransactionsRevision = completed.revisionStamp.transactions;
+                    renderedMetadataRevision = completed.revisionStamp.metadata;
                     renderedState = state;
                     scopeChoicesCache = null;
                     invalidateTagNames();
@@ -3268,15 +3243,32 @@ public final class HistoryActivity extends Activity {
         if (scrollView != null) scrollView.finishAutomaticRefresh();
     }
 
+    /** The caller holds the store monitor from the revision-checked hit through these page reads. */
+    private static Map<String, HistoryReader.DayRows> seedPagesForHit(Context app,
+            HistoryReader.Result result, Set<String> requested) throws Exception {
+        Map<String, HistoryReader.DayRows> pages = new java.util.LinkedHashMap<>();
+        if (result.requestedDayRows.keySet().containsAll(requested)) {
+            for (String key : requested) pages.put(key, result.requestedDayRows.get(key));
+        } else {
+            try (MetadataStore.LookupSession metadata = MetadataStore.LookupSession.open(app)) {
+                for (String key : requested) {
+                    HistoryReader.DayRows cached = result.requestedDayRows.get(key);
+                    pages.put(key, cached != null ? cached : HistoryReader.readPage(metadata,
+                        result, key, HistoryReader.DEFAULT_MAX_ROWS_PER_DAY));
+                }
+            }
+        }
+        return pages;
+    }
+
     /** Plans rows from newest-first matching summaries, without rescanning history. A new narrowing
      *  starts with its newest populated days, not prior expanded days or dates relative to today.
      *  An unchanged scope retains the user's expansion within the existing page budget. */
-    private static Set<String> plannedExpandedDays(HistoryReader.Result result,
+    private static Set<String> plannedExpandedDays(Set<String> visible,
             Set<String> expandedSnapshot, boolean seeded, boolean expandAll, String expansionKey,
             boolean expansionActive, String previousExpansionKey,
             Set<String> savedPreNarrowingDays, boolean iran) {
-        Set<String> visible = result.daySummaries.keySet();
-        Set<String> requested = new java.util.LinkedHashSet<>();
+        Set<String> requested = new LinkedHashSet<>();
         if (expansionActive && !expansionKey.equals(previousExpansionKey)) {
             for (String key : visible) {
                 requested.add(key);
@@ -3284,30 +3276,16 @@ public final class HistoryActivity extends Activity {
             }
             return requested;
         }
-        for (String key : expandedSnapshot) {
+        boolean restoring = !expansionActive && previousExpansionKey != null
+            && savedPreNarrowingDays != null;
+        for (String key : restoring ? savedPreNarrowingDays : expandedSnapshot) {
             if (visible.contains(key)) requested.add(key);
+            if (requested.size() == MAX_INITIAL_NARROWED_DAY_PAGES) return requested;
         }
-
-        if (!seeded) {
-            if (expandAll) {
-                requested.addAll(visible);
-            } else {
-                // The normal first-load seed opens only the most recent days. Building every day
-                // of a busy month at once creates a large non-recycled view tree and can make older
-                // devices look hung or run out of memory; collapsed days still show their totals
-                // and are expanded on demand.
-                for (String key : HistoryReader.defaultSeedDays(CalDate.today(iran))) {
-                    if (visible.contains(key)) requested.add(key);
-                }
-            }
-        }
-
-        if (!expansionActive) {
-            if (previousExpansionKey != null && savedPreNarrowingDays != null) {
-                requested.clear();
-                for (String key : savedPreNarrowingDays) {
-                    if (visible.contains(key)) requested.add(key);
-                }
+        if (!seeded && !restoring) {
+            for (String key : expandAll ? visible : HistoryReader.defaultSeedDays(CalDate.today(iran))) {
+                if (visible.contains(key)) requested.add(key);
+                if (requested.size() == MAX_INITIAL_NARROWED_DAY_PAGES) break;
             }
         }
         return requested;

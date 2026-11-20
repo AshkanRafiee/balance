@@ -58,6 +58,11 @@ final class HistoryReader {
 
     enum Mode { SUMMARY, RESIDUAL_SUMMARY, REFERENCE }
 
+    /** Chooses first pages once the complete, newest-first set of matching days is known. */
+    interface SeedPages {
+        Set<String> select(Set<String> visibleDays);
+    }
+
     /** Captured under BalanceData.class with the snapshot, never relabelled after a store write. */
     static final class RevisionStamp {
         final String transactions;
@@ -455,7 +460,12 @@ final class HistoryReader {
     /** Same as {@link #summaryWithResiduals(Context, Request)} with advisory progress. */
     static Result summaryWithResiduals(Context context, Request request, WorkProgress progress)
             throws Exception {
-        return timelineSummary(context, request, true, progress);
+        return timelineSummary(context, request, true, progress, null);
+    }
+
+    static Result summaryWithResiduals(Context context, Request request, WorkProgress progress,
+            SeedPages seedPages) throws Exception {
+        return timelineSummary(context, request, true, progress, seedPages);
     }
 
     /**
@@ -466,7 +476,7 @@ final class HistoryReader {
      */
     private static Result timelineSummary(Context context, Request request, boolean residuals)
             throws Exception {
-        return timelineSummary(context, request, residuals, null);
+        return timelineSummary(context, request, residuals, null, null);
     }
 
     /**
@@ -480,7 +490,7 @@ final class HistoryReader {
 
     /** Same as {@link #timelineSummary(Context, Request, boolean)} with advisory progress. */
     private static Result timelineSummary(Context context, Request request, boolean residuals,
-            WorkProgress progress) throws Exception {
+            WorkProgress progress, SeedPages seedPages) throws Exception {
         if (context == null) throw new NullPointerException("context");
         if (request == null) throw new NullPointerException("request");
         BalanceData.ensureResetComplete(context);
@@ -536,7 +546,7 @@ final class HistoryReader {
                     }
                 }
                 if (progress != null) progress.stage(R.string.history_stage_building);
-                return accumulator.result(false, residuals, null, null, metadata);
+                return accumulator.result(false, residuals, null, null, metadata, seedPages);
             } finally {
                 accumulator.close();
             }
@@ -600,7 +610,7 @@ final class HistoryReader {
         Accumulator accumulator = new Accumulator(context, request);
         for (Transaction transaction : visibleTransactions) accumulator.addTransaction(transaction);
         for (Residual residual : visibleResiduals) accumulator.addResidual(residual);
-        return accumulator.result(true, true, visibleTransactions, visibleResiduals, null);
+        return accumulator.result(true, true, visibleTransactions, visibleResiduals, null, null);
     }
 
     /** Explicitly named compatibility entry point; it is intentionally not the bounded path. */
@@ -923,7 +933,7 @@ final class HistoryReader {
         }
 
         Result result(boolean reference, boolean residualsComplete, List<Transaction> transactions,
-                List<Residual> residuals, MetadataStore.LookupSession sharedMetadata)
+                List<Residual> residuals, MetadataStore.LookupSession metadata, SeedPages seedPages)
                 throws Exception {
             HistoryTimeline snapshot = timeline == null ? null : timeline.finish();
             timeline = null;
@@ -947,17 +957,12 @@ final class HistoryReader {
                 }
 
                 LinkedHashMap<String, DayRows> rowResults = new LinkedHashMap<>();
-                if (snapshot != null && !request.requestedDayKeys.isEmpty()) {
-                    boolean ownMetadata = sharedMetadata == null;
-                    MetadataStore.LookupSession metadata = ownMetadata
-                        ? MetadataStore.LookupSession.open(context) : sharedMetadata;
-                    try {
-                        for (String key : request.requestedDayKeys) {
-                            rowResults.put(key, fromPage(metadata, snapshot,
-                                snapshot.firstPage(key, request.maxRowsPerDay), request.iran));
-                        }
-                    } finally {
-                        if (ownMetadata) metadata.close();
+                if (snapshot != null) {
+                    Set<String> keys = seedPages == null ? request.requestedDayKeys
+                        : seedPages.select(Collections.unmodifiableSet(dayResults.keySet()));
+                    for (String key : keys) {
+                        rowResults.put(key, fromPage(metadata, snapshot,
+                            snapshot.firstPage(key, request.maxRowsPerDay), request.iran));
                     }
                 }
                 List<Transaction> visibleTx = transactions == null ? null
