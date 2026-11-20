@@ -16,6 +16,9 @@ import android.widget.TextView;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+import androidx.test.runner.lifecycle.ActivityLifecycleCallback;
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry;
+import androidx.test.runner.lifecycle.Stage;
 
 import org.junit.After;
 import org.junit.Before;
@@ -105,6 +108,39 @@ public final class DashboardUiTest {
                     activity.getString(R.string.dashboard_no_accounts_title)));
             }
         });
+    }
+
+    @Test public void coldLaunchBuildsOneTotalCardByTheEndOfResume() {
+        int[] builds = {0};
+        int[] atFirstResume = {-1};
+        ActivityLifecycleCallback observer = (activity, stage) -> {
+            if (!(activity instanceof MainActivity) || atFirstResume[0] != -1) return;
+            if (stage != Stage.CREATED && stage != Stage.RESUMED) return;
+            MainActivity.DashboardScreen screen = activity.findViewById(R.id.dashboard_screen);
+            if (stage == Stage.CREATED) {
+                if (screen.findViewById(R.id.dashboard_total_card) != null) builds[0]++;
+                screen.content.setOnHierarchyChangeListener(new ViewGroup.OnHierarchyChangeListener() {
+                    @Override public void onChildViewAdded(View parent, View child) {
+                        if (child.getId() == R.id.dashboard_total_card) builds[0]++;
+                    }
+                    @Override public void onChildViewRemoved(View parent, View child) {}
+                });
+            } else {
+                atFirstResume[0] = builds[0];
+                screen.content.setOnHierarchyChangeListener(null);
+            }
+        };
+        android.app.Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
+        instrumentation.runOnMainSync(() -> ActivityLifecycleMonitorRegistry.getInstance()
+            .addLifecycleCallback(observer));
+        try {
+            launch();
+            scenario.onActivity(activity -> assertEquals(
+                "build exactly once before asynchronous scan results arrive", 1, atFirstResume[0]));
+        } finally {
+            instrumentation.runOnMainSync(() -> ActivityLifecycleMonitorRegistry.getInstance()
+                .removeLifecycleCallback(observer));
+        }
     }
 
     @Test public void savedBank_isRenderedAsSemanticRowAndMaskHidesPrivateFields() {

@@ -73,6 +73,7 @@ public class MainActivity extends Activity {
     private DashboardScreen dashboard;
     private boolean smsRequested;
     private boolean mainResumed;
+    private boolean batchingInitialDashboard;
     private boolean historyWarmPending;
     private String pendingBackupPassword;
     private LockOverlay lockOverlay;
@@ -225,14 +226,18 @@ public class MainActivity extends Activity {
         // newly granted notification permission all land here before the next due.
         scheduleReminders();
         if (view != null) {
-            view.enforceAutoHide();
-            // Start the reload now rather than on the first draw, so the fresh summary is
-            // usually ready before the card paints; the last summary stays up meanwhile.
-            view.invalidateCommitmentSummary();
-            historyWarmPending = true;
-            view.refreshSilent();
-            view.scheduleMonthRefresh();
-            if (dashboard != null) dashboard.render();
+            // Build the first dashboard with its mask and refresh state already applied.
+            batchingInitialDashboard = dashboard != null && dashboard.renderedContent == null;
+            try {
+                view.enforceAutoHide();
+                view.invalidateCommitmentSummary();
+                historyWarmPending = true;
+                view.refreshSilent();
+                view.scheduleMonthRefresh();
+            } finally {
+                batchingInitialDashboard = false;
+                if (dashboard != null) dashboard.render();
+            }
         }
         registerSmsObserver();
         // A fresh install that skipped or finished the introduction returns here without ever
@@ -1557,7 +1562,7 @@ public class MainActivity extends Activity {
      * compatibility façade for the existing scan/store/widget machinery.
      */
     final class DashboardScreen extends FrameLayout {
-        private final LinearLayout content;
+        final LinearLayout content;
         private final PullContainer pull;
         private final ImageButton maskButton;
         private final ImageButton refreshButton;
@@ -1677,7 +1682,6 @@ public class MainActivity extends Activity {
             pull = new PullContainer(context, scroll);
             shell.addView(pull, new LinearLayout.LayoutParams(-1, 0, 1));
             shell.addView(buildActionDock(context), ExpressiveUi.widthMatch(context, 10, 0));
-            render();
         }
 
         private LinearLayout buildActionDock(Context context) {
@@ -1732,7 +1736,7 @@ public class MainActivity extends Activity {
                 post(this::render);
                 return;
             }
-            if (view == null) return;
+            if (view == null || batchingInitialDashboard) return;
             rtl = getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
             boolean initial = renderedContent == null;
             if (initial || renderedMaskIcon != view.hidden) {
