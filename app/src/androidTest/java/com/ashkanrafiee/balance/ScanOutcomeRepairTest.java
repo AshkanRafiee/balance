@@ -119,6 +119,36 @@ public class ScanOutcomeRepairTest {
         }
     }
 
+    @Test public void incrementalScansWithoutBalancesPreserveWindowAndCheckpointObservedRows()
+            throws Exception {
+        FixtureProvider inbox = new FixtureProvider(3);
+        Context provider = withProvider(inbox);
+        assertTrue(scan(provider, false).succeeded());
+        SharedPreferences data = DataGeneration.dataPrefs(context);
+        String window = data.getString(BalanceData.KEY_RECENT_MOVEMENTS, null);
+        assertNotNull(window);
+        String plain = BalanceData.decryptStorePayload(window);
+        assertEquals(1, new org.json.JSONObject(plain).getJSONArray("Saman").length());
+
+        assertTrue(scan(provider, false).succeeded());
+        assertEquals(1, inbox.emptyIncrementalQueries);
+        assertEquals(window, data.getString(BalanceData.KEY_RECENT_MOVEMENTS, null));
+
+        inbox.messageId++;
+        inbox.messageBody = "unparsed notice";
+        assertTrue(scan(provider, false).succeeded());
+        assertEquals(2L, SourceStore.sourceCount(context));
+        assertEquals(inbox.messageId, context.getSharedPreferences(BalanceData.PREFS_PREF, 0)
+            .getLong(BalanceData.KEY_SCANNED_ID, 0));
+        assertEquals(window, data.getString(BalanceData.KEY_RECENT_MOVEMENTS, null));
+
+        // A plaintext window is still migrated even without another matching movement.
+        assertTrue(data.edit().putString(BalanceData.KEY_RECENT_MOVEMENTS, plain).commit());
+        assertTrue(scan(provider, false).succeeded());
+        assertEquals(plain, BalanceData.decryptStorePayload(
+            data.getString(BalanceData.KEY_RECENT_MOVEMENTS, null)));
+    }
+
     @Test public void emptyWritesPreserveNonemptyAndUnreadableStoredBalances() throws Exception {
         SharedPreferences data = DataGeneration.dataPrefs(context);
         LinkedHashMap<String, Bank> balances = new LinkedHashMap<>();

@@ -1680,7 +1680,12 @@ final class BalanceData {
         Map<SourceEvidence, String> balanceReplacements = full
             ? balanceSourceReplacements(context, current, sourceRows) : java.util.Collections.emptyMap();
         Map<String, Bank> balanceSnapshots = full ? new HashMap<>(current) : java.util.Collections.emptyMap();
-        Map<String, List<Reconcile.Entry>> windows = full ? new HashMap<>() : loadRecentMovements(context);
+        // Without balance rows an incremental scan cannot change an encrypted window. Still
+        // migrate a legacy plaintext window and rebuild (or clear) the window on full scans.
+        boolean updateWindow = full || !rowsByKey.isEmpty() || DataGeneration.dataPrefs(context)
+            .getString(KEY_RECENT_MOVEMENTS, "").startsWith("{");
+        Map<String, List<Reconcile.Entry>> windows = full ? new HashMap<>()
+            : updateWindow ? loadRecentMovements(context) : java.util.Collections.emptyMap();
         for (Map.Entry<String, List<Object[]>> e : rowsByKey.entrySet()) {
             String key = e.getKey();
             String bank = bankOfKey(key);
@@ -1758,7 +1763,7 @@ final class BalanceData {
             KEY_SOURCE_PENDING_BALANCE, KEY_SOURCE_FAILURE_BALANCE);
         boolean holdWatermark = holdForSourceRetry(prefs, KEY_SOURCE_FAILURE_BALANCE, sourceOk);
         if (progress != null) progress.stage(R.string.scan_stage_saving);
-        if (!write(context, current) || !saveRecentMovements(context, windows))
+        if (!write(context, current) || (updateWindow && !saveRecentMovements(context, windows)))
             return new ScanOutcome(ScanOutcome.Status.SAVE_ERROR, 0);
         // A full scan that finds no bank message at all could not have re-derived anything, so it
         // must not confirm the rules version or advance the watermark: the stored balances may be
