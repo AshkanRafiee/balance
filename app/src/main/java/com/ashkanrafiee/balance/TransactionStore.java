@@ -33,6 +33,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -70,6 +71,7 @@ final class TransactionStore {
     private static final String[] ROW_COLUMNS = {"ordinal", "payload", "sig_digest",
         "content_digest", "legacy_digest"};
     private static final ThreadLocal<Boolean> ACTIVE = new ThreadLocal<>();
+    private static final Pattern EXACT_INTEGER = Pattern.compile("-?(0|[1-9][0-9]*)");
 
     private TransactionStore() {}
 
@@ -937,7 +939,7 @@ final class TransactionStore {
     private static long integer(JsonReader json) throws Exception {
         if (json.peek() != JsonToken.NUMBER) throw new Exception("invalid transaction number");
         String number = json.nextString();
-        if (!number.matches("-?(0|[1-9][0-9]*)")) throw new Exception("non-integer transaction number");
+        if (!EXACT_INTEGER.matcher(number).matches()) throw new Exception("non-integer transaction number");
         return Long.parseLong(number);
     }
 
