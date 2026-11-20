@@ -209,6 +209,8 @@ public final class DashboardSmsRefreshTest {
                     activity.findViewById(R.id.dashboard_bank_list));
                 assertTrue("manual refresh must visibly acknowledge the action",
                     hasVisibleProgress(activity.getWindow().getDecorView()));
+                assertFalse("the invisible canvas must not run a second animation",
+                    findBalanceView(activity.getWindow().getDecorView()).spinnerRunning);
                 assertTrue(hasText(activity.findViewById(R.id.dashboard_total_card),
                     activity.getString(R.string.status_refreshing)));
                 assertSame(list[0], activity.findViewById(R.id.dashboard_bank_list));

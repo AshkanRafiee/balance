@@ -2603,6 +2603,7 @@ public class MainActivity extends Activity {
 
         /** Release past the trigger: the arrow goes fully down and spins while the scan runs. */
         void beginSpin() {
+            if (getVisibility() != VISIBLE) return; // The native dashboard draws its own progress.
             spinnerRunning = true;
             retracting = false;
             indicatorVisible = true;
@@ -2616,7 +2617,7 @@ public class MainActivity extends Activity {
 
         /** Spins for an explicit refresh or a confirmed cold load, never a saved-content resume. */
         void spinForAutoRefresh() {
-            if (indicatorVisible) return;
+            if (getVisibility() != VISIBLE || indicatorVisible) return;
             spinnerRunning = true;
             retracting = false;
             indicatorVisible = true;
