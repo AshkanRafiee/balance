@@ -112,8 +112,7 @@ public final class CommitmentsActivity extends Activity {
         long currentMonthStart = Commitment.millisOf(currentCivil[0], currentCivil[1], 1, cal);
         for (Commitment c : commitments) {
             if (c == null) continue;
-            long overdueEnd = currentMonthStart - 1;
-            Commitment.visitOccurrences(c, cal, overdueWindowStart(c, overdueEnd), overdueEnd, at -> {
+            visitOverdue(c, cal, currentMonthStart, at -> {
                 if (c.isSettled(at)) {
                     // The current month already owns its settled rows. Keep older paid rows in
                     // their original month so they never appear in the overdue section.
@@ -146,7 +145,7 @@ public final class CommitmentsActivity extends Activity {
                     if (c.isPayment()) summary.overduePay = summary.overduePay.add(amount);
                     else summary.overdueReceive = summary.overdueReceive.add(amount);
                 }
-            }, MAX_OVERDUE_OCCURRENCES);
+            });
         }
         summary.overdue.sort((x, y) -> {
             int byDate = Long.compare(y.date, x.date);
@@ -233,6 +232,13 @@ public final class CommitmentsActivity extends Activity {
         for (int i = 1; i < summary.overdue.size(); i++)
             if (summary.overdue.get(i).date < summary.overdue.get(oldest).date) oldest = i;
         if (row.date > summary.overdue.get(oldest).date) summary.overdue.set(oldest, row);
+    }
+
+    static void visitOverdue(Commitment c, CalendarSystem calendar, long currentMonthStart,
+            Commitment.OccurrenceVisitor visitor) {
+        long overdueEnd = currentMonthStart - 1;
+        Commitment.visitOccurrences(c, calendar, overdueWindowStart(c, overdueEnd), overdueEnd,
+            visitor, MAX_OVERDUE_OCCURRENCES);
     }
 
     private static long overdueWindowStart(Commitment c, long overdueEnd) {

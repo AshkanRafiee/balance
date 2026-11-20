@@ -1762,7 +1762,7 @@ public class MainActivity extends Activity {
                     view.commitmentSummaryLoaded, view.commitmentSummaryFailed,
                     view.commitmentSummaryGood, view.hasCommitments);
                 if (view.commitmentSummary != null) {
-                    CommitmentsActivity.Summary summary = view.commitmentSummary;
+                    DashboardCommitments summary = view.commitmentSummary;
                     java.util.Collections.addAll(state, summary.remainingPay(),
                         summary.remainingReceive());
                 }
@@ -1927,7 +1927,7 @@ public class MainActivity extends Activity {
                 card.addView(ExpressiveUi.label(this, getString(R.string.commitments_card_empty_action), 12,
                     ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 4, 0));
             } else {
-                CommitmentsActivity.Summary summary = view.commitmentSummary;
+                DashboardCommitments summary = view.commitmentSummary;
                 LinearLayout values = ExpressiveUi.row(this);
                 values.addView(commitmentValue(R.string.commitments_remaining_payable,
                     summary.remainingPay(), R.color.negative),
@@ -2373,7 +2373,7 @@ public class MainActivity extends Activity {
         /** Bumps on every invalidation so a late worker cannot install a stale summary. */
         int commitmentSummaryGen;
         boolean hasCommitments;
-        CommitmentsActivity.Summary commitmentSummary;
+        DashboardCommitments commitmentSummary;
         int insetsTop, insetsBottom;
         int sortMode;
         float scrollY = 0, lastY, downY;
@@ -2776,7 +2776,7 @@ public class MainActivity extends Activity {
                             return;
                         }
                         if (!commitmentSummaryLoaded) {
-                            commitmentSummary = new CommitmentsActivity.Summary();
+                            commitmentSummary = new DashboardCommitments();
                             commitmentSummaryLoaded = true;
                             commitmentSummaryStale = false;
                             hasCommitments = false;
@@ -2788,11 +2788,11 @@ public class MainActivity extends Activity {
                     return;
                 }
                 try {
-                    final CommitmentsActivity.Summary summary = CommitmentsActivity.summarize(
+                    final DashboardCommitments summary = DashboardCommitments.summarize(
                         commitments,
                         RegionHelper.isIran(MainActivity.this)
                             ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN,
-                        System.currentTimeMillis(), CommitmentsActivity.WINDOW_MONTHS);
+                        System.currentTimeMillis());
                     final boolean any = !commitments.isEmpty();
                     post(() -> {
                         commitmentSummaryLoading = false;
@@ -2818,7 +2818,7 @@ public class MainActivity extends Activity {
                             return;
                         }
                         if (!commitmentSummaryLoaded) {
-                            commitmentSummary = new CommitmentsActivity.Summary();
+                            commitmentSummary = new DashboardCommitments();
                             commitmentSummaryLoaded = true;
                             commitmentSummaryStale = false;
                             hasCommitments = false;
@@ -3364,7 +3364,7 @@ public class MainActivity extends Activity {
                 // last summary, so the card never flashes empty on the way back.
                 ensureCommitmentSummary();
             }
-            CommitmentsActivity.Summary summary = commitmentSummary;
+            DashboardCommitments summary = commitmentSummary;
             if (!hasCommitments) {
                 Paint.Align emptyAlign = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
                 float emptyX = rtl ? right : left;
