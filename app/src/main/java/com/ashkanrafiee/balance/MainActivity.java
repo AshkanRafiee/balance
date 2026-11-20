@@ -124,6 +124,7 @@ public class MainActivity extends Activity {
             pendingLockAction = null;
             updateSecureFlag();
             if (action != null) action.run();
+            view.ensureCommitmentSummary();
             warmHistoryWhenIdle();
         });
         lockOverlay.setCancelListener(() -> {
@@ -225,10 +226,9 @@ public class MainActivity extends Activity {
         scheduleReminders();
         if (view != null) {
             view.enforceAutoHide();
-            view.invalidateCommitmentSummary();
             // Start the reload now rather than on the first draw, so the fresh summary is
             // usually ready before the card paints; the last summary stays up meanwhile.
-            view.ensureCommitmentSummary();
+            view.invalidateCommitmentSummary();
             historyWarmPending = true;
             view.refreshSilent();
             view.scheduleMonthRefresh();
@@ -1541,8 +1541,7 @@ public class MainActivity extends Activity {
     void refreshRegionPresentation() {
         HistoryWarmup.invalidate();
         if (view != null) {
-            view.invalidateCommitmentSummary();
-            view.ensureCommitmentSummary();
+            view.invalidateCommitmentSummary(true);
             view.invalidate();
         }
         if (dashboard != null) dashboard.render();
@@ -1951,10 +1950,7 @@ public class MainActivity extends Activity {
             card.addView(ExpressiveUi.label(this, getString(R.string.commitments_load_failed), 13,
                 ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 8, 0));
             TextView retry = ExpressiveUi.button(this, getString(R.string.commitments_retry), false);
-            retry.setOnClickListener(v -> {
-                view.invalidateCommitmentSummary();
-                view.ensureCommitmentSummary();
-            });
+            retry.setOnClickListener(v -> view.invalidateCommitmentSummary());
             card.addView(retry, ExpressiveUi.widthMatch(this, 6, 0));
         }
 
@@ -2371,7 +2367,7 @@ public class MainActivity extends Activity {
          *  next explicit invalidation clears it and tries again. */
         boolean commitmentSummaryFailed;
         /** Bumps on every invalidation so a late worker cannot install a stale summary. */
-        int commitmentSummaryGen;
+        volatile int commitmentSummaryGen;
         boolean hasCommitments;
         DashboardCommitments commitmentSummary;
         int insetsTop, insetsBottom;
@@ -2408,12 +2404,7 @@ public class MainActivity extends Activity {
         Runnable clearClipRunnable;
         final Handler handler = new Handler(Looper.getMainLooper());
         final Runnable monthRefresh = () -> {
-            commitmentSummaryStale = true;
-            commitmentSummaryFailed = false;
-            commitmentSummaryGen++;
-            invalidate();
-            ensureCommitmentSummary();
-            if (dashboard != null) dashboard.render();
+            invalidateCommitmentSummary();
             scheduleMonthRefresh();
         };
         final Runnable lockLongProbe = () -> {
@@ -2722,11 +2713,16 @@ public class MainActivity extends Activity {
             boolean layoutChanged = visible != smsBanner || showCommitments != commitmentsCard;
             if (!layoutChanged) return;
             smsBanner = visible;
+            boolean cardChanged = commitmentsCard != showCommitments;
             commitmentsCard = showCommitments;
             rows();
             scrollY = Math.max(0, Math.min(scrollY, maxScroll()));
-            invalidate();
-            if (dashboard != null) dashboard.render();
+            if (cardChanged && !showCommitments) invalidateCommitmentSummary(true);
+            else {
+                if (cardChanged) ensureCommitmentSummary();
+                invalidate();
+                if (dashboard != null) dashboard.render();
+            }
         }
 
         /** Reloads the saved balances (e.g. after a restore) without re-scanning SMS.
@@ -2745,11 +2741,26 @@ public class MainActivity extends Activity {
         }
 
         void invalidateCommitmentSummary() {
+            invalidateCommitmentSummary(false);
+        }
+
+        private void invalidateCommitmentSummary(boolean discard) {
+            if (discard) {
+                commitmentSummary = null;
+                commitmentSummaryLoaded = commitmentSummaryGood = hasCommitments = false;
+            }
             commitmentSummaryStale = true;
             commitmentSummaryFailed = false;
             commitmentSummaryGen++;
+            ensureCommitmentSummary();
             invalidate();
             if (dashboard != null) dashboard.render();
+        }
+
+        private boolean canLoadCommitmentSummary() {
+            return mainResumed && !isFinishing() && !isDestroyed()
+                && BalanceData.getShowCommitments(MainActivity.this)
+                && !(LockManager.isSessionLocked() && LockManager.isEnabled(MainActivity.this));
         }
 
         /** Loads the commitments summary off the UI thread: the store read can wait behind a
@@ -2757,77 +2768,57 @@ public class MainActivity extends Activity {
          *  Reloads keep drawing the last summary until the fresh one arrives, so returning to
          *  the dashboard never flashes the card empty. */
         void ensureCommitmentSummary() {
-            if (commitmentSummaryLoading) return;
+            if (commitmentSummaryLoading || !canLoadCommitmentSummary()) return;
             if (commitmentSummaryLoaded && (!commitmentSummaryStale || commitmentSummaryFailed))
                 return;
             commitmentSummaryLoading = true;
             final int gen = commitmentSummaryGen;
             new Thread(() -> {
-                List<Commitment> commitments;
+                DashboardCommitments result = null;
+                boolean any = false;
+                boolean attempted = false;
                 try {
-                    commitments = BalanceData.readCommitments(
-                        MainActivity.this.getApplicationContext());
+                    Context app = getApplicationContext();
+                    List<Commitment> commitments = null;
+                    synchronized (BalanceData.class) {
+                        // A scan may have held the store while the user hid the card or changed
+                        // calendars. Don't decrypt a snapshot nobody can use after that wait.
+                        if (gen == commitmentSummaryGen && BalanceData.getShowCommitments(app)
+                                && !(LockManager.isSessionLocked() && LockManager.isEnabled(app))) {
+                            attempted = true;
+                            commitments = BalanceData.readCommitments(app);
+                        }
+                    }
+                    if (commitments != null) {
+                        result = DashboardCommitments.summarize(commitments,
+                            RegionHelper.isIran(app) ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN,
+                            System.currentTimeMillis());
+                        any = !commitments.isEmpty();
+                    }
                 } catch (Exception e) {
-                    android.util.Log.w("Balance", "commitment summary unreadable", e);
-                    post(() -> {
-                        commitmentSummaryLoading = false;
-                        if (gen != commitmentSummaryGen) {
-                            ensureCommitmentSummary();
-                            return;
-                        }
-                        if (!commitmentSummaryLoaded) {
-                            commitmentSummary = new DashboardCommitments();
-                            commitmentSummaryLoaded = true;
-                            commitmentSummaryStale = false;
-                            hasCommitments = false;
-                        }
-                        commitmentSummaryFailed = true;
-                        invalidate();
-                        if (dashboard != null) dashboard.render();
-                    });
-                    return;
+                    android.util.Log.w("Balance", "commitment summary unavailable", e);
                 }
-                try {
-                    final DashboardCommitments summary = DashboardCommitments.summarize(
-                        commitments,
-                        RegionHelper.isIran(MainActivity.this)
-                            ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN,
-                        System.currentTimeMillis());
-                    final boolean any = !commitments.isEmpty();
-                    post(() -> {
-                        commitmentSummaryLoading = false;
-                        if (gen != commitmentSummaryGen) {
-                            ensureCommitmentSummary();
-                            return;
-                        }
+                final DashboardCommitments summary = result;
+                final boolean hasDefinitions = any;
+                final boolean skipped = !attempted;
+                post(() -> {
+                    commitmentSummaryLoading = false;
+                    if (!canLoadCommitmentSummary()) return;
+                    if (skipped || gen != commitmentSummaryGen) {
+                        ensureCommitmentSummary();
+                        return;
+                    }
+                    commitmentSummaryFailed = summary == null;
+                    if (summary != null || !commitmentSummaryLoaded) {
                         commitmentSummary = summary;
-                        hasCommitments = any;
+                        hasCommitments = hasDefinitions;
                         commitmentSummaryLoaded = true;
-                        commitmentSummaryGood = true;
+                        commitmentSummaryGood = summary != null;
                         commitmentSummaryStale = false;
-                        commitmentSummaryFailed = false;
-                        invalidate();
-                        if (dashboard != null) dashboard.render();
-                    });
-                } catch (Exception e) {
-                    android.util.Log.w("Balance", "commitment summary calculation failed", e);
-                    post(() -> {
-                        commitmentSummaryLoading = false;
-                        if (gen != commitmentSummaryGen) {
-                            ensureCommitmentSummary();
-                            return;
-                        }
-                        if (!commitmentSummaryLoaded) {
-                            commitmentSummary = new DashboardCommitments();
-                            commitmentSummaryLoaded = true;
-                            commitmentSummaryStale = false;
-                            hasCommitments = false;
-                        }
-                        commitmentSummaryFailed = true;
-                        invalidate();
-                        if (dashboard != null) dashboard.render();
-                    });
-                }
+                    }
+                    invalidate();
+                    if (dashboard != null) dashboard.render();
+                });
             }, "commitment-summary").start();
         }
 
@@ -2967,7 +2958,7 @@ public class MainActivity extends Activity {
                         dismissProgress();
                         // A reset also wipes commitments: drop the cached card summary so the next
                         // frame reloads it instead of showing the deleted series until reopen.
-                        if (hard) view.invalidateCommitmentSummary();
+                        if (hard) invalidateCommitmentSummary(true);
                         applySaved(saved, app, finished.succeeded()
                             ? (saved.isEmpty() ? statusNoSms + " · " + updatedNow : updatedNow)
                             : getString(R.string.scan_inbox_failed));
@@ -2988,7 +2979,7 @@ public class MainActivity extends Activity {
                     post(() -> {
                         if (isFinishing() || isDestroyed()) return;
                         dismissProgress();
-                        if (hard) view.invalidateCommitmentSummary();
+                        if (hard) invalidateCommitmentSummary(true);
                         // A transient read failure must not discard already usable balances.
                         applySaved(saved2.isEmpty() && !hard && !banks.isEmpty()
                             ? new LinkedHashMap<>(banks) : saved2, app,

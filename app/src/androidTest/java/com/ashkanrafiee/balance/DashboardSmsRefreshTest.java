@@ -194,6 +194,42 @@ public final class DashboardSmsRefreshTest {
         return idle[0];
     }
 
+    @Test public void disabledCardSkipsWorkAndDropsAnInFlightResultUntilReenabled()
+            throws Exception {
+        scenario = ActivityScenario.launch(MainActivity.class);
+        await(this::dashboardIdle, 45_000);
+        scenario.onActivity(activity -> {
+            MainActivity.BalanceView view = findBalanceView(activity.getWindow().getDecorView());
+            view.invalidateCommitmentSummary();
+            assertFalse("disabled at startup", view.commitmentSummaryLoaded);
+            assertFalse("invalidation while disabled must not start a worker",
+                view.commitmentSummaryLoading);
+            BalanceData.setShowCommitments(context, true);
+            view.updateSmsBanner();
+            assertTrue(view.commitmentSummaryLoading);
+            // Finish the toggle on this UI turn, before the worker can publish anything.
+            BalanceData.setShowCommitments(context, false);
+            view.updateSmsBanner();
+        });
+        await(() -> summarySettled(false), 20_000);
+        scenario.onActivity(activity -> {
+            BalanceData.setShowCommitments(context, true);
+            findBalanceView(activity.getWindow().getDecorView()).updateSmsBanner();
+        });
+        await(() -> summarySettled(true), 20_000);
+    }
+
+    private boolean summarySettled(boolean visible) {
+        boolean[] settled = {false};
+        scenario.onActivity(activity -> {
+            MainActivity.BalanceView view = findBalanceView(activity.getWindow().getDecorView());
+            settled[0] = !view.commitmentSummaryLoading && view.commitmentSummaryGood == visible
+                && (view.commitmentSummary != null) == visible
+                && (activity.findViewById(R.id.dashboard_commitments_card) != null) == visible;
+        });
+        return settled[0];
+    }
+
     @Test public void manualRefreshQueuedDuringAutomaticScan_keepsItsVisibleFollowup()
             throws Exception {
         LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();

@@ -235,6 +235,46 @@ public final class DashboardUiTest {
         await(() -> findText(currentRoot(), persianCalendar) != null, 10_000);
     }
 
+    @Test public void lockedLaunchDefersCommitmentTotalsUntilPinUnlock() {
+        org.junit.Assume.assumeFalse(LockManager.isEnabled(context));
+        BalanceData.setShowCommitments(context, true);
+        LockManager.resetSessionForTest();
+        LockManager.enable(context, "1234", true, false);
+        try {
+            launch();
+            await(() -> currentRoot().findViewById(R.id.dashboard_commitments_card) != null,
+                20_000);
+            scenario.onActivity(activity -> {
+                View root = activity.getWindow().getDecorView();
+                assertTrue(LockManager.isSessionLocked());
+                View confirm = findDescription(root, activity.getString(R.string.lock_key_confirm));
+                assertNotNull(confirm);
+                assertTrue(confirm.isShown());
+                View overlay = confirm;
+                while (!(overlay instanceof LockOverlay)) overlay = (View) overlay.getParent();
+                assertNotNull(findText(activity.findViewById(R.id.dashboard_commitments_card),
+                    activity.getString(R.string.commitments_loading)));
+                for (String digit : new String[]{"1", "2", "3", "4"})
+                    findText(overlay, digit).performClick();
+                confirm.performClick();
+            });
+            Context strings = LocaleHelper.wrap(context);
+            await(() -> {
+                View card = currentRoot().findViewById(R.id.dashboard_commitments_card);
+                return !LockManager.isSessionLocked() && card != null
+                    && (hasText(card, strings.getString(R.string.commitments_card_empty))
+                        || hasText(card, strings.getString(R.string.commitments_remaining_payable)));
+            }, 20_000);
+        } finally {
+            if (scenario != null) {
+                scenario.close();
+                scenario = null;
+            }
+            LockManager.disable(context);
+            LockManager.resetSessionForTest();
+        }
+    }
+
     @Test public void totalCardKeepsHistoryWithoutExplanationOrStaleSummary() {
         LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
         saved.put("Tejarat|1234", new Bank("Tejarat", 987_000L,
