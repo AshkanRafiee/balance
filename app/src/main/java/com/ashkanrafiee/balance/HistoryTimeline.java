@@ -1,9 +1,9 @@
 package com.ashkanrafiee.balance;
 
-import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteStatement;
 import android.util.Base64;
 
 import org.json.JSONObject;
@@ -112,6 +112,7 @@ final class HistoryTimeline implements AutoCloseable {
     /** A writer that accepts arbitrary input order and creates the committed timeline snapshot. */
     static final class Builder implements AutoCloseable {
         private SQLiteDatabase db;
+        private SQLiteStatement insertRow;
         private EncryptedRowCodec codec;
         private File databaseFile;
         private File wrappedKeyFile;
@@ -154,11 +155,13 @@ final class HistoryTimeline implements AutoCloseable {
             db.execSQL("CREATE TABLE " + TABLE + " ("
                 + "day TEXT NOT NULL, date INTEGER NOT NULL, tie INTEGER NOT NULL,"
                 + "type INTEGER NOT NULL, payload TEXT NOT NULL,"
-                + "PRIMARY KEY(day, date, tie))");
-            db.execSQL("CREATE INDEX history_timeline_order ON " + TABLE
-                + "(day, date DESC, tie ASC)");
+                + "PRIMARY KEY(day, date DESC, tie ASC)) WITHOUT ROWID");
             db.beginTransactionNonExclusive();
             transactionOpen = true;
+            // This spool is written once and paged in primary-key order. Reuse one insert
+            // for the entire pass rather than constructing a ContentValues/statement per row.
+            insertRow = db.compileStatement("INSERT INTO " + TABLE
+                + "(day, date, tie, type, payload) VALUES(?, ?, ?, ?, ?)");
         }
 
         void addTransaction(String dayKey, Transaction transaction, long sourceOrdinal)
@@ -186,19 +189,19 @@ final class HistoryTimeline implements AutoCloseable {
                 throws Exception {
             if (finished || !transactionOpen) throw new IllegalStateException("timeline is closed");
             if (dayKey == null || dayKey.isEmpty()) throw new IllegalArgumentException("invalid day");
-            ContentValues values = new ContentValues();
-            values.put("day", dayKey);
-            values.put("date", date);
-            values.put("tie", tie);
-            values.put("type", type);
-            values.put("payload", codec.encrypt(plain, identity(dayKey, date, tie, type)));
-            if (db.insertOrThrow(TABLE, null, values) < 0)
-                throw new Exception("history timeline insert failed");
+            insertRow.bindString(1, dayKey);
+            insertRow.bindLong(2, date);
+            insertRow.bindLong(3, tie);
+            insertRow.bindLong(4, type);
+            insertRow.bindString(5, codec.encrypt(plain, identity(dayKey, date, tie, type)));
+            insertRow.execute();
         }
 
         /** Commits the spool and transfers file ownership to the returned snapshot. */
         HistoryTimeline finish() throws Exception {
             if (finished || !transactionOpen) throw new IllegalStateException("timeline is closed");
+            insertRow.close();
+            insertRow = null;
             db.setTransactionSuccessful();
             db.endTransaction();
             transactionOpen = false;
@@ -219,8 +222,12 @@ final class HistoryTimeline implements AutoCloseable {
 
         private Exception closeAndDelete() {
             Exception failure = null;
+            if (insertRow != null) {
+                try { insertRow.close(); } catch (Exception e) { failure = e; }
+                insertRow = null;
+            }
             if (transactionOpen && db != null) {
-                try { db.endTransaction(); } catch (Exception e) { failure = e; }
+                try { db.endTransaction(); } catch (Exception e) { failure = append(failure, e); }
                 transactionOpen = false;
             }
             if (codec != null) {
