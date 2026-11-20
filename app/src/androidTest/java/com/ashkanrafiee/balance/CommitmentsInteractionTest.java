@@ -39,6 +39,9 @@ import java.util.Calendar;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * The commitments screen's two layers of interaction: a due can be edited or settled independently,
@@ -209,19 +212,22 @@ public class CommitmentsInteractionTest {
         commitmentsScenario = ActivityScenario.launch(CommitmentsActivity.class);
         // Simulate a newer saved amount after the row was rendered.
         assertTrue(CommitmentStore.setOccurrenceAmount(ctx, source.id, due, true, -150_000L));
+        AlertDialog first = openDueEditor(null, "150000");
         commitmentsScenario.onActivity(activity -> {
-            AlertDialog editor = openDueEditor(activity, activity.getWindow().getDecorView());
-            View form = editor.getWindow().getDecorView();
+            View form = first.getWindow().getDecorView();
             assertNotNull(findText(form, source.name));
             assertNotNull(findText(form, activity.getString(R.string.commitments_edit_due_payment)));
             EditText amount = findEditText(form, "150000");
             assertNotNull("editing must prefill the current effective magnitude", amount);
-            TextView save = editor.getButton(AlertDialog.BUTTON_POSITIVE);
+            TextView save = first.getButton(AlertDialog.BUTTON_POSITIVE);
             amount.setText("0");
             assertFalse(save.isEnabled());
             amount.setText("225000");
             assertTrue(save.isEnabled());
             assertTrue(save.performClick());
+        });
+        awaitEditorDismissed(first);
+        commitmentsScenario.onActivity(activity -> {
             View screen = activity.getWindow().getDecorView();
             assertNotNull(findText(screen, "−225,000"));
             assertNotNull(findText(screen, "−125,000"));
@@ -236,14 +242,17 @@ public class CommitmentsInteractionTest {
         commitmentsScenario.onActivity(activity -> {
             View screen = activity.getWindow().getDecorView();
             clickText(screen, activity.getString(R.string.commitments_show_older_paid, 1));
-            TextView undo = findText(screen, activity.getString(R.string.commitments_undo));
-            assertNotNull(undo);
-            AlertDialog editor = openDueEditor(activity, (View) undo.getParent());
-            EditText amount = findEditText(editor.getWindow().getDecorView(), "225000");
+        });
+        AlertDialog settled = openDueEditor(activity -> (View) findText(
+            activity.getWindow().getDecorView(), activity.getString(R.string.commitments_undo))
+            .getParent(), "225000");
+        commitmentsScenario.onActivity(activity -> {
+            EditText amount = findEditText(settled.getWindow().getDecorView(), "225000");
             assertNotNull(amount);
             amount.setText("75000");
-            assertTrue(editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick());
+            assertTrue(settled.getButton(AlertDialog.BUTTON_POSITIVE).performClick());
         });
+        awaitEditorDismissed(settled);
         Commitment changed = CommitmentStore.get(ctx, source.id);
         assertEquals(-75_000L, changed.amountAt(due));
         assertTrue("editing the amount must not undo a settlement", changed.isSettled(due));
@@ -256,13 +265,15 @@ public class CommitmentsInteractionTest {
             TextView undo = findText(screen, activity.getString(R.string.commitments_undo));
             assertNotNull(undo);
             assertTrue(undo.performClick());
-            AlertDialog editor = openDueEditor(activity, screen);
-            assertNotNull(findEditText(editor.getWindow().getDecorView(), "75000"));
+        });
+        AlertDialog editor = openDueEditor(null, "75000");
+        commitmentsScenario.onActivity(activity -> {
             TextView reset = editor.getButton(AlertDialog.BUTTON_NEUTRAL);
             assertEquals(activity.getString(R.string.commitments_reset_due_amount),
                 reset.getText().toString());
             assertTrue(reset.performClick());
         });
+        awaitEditorDismissed(editor);
         Commitment reset = CommitmentStore.get(ctx, source.id);
         assertNull(reset.occurrenceAmountOverride(due));
         assertEquals(-125_000L, reset.amountAt(due));
@@ -333,15 +344,14 @@ public class CommitmentsInteractionTest {
             SystemClock.sleep(20);
         assertFalse("verification must finish", LockManager.isSessionLocked());
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
-        AlertDialog[] opened = {null};
+        AlertDialog opened = openDueEditor(null, "1000");
         commitmentsScenario.onActivity(activity -> {
-            opened[0] = openDueEditor(activity, activity.getWindow().getDecorView());
-            assertTrue((opened[0].getWindow().getAttributes().flags
+            assertTrue((opened.getWindow().getAttributes().flags
                 & WindowManager.LayoutParams.FLAG_SECURE) != 0);
         });
         commitmentsScenario.moveToState(Lifecycle.State.STARTED);
         commitmentsScenario.onActivity(activity -> {
-            assertFalse(opened[0].isShowing());
+            assertFalse(opened.isShowing());
             assertNull(dialogField(activity, "activeDialog"));
         });
     }
@@ -354,12 +364,10 @@ public class CommitmentsInteractionTest {
         BalanceData.writeCommitments(ctx, singleton(source));
         commitmentsScenario = ActivityScenario.launch(CommitmentReminders
             .dueIntent(ctx, source.id, future).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-        AlertDialog[] opened = {null};
+        String tag = "reminder-due:" + source.id + ":" + future;
+        AlertDialog editor = openDueEditor(activity ->
+            activity.getWindow().getDecorView().findViewWithTag(tag), "100");
         commitmentsScenario.onActivity(activity -> {
-            View target = activity.getWindow().getDecorView()
-                .findViewWithTag("reminder-due:" + source.id + ":" + future);
-            assertNotNull(target);
-            AlertDialog editor = openDueEditor(activity, target);
             assertNotNull(findText(editor.getWindow().getDecorView(), "15 January 2090"));
             assertNotNull(findText(editor.getWindow().getDecorView(),
                 activity.getString(R.string.commitments_edit_due_receipt)));
@@ -372,23 +380,218 @@ public class CommitmentsInteractionTest {
             amount.getText().replace(0, amount.length(), localizedAmount);
             assertEquals(localizedAmount, amount.getText().toString());
             assertTrue(editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick());
-            View updatedTarget = activity.getWindow().getDecorView().findViewWithTag(target.getTag());
+        });
+        awaitEditorDismissed(editor);
+        commitmentsScenario.onActivity(activity -> {
+            View updatedTarget = activity.getWindow().getDecorView().findViewWithTag(tag);
             assertNotNull(updatedTarget);
             assertNotNull(findText(updatedTarget, "+1,234.5"));
-            opened[0] = openDueEditor(activity, updatedTarget);
         });
+        AlertDialog reopened = openDueEditor(activity ->
+            activity.getWindow().getDecorView().findViewWithTag(tag), "1234.5");
         assertEquals(12345L, CommitmentStore.get(ctx, source.id).amountAt(future));
         assertTrue(CommitmentStore.delete(ctx, source.id));
         commitmentsScenario.onActivity(activity -> {
-            EditText amount = findEditText(opened[0].getWindow().getDecorView(), "1234.5");
+            EditText amount = findEditText(reopened.getWindow().getDecorView(), "1234.5");
             assertNotNull(amount);
             amount.setText("9999");
-            assertTrue(opened[0].getButton(AlertDialog.BUTTON_POSITIVE).performClick());
-            assertFalse(opened[0].isShowing());
+            assertTrue(reopened.getButton(AlertDialog.BUTTON_POSITIVE).performClick());
+        });
+        awaitEditorDismissed(reopened);
+        commitmentsScenario.onActivity(activity -> {
             assertNotNull(activity.getWindow().getDecorView()
                 .findViewWithTag("reminder-due-unavailable"));
         });
         assertNull(CommitmentStore.get(ctx, source.id));
+    }
+
+    @Test public void blockedDueOpenIsDismissedAndResumeDoesNotWaitForScan() throws Exception {
+        seedDue();
+        commitmentsScenario = ActivityScenario.launch(CommitmentsActivity.class);
+        Thread[] workers = new Thread[2];
+        withStoreHeld(() -> {
+            commitmentsScenario.onActivity(activity -> {
+                clickText(activity.getWindow().getDecorView(), activity.getString(R.string.commitments_edit_due));
+                AlertDialog dialog = dialogField(activity, "activeDialog");
+                assertTrue(findText(dialog.getWindow().getDecorView(),
+                    activity.getString(R.string.commitments_loading)).isShown());
+                assertFalse(dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled());
+            });
+            workers[0] = blockedWorker("due-open");
+            commitmentsScenario.moveToState(Lifecycle.State.STARTED);
+            commitmentsScenario.moveToState(Lifecycle.State.RESUMED);
+            workers[1] = blockedWorker("due-overview");
+            commitmentsScenario.onActivity(activity -> assertNull(dialogField(activity, "activeDialog")));
+        });
+        for (Thread worker : workers) awaitWorker(worker);
+        commitmentsScenario.onActivity(activity -> assertNull(dialogField(activity, "activeDialog")));
+    }
+
+    @Test public void lockedWhileWaitingForSaveCannotWriteOrReopen() throws Exception {
+        Commitment source = seedDue();
+        commitmentsScenario = ActivityScenario.launch(CommitmentsActivity.class);
+        LockManager.enable(ctx, "test-password", false, false);
+        AlertDialog editor = openDueEditor(null, "1000");
+        Thread[] worker = {null};
+        withStoreHeld(() -> {
+            submitDue(editor, "1000", "2000");
+            worker[0] = blockedWorker("due-save");
+            commitmentsScenario.onActivity(activity -> {
+                assertTrue(findText(editor.getWindow().getDecorView(),
+                    activity.getString(R.string.lock_progress_saving)).isShown());
+                assertFalse(editor.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled());
+                LockManager.lockSession(); // The store guard must recheck, even before a pause.
+            });
+        });
+        awaitWorker(worker[0]);
+        awaitEditorDismissed(editor);
+        assertNull(CommitmentStore.get(ctx, source.id).occurrenceAmountOverride(source.start));
+    }
+
+    @Test public void concurrentEditOfSameDueWinsOverStaleForm() throws Exception {
+        Commitment source = seedDue();
+        commitmentsScenario = ActivityScenario.launch(CommitmentsActivity.class);
+        AlertDialog editor = openDueEditor(null, "1000");
+        assertTrue(CommitmentStore.setOccurrenceAmount(ctx, source.id, source.start, true, -3000L));
+        submitDue(editor, "1000", "2000");
+        awaitEditorDismissed(editor);
+        assertEquals(-3000L, CommitmentStore.get(ctx, source.id).amountAt(source.start));
+        commitmentsScenario.onActivity(activity -> assertNotNull(findText(
+            activity.getWindow().getDecorView(), "−3,000")));
+    }
+
+    @Test public void savePublishesDetachedReminderRowWhileAnotherScanHoldsStore() throws Exception {
+        Commitment source = seedDue();
+        LocaleHelper.setLanguage(ctx, "fa");
+        commitmentsScenario = ActivityScenario.launch(CommitmentReminders.dueIntent(ctx,
+            source.id, source.start).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        String tag = "reminder-due:" + source.id + ":" + source.start;
+        AlertDialog editor = openDueEditor(activity ->
+            activity.getWindow().getDecorView().findViewWithTag(tag), "1000");
+        assertPublishesDuringScan("due-save", () -> {
+            submitDue(editor, "1000", "2000");
+            commitmentsScenario.onActivity(activity -> {
+                View form = editor.getWindow().getDecorView();
+                assertNotNull(findText(form, activity.getString(R.string.commitments_amount_hint,
+                    activity.getString(R.string.unit_rial))));
+                // Even a programmatic second click cannot submit another value.
+                findEditText(form, "2000").setText("9000");
+                editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+            });
+        }, () -> {
+            awaitEditorDismissed(editor);
+            commitmentsScenario.onActivity(activity -> {
+                View row = activity.getWindow().getDecorView().findViewWithTag(tag);
+                String value = CommitmentsActivity.displayMagnitude(activity, true,
+                    java.math.BigInteger.valueOf(2000));
+                assertNotNull(findText(row, "\u2066−" + value + "\u2069"));
+            });
+        });
+        assertEquals(-2000L, CommitmentStore.get(ctx, source.id).amountAt(source.start));
+    }
+
+    @Test public void deletedDueCannotOpenOrReadOverviewOnMainDuringScan() throws Exception {
+        Commitment source = seedDue();
+        commitmentsScenario = ActivityScenario.launch(CommitmentReminders.dueIntent(ctx,
+            source.id, source.start).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        assertTrue(CommitmentStore.delete(ctx, source.id));
+        AlertDialog[] editor = {null};
+        assertPublishesDuringScan("due-open", () -> commitmentsScenario.onActivity(activity -> {
+            View row = activity.getWindow().getDecorView().findViewWithTag(
+                "reminder-due:" + source.id + ":" + source.start);
+            clickText(row, activity.getString(R.string.commitments_edit_due));
+            editor[0] = dialogField(activity, "activeDialog");
+            assertNotNull(editor[0]);
+        }), () -> {
+            awaitEditorDismissed(editor[0]);
+            commitmentsScenario.onActivity(activity -> assertNotNull(activity.getWindow()
+                .getDecorView().findViewWithTag("reminder-due-unavailable")));
+        });
+    }
+
+    /** Let the worker finish, then reacquire the store before its UI callback can bind the result. */
+    private void assertPublishesDuringScan(String name, Runnable submit, Runnable check)
+            throws InterruptedException {
+        CountDownLatch allowUi = new CountDownLatch(1);
+        CountDownLatch uiParked = new CountDownLatch(1);
+        Thread[] worker = {null};
+        java.util.concurrent.atomic.AtomicBoolean uiTimedOut = new java.util.concurrent.atomic.AtomicBoolean();
+        try {
+            withStoreHeld(() -> {
+                submit.run();
+                worker[0] = blockedWorker(name);
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                    uiParked.countDown();
+                    try { awaitLatch(allowUi); }
+                    catch (AssertionError timeout) { uiTimedOut.set(true); }
+                });
+                awaitLatch(uiParked);
+            });
+            awaitWorker(worker[0]); // UI publication queued, store is free again.
+            withStoreHeld(() -> {
+                allowUi.countDown();
+                check.run();
+            });
+        } finally {
+            allowUi.countDown();
+        }
+        assertFalse("UI gate expired before the simulated scan", uiTimedOut.get());
+    }
+
+    private Commitment seedDue() {
+        Commitment c = Commitment.create("worker test", -1000L, Commitment.MONTHLY,
+            Commitment.startOfDay(System.currentTimeMillis()), null, false, 0);
+        BalanceData.writeCommitments(ctx, singleton(c));
+        return c;
+    }
+
+    private void submitDue(AlertDialog editor, String initial, String value) {
+        commitmentsScenario.onActivity(activity -> {
+            findEditText(editor.getWindow().getDecorView(), initial).setText(value);
+            assertTrue(editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick());
+        });
+    }
+
+    /** The watchdog also releases the monitor on regression, rather than hanging instrumentation. */
+    private static void withStoreHeld(Runnable action) throws InterruptedException {
+        CountDownLatch held = new CountDownLatch(1), release = new CountDownLatch(1);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread holder = new Thread(() -> {
+            synchronized (BalanceData.class) {
+                held.countDown();
+                try { awaitLatch(release); }
+                catch (AssertionError error) { failure.set(error); }
+            }
+        });
+        holder.start();
+        try {
+            awaitLatch(held);
+            action.run();
+        } finally {
+            release.countDown();
+            awaitWorker(holder);
+        }
+        if (failure.get() != null) throw new AssertionError("UI waited for the scan", failure.get());
+    }
+
+    private static void awaitLatch(CountDownLatch latch) {
+        try { assertTrue("timed out at test gate", latch.await(10, TimeUnit.SECONDS)); }
+        catch (InterruptedException error) { throw new AssertionError(error); }
+    }
+
+    private static Thread blockedWorker(String name) {
+        long deadline = SystemClock.uptimeMillis() + 5000;
+        while (SystemClock.uptimeMillis() < deadline) {
+            for (Thread t : Thread.getAllStackTraces().keySet())
+                if (name.equals(t.getName()) && t.getState() == Thread.State.BLOCKED) return t;
+            SystemClock.sleep(10);
+        }
+        throw new AssertionError(name + " never waited for the held store");
+    }
+
+    private static void awaitWorker(Thread worker) throws InterruptedException {
+        worker.join(10_000);
+        assertFalse("worker did not finish: " + worker.getName(), worker.isAlive());
     }
 
     @Test public void dashboardGuidanceAppearsOnlyWithoutDefinitions() {
@@ -732,12 +935,27 @@ public class CommitmentsInteractionTest {
             CalendarSystem.GREGORIAN);
     }
 
-    private static AlertDialog openDueEditor(CommitmentsActivity activity, View row) {
-        clickText(row, activity.getString(R.string.commitments_edit_due));
-        AlertDialog dialog = dialogField(activity, "activeDialog");
-        assertNotNull("the occurrence amount editor must open", dialog);
-        assertTrue(dialog.isShowing());
-        return dialog;
+    private AlertDialog openDueEditor(java.util.function.Function<CommitmentsActivity, View> target,
+            String expectedAmount) {
+        AlertDialog[] opened = {null};
+        commitmentsScenario.onActivity(activity -> {
+            View row = target == null ? activity.getWindow().getDecorView() : target.apply(activity);
+            assertNotNull(row);
+            clickText(row, activity.getString(R.string.commitments_edit_due));
+            opened[0] = dialogField(activity, "activeDialog");
+            assertNotNull(opened[0]);
+        });
+        long deadline = SystemClock.uptimeMillis() + 10_000;
+        while (SystemClock.uptimeMillis() < deadline) {
+            boolean[] ready = {false};
+            commitmentsScenario.onActivity(activity -> {
+                assertTrue(opened[0].isShowing());
+                ready[0] = findEditText(opened[0].getWindow().getDecorView(), expectedAmount) != null;
+            });
+            if (ready[0]) return opened[0];
+            SystemClock.sleep(20);
+        }
+        throw new AssertionError("the occurrence amount did not load");
     }
 
     private static AlertDialog openSeriesEditor(CommitmentsActivity activity, String name) {

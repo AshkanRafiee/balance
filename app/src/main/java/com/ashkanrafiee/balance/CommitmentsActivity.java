@@ -231,6 +231,9 @@ public final class CommitmentsActivity extends Activity {
     private LinearLayout root;
     private AlertDialog manageDialogWindow;
     private AlertDialog activeDialog;
+    /** A lifecycle return that interrupted a due edit must not wait for the same scan again. */
+    private boolean dueRefreshPending;
+    private volatile int dueRefreshGeneration;
     /** Snapshots the open editor's typed input, while it is open. A pause inventories the form
      *  before the editor is dismissed, so the data survives the round-trip. */
     private java.util.function.Supplier<Draft> editorSnapshotter;
@@ -240,7 +243,7 @@ public final class CommitmentsActivity extends Activity {
     private Draft pendingEditorDraft;
     /** True while onPause's dismiss is in flight, so the editor's dismiss listener keeps the
      *  just-snapshotted draft instead of discarding it the way a save/cancel dismissal does. */
-    private boolean pausing;
+    private volatile boolean pausing;
     private LockOverlay lockOverlay;
     private ReminderTarget reminderTarget;
     private boolean reminderRevealPending;
@@ -294,6 +297,7 @@ public final class CommitmentsActivity extends Activity {
         // A draft snapshotted before rotation or process death comes back with the screen; the
         // next unlocked resume reopens it, exactly like a plain pause round-trip.
         if (state != null) pendingEditorDraft = Draft.readFrom(state);
+        dueRefreshPending = state != null && state.getBoolean("due_refresh_pending");
         if (state != null && state.getBoolean("reminder_navigation_saved", false)) {
             String id = state.getString("reminder_target_id");
             long due = state.getLong("reminder_target_due", 0);
@@ -354,6 +358,7 @@ public final class CommitmentsActivity extends Activity {
     protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
         if (pendingEditorDraft != null) pendingEditorDraft.writeTo(out);
+        out.putBoolean("due_refresh_pending", dueRefreshPending || activeDialog instanceof DueEditor);
         out.putBoolean("reminder_navigation_saved", true);
         out.putBoolean("reminder_reveal_pending", reminderRevealPending);
         if (reminderTarget != null) {
@@ -368,9 +373,10 @@ public final class CommitmentsActivity extends Activity {
         ReminderTarget target = ReminderTarget.fromIntent(intent);
         if (target == null) return;
         if (editorSnapshotter != null) pendingEditorDraft = editorSnapshotter.get();
+        boolean wasPausing = pausing;
         pausing = true;
         dismissActiveDialog();
-        pausing = false;
+        pausing = wasPausing;
         reminderTarget = target;
         reminderRevealPending = true;
         if (LockManager.isEnabled(this) && LockManager.isSessionLocked()) lockOverlay.showLock();
@@ -451,6 +457,7 @@ public final class CommitmentsActivity extends Activity {
     @Override
     protected void onDestroy() {
         monthHandler.removeCallbacks(monthRefresh);
+        if (activeDialog instanceof DueEditor) activeDialog.dismiss();
         super.onDestroy();
     }
 
@@ -475,6 +482,8 @@ public final class CommitmentsActivity extends Activity {
     }
 
     private void dismissActiveDialog() {
+        if (activeDialog instanceof DueEditor) dueRefreshPending = true;
+        dueRefreshGeneration++;
         if (activeDialog != null) {
             activeDialog.dismiss();
             activeDialog = null;
@@ -574,13 +583,42 @@ public final class CommitmentsActivity extends Activity {
     }
 
     private void render() {
-        List<Commitment> commitments;
+        int generation = ++dueRefreshGeneration;
+        if (dueRefreshPending || activeDialog instanceof DueEditor) {
+            dueRefreshPending = true;
+            if (!canShowDue()) return;
+            if (root.getChildCount() == 0)
+                root.addView(text(getString(R.string.commitments_loading), 14, muted));
+            new Thread(() -> {
+                List<Commitment> snapshot;
+                synchronized (BalanceData.class) {
+                    if (generation != dueRefreshGeneration || !canShowDue()) return;
+                    snapshot = readOverview(getApplicationContext());
+                }
+                runOnUiThread(() -> {
+                    if (generation != dueRefreshGeneration || !canShowDue()) return;
+                    dueRefreshPending = snapshot == null;
+                    render(snapshot);
+                });
+            }, "due-overview").start();
+        } else {
+            render(readOverview(this));
+        }
+    }
+
+    private static List<Commitment> readOverview(Context context) {
         try {
-            commitments = BalanceData.readCommitments(this);
+            return BalanceData.readCommitments(context);
         } catch (RuntimeException error) {
             // A transient store/read failure must not take down the activity during resume or look
             // like an empty commitments list. Show an explicit retry state instead.
             android.util.Log.w("CommitmentsActivity", "commitment screen read failed", error);
+            return null;
+        }
+    }
+
+    private void render(List<Commitment> commitments) {
+        if (commitments == null) {
             renderLoadError();
             return;
         }
@@ -1034,101 +1072,199 @@ public final class CommitmentsActivity extends Activity {
         return LockManager.isEnabled(this) && LockManager.isSessionLocked();
     }
 
+    private boolean canShowDue() {
+        return !pausing && !isFinishing() && !isDestroyed() && !commitmentsLocked();
+    }
+
     private void editOccurrence(Row row) {
-        if (pausing || commitmentsLocked()) return;
-        final Commitment current;
-        try {
-            BalanceData.ensureResetComplete(this);
-            current = CommitmentStore.get(this, row.commitment.id);
-            if (current == null || current.frequency == Commitment.ONCE
-                    || current.isPayment() != row.commitment.isPayment()
-                    || !current.hasOccurrence(row.date)) {
-                showStaleOccurrence();
-                return;
-            }
-        } catch (Exception unavailable) {
-            showOccurrenceEditError(R.string.commitments_edit_due_load_failed);
-            return;
-        }
-
-        LinearLayout form = new LinearLayout(this);
-        form.setOrientation(LinearLayout.VERTICAL);
-        form.setPadding(dp(24), dp(8), dp(24), dp(8));
-        TextView name = text(current.name, 16, fg, medium());
-        applyUserTextDirection(name);
-        form.addView(name);
-        form.addView(text(occurrenceDateText(current, row.date), 14, muted),
-            margin(0, 4, 0, 8));
-        form.addView(text(getString(current.isPayment() ? R.string.commitments_edit_due_payment
-            : R.string.commitments_edit_due_receipt), 14, muted));
-        EditText amount = amountField();
-        amount.setId(View.generateViewId());
-        TextView amountLabel = text(getString(R.string.commitments_amount_hint,
-            CurrencyHelper.label(this)), 13, muted, medium());
-        amountLabel.setLabelFor(amount.getId());
-        form.addView(amountLabel, margin(0, 12, 0, 0));
-        amount.setText(formatMagnitude(current.amountAt(row.date)));
-        amount.setSelectAllOnFocus(true);
-        form.addView(amount, new LinearLayout.LayoutParams(-1, -2));
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(form);
-
-        AlertDialog.Builder builder = new AlertDialog.Builder(this)
-            .setTitle(R.string.commitments_edit_due_title)
-            .setView(scroll)
-            .setPositiveButton(R.string.note_save, null)
-            .setNegativeButton(R.string.lock_cancel, null);
-        if (current.occurrenceAmountOverride(row.date) != null)
-            builder.setNeutralButton(R.string.commitments_reset_due_amount, null);
-        AlertDialog dialog = builder.create();
-        if (LockManager.isEnabled(this) && dialog.getWindow() != null)
-            dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
-        dialog.setOnDismissListener(d -> {
-            if (activeDialog == dialog) activeDialog = null;
-        });
-        dialog.show();
-        activeDialog = dialog;
-        TextView save = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
-        save.setOnClickListener(v -> {
-            Long parsed = parseAmount(amount.getText().toString(), current.isPayment());
-            if (parsed != null) saveOccurrenceAmount(dialog, current, row.date, parsed);
-        });
-        TextView reset = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
-        if (reset != null) {
-            reset.setOnClickListener(v -> saveOccurrenceAmount(dialog, current, row.date, null));
-        }
-        save.setEnabled(parseAmount(amount.getText().toString(), current.isPayment()) != null);
-        amount.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                save.setEnabled(parseAmount(s.toString(), current.isPayment()) != null);
-            }
-            @Override public void afterTextChanged(Editable s) {}
-        });
+        if (activeDialog != null || !canShowDue()) return;
+        DueEditor editor = new DueEditor(row);
+        activeDialog = editor;
+        editor.open();
     }
 
-    private void saveOccurrenceAmount(AlertDialog dialog, Commitment current, long due, Long amount) {
-        if (activeDialog != dialog || !dialog.isShowing() || pausing || commitmentsLocked()) return;
-        try {
-            if (!CommitmentStore.setOccurrenceAmount(this, current.id, due, current.isPayment(),
-                    amount)) {
-                dialog.dismiss();
-                showStaleOccurrence();
-                return;
-            }
-        } catch (Exception unavailable) {
-            showOccurrenceEditError(R.string.commitments_edit_due_save_failed);
-            return;
-        }
-        dialog.dismiss();
-        // A write changes the store revision. Re-arm without clearing which reminders fired.
-        CommitmentReminders.scheduleAll(this);
-        render();
-    }
+    /** One dialog owns one immutable target. Dismissal revokes queued work immediately, even
+     *  when the worker is still behind a scan and the activity has since resumed or navigated. */
+    private final class DueEditor extends AlertDialog {
+        private final Context app = getApplicationContext();
+        private final String id;
+        private final long due;
+        private final boolean payment;
+        private volatile boolean dismissed;
+        private boolean saving;
+        private Commitment opened;
+        private final LinearLayout form = new LinearLayout(CommitmentsActivity.this);
+        private final EditText amount = amountField();
+        private final TextView status = text(getString(R.string.commitments_loading), 14, muted);
 
-    private void showStaleOccurrence() {
-        showOccurrenceEditError(R.string.commitments_edit_due_stale);
-        render();
+        DueEditor(Row row) {
+            super(CommitmentsActivity.this);
+            id = row.commitment.id;
+            due = row.date;
+            payment = row.commitment.isPayment();
+        }
+
+        void open() {
+            setTitle(R.string.commitments_edit_due_title);
+            setCanceledOnTouchOutside(true);
+            form.setOrientation(LinearLayout.VERTICAL);
+            form.setPadding(dp(24), dp(8), dp(24), dp(8));
+            status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+            form.addView(status);
+            amount.setVisibility(View.GONE);
+            amount.setId(View.generateViewId());
+            form.addView(amount);
+            ScrollView scroll = new ScrollView(CommitmentsActivity.this);
+            scroll.addView(form);
+            setView(scroll);
+            setButton(BUTTON_POSITIVE, getString(R.string.note_save), (OnClickListener) null);
+            setButton(BUTTON_NEUTRAL, getString(R.string.commitments_reset_due_amount),
+                (OnClickListener) null);
+            setButton(BUTTON_NEGATIVE, getString(R.string.lock_cancel), (OnClickListener) null);
+            if (LockManager.isEnabled(app))
+                getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+            show();
+            getButton(BUTTON_POSITIVE).setEnabled(false);
+            getButton(BUTTON_NEUTRAL).setVisibility(View.GONE);
+            new Thread(() -> {
+                try {
+                    Commitment current;
+                    synchronized (BalanceData.class) {
+                        if (!admitted()) { runOnUiThread(this::dismiss); return; }
+                        current = readTarget();
+                    }
+                    if (current == null) finishEdit(false);
+                    else runOnUiThread(() -> { if (currentDialog()) bind(current); });
+                } catch (Exception error) {
+                    runOnUiThread(() -> {
+                        if (!currentDialog()) return;
+                        dismiss();
+                        showOccurrenceEditError(R.string.commitments_edit_due_load_failed);
+                    });
+                }
+            }, "due-open").start();
+        }
+
+        private Commitment readTarget() throws Exception {
+            BalanceData.ensureResetComplete(app);
+            Commitment c = CommitmentStore.get(app, id);
+            return c != null && c.frequency != Commitment.ONCE && c.isPayment() == payment
+                && c.hasOccurrence(due) ? c : null;
+        }
+
+        private void bind(Commitment c) {
+            opened = c;
+            form.removeAllViews();
+            TextView name = text(c.name, 16, fg, medium());
+            applyUserTextDirection(name);
+            form.addView(name);
+            form.addView(text(occurrenceDateText(c, due), 14, muted), margin(0, 4, 0, 8));
+            form.addView(text(getString(payment ? R.string.commitments_edit_due_payment
+                : R.string.commitments_edit_due_receipt), 14, muted));
+            TextView label = text(getString(R.string.commitments_amount_hint,
+                CurrencyHelper.label(CommitmentsActivity.this)), 13, muted, medium());
+            label.setLabelFor(amount.getId());
+            form.addView(label, margin(0, 12, 0, 0));
+            amount.setText(formatMagnitude(c.amountAt(due)));
+            amount.setSelectAllOnFocus(true);
+            amount.setVisibility(View.VISIBLE);
+            form.addView(amount);
+            form.addView(status);
+            setSaving(false);
+            amount.requestFocus();
+            getButton(BUTTON_POSITIVE).setOnClickListener(v -> {
+                Long parsed = parseAmount(amount.getText().toString(), payment);
+                if (parsed != null) save(parsed);
+            });
+            if (c.occurrenceAmountOverride(due) != null) {
+                getButton(BUTTON_NEUTRAL).setVisibility(View.VISIBLE);
+                getButton(BUTTON_NEUTRAL).setOnClickListener(v -> save(null));
+            }
+            amount.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                    getButton(BUTTON_POSITIVE).setEnabled(!saving
+                        && parseAmount(s.toString(), payment) != null);
+                }
+                @Override public void afterTextChanged(Editable s) {}
+            });
+        }
+
+        private void setSaving(boolean busy) {
+            saving = busy;
+            status.setText(R.string.lock_progress_saving);
+            status.setVisibility(busy ? View.VISIBLE : View.GONE);
+            amount.setEnabled(!busy);
+            getButton(BUTTON_POSITIVE).setEnabled(!busy
+                && parseAmount(amount.getText().toString(), payment) != null);
+            getButton(BUTTON_NEUTRAL).setEnabled(!busy);
+        }
+
+        private boolean admitted() { return !dismissed && canShowDue(); }
+
+        private boolean currentDialog() {
+            if (activeDialog != this || !isShowing()) return false;
+            if (admitted()) return true;
+            dismiss();
+            return false;
+        }
+
+        private void save(Long value) {
+            if (saving || !currentDialog()) return;
+            setSaving(true);
+            new Thread(() -> {
+                final boolean saved;
+                try {
+                    synchronized (BalanceData.class) {
+                        if (!admitted()) { runOnUiThread(this::dismiss); return; }
+                        Commitment latest = readTarget();
+                        saved = latest != null && latest.amount == opened.amount
+                            && java.util.Objects.equals(latest.occurrenceAmountOverride(due),
+                                opened.occurrenceAmountOverride(due))
+                            && admitted()
+                            && CommitmentStore.setOccurrenceAmount(app, id, due, payment, value);
+                    }
+                } catch (Exception error) {
+                    runOnUiThread(() -> {
+                        if (!currentDialog()) return;
+                        setSaving(false);
+                        showOccurrenceEditError(R.string.commitments_edit_due_save_failed);
+                    });
+                    return;
+                }
+                if (saved) CommitmentReminders.scheduleAll(app);
+                finishEdit(saved);
+            }, "due-save").start();
+        }
+
+        private void finishEdit(boolean saved) {
+            // readOverview returns detached settlement lists. No store call (even a lazy
+            // isSettled lookup for a reminder target) belongs in the UI callback.
+            List<Commitment> snapshot;
+            synchronized (BalanceData.class) {
+                snapshot = admitted() ? readOverview(app) : null;
+            }
+            runOnUiThread(() -> {
+                if (!currentDialog()) return;
+                if (!saved) showOccurrenceEditError(R.string.commitments_edit_due_stale);
+                saving = false;
+                dueRefreshGeneration++;
+                dismiss();
+                dueRefreshPending = snapshot == null;
+                render(snapshot);
+            });
+        }
+
+        @Override public void dismiss() {
+            dismissed = true;
+            super.dismiss();
+            if (activeDialog != this) return;
+            activeDialog = null;
+            dueRefreshPending = true;
+            // An admitted save can finish after Cancel. Reading on a worker observes its commit
+            // without blocking this window, including across a pause or a new reminder intent.
+            if (saving && canShowDue()) render();
+        }
     }
 
     private void showOccurrenceEditError(int message) {
