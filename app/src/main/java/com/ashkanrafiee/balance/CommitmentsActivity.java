@@ -1693,10 +1693,12 @@ public final class CommitmentsActivity extends Activity {
      *  range has one extra magnitude, so a payment can represent Long.MIN_VALUE exactly. */
     private Long parseAmount(String raw, boolean pay) {
         try {
-            String number = BalanceData.digits(raw.replace(",", "")
-                .replace("\u066C", "").replace("\u066B", ".").trim());
-            if (!number.matches("[0-9]+(?:\\.[0-9]+)?")) return null;
-            BigDecimal display = new BigDecimal(number);
+            String number = BalanceData.digits(raw.trim()).replace('\u066B', '.');
+            // Only strip a separator after checking its groups: "12,5" must never become 125.
+            String group = number.contains(",") ? "," : "\u066C";
+            if (!number.matches("(?:[0-9]++|[0-9]{1,3}(?:" + group
+                    + "[0-9]{3})++)(?:\\.[0-9]+)?")) return null;
+            BigDecimal display = new BigDecimal(number.replace(group, ""));
             if (display.signum() <= 0) return null;
             BigInteger magnitude = (isToman()
                 ? display.movePointRight(1) : display).toBigIntegerExact();

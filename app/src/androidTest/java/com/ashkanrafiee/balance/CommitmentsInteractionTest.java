@@ -283,6 +283,32 @@ public class CommitmentsInteractionTest {
         });
     }
 
+    @Test public void seriesAmountPasteRequiresCompleteThousandsGroups() throws Exception {
+        CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_TOMAN);
+        Commitment source = Commitment.create("monthly payment", -1000L, Commitment.MONTHLY,
+            Commitment.startOfDay(System.currentTimeMillis()), null, false, 0);
+        BalanceData.writeCommitments(ctx, singleton(source));
+        commitmentsScenario = ActivityScenario.launch(CommitmentsActivity.class);
+        AlertDialog[] opened = {null};
+        commitmentsScenario.onActivity(activity ->
+            opened[0] = openSeriesEditor(activity, source.name));
+        commitmentsScenario.onActivity(activity -> {
+            EditText amount = findEditText(opened[0].getWindow().getDecorView(), "100");
+            assertNotNull(amount);
+            View save = opened[0].getButton(AlertDialog.BUTTON_POSITIVE);
+            for (String invalid : new String[]{"12,5", ",123", "123,", "1,,000", "1234,567",
+                    "1,23,456", "1,234٬567", "1.0,000"}) {
+                amount.getText().replace(0, amount.length(), invalid);
+                assertFalse(invalid, save.isEnabled());
+            }
+            amount.getText().replace(0, amount.length(), "1,234,567.8");
+            assertTrue(save.isEnabled());
+            assertTrue(save.performClick());
+        });
+        awaitEditorDismissed(opened[0]);
+        assertEquals(-12_345_678L, CommitmentStore.get(ctx, source.id).amount);
+    }
+
     @Test public void dueEditorIsSecureAndDismissedOnPause() {
         long due = Commitment.startOfDay(System.currentTimeMillis());
         Commitment source = Commitment.create("private bill", -1000L, Commitment.MONTHLY,
@@ -340,19 +366,21 @@ public class CommitmentsInteractionTest {
             EditText amount = findEditText(editor.getWindow().getDecorView(), "100");
             assertNotNull(amount);
             // Editable replacement follows the same input-filter path as a paste.
-            String localizedAmount = "۱۲۳٫۴";
+            amount.getText().replace(0, amount.length(), "۱۲۳٬۴");
+            assertFalse(editor.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled());
+            String localizedAmount = "۱٬۲۳۴٫۵";
             amount.getText().replace(0, amount.length(), localizedAmount);
             assertEquals(localizedAmount, amount.getText().toString());
             assertTrue(editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick());
             View updatedTarget = activity.getWindow().getDecorView().findViewWithTag(target.getTag());
             assertNotNull(updatedTarget);
-            assertNotNull(findText(updatedTarget, "+123.4"));
+            assertNotNull(findText(updatedTarget, "+1,234.5"));
             opened[0] = openDueEditor(activity, updatedTarget);
         });
-        assertEquals(1234L, CommitmentStore.get(ctx, source.id).amountAt(future));
+        assertEquals(12345L, CommitmentStore.get(ctx, source.id).amountAt(future));
         assertTrue(CommitmentStore.delete(ctx, source.id));
         commitmentsScenario.onActivity(activity -> {
-            EditText amount = findEditText(opened[0].getWindow().getDecorView(), "123.4");
+            EditText amount = findEditText(opened[0].getWindow().getDecorView(), "1234.5");
             assertNotNull(amount);
             amount.setText("9999");
             assertTrue(opened[0].getButton(AlertDialog.BUTTON_POSITIVE).performClick());
