@@ -46,7 +46,7 @@ public final class CommitmentsActivity extends Activity {
     static final int WINDOW_MONTHS = 12;
     /** How many overdue rows render before the rest collapse into a "+N older" line. */
     static final int MAX_OVERDUE_ROWS = 50;
-    /** Maximum overdue occurrences inspected per commitment, keeping very old schedules bounded. */
+    /** Row budget for older paid history and overdue reminder planning, never a monetary limit. */
     static final int MAX_OVERDUE_OCCURRENCES = 2048;
 
     /** One due day of one commitment on screen. */
@@ -110,41 +110,32 @@ public final class CommitmentsActivity extends Activity {
         long today = Commitment.startOfDay(nowMs);
         int[] currentCivil = Commitment.civilDay(today, cal);
         long currentMonthStart = Commitment.millisOf(currentCivil[0], currentCivil[1], 1, cal);
+        java.time.LocalDate lastOverdueDay = CommitmentSchedule.day(currentMonthStart - 1,
+            java.time.ZoneId.systemDefault());
         for (Commitment c : commitments) {
             if (c == null) continue;
-            visitOverdue(c, cal, currentMonthStart, at -> {
-                if (c.isSettled(at)) {
-                    // The current month already owns its settled rows. Keep older paid rows in
-                    // their original month so they never appear in the overdue section.
-                    int[] settledCivil = c.dueCivil(at, cal);
-                    MonthGroup settledMonth = null;
-                    for (MonthGroup candidate : summary.settledMonths) {
-                        if (candidate.year == settledCivil[0]
-                                && candidate.month == settledCivil[1]) {
-                            settledMonth = candidate;
-                            break;
-                        }
+            CommitmentOutstanding overdue = new CommitmentOutstanding(c, cal, lastOverdueDay);
+            summary.overdueCount += overdue.count;
+            if (c.isPayment()) summary.overduePay = summary.overduePay.add(overdue.amount);
+            else summary.overdueReceive = summary.overdueReceive.add(overdue.amount);
+            overdue.visitLatest(false, MAX_OVERDUE_ROWS,
+                at -> addOverdueRow(summary, new Row(c, at, false)));
+            overdue.visitLatest(true, MAX_OVERDUE_OCCURRENCES, at -> {
+                int[] civil = c.dueCivil(at, cal);
+                MonthGroup group = null;
+                for (MonthGroup candidate : summary.settledMonths) {
+                    if (candidate.year == civil[0] && candidate.month == civil[1]) {
+                        group = candidate;
+                        break;
                     }
-                    if (settledMonth == null) {
-                        settledMonth = new MonthGroup(settledCivil[0], settledCivil[1]);
-                        summary.settledMonths.add(settledMonth);
-                    }
-                    boolean present = false;
-                    for (Row existing : settledMonth.rows) {
-                        if (existing.date == at && existing.commitment.id.equals(c.id)) {
-                            present = true;
-                            break;
-                        }
-                    }
-                    if (!present) settledMonth.rows.add(new Row(c, at, true));
-                } else {
-                    summary.overdueCount++;
-                    Row row = new Row(c, at, false);
-                    addOverdueRow(summary, row);
-                    BigInteger amount = BigInteger.valueOf(row.amount);
-                    if (c.isPayment()) summary.overduePay = summary.overduePay.add(amount);
-                    else summary.overdueReceive = summary.overdueReceive.add(amount);
                 }
+                if (group == null) {
+                    group = new MonthGroup(civil[0], civil[1]);
+                    summary.settledMonths.add(group);
+                }
+                for (Row existing : group.rows)
+                    if (existing.date == at && existing.commitment.id.equals(c.id)) return;
+                group.rows.add(new Row(c, at, true));
             });
         }
         summary.overdue.sort((x, y) -> {
@@ -232,28 +223,6 @@ public final class CommitmentsActivity extends Activity {
         for (int i = 1; i < summary.overdue.size(); i++)
             if (summary.overdue.get(i).date < summary.overdue.get(oldest).date) oldest = i;
         if (row.date > summary.overdue.get(oldest).date) summary.overdue.set(oldest, row);
-    }
-
-    static void visitOverdue(Commitment c, CalendarSystem calendar, long currentMonthStart,
-            Commitment.OccurrenceVisitor visitor) {
-        long overdueEnd = currentMonthStart - 1;
-        Commitment.visitOccurrences(c, calendar, overdueWindowStart(c, overdueEnd), overdueEnd,
-            visitor, MAX_OVERDUE_OCCURRENCES);
-    }
-
-    private static long overdueWindowStart(Commitment c, long overdueEnd) {
-        long spanDays;
-        switch (c.frequency) {
-            case Commitment.WEEKLY: spanDays = MAX_OVERDUE_OCCURRENCES * 7L; break;
-            case Commitment.MONTHLY: spanDays = MAX_OVERDUE_OCCURRENCES * 31L; break;
-            case Commitment.YEARLY: spanDays = MAX_OVERDUE_OCCURRENCES * 366L; break;
-            default: spanDays = MAX_OVERDUE_OCCURRENCES;
-        }
-        long span = spanDays * 86400000L;
-        long from = overdueEnd > span ? overdueEnd - span : 0;
-        // The recurrence cursor already skips efficiently to its anchor. A device-zone view of
-        // c.start can be the next civil day when traveling, so it is not a safe civil lower bound.
-        return Commitment.startOfDay(from);
     }
 
     private int fg, muted, accent, card, chipBg, depBg, warnBg, warnFg, negativeColor,

@@ -77,13 +77,24 @@ final class CommitmentSchedule {
     }
 
     long count(int frequency) {
+        return frequency == Commitment.ONCE ? 1 : countThrough(last, frequency);
+    }
+
+    /** Count from the anchor through an inclusive home-zone civil day, clipped to a finite end.
+     * Monthly/yearly indexes use the original anchor, even across clamped short months. */
+    long countThrough(LocalDate day, int frequency) {
+        if (day.isBefore(first)) return 0;
         if (frequency == Commitment.ONCE) return 1;
-        long index = indexAt(last, frequency);
-        return index + (at(index, frequency).isAfter(last) ? 0 : 1);
+        if (last != null && day.isAfter(last)) day = last;
+        long index = indexAt(day, frequency);
+        return index + (at(index, frequency).isAfter(day) ? 0 : 1);
     }
 
     void visit(int frequency, long from, long to, Commitment.OccurrenceVisitor visitor, int max) {
         long index = indexAt(day(from, zone), frequency);
+        // Skipping a civil date can map adjacent dues to the same instant. Starting a display
+        // window exactly there must see the same dues as a walk from the anchor.
+        if (index > 0 && instant(at(index - 1, frequency)) >= from) index--;
         int visited = 0;
         while (true) {
             LocalDate date = at(index, frequency);
