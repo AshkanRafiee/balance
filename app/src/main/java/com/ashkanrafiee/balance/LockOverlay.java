@@ -61,14 +61,14 @@ public final class LockOverlay extends FrameLayout {
     private TextView title, subtitle, error, dots;
     private TextView pwTitle, pwSubtitle, pwError;
     private ImageView headerBadge;
-    private final LinearLayout pinPad;
+    private LinearLayout pinPad;
     private LinearLayout padCard;
-    private final LinearLayout columnView;
-    private final LinearLayout passwordEntry;
+    private LinearLayout columnView;
+    private LinearLayout passwordEntry;
     private LinearLayout pwHeader;
-    private final EditText passwordInput;
-    private final TextView fpRow;
-    private final TextView cancel;
+    private EditText passwordInput;
+    private TextView fpRow;
+    private TextView cancel;
     private TextView unlockLabel, padCheckLabel;
     private ProgressBar unlockSpin, padCheckSpin;
 
@@ -138,7 +138,12 @@ public final class LockOverlay extends FrameLayout {
             v.setPadding(0, top + dp(20), 0, bottom + dp(30));
             return ins;
         });
+    }
 
+    /** The opaque, touch-blocking frame exists from construction. Build its controls on the UI
+     *  thread at the first lock or verification, before configuring or revealing the entrance. */
+    private void ensureEntranceBuilt() {
+        if (columnView != null) return;
         // Root column: a compact header at the top, a flexible centered band holding the digit
         // display or the password cluster, and the keypad card pinned to the bottom of the band.
         // Generous insets keep every control clear of the status and navigation bars; the column
@@ -146,11 +151,7 @@ public final class LockOverlay extends FrameLayout {
         ScrollView scroll = new ScrollView(ctx);
         scroll.setFillViewport(true);
         scroll.setClipToPadding(false);
-        addView(scroll, new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
         LinearLayout column = new LinearLayout(ctx);
-        columnView = column;
         column.setOrientation(LinearLayout.VERTICAL);
         column.setGravity(Gravity.CENTER_HORIZONTAL);
         scroll.addView(column, new ScrollView.LayoutParams(
@@ -240,7 +241,7 @@ public final class LockOverlay extends FrameLayout {
         fpRow.setOnClickListener(v -> startFingerprint());
         LinearLayout.LayoutParams fpLp = new LinearLayout.LayoutParams(-1, -2);
         fpLp.setMargins(dp(48), dp(18), dp(48), 0);
-        columnView.addView(fpRow, fpLp);
+        column.addView(fpRow, fpLp);
         fpRow.setVisibility(GONE);
 
         cancel = text(getString(R.string.lock_cancel), 15, accent);
@@ -252,8 +253,11 @@ public final class LockOverlay extends FrameLayout {
         });
         LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(-2, -2);
         cancelLp.topMargin = dp(6);
-        columnView.addView(cancel, cancelLp);
+        column.addView(cancel, cancelLp);
         cancel.setVisibility(GONE);
+        columnView = column;
+        addView(scroll, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
     /** The badge, title, subtitle and error header, a small lock-branded brand at the top of the page. */
@@ -398,6 +402,7 @@ public final class LockOverlay extends FrameLayout {
     // ====================================================================
 
     private void configure() {
+        ensureEntranceBuilt();
         // A previous prompt may have left the entry disabled (or a fingerprint session pending);
         // always start every appearance from a clean, fully interactive state.
         invalidateCodeAttempt();

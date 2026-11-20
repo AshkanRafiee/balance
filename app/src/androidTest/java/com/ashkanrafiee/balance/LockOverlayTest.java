@@ -3,6 +3,7 @@ package com.ashkanrafiee.balance;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
@@ -81,6 +82,47 @@ public class LockOverlayTest {
             });
         }
         assertEquals("Each current result must notify exactly once", 2, unlocks.get());
+    }
+
+    @Test public void disabledLaunchKeepsOnlyShieldUntilFirstVerification() {
+        LockManager.disable(ctx);
+        scenario.recreate();
+        scenario.onActivity(activity -> {
+            overlay = (LockOverlay) field(activity, "lockOverlay");
+            assertFalse(overlay.isShowing());
+            assertEquals(0, overlay.getChildCount());
+            assertEquals(android.graphics.PixelFormat.OPAQUE, overlay.getBackground().getOpacity());
+            assertTrue(overlay.isClickable());
+            overlay.setAutoFingerprintEnabled(false);
+            overlay.hide();
+        });
+        // Pausing, stopping and destroying an entrance that was never built must stay idle.
+        scenario.moveToState(Lifecycle.State.CREATED);
+        onMain(() -> assertEquals(0, overlay.getChildCount()));
+        scenario.moveToState(Lifecycle.State.RESUMED);
+        scenario.recreate();
+        LockManager.enable(ctx, "MyPassw0rd", false, false);
+        scenario.onActivity(activity -> {
+            overlay = (LockOverlay) field(activity, "lockOverlay");
+            assertEquals(0, overlay.getChildCount());
+            overlay.showVerify();
+            assertTrue(overlay.isShowing());
+            assertEquals(1, overlay.getChildCount());
+            EditText input = (EditText) field(overlay, "passwordInput");
+            View cancel = (View) field(overlay, "cancel");
+            assertTrue("Password input must be ready before showVerify returns", input.isShown());
+            assertTrue(cancel.isShown());
+            View entrance = overlay.getChildAt(0);
+            input.setText("partial");
+            overlay.hide();
+            LockManager.lockSession();
+            overlay.showLock();
+            assertSame(entrance, overlay.getChildAt(0));
+            assertTrue(input.isShown());
+            assertEquals("", input.getText().toString());
+            assertFalse(cancel.isShown());
+            assertTrue(LockManager.isSessionLocked());
+        });
     }
 
     @Test public void completionAfterPauseAndResume_cannotUnlockOrBlockRetry() {
