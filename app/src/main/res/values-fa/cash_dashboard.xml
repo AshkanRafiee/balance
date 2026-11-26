@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cash_dashboard_display">نمایش پول نقد</string>
+    <string name="cash_dashboard_value">%1$s %2$s</string>
+    <string name="cash_dashboard_not_counted">پول نقد هنوز شمارش نشده است</string>
+    <string name="cash_dashboard_last_updated">آخرین به‌روزرسانی: %1$s</string>
+    <string name="cash_dashboard_count">شمارش پول نقد</string>
+    <string name="cash_dashboard_history">تاریخچهٔ پول نقد</string>
+    <string name="cash_dashboard_count_message">مقدار پول نقدی را که اکنون دارید وارد کنید. موجودی به‌روزرسانی می‌شود و تراکنشی ثبت نمی‌شود. برای ثبت واریز یا برداشت، تاریخچهٔ پول نقد را باز کنید. تراکنش‌های بعد از زمان این شمارش موجودی را تغییر می‌دهند؛ تراکنش‌های قدیمی‌تر فقط در تاریخچه دیده می‌شوند.</string>
+    <string name="cash_dashboard_count_amount">مقدار پول نقد (%1$s)</string>
+    <string name="cash_dashboard_amount_error">یک مبلغ معتبر و نامنفی وارد کنید.</string>
+    <string name="cash_dashboard_save">ذخیره</string>
+    <string name="cash_dashboard_disable_title">پول نقد پنهان شود؟</string>
+    <string name="cash_dashboard_disable_message">پول نقد از صفحهٔ اصلی، جمع‌ها و نماهای تاریخچه حذف می‌شود. موجودی و تراکنش‌های نقدی حفظ می‌شوند و با نمایش دوبارهٔ پول نقد برمی‌گردند.</string>
+    <string name="cash_dashboard_disable">پنهان کردن پول نقد</string>
+    <string name="cash_dashboard_enable_title">پول نقد دوباره نمایش داده شود؟</string>
+    <string name="cash_dashboard_enable_message">موجودی نقدی ذخیره‌شده به صفحهٔ اصلی برمی‌گردد و در جمع‌ها لحاظ می‌شود. تراکنش‌های نقدی دوباره در تاریخچه دیده می‌شوند. قبل از اینکه به جمع موجودی تکیه کنید، مبلغ نقدی ذخیره‌شده را در صفحهٔ اصلی بررسی کنید.</string>
+    <string name="cash_dashboard_enable">نمایش پول نقد</string>
+    <string name="cash_dashboard_review_cash">بررسی تاریخچهٔ پول نقد</string>
+    <string name="cash_dashboard_show_review">نمایش و بررسی تاریخچه</string>
+    <string name="cash_dashboard_load_failed">خواندن اطلاعات پول نقد ممکن نشد. دوباره تلاش کنید.</string>
+    <string name="cash_dashboard_save_failed">تغییر پول نقد ذخیره نشد. دوباره تلاش کنید.</string>
+    <string name="cash_dashboard_bank_permission">برای خواندن موجودی‌های بانکی، دسترسی به پیامک لازم است</string>
+    <string name="cash_dashboard_bank_stale">ممکن است موجودی‌های بانکی به‌روز نباشند</string>
+    <string name="cash_dashboard_bank_saved">موجودی‌های بانکی ذخیره‌شده نمایش داده می‌شوند. تا وقتی دسترسی به پیامک غیرفعال است، پیامک‌های بانکی جدید لحاظ نمی‌شوند.</string>
+    <string name="cash_dashboard_scan_reset_warning">بازنشانی کامل، موجودی‌ها و تاریخچهٔ بانکی، متن پیام‌های ذخیره‌شده، استثناهای حساب و همهٔ تعهدها، از جمله سوابق پرداخت یا رد شدن آن‌ها را حذف می‌کند. موجودی و تاریخچهٔ بانکی فقط از پیام‌های باقی‌مانده در صندوق بازسازی می‌شوند. تعهدها از پیامک بانکی بازیابی نمی‌شوند. موجودی و تراکنش‌های نقدی حفظ می‌شوند. یادداشت‌ها و برچسب‌ها، از جمله برای تراکنش‌های نقدی، حفظ می‌شوند مگر گزینهٔ زیر را انتخاب کنید. اگر ممکن است به داده‌هایی که حذف می‌شوند نیاز داشته باشید، ابتدا پشتیبان رمزگذاری‌شده بگیرید. برای حفظ این داده‌ها، لغو کنید و «بازخوانی پیام‌های بانکی» را انتخاب کنید.</string>
+    <string name="cash_dashboard_scan_reset_final_warning">موجودی‌ها و تاریخچهٔ بانکی، متن پیام‌های ذخیره‌شده، استثناهای حساب و همهٔ تعهدها برای همیشه حذف شوند؟ تعهدها و سوابق پرداخت یا رد شدن آن‌ها از پیامک بانکی بازیابی نمی‌شوند. پیام‌های حذف‌شدهٔ صندوق نمی‌توانند تاریخچهٔ بانکی ازدست‌رفته را بازسازی کنند. بدون پشتیبان، این کار برگشت‌پذیر نیست. موجودی و تراکنش‌های نقدی حفظ می‌شوند.</string>
+</resources>

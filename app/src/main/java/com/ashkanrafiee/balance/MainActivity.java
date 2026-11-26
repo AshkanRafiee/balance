@@ -47,10 +47,15 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 public class MainActivity extends Activity {
     private static volatile java.util.concurrent.CountDownLatch refreshGateStarted;
     private static volatile java.util.concurrent.CountDownLatch refreshGateRelease;
+    private static final ExecutorService CASH_WORKER = Executors.newSingleThreadExecutor(task ->
+        new Thread(task, "cash-dashboard"));
 
     static void setRefreshGateForTest(java.util.concurrent.CountDownLatch started,
             java.util.concurrent.CountDownLatch release) {
@@ -85,6 +90,7 @@ public class MainActivity extends Activity {
     /** True while a lock enable/change/disable or fingerprint toggle is running in the background,
      *  so re-tapping the lock button or options can not open a second flow over the first. */
     private boolean lockChangeBusy = false;
+    private boolean cashBusy;
     private ContentObserver smsObserver;
 
     @Override
@@ -232,6 +238,7 @@ public class MainActivity extends Activity {
                 view.enforceAutoHide();
                 view.invalidateCommitmentSummary();
                 historyWarmPending = true;
+                reloadCashBalance();
                 view.refreshSilent();
                 view.scheduleMonthRefresh();
             } finally {
@@ -372,8 +379,8 @@ public class MainActivity extends Activity {
      *  to turn dark mode on for the evening or make Balance feel like their own — and read as a pair,
      *  while language, calendar and currency are all set once and together decide how text, dates
      *  and amounts are formatted,
-     *  and the freshness threshold is the odd one out, with the lone on/off toggle below them
-     *  showing or hiding the commitments card. Every picker applies its choice as soon
+     *  and the freshness threshold is the odd one out, with the on/off toggles below them
+     *  controlling the commitments card and cash. Every picker applies its choice as soon
       *  as it is selected — a changed region repaints the dashboard and applies on the next history open, a changed theme or
      *  language recreates the screen, a changed currency re-renders the dashboard and the widget —
      *  so only a typed custom currency name waits for the OK button. */
@@ -675,10 +682,15 @@ public class MainActivity extends Activity {
         commitmentsLp.topMargin = dp(18);
         box.addView(showCommitments, commitmentsLp);
 
+        CheckBox showCash = new CheckBox(this);
+        showCash.setText(R.string.cash_dashboard_display);
+        showCash.setEnabled(false);
+        box.addView(showCash, new LinearLayout.LayoutParams(-1, -2));
+
         ScrollView displayScroll = new ScrollView(this);
         displayScroll.setFillViewport(true);
         displayScroll.addView(box, new ScrollView.LayoutParams(-1, -2));
-        showDialog(new android.app.AlertDialog.Builder(this)
+        android.app.AlertDialog display = showDialog(new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.footer_display))
             .setView(displayScroll)
             .setPositiveButton(android.R.string.ok, (d, w) -> {
@@ -695,6 +707,204 @@ public class MainActivity extends Activity {
             })
             .setNegativeButton(getString(R.string.lock_cancel), null)
             .create());
+        prepareCashToggle(display, showCash);
+    }
+
+    private boolean canUseCashUi() {
+        return mainResumed && !isFinishing() && !isDestroyed()
+            && !lockOverlay.isShowing()
+            && (!LockManager.isEnabled(this) || !LockManager.isSessionLocked());
+    }
+
+    private void reloadCashBalance() {
+        Context app = getApplicationContext();
+        CASH_WORKER.execute(() -> {
+            try {
+                Bank cash = CashStore.visibleBalance(app);
+                runOnUiThread(() -> applyCashBalance(cash, false));
+            } catch (RuntimeException e) {
+                android.util.Log.w("Balance", "cash balance unavailable");
+                runOnUiThread(() -> applyCashBalance(null, true));
+            }
+        });
+    }
+
+    private void applyCashBalance(Bank cash, boolean unavailable) {
+        if (isFinishing() || isDestroyed()) return;
+        view.cash = cash;
+        view.cashUnavailable = unavailable;
+        view.recalcTotal();
+        view.invalidate();
+        dashboard.render();
+    }
+
+    private void prepareCashToggle(android.app.AlertDialog display, CheckBox check) {
+        Context app = getApplicationContext();
+        CASH_WORKER.execute(() -> {
+            try {
+                boolean enabled = CashStore.isEnabled(app);
+                runOnUiThread(() -> {
+                    if (activeDialog != display) return;
+                    check.setChecked(enabled);
+                    check.setEnabled(true);
+                });
+            } catch (RuntimeException e) {
+                runOnUiThread(() -> {
+                    if (activeDialog == display && canUseCashUi())
+                        toast(R.string.cash_dashboard_load_failed);
+                });
+            }
+        });
+        check.setOnClickListener(v -> {
+            boolean target = check.isChecked();
+            check.setChecked(!target);
+            if (cashBusy || !canUseCashUi()) return;
+            cashBusy = true;
+            check.setEnabled(false);
+            CASH_WORKER.execute(() -> {
+                try {
+                    boolean hasData = CashStore.read(app).hasData();
+                    runOnUiThread(() -> {
+                        cashBusy = false;
+                        if (activeDialog != display) return;
+                        if (!canUseCashUi()) {
+                            check.setEnabled(true);
+                            return;
+                        }
+                        if (hasData) {
+                            confirmCashVisibility(target);
+                        } else {
+                            changeCash(() -> CashStore.setEnabled(app, target), success -> {
+                                if (activeDialog != display) return;
+                                if (success) check.setChecked(target);
+                                check.setEnabled(true);
+                            });
+                        }
+                    });
+                } catch (RuntimeException e) {
+                    runOnUiThread(() -> {
+                        cashBusy = false;
+                        if (activeDialog != display) return;
+                        check.setEnabled(true);
+                        if (canUseCashUi()) toast(R.string.cash_dashboard_load_failed);
+                    });
+                }
+            });
+        });
+    }
+
+    private void confirmCashVisibility(boolean enable) {
+        Context app = getApplicationContext();
+        Runnable write = () -> CashStore.setEnabled(app, enable);
+        showDialog(new android.app.AlertDialog.Builder(this)
+            .setTitle(enable ? R.string.cash_dashboard_enable_title : R.string.cash_dashboard_disable_title)
+            .setMessage(enable ? R.string.cash_dashboard_enable_message
+                : R.string.cash_dashboard_disable_message)
+            .setPositiveButton(enable ? R.string.cash_dashboard_enable : R.string.cash_dashboard_disable,
+                (d, w) -> changeCash(write, null))
+            .setNegativeButton(android.R.string.cancel, null)
+            .setNeutralButton(enable ? R.string.cash_dashboard_show_review
+                : R.string.cash_dashboard_review_cash, (d, w) -> {
+                    if (enable) {
+                        changeCash(write, success -> {
+                            if (success) openCashRelatedHistory(false);
+                        });
+                    } else {
+                        openCashRelatedHistory(true);
+                    }
+                })
+            .create());
+    }
+
+    private void openCashRelatedHistory(boolean cashOnly) {
+        if (!canUseCashUi()) return;
+        Intent history = new Intent(this, HistoryActivity.class);
+        if (cashOnly) history.putExtra(HistoryActivity.EXTRA_BANK, CashStore.KEY);
+        startActivity(history);
+    }
+
+    private void countCashDialog() {
+        if (cashBusy || view.cash == null || !canUseCashUi()) return;
+        LinearLayout body = ExpressiveUi.column(this);
+        body.setPadding(dp(24), dp(12), dp(24), 0);
+        body.addView(ExpressiveUi.label(this, getString(R.string.cash_dashboard_count_message),
+            14, resColor(R.color.fg)), ExpressiveUi.widthMatch(this, 0, 8));
+        EditText amount = new EditText(this);
+        amount.setSingleLine(true);
+        // Keep the numeric keyboard without rewriting pasted or localized digits before validation.
+        amount.setKeyListener(android.text.method.TextKeyListener.getInstance());
+        boolean toman = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(this));
+        amount.setRawInputType(InputType.TYPE_CLASS_NUMBER
+            | (toman ? InputType.TYPE_NUMBER_FLAG_DECIMAL : 0));
+        amount.setImeOptions(android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
+        amount.setHint(getString(R.string.cash_dashboard_count_amount, CurrencyHelper.label(this)));
+        if (!view.hidden && view.cash.date > 0) {
+            amount.setText(CashStore.formatAmountForInput(this, view.cash.amount));
+            amount.setSelectAllOnFocus(true);
+        }
+        amount.setSaveEnabled(false);
+        if (android.os.Build.VERSION.SDK_INT >= 26)
+            amount.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        body.addView(amount, new LinearLayout.LayoutParams(-1, -2));
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(body);
+        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.cash_dashboard_count)
+            .setView(scroll)
+            .setPositiveButton(R.string.cash_dashboard_save, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setNeutralButton(R.string.cash_dashboard_history, (d, w) -> openCashRelatedHistory(true))
+            .create();
+        if (LockManager.isEnabled(this))
+            dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+        showDialog(dialog);
+        View save = dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE);
+        save.setOnClickListener(v -> {
+            if (cashBusy || !canUseCashUi()) return;
+            Long parsed = CashStore.parseAmount(this, amount.getText().toString());
+            if (parsed == null) {
+                amount.setError(getString(R.string.cash_dashboard_amount_error));
+                return;
+            }
+            Context app = getApplicationContext();
+            amount.setEnabled(false);
+            save.setEnabled(false);
+            changeCash(() -> CashStore.setBalance(app, parsed), success -> {
+                if (activeDialog != dialog) return;
+                if (success) {
+                    dialog.dismiss();
+                } else {
+                    amount.setEnabled(true);
+                    save.setEnabled(true);
+                }
+            });
+        });
+    }
+
+    private void changeCash(Runnable write, Consumer<Boolean> onComplete) {
+        if (cashBusy || !canUseCashUi()) return;
+        cashBusy = true;
+        Context app = getApplicationContext();
+        CASH_WORKER.execute(() -> {
+            boolean saved = false;
+            try {
+                write.run();
+                saved = true;
+                Bank cash = CashStore.visibleBalance(app);
+                runOnUiThread(() -> applyCashBalance(cash, false));
+            } catch (RuntimeException e) {
+                android.util.Log.w("Balance", "cash update unavailable");
+                if (saved) runOnUiThread(() -> applyCashBalance(null, true));
+            }
+            boolean success = saved;
+            runOnUiThread(() -> {
+                cashBusy = false;
+                if (isFinishing() || isDestroyed()) return;
+                if (!success && canUseCashUi()) toast(R.string.cash_dashboard_save_failed);
+                if (onComplete != null) onComplete.accept(success);
+            });
+            if (saved) BalanceWidgetProvider.push(app);
+        });
     }
 
     void hardRefreshDialog() {
@@ -707,7 +917,7 @@ public class MainActivity extends Activity {
         TextView message = new TextView(this);
         message.setTextSize(14);
         message.setTextColor(resColor(R.color.subtitle));
-        message.setText(getString(R.string.scan_reset_warning));
+        message.setText(getString(R.string.cash_dashboard_scan_reset_warning));
         LinearLayout.LayoutParams messageLp = new LinearLayout.LayoutParams(-1, -2);
         messageLp.bottomMargin = dp(12);
         message.setLayoutParams(messageLp);
@@ -746,7 +956,7 @@ public class MainActivity extends Activity {
      *  to be destroyed and that it cannot be undone — a single accidental tap can still be stopped.
      *  Confirming here runs the real reset ({@code alsoNotes} deleting the notes it carries). */
     private void confirmHardRefresh(final boolean alsoNotes) {
-        String message = getString(R.string.scan_reset_final_warning);
+        String message = getString(R.string.cash_dashboard_scan_reset_final_warning);
         if (alsoNotes) message += "\n\n" + getString(R.string.dialog_hard_refresh_confirm2_notes);
         TextView body = new TextView(this);
         body.setTextSize(14);
@@ -1764,7 +1974,8 @@ public class MainActivity extends Activity {
             List<Object> state = contentState();
             List<Object> commitments = commitmentState();
             if (state.equals(renderedContent)) {
-                if (!view.status.contentEquals(heroStatus.getText())) heroStatus.setText(view.status);
+                if (!view.totalStatus().contentEquals(heroStatus.getText()))
+                    heroStatus.setText(view.totalStatus());
                 if (!java.util.Objects.equals(commitments, renderedCommitments)) {
                     // This card sits between the hero and banks. Updating it here keeps focused
                     // bank controls attached to the same ScrollView during a summary reload.
@@ -1779,6 +1990,8 @@ public class MainActivity extends Activity {
             content.addView(buildHeroCard(), ExpressiveUi.widthMatch(this, 0, 14));
             addCommitments(commitments);
             if (view.smsBanner) content.addView(buildSmsBanner(),
+                ExpressiveUi.widthMatch(this, 0, 14));
+            if (view.cash != null) content.addView(buildCashCard(view.cash),
                 ExpressiveUi.widthMatch(this, 0, 14));
             content.addView(buildBanksHeader(), ExpressiveUi.widthMatch(this, 4, 8));
             content.addView(buildBanks(), ExpressiveUi.widthMatch(this, 0, 0));
@@ -1795,11 +2008,17 @@ public class MainActivity extends Activity {
         private List<Object> contentState() {
             List<Object> state = new java.util.ArrayList<>();
             boolean empty = view.banks.isEmpty();
-            java.util.Collections.addAll(state, view.hidden, empty ? view.status : null, view.total,
+            java.util.Collections.addAll(state, view.hidden, empty ? view.totalStatus() : null,
+                view.total, view.totalUnavailable(),
                 view.sortMode, view.smsBanner, empty && view.refreshing,
                 CurrencyHelper.currency(MainActivity.this), RegionHelper.region(MainActivity.this),
                 getResources().getConfiguration().getLocales(),
                 new java.util.HashSet<>(view.excluded));
+            Bank cash = view.cash;
+            state.add(cash != null);
+            if (cash != null) java.util.Collections.addAll(state, cash.amount, cash.date,
+                BalanceData.isStale(MainActivity.this, cash.date),
+                BalanceData.staleDays(MainActivity.this, cash.date));
             for (java.util.Map.Entry<String, Bank> entry : view.banks.entrySet()) {
                 Bank bank = entry.getValue();
                 java.util.Collections.addAll(state, entry.getKey(), bank.name, bank.account,
@@ -1857,9 +2076,9 @@ public class MainActivity extends Activity {
             boolean veryLargeText = getResources().getConfiguration().fontScale >= 2.5f;
             LinearLayout amountRow = veryLargeText ? ExpressiveUi.column(this) : ExpressiveUi.row(this);
             if (veryLargeText) amountRow.setGravity(Gravity.END);
-            boolean emptyTotal = view.banks.isEmpty() || view.excluded.containsAll(view.banks.keySet());
+            boolean emptyTotal = view.totalIsEmpty();
             String amountText = emptyTotal ? getString(R.string.total_empty_value)
-                : view.hidden ? "••••••" : CurrencyHelper.amount(MainActivity.this, view.total);
+                : view.hidden ? "••••••" : view.totalAmountText();
             TextView amount = ExpressiveUi.heading(this, amountText, 42);
             // Keep the total a single readable figure. A weighted TextView can otherwise wrap a
             // longer total at a large system font scale, splitting the number at an arbitrary comma
@@ -1874,7 +2093,7 @@ public class MainActivity extends Activity {
                 : view.hidden
                 ? getString(R.string.accessibility_total_masked)
                 : getString(R.string.accessibility_total_balance,
-                    CurrencyHelper.amount(MainActivity.this, view.total) + " "
+                    view.totalAmountText() + " "
                         + CurrencyHelper.label(MainActivity.this)));
             if (veryLargeText) {
                 amount.setGravity(rtl ? Gravity.END : Gravity.START);
@@ -1895,7 +2114,7 @@ public class MainActivity extends Activity {
             else unitLp.setMarginStart(ExpressiveUi.dp(this, 10));
             amountRow.addView(unit, unitLp);
             hero.addView(amountRow, new LinearLayout.LayoutParams(-1, -2));
-            heroStatus = ExpressiveUi.label(this, view.status, 12,
+            heroStatus = ExpressiveUi.label(this, view.totalStatus(), 12,
                 ExpressiveUi.color(this, R.color.expressive_on_primary_container));
             heroStatus.setAlpha(.82f);
             heroStatus.setMaxLines(2);
@@ -1921,7 +2140,7 @@ public class MainActivity extends Activity {
             hero.setOnClickListener(v -> startActivity(new Intent(MainActivity.this,
                 HistoryActivity.class)));
             hero.setOnLongClickListener(v -> {
-                view.copyBalance(getString(R.string.total_label), view.total);
+                view.copyTotal();
                 return true;
             });
             return hero;
@@ -1930,7 +2149,8 @@ public class MainActivity extends Activity {
         private LinearLayout buildSmsBanner() {
             LinearLayout banner = ExpressiveUi.card(this,
                 ExpressiveUi.color(this, R.color.warn_bg), ExpressiveUi.RADIUS_CONTROL, 16);
-            TextView title = ExpressiveUi.heading(this, getString(R.string.banner_stale_title), 14);
+            TextView title = ExpressiveUi.heading(this,
+                getString(R.string.cash_dashboard_bank_stale), 14);
             title.setTextColor(ExpressiveUi.color(this, R.color.warn));
             banner.addView(title);
             TextView action = ExpressiveUi.label(this, getString(R.string.banner_stale_action), 12,
@@ -1941,6 +2161,72 @@ public class MainActivity extends Activity {
             banner.setFocusable(true);
             banner.setOnClickListener(v -> requestSms());
             return banner;
+        }
+
+        private LinearLayout buildCashCard(Bank cash) {
+            LinearLayout card = ExpressiveUi.card(this, ExpressiveUi.color(this, R.color.panel),
+                ExpressiveUi.RADIUS_CARD, 18);
+            card.setId(R.id.dashboard_cash_card);
+            boolean largeText = getResources().getConfiguration().fontScale >= 1.3f;
+            LinearLayout header = largeText ? ExpressiveUi.column(this) : ExpressiveUi.row(this);
+            TextView title = ExpressiveUi.heading(this, getString(R.string.cash_label), 20);
+            if (android.os.Build.VERSION.SDK_INT >= 28) title.setAccessibilityHeading(true);
+            header.addView(title, largeText ? new LinearLayout.LayoutParams(-1, -2)
+                : new LinearLayout.LayoutParams(0, -2, 1));
+            boolean stale = BalanceData.isStale(MainActivity.this, cash.date);
+            TextView amount = ExpressiveUi.heading(this, view.hidden ? "••••••"
+                : getString(R.string.cash_dashboard_value, CurrencyHelper.amountExact(MainActivity.this,
+                    cash.amount), CurrencyHelper.label(MainActivity.this)), 19);
+            amount.setId(R.id.dashboard_cash_amount);
+            amount.setTextColor(ExpressiveUi.color(this, stale ? R.color.muted : R.color.accent));
+            if (view.hidden)
+                amount.setContentDescription(getString(R.string.accessibility_total_masked));
+            header.addView(amount, new LinearLayout.LayoutParams(largeText ? -1 : -2, -2));
+            card.addView(header);
+
+            String updated = cash.date <= 0 ? getString(R.string.cash_dashboard_not_counted)
+                : view.hidden ? null : getString(R.string.cash_dashboard_last_updated,
+                    cashUpdateDate(cash.date));
+            if (updated != null) card.addView(ExpressiveUi.label(this, updated, 12,
+                ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 4, 0));
+            TextView badge = staleBadge(cash.date);
+            if (badge != null) {
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+                lp.topMargin = ExpressiveUi.dp(this, 6);
+                card.addView(badge, lp);
+            }
+            LinearLayout actions = largeText ? ExpressiveUi.column(this) : ExpressiveUi.row(this);
+            TextView count = ExpressiveUi.button(this, getString(R.string.cash_dashboard_count), true);
+            count.setOnClickListener(v -> countCashDialog());
+            TextView history = ExpressiveUi.button(this, getString(R.string.cash_dashboard_history),
+                false);
+            history.setOnClickListener(v -> openCashRelatedHistory(true));
+            if (largeText) {
+                actions.addView(count, ExpressiveUi.widthMatch(this, 0, 8));
+                actions.addView(history, ExpressiveUi.widthMatch(this, 0, 0));
+            } else {
+                LinearLayout.LayoutParams countLp = new LinearLayout.LayoutParams(0, -2, 1);
+                countLp.setMarginEnd(ExpressiveUi.dp(this, 8));
+                actions.addView(count, countLp);
+                actions.addView(history, new LinearLayout.LayoutParams(0, -2, 1));
+            }
+            card.addView(actions, ExpressiveUi.widthMatch(this, 12, 0));
+            card.setOnLongClickListener(v -> {
+                if (canUseCashUi()) view.copyBalance(getString(R.string.cash_label),
+                    BigInteger.valueOf(cash.amount), true);
+                return true;
+            });
+            return card;
+        }
+
+        private String cashUpdateDate(long millis) {
+            boolean iran = RegionHelper.isIran(MainActivity.this);
+            boolean fa = LocaleHelper.isPersian(MainActivity.this);
+            int[] date = Commitment.civilDay(millis,
+                iran ? CalendarSystem.JALALI : CalendarSystem.GREGORIAN);
+            String month = CalDate.monthName(date[1], iran, fa);
+            return fa ? view.faDigits(Integer.toString(date[2])) + " " + month + " "
+                + view.faDigits(Integer.toString(date[0])) : month + " " + date[2] + " " + date[0];
         }
 
         private LinearLayout buildCommitmentsCard() {
@@ -2051,8 +2337,8 @@ public class MainActivity extends Activity {
             boolean loading = view.refreshing;
             TextView body = ExpressiveUi.label(this, loading
                 ? getString(R.string.status_reading_sms)
-                : view.status.equals(getString(R.string.status_permission_needed))
-                ? getString(R.string.status_permission_needed)
+                : view.status.equals(getString(R.string.cash_dashboard_bank_permission))
+                ? view.status
                 : getString(R.string.dashboard_no_accounts_body), 14,
                 ExpressiveUi.color(this, R.color.muted));
             body.setPadding(0, ExpressiveUi.dp(this, 8), 0, ExpressiveUi.dp(this, 16));
@@ -2090,7 +2376,7 @@ public class MainActivity extends Activity {
                 BankRules.displayName(MainActivity.this, row.bankName), 16);
             name.setMaxLines(1);
             name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            TextView stale = staleBadge(row);
+            TextView stale = row.excluded ? null : staleBadge(row.bank.date);
             // At the normal size the age stays beside the bank name. Once the user's text is large,
             // keeping both in one horizontal measurement pass can give the badge a few pixels of
             // width, which makes a short "181 days" pill wrap into a tall vertical border. Stack
@@ -2243,11 +2529,11 @@ public class MainActivity extends Activity {
             });
         }
 
-        private TextView staleBadge(BalanceView.BankRow row) {
-            if (row.excluded || !BalanceData.isStale(MainActivity.this, row.bank.date)) return null;
+        private TextView staleBadge(long date) {
+            if (!BalanceData.isStale(MainActivity.this, date)) return null;
             TextView badge = ExpressiveUi.label(this, getResources().getQuantityString(
-                R.plurals.stale_days, BalanceData.staleDays(MainActivity.this, row.bank.date),
-                BalanceData.staleDays(MainActivity.this, row.bank.date)), 11,
+                R.plurals.stale_days, BalanceData.staleDays(MainActivity.this, date),
+                BalanceData.staleDays(MainActivity.this, date)), 11,
                 ExpressiveUi.color(this, R.color.muted));
             badge.setSingleLine(true);
             badge.setMaxLines(1);
@@ -2392,6 +2678,8 @@ public class MainActivity extends Activity {
         final float fs = getResources().getConfiguration().fontScale;
         Drawable lockIcon;
         boolean hidden, refreshing, refreshAgain, pendingHard, pendingNotes, pendingReRead;
+        Bank cash;
+        boolean cashUnavailable;
         boolean refreshVisible, pendingVisible;
         boolean autoHide;
         /** Whether the "balances may be out of date" strip is up. It exists only while saved data is
@@ -2463,7 +2751,7 @@ public class MainActivity extends Activity {
         final Runnable totalLongProbe = () -> {
             totalProbeFired = true;
             if (MainActivity.this.isFinishing() || MainActivity.this.isDestroyed()) return;
-            copyBalance(getString(R.string.total_label), this.total);
+            copyTotal();
         };
         final Runnable bankLongProbe = () -> {
             bankProbeFired = true;
@@ -2518,7 +2806,7 @@ public class MainActivity extends Activity {
             }
         };
         String status = getString(R.string.status_reading_sms);
-        long total;
+        BigInteger total = BigInteger.ZERO;
         float footerAboutStart, footerAboutEnd, footerLangStart, footerLangEnd,
             footerBackupStart, footerBackupEnd, footerReportStart, footerReportEnd, footerY;
         final int fg = resColor(R.color.fg);
@@ -2701,18 +2989,48 @@ public class MainActivity extends Activity {
         /** Recomputes the total from included entries only. Exclusion is per account, matched on the
          *  entry's own {@code bank|account} storage key. */
         void recalcTotal() {
-            total = 0;
+            BigInteger sum = cash == null ? BigInteger.ZERO : BigInteger.valueOf(cash.amount);
             for (java.util.Map.Entry<String, Bank> e : banks.entrySet())
-                if (!BalanceData.isExcluded(excluded, e.getKey())) total += e.getValue().amount;
+                if (!BalanceData.isExcluded(excluded, e.getKey()))
+                    sum = sum.add(BigInteger.valueOf(e.getValue().amount));
+            total = sum;
+        }
+
+        boolean totalIsEmpty() {
+            return totalUnavailable() || (!hasRecordedCash() && excluded.containsAll(banks.keySet()));
+        }
+
+        private boolean hasRecordedCash() {
+            return cash != null && cash.date > 0;
+        }
+
+        boolean totalUnavailable() {
+            return cashUnavailable || (banks.isEmpty()
+                && getString(R.string.status_sms_unreadable).equals(status));
+        }
+
+        String totalStatus() {
+            return cashUnavailable ? getString(R.string.cash_dashboard_load_failed) : status;
+        }
+
+        String totalAmountText() {
+            return hasRecordedCash() ? CurrencyHelper.amountExact(MainActivity.this, total)
+                : CurrencyHelper.amount(MainActivity.this, total);
+        }
+
+        void copyTotal() {
+            if (!totalUnavailable())
+                copyBalance(getString(R.string.total_label), total, hasRecordedCash());
         }
 
         /** A short live summary of the dashboard for screen readers: the total (or its mask state)
          *  followed by the status line. Rebuilt every frame, but only announced on change. */
         String announce() {
-            String totalText = hidden ? getString(R.string.accessibility_total_masked)
-                : CurrencyHelper.amount(MainActivity.this, total) + " "
+            String totalText = totalUnavailable() ? getString(R.string.total_empty_value)
+                : hidden ? getString(R.string.accessibility_total_masked)
+                : totalAmountText() + " "
                     + CurrencyHelper.label(MainActivity.this);
-            int staleCount = 0;
+            int staleCount = cash != null && BalanceData.isStale(MainActivity.this, cash.date) ? 1 : 0;
             for (java.util.Map.Entry<String, Bank> e : banks.entrySet())
                 if (!BalanceData.isExcluded(excluded, e.getKey()) && BalanceData.isStale(MainActivity.this, e.getValue().date))
                     staleCount++;
@@ -2720,7 +3038,8 @@ public class MainActivity extends Activity {
                 ? " " + getResources().getQuantityString(
                     R.plurals.accessibility_stale_note, staleCount, staleCount)
                 : "";
-            return getString(R.string.accessibility_total_balance, totalText) + " " + status + "." + note;
+            return getString(R.string.accessibility_total_balance, totalText)
+                + " " + totalStatus() + "." + note;
         }
 
         /** Publishes a set of balances into the view and redraws. Every path that ends up showing
@@ -2773,6 +3092,7 @@ public class MainActivity extends Activity {
          *  A corrupt store must show the unreadable state, never crash the screen. */
         void loadSaved() {
             invalidateCommitmentSummary();
+            reloadCashBalance();
             LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
             String status = getString(R.string.status_loaded_from_saved);
             try {
@@ -2942,8 +3262,8 @@ public class MainActivity extends Activity {
                         dismissProgress();
                         if (hard) toast(R.string.toast_reset_failed);
                         applySaved(saved, app, saved.isEmpty()
-                            ? getString(R.string.status_permission_needed)
-                            : getString(R.string.status_stale_no_permission));
+                            ? getString(R.string.cash_dashboard_bank_permission)
+                            : getString(R.string.cash_dashboard_bank_saved));
                         finishQueuedRefresh(silent);
                     });
                 }).start();
@@ -3087,13 +3407,13 @@ public class MainActivity extends Activity {
             text(c, CurrencyHelper.label(MainActivity.this), x, baseline + 19, 11, muted, align);
         }
 
-        void totalValue(Canvas c, long n, float x, float baseline, float width, boolean rtl) {
+        void totalValue(Canvas c, float x, float baseline, float width, boolean rtl) {
             Paint.Align anchor = rtl ? Paint.Align.RIGHT : Paint.Align.LEFT;
             if (hidden) {
                 text(c, "\u2022\u2022\u2022\u2022\u2022\u2022", x, baseline, 34, fg, anchor);
                 return;
             }
-            String number = CurrencyHelper.amount(MainActivity.this, n);
+            String number = totalAmountText();
             String unit = CurrencyHelper.label(MainActivity.this);
             float unitSize = 13, unitGap = 10, unitWidth = measure(unit, unitSize);
             float current = 34;
@@ -3222,13 +3542,13 @@ public class MainActivity extends Activity {
             round(c, 24, DashboardLayout.TOTAL_TOP, w - 24, DashboardLayout.TOTAL_BOTTOM, 28, panel);
             float totalLabelX = rtl ? w - 48 : 48;
             text(c, getString(R.string.total_balance_label), totalLabelX, 156, 13, muted, edgeAlign);
-            if (banks.isEmpty() || excluded.containsAll(banks.keySet())) {
+            if (totalIsEmpty()) {
                 // No counts yet — or nothing counts anymore (every account excluded): a dash, not
                 // a literal zero, so a fresh install or an all-excluded state never reads as a
                 // real zero-rial balance.
                 text(c, getString(R.string.total_empty_value), totalLabelX, 208, 34, fg, edgeAlign);
             } else {
-                totalValue(c, total, totalLabelX, 208, w - 150, rtl);
+                totalValue(c, totalLabelX, 208, w - 150, rtl);
             }
             text(c, getString(R.string.total_history_hint), w / 2f, 253, 11, muted, Paint.Align.CENTER);
             RectF eyeRect = rtl ? new RectF(45, 147, 75, 165) : new RectF(w - 75, 147, w - 45, 165);
@@ -3654,6 +3974,10 @@ public class MainActivity extends Activity {
         }
 
         void copyBalance(String label, long value) {
+            copyBalance(label, BigInteger.valueOf(value), false);
+        }
+
+        void copyBalance(String label, BigInteger value, boolean exact) {
             if (hidden) {
                 Toast.makeText(MainActivity.this, getString(R.string.toast_unmask_to_copy), Toast.LENGTH_SHORT).show();
                 return;
@@ -3663,10 +3987,11 @@ public class MainActivity extends Activity {
                 Toast.makeText(MainActivity.this, getString(R.string.toast_copied_balance, label), Toast.LENGTH_SHORT).show();
                 return;
             }
-            long shown = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(MainActivity.this))
-                ? value / 10 : value;
-            String amount = Long.toString(shown);
-            ClipData clip = ClipData.newPlainText(label, amount);
+            BigInteger shown = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(MainActivity.this))
+                ? value.divide(BigInteger.TEN) : value;
+            String text = exact ? CurrencyHelper.exactDisplayValue(MainActivity.this, value)
+                .stripTrailingZeros().toPlainString() : shown.toString();
+            ClipData clip = ClipData.newPlainText(label, text);
             if (android.os.Build.VERSION.SDK_INT >= 33) {
                 android.os.PersistableBundle clipExtras = new android.os.PersistableBundle();
                 clipExtras.putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true);

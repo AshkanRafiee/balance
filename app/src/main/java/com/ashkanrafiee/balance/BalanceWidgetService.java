@@ -18,21 +18,17 @@ public class BalanceWidgetService extends RemoteViewsService {
         return new Factory(getApplicationContext());
     }
 
-    /** The ordered list the widget shows: only included entries, one row per bank entry — a
-     *  multi-account bank contributes a row per account, exactly as on the main screen — in the
-     *  same order the app shows them (persisted sort mode), with excluded accounts dropped entirely
-     *  so the widget stays a glanceable summary of the total. */
+    /** The balances in the total, one row per account or recorded cash balance, in the persisted
+     *  sort order. */
     static List<Bank> widgetBanks(Context context) {
         if (BalanceWidgetProvider.widgetLocked(context)) return new ArrayList<>();
         Context c = WidgetTheme.context(context);
         Set<String> excluded = BalanceData.getExcluded(c);
         List<Bank> included = new ArrayList<>();
-        for (List<Bank> block : BalanceData.groupedForDisplay(
-                BalanceData.read(c), excluded, BalanceData.getSort(c))) {
-            for (Bank b : block) {
-                if (BalanceData.isExcluded(excluded, BalanceData.storageKey(b.name, b.account))) continue;
-                included.add(new Bank(b.name, b.amount, b.date, b.sender, b.account));
-            }
+        for (Bank b : BalanceData.orderForDisplay(
+                BalanceWidgetProvider.widgetBalances(c), excluded, BalanceData.getSort(c))) {
+            if (!BalanceData.isExcluded(excluded, BalanceData.storageKey(b.name, b.account)))
+                included.add(b);
         }
         return included;
     }
@@ -59,7 +55,9 @@ public class BalanceWidgetService extends RemoteViewsService {
         views.setInt(R.id.widget_item_root, "setLayoutDirection", dir);
         views.setTextViewText(R.id.bank_name, BankRules.displayName(c, b.name));
         views.setTextViewText(R.id.bank_amount,
-            hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : CurrencyHelper.amount(c, b.amount));
+            hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022"
+                : CashStore.KEY.equals(b.name) ? CurrencyHelper.amountExact(c, b.amount)
+                : CurrencyHelper.amount(c, b.amount));
         // Literal colors, not resource ids, or the launcher re-resolves them in its own palette and
         // the app's theme stops reaching the rows. See WidgetTheme.
         views.setTextColor(R.id.bank_name, ThemeColorHelper.color(c, R.color.bank_name));
@@ -156,7 +154,7 @@ public class BalanceWidgetService extends RemoteViewsService {
             try {
                 banks = widgetBanks(context);
             } catch (Exception e) {
-                Log.w(TAG, "widget dataset load failed", e);
+                Log.w(TAG, "widget dataset load failed");
                 unreadable = true;
             }
         }

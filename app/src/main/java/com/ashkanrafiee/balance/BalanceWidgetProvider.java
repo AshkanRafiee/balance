@@ -16,6 +16,7 @@ import android.os.SystemClock;
 import android.util.Log;
 import android.view.View;
 import android.widget.RemoteViews;
+import java.math.BigInteger;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -245,6 +246,15 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         return buildViews(context, true);
     }
 
+    static Map<String, Bank> widgetBalances(Context context) {
+        synchronized (BalanceData.class) {
+            Map<String, Bank> balances = BalanceData.read(context);
+            Bank cash = CashStore.visibleBalance(context);
+            if (cash != null && cash.date != 0) balances.put(CashStore.KEY, cash);
+            return balances;
+        }
+    }
+
     /** Same header with or without the list-adapter binding. The delayed mask re-assertion
      *  below uses the adapter-free form: the adapter is already bound by the toggle's full
      *  update, and re-setting it plus another notify would only retrigger the list rebind
@@ -253,14 +263,18 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         Context c = WidgetTheme.context(context);
         if (widgetLocked(c)) return lockedViews(c);
         boolean hidden = BalanceData.isWidgetHidden(c);
-        long total = 0;
+        BigInteger total = BigInteger.ZERO;
+        boolean includesCash;
         try {
-            Map<String, Bank> banks = BalanceData.read(c);
+            Map<String, Bank> banks = widgetBalances(c);
             Set<String> excluded = BalanceData.getExcluded(c);
+            includesCash = banks.containsKey(CashStore.KEY)
+                && !BalanceData.isExcluded(excluded, CashStore.KEY);
             for (Map.Entry<String, Bank> e : banks.entrySet())
-                if (!BalanceData.isExcluded(excluded, e.getKey())) total += e.getValue().amount;
+                if (!BalanceData.isExcluded(excluded, e.getKey()))
+                    total = total.add(BigInteger.valueOf(e.getValue().amount));
         } catch (Exception e) {
-            Log.w(TAG, "widget balance store unreadable", e);
+            Log.w(TAG, "widget balance store unreadable");
             return unreadableViews(c);
         }
         RemoteViews views = new RemoteViews(c.getPackageName(), R.layout.widget_balance);
@@ -280,7 +294,8 @@ public class BalanceWidgetProvider extends AppWidgetProvider {
         if (!smsAllowed) views.setTextViewText(R.id.widget_hint,
             c.getString(R.string.widget_permission_hint));
         views.setTextViewText(R.id.widget_total,
-            hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022" : CurrencyHelper.amount(c, total));
+            hidden ? "\u2022\u2022\u2022\u2022\u2022\u2022"
+                : includesCash ? CurrencyHelper.amountExact(c, total) : CurrencyHelper.amount(c, total));
         views.setTextViewText(R.id.widget_unit, CurrencyHelper.label(c));
         views.setImageViewResource(R.id.widget_mask,
             hidden ? R.drawable.ic_visibility_off : R.drawable.ic_visibility);

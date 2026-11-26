@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item type="id" name="dashboard_cash_card" />
+    <item type="id" name="dashboard_cash_amount" />
+    <string name="cash_dashboard_display">Show cash</string>
+    <string name="cash_dashboard_value">%1$s %2$s</string>
+    <string name="cash_dashboard_not_counted">Cash hasn’t been counted yet</string>
+    <string name="cash_dashboard_last_updated">Last updated: %1$s</string>
+    <string name="cash_dashboard_count">Count cash</string>
+    <string name="cash_dashboard_history">Cash history</string>
+    <string name="cash_dashboard_count_message">Enter how much cash you have now. This updates your balance without adding a transaction. To record a deposit or withdrawal, open Cash history. Entries dated after this count change your balance; older entries appear only in history.</string>
+    <string name="cash_dashboard_count_amount">Cash amount (%1$s)</string>
+    <string name="cash_dashboard_amount_error">Enter a valid amount of zero or more.</string>
+    <string name="cash_dashboard_save">Save</string>
+    <string name="cash_dashboard_disable_title">Hide cash?</string>
+    <string name="cash_dashboard_disable_message">Cash will be removed from your dashboard, totals, and history views. Your cash balance and transactions will be kept and will return when you show cash again.</string>
+    <string name="cash_dashboard_disable">Hide cash</string>
+    <string name="cash_dashboard_enable_title">Show cash again?</string>
+    <string name="cash_dashboard_enable_message">Your saved cash balance will return to the dashboard and be included in totals. Your cash transactions will be visible in history again. Check the saved cash amount on the dashboard before relying on the total.</string>
+    <string name="cash_dashboard_enable">Show cash</string>
+    <string name="cash_dashboard_review_cash">Review Cash history</string>
+    <string name="cash_dashboard_show_review">Show and review history</string>
+    <string name="cash_dashboard_load_failed">Could not read your cash data. Try again.</string>
+    <string name="cash_dashboard_save_failed">Could not save your cash change. Try again.</string>
+    <string name="cash_dashboard_bank_permission">SMS permission is needed to read bank balances</string>
+    <string name="cash_dashboard_bank_stale">Bank balances may be out of date</string>
+    <string name="cash_dashboard_bank_saved">Showing saved bank balances. Newer bank SMS is not included while SMS access is off.</string>
+    <string name="cash_dashboard_scan_reset_warning">Full reset deletes saved bank balances, bank history, source messages, account exclusions and all commitments, including their paid or skipped records. Only messages still in your inbox can rebuild bank balances and history. Commitments cannot be recovered from bank SMS. Your cash balance and transactions are kept. Notes and tags, including those on cash transactions, are kept unless you select the option below. Create an encrypted backup first if you may need the data this reset deletes. To keep it, cancel and choose Re-read bank messages instead.</string>
+    <string name="cash_dashboard_scan_reset_final_warning">Permanently delete bank balances, bank history, source messages, account exclusions and all commitments? Commitments and their paid or skipped records cannot be recovered from bank SMS. Deleted inbox messages cannot rebuild lost bank history. Without a backup, this cannot be undone. Your cash balance and transactions are kept.</string>
+</resources>
