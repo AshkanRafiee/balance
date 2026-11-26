@@ -155,7 +155,7 @@ final class BankRules {
     // Only integer rial amounts: grouping is either absent or consistently three digits.
     private static final String AUTH_INTEGER = "([0-9]{1,19}|[0-9]{1,3}(?:,[0-9]{3}){1,6})";
     private static final String AUTH_LAYOUT_VERSION = "strict-purchase-layouts-v2";
-    private static final String MOVEMENT_LAYOUT_VERSION = "line-local-movement-labels-v2";
+    private static final String MOVEMENT_LAYOUT_VERSION = "line-local-movement-labels-v3";
     private static final Pattern AUTH_AMOUNT = Pattern.compile(
         "مبلغ\\s*[:：]?\\s*" + AUTH_INTEGER + "(?:\\s*ریال)?");
     private static final Pattern AUTH_RIAL_AMOUNT = Pattern.compile(

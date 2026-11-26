@@ -184,7 +184,10 @@ final class BalanceData {
         private static final Pattern amountLabel = Pattern.compile(
             "(?:\u0645\u0628\u0644\u063A)[^\\d]{0,12}?([+-]?\\s*[0-9][0-9,]*\\s*[+-]?)");
         private static final Pattern mofidHamiMovement = Pattern.compile(
-            "(?m)^[ \\t]*(واریز|برداشت)[ \\t]+مبلغ[ \\t]+([0-9][0-9,]*)[ \\t]*ریال[ \\t]*\\r?$");
+            "(?m)^[ \\t]*(واریز|برداشت)[ \\t]+مبلغ(?:[ \\t]+|[ \\t]*:[ \\t]*)"
+                + "([0-9][0-9,]*)[ \\t]*ریال[ \\t]*\\r?$");
+        private static final Pattern mofidHamiFeeLine = Pattern.compile(
+            "(?m)^[ \\t]*کارمزد[ \\t]+بانک[ \\t]+به[ \\t]+مبلغ[^\\r\\n]*");
         /** The amount written directly after a deposit/withdrawal label, as Tejarat does with
          *  "برداشت: 490,098,000 ریال". Matching one of these also resolves the direction: a label that
          *  feeds the amount is authoritative, so a payment-method word like "پرداخت" in the same message
@@ -3600,6 +3603,7 @@ final class BalanceData {
                 amount = toLong(movement.group(2));
                 if (amount > 0) labelDir = movement.group(1).equals("برداشت") ? -1 : 1;
             }
+            if (amount <= 0) n = SmsPatterns.mofidHamiFeeLine.matcher(n).replaceAll("");
         }
 
         // A signed amount on its own line is unambiguous. Resolve it before broad "مبلغ" scans:

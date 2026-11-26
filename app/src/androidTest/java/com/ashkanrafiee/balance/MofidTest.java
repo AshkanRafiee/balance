@@ -124,6 +124,17 @@ public class MofidTest {
             CARD_WITHDRAWAL_DATE);
         assertFixture(CARD_SENDER, alternate(FEE_WITHDRAWAL), CARD_WITHDRAWAL_AMOUNT,
             CARD_WITHDRAWAL_BALANCE, CARD_WITHDRAWAL_DATE);
+        assertFixture(CARD_SENDER, FEE_WITHDRAWAL.replace("برداشت مبلغ ", "برداشت مبلغ: "),
+            CARD_WITHDRAWAL_AMOUNT, CARD_WITHDRAWAL_BALANCE, CARD_WITHDRAWAL_DATE);
+    }
+
+    @Test public void feeAloneIsNotAWithdrawalAmount() {
+        String message = FEE_WITHDRAWAL.replace("برداشت مبلغ 3,766,300 ریال", "برداشت انجام شد");
+        assertNull(BalanceData.extractTransaction(message));
+        Transaction movement = BalanceData.parseMovement(BANK, CARD_SENDER, message,
+            CARD_WITHDRAWAL_DATE, true, CARD_DEPOSIT_BALANCE);
+        assertNotNull(movement);
+        assertEquals(CARD_WITHDRAWAL_AMOUNT, movement.amount);
     }
 
     @Test public void persianDigitsArabicLettersAndCrLf_preserveBothMovements() {
