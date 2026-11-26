@@ -4,6 +4,7 @@
     <string name="cash_history_empty_total">No transactions yet. Bank transactions come from SMS. Tap + to add a cash transaction.</string>
     <string name="cash_history_add">Add cash transaction</string>
     <string name="cash_history_amount">Amount (%1$s)</string>
+    <string name="cash_history_note_optional">Note (optional)</string>
     <string name="cash_history_date_value">Date: %1$s</string>
     <string name="cash_history_time_value">Time: %1$s</string>
     <string name="cash_history_choose_date">Choose transaction date</string>

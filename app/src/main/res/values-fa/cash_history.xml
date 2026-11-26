@@ -4,6 +4,7 @@
     <string name="cash_history_empty_total">هنوز تراکنشی ثبت نشده است. تراکنش‌های بانکی از پیامک‌ها خوانده می‌شوند. برای افزودن تراکنش نقدی، + را بزنید.</string>
     <string name="cash_history_add">افزودن تراکنش نقدی</string>
     <string name="cash_history_amount">مبلغ (%1$s)</string>
+    <string name="cash_history_note_optional">یادداشت (اختیاری)</string>
     <string name="cash_history_date_value">تاریخ: %1$s</string>
     <string name="cash_history_time_value">ساعت: %1$s</string>
     <string name="cash_history_choose_date">انتخاب تاریخ تراکنش</string>
