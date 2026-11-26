@@ -92,6 +92,7 @@ public class MainActivity extends Activity {
      *  so re-tapping the lock button or options can not open a second flow over the first. */
     private boolean lockChangeBusy = false;
     private boolean cashBusy;
+    private CashTransactionEditor cashEditor;
     private volatile int cashUiEpoch;
     private ContentObserver smsObserver;
 
@@ -169,6 +170,7 @@ public class MainActivity extends Activity {
     protected void onPause() {
         mainResumed = false;
         cashUiEpoch++;
+        if (cashEditor != null) cashEditor.dismiss();
         unregisterSmsObserver();
         if (view != null && BalanceData.isAutoHide(this)) {
             // Explanations have their own window: masking only the dashboard leaves their
@@ -820,10 +822,6 @@ public class MainActivity extends Activity {
     }
 
     private void openCashRelatedHistory(boolean cashOnly) {
-        openCashRelatedHistory(cashOnly, false);
-    }
-
-    private void openCashRelatedHistory(boolean cashOnly, boolean addCash) {
         if (!canUseCashUi()) return;
         Intent history = new Intent(this, HistoryActivity.class);
         if (cashOnly) {
@@ -831,13 +829,27 @@ public class MainActivity extends Activity {
             HistoryWarmup.cancelWarm();
             history.putExtra(HistoryActivity.EXTRA_BANK, CashStore.KEY);
         }
-        if (addCash) history.putExtra(HistoryActivity.EXTRA_ADD_CASH, true);
         startActivity(history);
     }
 
     private void addCashTransaction() {
-        if (cashBusy || view.cash == null) return;
-        openCashRelatedHistory(true, true);
+        if (cashBusy || view.cash == null || !canUseCashUi()) return;
+        HistoryWarmup.cancelWarm();
+        if (cashEditor == null) {
+            cashEditor = new CashTransactionEditor(this, () -> {
+                if (canUseCashUi()) reloadCashBalance();
+            }, () -> {}, () -> view.hidden);
+        }
+        cashEditor.showNew();
+    }
+
+    android.app.AlertDialog cashEditorDialogForTest() {
+        if (cashEditor == null) return null;
+        List<android.app.AlertDialog> dialogs = cashEditor.shownDialogsForTest();
+        for (int i = dialogs.size() - 1; i >= 0; i--) {
+            if (dialogs.get(i).isShowing()) return dialogs.get(i);
+        }
+        return null;
     }
 
     private void adjustCashBalanceDialog() {
@@ -1033,6 +1045,7 @@ public class MainActivity extends Activity {
 
     /** Dismisses the tracked dialog and any progress dialog. Safe to call when nothing is up. */
     private void dismissDialogs() {
+        if (cashEditor != null) cashEditor.dismiss();
         if (activeDialog != null) {
             activeDialog.dismiss();
             activeDialog = null;
@@ -2222,8 +2235,8 @@ public class MainActivity extends Activity {
                 lp.topMargin = ExpressiveUi.dp(this, 6);
                 card.addView(badge, lp);
             }
-            String historyLabel = getString(R.string.cash_dashboard_open_history);
-            TextView hint = ExpressiveUi.label(this, historyLabel, 12,
+            String historyLabel = getString(R.string.cash_dashboard_history_action);
+            TextView hint = ExpressiveUi.label(this, getString(R.string.cash_dashboard_open_history), 12,
                 ExpressiveUi.color(this, R.color.muted));
             hint.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             card.addView(hint, ExpressiveUi.widthMatch(this, 6, 0));

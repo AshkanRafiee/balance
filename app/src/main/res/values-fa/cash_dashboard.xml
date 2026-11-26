@@ -5,7 +5,8 @@
     <string name="cash_dashboard_not_counted">موجودی نقدی هنوز تنظیم نشده است</string>
     <string name="cash_dashboard_last_updated">آخرین به‌روزرسانی: %1$s</string>
     <string name="cash_dashboard_add">افزودن تراکنش</string>
-    <string name="cash_dashboard_open_history">مشاهدهٔ تاریخچهٔ پول نقد</string>
+    <string name="cash_dashboard_open_history">برای دیدن تاریخچهٔ پول نقد، این کارت را لمس کنید</string>
+    <string name="cash_dashboard_history_action">مشاهدهٔ تاریخچهٔ پول نقد</string>
     <string name="cash_dashboard_history">تاریخچهٔ پول نقد</string>
     <string name="cash_dashboard_adjust">اصلاح موجودی</string>
     <string name="cash_dashboard_adjust_message">مقدار پول نقدی را که اکنون دارید وارد کنید. این مبلغ جایگزین موجودی نقدی فعلی می‌شود و تراکنشی ثبت نمی‌شود. برای ثبت واریز یا برداشت، «افزودن تراکنش» را بزنید.</string>

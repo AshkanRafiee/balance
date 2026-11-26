@@ -80,7 +80,7 @@ public final class DashboardCashTest {
         preferences().edit().putBoolean(BalanceData.KEY_HIDDEN, originalHidden).commit();
     }
 
-    @Test public void addTransactionAndCashCardOpenTheIntendedCashScreenWhenMasked() {
+    @Test public void cashCardOpensHistoryWhenMasked() {
         CashStore.setBalance(context, 86_000);
         launch();
         scenario.onActivity(activity -> {
@@ -90,7 +90,7 @@ public final class DashboardCashTest {
             assertEquals("••••••", masked.getText().toString());
             assertNull(findText(card, activity.getString(R.string.cash_dashboard_history)));
             assertTrue(card.isLongClickable());
-            String historyLabel = activity.getString(R.string.cash_dashboard_open_history);
+            String historyLabel = activity.getString(R.string.cash_dashboard_history_action);
             AccessibilityNodeInfo node = card.createAccessibilityNodeInfo();
             try {
                 assertTrue(node.getActionList().stream().anyMatch(action ->
@@ -102,11 +102,52 @@ public final class DashboardCashTest {
         });
         awaitCashCardLayout();
 
-        openHistory(CashStore.KEY, true, activity ->
-            tapCashCardText(activity, R.string.cash_dashboard_add));
-        awaitCashCardLayout();
-        openHistory(CashStore.KEY, false, activity ->
+        scenario.onActivity(activity -> tapCashCardText(activity, R.string.cash_dashboard_add));
+        await(activity -> activity.cashEditorDialogForTest() != null);
+        scenario.onActivity(activity -> amountField(activity.cashEditorDialogForTest()).setText("1"));
+        await(activity -> {
+            AlertDialog editor = activity.cashEditorDialogForTest();
+            return editor != null && findText(editor.getWindow().getDecorView(),
+                activity.getString(R.string.cash_history_preview_balance, "••••••", "••••••")) != null;
+        });
+        scenario.onActivity(activity -> activity.cashEditorDialogForTest().dismiss());
+        openHistory(CashStore.KEY, activity ->
             tapCashCardText(activity, R.string.cash_dashboard_open_history));
+    }
+
+    @Test public void addTransactionStaysOnDashboardAndSavesOptionalNote() {
+        launch();
+        scenario.onActivity(activity -> tapCashCardText(activity, R.string.cash_dashboard_add));
+        await(activity -> activity.cashEditorDialogForTest() != null);
+        scenario.onActivity(activity -> {
+            AlertDialog editor = activity.cashEditorDialogForTest();
+            amountField(editor).setText("10.5");
+            EditText note = (EditText) find(editor.getWindow().getDecorView(),
+                v -> v instanceof EditText && android.text.TextUtils.equals(
+                    activity.getString(R.string.cash_history_note_optional), ((EditText) v).getHint()));
+            assertNotNull("optional note field", note);
+            note.setText("lunch");
+        });
+        await(activity -> activity.cashEditorDialogForTest() != null
+            && activity.cashEditorDialogForTest().getButton(AlertDialog.BUTTON_POSITIVE).isEnabled());
+        scenario.onActivity(activity -> activity.cashEditorDialogForTest()
+            .getButton(AlertDialog.BUTTON_POSITIVE).performClick());
+        await(activity -> {
+            TextView amount = activity.findViewById(R.id.dashboard_cash_amount);
+            return activity.cashEditorDialogForTest() == null
+                && activity.getString(R.string.cash_dashboard_value,
+                    CurrencyHelper.amountExact(activity, 105), CurrencyHelper.label(activity))
+                    .contentEquals(amount.getText());
+        });
+        CashStore.State state = CashStore.read(context);
+        assertEquals(1, state.transactions.size());
+        Transaction transaction = state.transactions.get(0);
+        try {
+            assertEquals(105L, state.balance);
+            assertEquals("lunch", BalanceData.getNote(context, transaction));
+        } finally {
+            CashStore.remove(context, transaction);
+        }
     }
 
     @Test public void adjustUpdatesBalanceWithoutHistoryAndDoesNotPrefillWhenMasked() {
@@ -215,11 +256,11 @@ public final class DashboardCashTest {
     }
 
     private void reviewHistory(String expectedScope) {
-        openHistory(expectedScope, false, activity -> dialog(activity)
+        openHistory(expectedScope, activity -> dialog(activity)
             .getButton(AlertDialog.BUTTON_NEUTRAL).performClick());
     }
 
-    private void openHistory(String expectedScope, boolean addCash, Consumer<MainActivity> open) {
+    private void openHistory(String expectedScope, Consumer<MainActivity> open) {
         Instrumentation.ActivityMonitor monitor = instrumentation.addMonitor(
             HistoryActivity.class.getName(), null, false);
         try {
@@ -229,8 +270,6 @@ public final class DashboardCashTest {
             try {
                 assertEquals(expectedScope,
                     history.getIntent().getStringExtra(HistoryActivity.EXTRA_BANK));
-                assertEquals(addCash,
-                    history.getIntent().getBooleanExtra(HistoryActivity.EXTRA_ADD_CASH, false));
             } finally {
                 instrumentation.runOnMainSync(history::finish);
                 instrumentation.waitForIdleSync();
