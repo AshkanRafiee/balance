@@ -76,6 +76,8 @@ final class BackupManager {
     /** Legacy creation refuses to emit a backup file larger than this. Framed creation has no
      *  total-size cap; legacy restore streams through the staged path without a record cap. */
     private static final long MAX_BACKUP_BYTES = 10L * 1024 * 1024;
+    /** Size of each string fragment in the framed cash snapshot. */
+    static final int CASH_CHUNK_CHARS = 8192;
 
     /** Human-readable error carrying the string resource that describes it. */
     static final class BackupException extends Exception {
@@ -86,8 +88,7 @@ final class BackupManager {
         }
     }
 
-    /** One restorable section of a backup. The file always carries every section; the user
-     *  picks which ones a restore merges. */
+    /** One restorable section of a backup. The user picks which sections to merge when present. */
     enum Section {
         BALANCES,
         TRANSACTIONS,
@@ -97,7 +98,8 @@ final class BackupManager {
         TAGS,
         MERCHANTS,
         COMMITMENTS,
-        SOURCES
+        SOURCES,
+        CASH
     }
 
     /** All sections, for callers (and tests) that restore a backup whole. */
@@ -112,9 +114,11 @@ final class BackupManager {
         int transactionsAdded;
         int commitmentsAdded;
         boolean metadataChanged;
+        boolean cashImported;
+        boolean cashConflict;
         boolean changed() {
             return added > 0 || updated > 0 || transactionsAdded > 0
-                || commitmentsAdded > 0 || metadataChanged;
+                || commitmentsAdded > 0 || metadataChanged || cashImported;
         }
     }
 
@@ -292,6 +296,21 @@ final class BackupManager {
 
         json.name("commitmentDeletions");
         CommitmentStore.writeJsonDeletions(context, json);
+
+        String cash = CashStore.exportData(context);
+        if (cash != null) {
+            // The fragments bound token size on restore; they are always imported together.
+            json.name("cash").beginArray();
+            int start = 0;
+            while (start < cash.length()) {
+                int end = Math.min(start + CASH_CHUNK_CHARS, cash.length());
+                if (end < cash.length() && Character.isSurrogatePair(
+                        cash.charAt(end - 1), cash.charAt(end))) end--;
+                json.value(cash.substring(start, end));
+                start = end;
+            }
+            json.endArray();
+        }
 
         // The sources section dominates backup time on a real inbox (every recognized SMS
         // plus its parser observations), so it reports determinate progress against a cheap

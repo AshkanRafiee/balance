@@ -1340,6 +1340,7 @@ public class MainActivity extends Activity {
             getString(R.string.restore_section_merchants),
             getString(R.string.restore_section_commitments),
             getString(R.string.restore_section_sources),
+            getString(R.string.restore_section_cash),
             getString(R.string.restore_include_deleted)};
         final boolean[] checked = new boolean[sections.length + 1];
         java.util.Arrays.fill(checked, true);
@@ -1398,12 +1399,21 @@ public class MainActivity extends Activity {
                     view.loadSaved();
                     boolean countsChanged = res.added > 0 || res.updated > 0
                         || res.transactionsAdded > 0 || res.commitmentsAdded > 0;
-                    String summary = res.changed()
-                        ? countsChanged
-                            ? getString(R.string.backup_restore_summary, res.added, res.updated,
-                                res.commitmentsAdded, res.transactionsAdded)
-                            : getString(R.string.backup_restore_summary_metadata)
-                        : getString(R.string.backup_restore_summary_none);
+                    String summary;
+                    if (countsChanged) {
+                        summary = getString(R.string.backup_restore_summary, res.added, res.updated,
+                            res.commitmentsAdded, res.transactionsAdded);
+                    } else if (res.metadataChanged) {
+                        summary = getString(R.string.backup_restore_summary_metadata);
+                    } else {
+                        summary = "";
+                    }
+                    if (res.cashImported || res.cashConflict) {
+                        if (!summary.isEmpty()) summary += "\n";
+                        summary += getString(res.cashImported ? R.string.backup_restore_cash_imported
+                            : R.string.backup_restore_cash_conflict);
+                    }
+                    if (summary.isEmpty()) summary = getString(R.string.backup_restore_summary_none);
                     Toast.makeText(MainActivity.this,
                         getString(R.string.backup_restored) + "\n" + summary,
                         Toast.LENGTH_LONG).show();

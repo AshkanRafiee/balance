@@ -14,6 +14,8 @@ import android.util.JsonToken;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.FilterReader;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -61,6 +63,7 @@ final class BackupV2Restore {
 
     private static final int SOURCE = 8;
     private static final int RESIDUAL_NOTE_PROVENANCE = 9;
+    private static final int CASH = 10;
 
     private static final int SECTION_SCHEMA = 1;
     private static final int SECTION_BALANCES = 1 << 1;
@@ -75,6 +78,7 @@ final class BackupV2Restore {
     private static final int SECTION_APP_VERSION = 1 << 7;
     /** Optional note context added without changing the framed schema or older backup requirements. */
     private static final int SECTION_RESIDUAL_NOTE_PROVENANCE = 1 << 8;
+    private static final int SECTION_CASH = 1 << 9;
     private static final int ALL_SECTIONS = SECTION_SCHEMA | SECTION_BALANCES
         | SECTION_TRANSACTIONS | SECTION_METADATA | SECTION_COMMITMENTS;
 
@@ -439,13 +443,14 @@ final class BackupV2Restore {
             if (raw == null) throw new Exception("null input stream");
             try (BackupFrames.AuthenticatedInputStream authenticated =
                          BackupFrames.openInputStream(raw, password);
-                    InputStreamReader reader = new InputStreamReader(authenticated,
-                        StandardCharsets.UTF_8.newDecoder()
-                            .onMalformedInput(CodingErrorAction.REPORT)
-                            .onUnmappableCharacter(CodingErrorAction.REPORT));
+                    InputStreamReader utf8 = new InputStreamReader(authenticated,
+                         StandardCharsets.UTF_8.newDecoder()
+                             .onMalformedInput(CodingErrorAction.REPORT)
+                             .onUnmappableCharacter(CodingErrorAction.REPORT));
+                    FramedPayloadReader reader = new FramedPayloadReader(utf8);
                     JsonReader json = new JsonReader(reader)) {
                 json.setLenient(false);
-                parsePayload(context, json, stage);
+                parsePayload(context, json, reader, stage);
 
                 // Parsing an object is not enough. JsonReader must observe END_DOCUMENT so it reads
                 // through all plaintext, and the frame reader must then authenticate the footer and
@@ -645,7 +650,8 @@ final class BackupV2Restore {
         return key.substring(separator + 1);
     }
 
-    private static void parsePayload(Context context, JsonReader json, InputStage stage)
+    private static void parsePayload(Context context, JsonReader json, FramedPayloadReader reader,
+            InputStage stage)
             throws Exception {
         int seen = 0;
         json.beginObject();
@@ -707,6 +713,17 @@ final class BackupV2Restore {
                     seen |= bit;
                     parseCommitmentDeletions(json, stage);
                     break;
+                case "cash":
+                    seen = once(seen, SECTION_CASH, "duplicate cash ledger");
+                    String cash = reader.readCash(json);
+                    try {
+                        CashStore.validateData(cash);
+                    } catch (Exception malformed) {
+                        // A JSON parser may include the input text in its diagnostic.
+                        throw invalid("invalid cash snapshot");
+                    }
+                    stage.add(CASH, cash);
+                    break;
                 default:
                     throw invalid("unknown backup section");
             }
@@ -714,8 +731,51 @@ final class BackupV2Restore {
         json.endObject();
         if ((seen & ALL_SECTIONS) != ALL_SECTIONS
                 || (seen & ~(ALL_SECTIONS | SECTION_SOURCES | SECTION_COMMITMENT_DELETIONS
-                    | SECTION_APP_VERSION | SECTION_RESIDUAL_NOTE_PROVENANCE)) != 0)
+                    | SECTION_APP_VERSION | SECTION_RESIDUAL_NOTE_PROVENANCE | SECTION_CASH)) != 0)
             throw invalid("incomplete backup sections");
+    }
+
+    /** Limits each raw Cash token before JsonReader can allocate an arbitrarily large string. */
+    private static final class FramedPayloadReader extends FilterReader {
+        private int remaining = -1;
+
+        FramedPayloadReader(InputStreamReader input) {
+            super(input);
+        }
+
+        String readCash(JsonReader json) throws Exception {
+            // A UTF-16 code unit can take six JSON characters when escaped. Allow room for the
+            // brackets, separators and the reader's lookahead within each chunk budget.
+            int budget = 6 * BackupManager.CASH_CHUNK_CHARS + 2048;
+            remaining = budget;
+            try {
+                StringBuilder cash = new StringBuilder();
+                json.beginArray();
+                int previousLength = BackupManager.CASH_CHUNK_CHARS;
+                while (json.hasNext()) {
+                    String chunk = requiredString(json);
+                    if (previousLength < BackupManager.CASH_CHUNK_CHARS - 1
+                            || chunk.isEmpty() || chunk.length() > BackupManager.CASH_CHUNK_CHARS
+                            || chunk.length() > CashStore.MAX_SNAPSHOT_CHARS - cash.length())
+                        throw invalid("invalid cash snapshot chunk");
+                    cash.append(chunk);
+                    previousLength = chunk.length();
+                    remaining = budget;
+                }
+                json.endArray();
+                return cash.toString();
+            } finally {
+                remaining = -1;
+            }
+        }
+
+        @Override public int read(char[] buffer, int offset, int length) throws IOException {
+            if (remaining < 0 || length == 0) return super.read(buffer, offset, length);
+            if (remaining == 0) throw new IOException("cash snapshot too large");
+            int count = super.read(buffer, offset, Math.min(length, remaining));
+            if (count > 0) remaining -= count;
+            return count;
+        }
     }
 
     private static void parseBalances(JsonReader json, InputStage stage) throws Exception {
@@ -1301,6 +1361,13 @@ final class BackupV2Restore {
         if (selection.contains(BackupManager.Section.SOURCES)) mergeSources(context, stage, result);
         if (selection.contains(BackupManager.Section.BALANCES))
             mergeBalances(context, stage, result);
+        if (selection.contains(BackupManager.Section.CASH)) {
+            stage.forEach(CASH, payload -> {
+                CashStore.RestoreResult cash = CashStore.restoreData(context, payload);
+                result.cashImported = cash == CashStore.RestoreResult.IMPORTED;
+                result.cashConflict = cash == CashStore.RestoreResult.CONFLICT;
+            });
+        }
 
         boolean metadataSelected = selection.contains(BackupManager.Section.NOTES)
             || selection.contains(BackupManager.Section.REASONS)
