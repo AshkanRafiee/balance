@@ -28,6 +28,7 @@ import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -91,6 +92,7 @@ public class MainActivity extends Activity {
      *  so re-tapping the lock button or options can not open a second flow over the first. */
     private boolean lockChangeBusy = false;
     private boolean cashBusy;
+    private volatile int cashUiEpoch;
     private ContentObserver smsObserver;
 
     @Override
@@ -166,6 +168,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         mainResumed = false;
+        cashUiEpoch++;
         unregisterSmsObserver();
         if (view != null && BalanceData.isAutoHide(this)) {
             // Explanations have their own window: masking only the dashboard leaves their
@@ -817,17 +820,24 @@ public class MainActivity extends Activity {
     }
 
     private void openCashRelatedHistory(boolean cashOnly) {
+        openCashRelatedHistory(cashOnly, false);
+    }
+
+    private void openCashRelatedHistory(boolean cashOnly, boolean addCash) {
         if (!canUseCashUi()) return;
         Intent history = new Intent(this, HistoryActivity.class);
-        if (cashOnly) history.putExtra(HistoryActivity.EXTRA_BANK, CashStore.KEY);
+        if (cashOnly) {
+            // The all-accounts warmup cannot satisfy a Cash-only request and shares its store lock.
+            HistoryWarmup.cancelWarm();
+            history.putExtra(HistoryActivity.EXTRA_BANK, CashStore.KEY);
+        }
+        if (addCash) history.putExtra(HistoryActivity.EXTRA_ADD_CASH, true);
         startActivity(history);
     }
 
     private void addCashTransaction() {
-        if (cashBusy || view.cash == null || !canUseCashUi()) return;
-        startActivity(new Intent(this, HistoryActivity.class)
-            .putExtra(HistoryActivity.EXTRA_BANK, CashStore.KEY)
-            .putExtra(HistoryActivity.EXTRA_ADD_CASH, true));
+        if (cashBusy || view.cash == null) return;
+        openCashRelatedHistory(true, true);
     }
 
     private void adjustCashBalanceDialog() {
@@ -891,23 +901,32 @@ public class MainActivity extends Activity {
     private void changeCash(Runnable write, Consumer<Boolean> onComplete) {
         if (cashBusy || !canUseCashUi()) return;
         cashBusy = true;
+        int epoch = cashUiEpoch;
         Context app = getApplicationContext();
         CASH_WORKER.execute(() -> {
             boolean saved = false;
+            boolean cancelled = false;
             try {
-                write.run();
-                saved = true;
-                Bank cash = CashStore.visibleBalance(app);
-                runOnUiThread(() -> applyCashBalance(cash, false));
+                synchronized (BalanceData.class) {
+                    cancelled = epoch != cashUiEpoch
+                        || (LockManager.isEnabled(app) && LockManager.isSessionLocked());
+                    if (!cancelled) {
+                        write.run();
+                        saved = true;
+                        Bank cash = CashStore.visibleBalance(app);
+                        runOnUiThread(() -> applyCashBalance(cash, false));
+                    }
+                }
             } catch (RuntimeException e) {
                 android.util.Log.w("Balance", "cash update unavailable");
                 if (saved) runOnUiThread(() -> applyCashBalance(null, true));
             }
             boolean success = saved;
+            boolean showFailure = !success && !cancelled;
             runOnUiThread(() -> {
                 cashBusy = false;
                 if (isFinishing() || isDestroyed()) return;
-                if (!success && canUseCashUi()) toast(R.string.cash_dashboard_save_failed);
+                if (showFailure && canUseCashUi()) toast(R.string.cash_dashboard_save_failed);
                 if (onComplete != null) onComplete.accept(success);
             });
             if (saved) BalanceWidgetProvider.push(app);
@@ -2174,6 +2193,7 @@ public class MainActivity extends Activity {
             LinearLayout card = ExpressiveUi.card(this, ExpressiveUi.color(this, R.color.panel),
                 ExpressiveUi.RADIUS_CARD, 18);
             card.setId(R.id.dashboard_cash_card);
+            card.setBackground(ExpressiveUi.ripple(this, card.getBackground()));
             boolean largeText = getResources().getConfiguration().fontScale >= 1.3f;
             LinearLayout header = largeText ? ExpressiveUi.column(this) : ExpressiveUi.row(this);
             TextView title = ExpressiveUi.heading(this, getString(R.string.cash_label), 20);
@@ -2202,28 +2222,44 @@ public class MainActivity extends Activity {
                 lp.topMargin = ExpressiveUi.dp(this, 6);
                 card.addView(badge, lp);
             }
-            TextView add = ExpressiveUi.button(this, getString(R.string.cash_dashboard_add), true);
-            add.setOnClickListener(v -> addCashTransaction());
-            card.addView(add, ExpressiveUi.widthMatch(this, 12, 0));
+            String historyLabel = getString(R.string.cash_dashboard_open_history);
+            TextView hint = ExpressiveUi.label(this, historyLabel, 12,
+                ExpressiveUi.color(this, R.color.muted));
+            hint.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            card.addView(hint, ExpressiveUi.widthMatch(this, 6, 0));
 
             boolean stackActions = largeText || getResources().getConfiguration().screenWidthDp < 360;
             LinearLayout actions = stackActions ? ExpressiveUi.column(this) : ExpressiveUi.row(this);
-            TextView history = ExpressiveUi.button(this, getString(R.string.cash_dashboard_history),
-                false);
-            history.setOnClickListener(v -> openCashRelatedHistory(true));
+            TextView add = ExpressiveUi.button(this, getString(R.string.cash_dashboard_add), true);
+            add.setOnClickListener(v -> addCashTransaction());
             TextView adjust = ExpressiveUi.button(this, getString(R.string.cash_dashboard_adjust),
                 false);
             adjust.setOnClickListener(v -> adjustCashBalanceDialog());
             if (stackActions) {
-                actions.addView(history, ExpressiveUi.widthMatch(this, 0, 8));
+                actions.addView(add, ExpressiveUi.widthMatch(this, 0, 8));
                 actions.addView(adjust, ExpressiveUi.widthMatch(this, 0, 0));
             } else {
-                LinearLayout.LayoutParams historyLp = new LinearLayout.LayoutParams(0, -1, 1);
-                historyLp.setMarginEnd(ExpressiveUi.dp(this, 8));
-                actions.addView(history, historyLp);
+                int padding = ExpressiveUi.dp(this, 8);
+                add.setPaddingRelative(padding, add.getPaddingTop(), padding, add.getPaddingBottom());
+                adjust.setPaddingRelative(padding, adjust.getPaddingTop(), padding,
+                    adjust.getPaddingBottom());
+                LinearLayout.LayoutParams addLp = new LinearLayout.LayoutParams(0, -1, 1);
+                addLp.setMarginEnd(padding);
+                actions.addView(add, addLp);
                 actions.addView(adjust, new LinearLayout.LayoutParams(0, -1, 1));
             }
-            card.addView(actions, ExpressiveUi.widthMatch(this, 8, 0));
+            card.addView(actions, ExpressiveUi.widthMatch(this, 10, 0));
+            card.setFocusable(true);
+            if (android.os.Build.VERSION.SDK_INT >= 28) card.setScreenReaderFocusable(true);
+            card.setOnClickListener(v -> openCashRelatedHistory(true));
+            card.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+                @Override public void onInitializeAccessibilityNodeInfo(View host,
+                        AccessibilityNodeInfo info) {
+                    super.onInitializeAccessibilityNodeInfo(host, info);
+                    info.addAction(new AccessibilityNodeInfo.AccessibilityAction(
+                        AccessibilityNodeInfo.ACTION_CLICK, historyLabel));
+                }
+            });
             card.setOnLongClickListener(v -> {
                 if (canUseCashUi()) view.copyBalance(getString(R.string.cash_label),
                     BigInteger.valueOf(cash.amount), true);

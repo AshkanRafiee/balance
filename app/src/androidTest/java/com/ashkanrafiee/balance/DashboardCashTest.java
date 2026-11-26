@@ -3,6 +3,7 @@ package com.ashkanrafiee.balance;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -12,9 +13,12 @@ import android.app.AlertDialog;
 import android.app.Instrumentation;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Rect;
 import android.os.SystemClock;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.TextView;
@@ -76,21 +80,33 @@ public final class DashboardCashTest {
         preferences().edit().putBoolean(BalanceData.KEY_HIDDEN, originalHidden).commit();
     }
 
-    @Test public void addTransactionAndCashHistoryOpenTheIntendedCashScreenWhenMasked() {
+    @Test public void addTransactionAndCashCardOpenTheIntendedCashScreenWhenMasked() {
         CashStore.setBalance(context, 86_000);
         launch();
         scenario.onActivity(activity -> {
             activity.findViewById(R.id.dashboard_mask_button).performClick();
+            View card = activity.findViewById(R.id.dashboard_cash_card);
             TextView masked = activity.findViewById(R.id.dashboard_cash_amount);
             assertEquals("••••••", masked.getText().toString());
+            assertNull(findText(card, activity.getString(R.string.cash_dashboard_history)));
+            assertTrue(card.isLongClickable());
+            String historyLabel = activity.getString(R.string.cash_dashboard_open_history);
+            AccessibilityNodeInfo node = card.createAccessibilityNodeInfo();
+            try {
+                assertTrue(node.getActionList().stream().anyMatch(action ->
+                    action.getId() == AccessibilityNodeInfo.ACTION_CLICK
+                        && historyLabel.equals(action.getLabel())));
+            } finally {
+                node.recycle();
+            }
         });
+        awaitCashCardLayout();
 
         openHistory(CashStore.KEY, true, activity ->
-            clickText(activity.findViewById(R.id.dashboard_cash_card),
-                activity.getString(R.string.cash_dashboard_add)));
+            tapCashCardText(activity, R.string.cash_dashboard_add));
+        awaitCashCardLayout();
         openHistory(CashStore.KEY, false, activity ->
-            clickText(activity.findViewById(R.id.dashboard_cash_card),
-                activity.getString(R.string.cash_dashboard_history)));
+            tapCashCardText(activity, R.string.cash_dashboard_open_history));
     }
 
     @Test public void adjustUpdatesBalanceWithoutHistoryAndDoesNotPrefillWhenMasked() {
@@ -98,7 +114,10 @@ public final class DashboardCashTest {
         scenario.onActivity(activity -> {
             View card = activity.findViewById(R.id.dashboard_cash_card);
             assertNotNull(findText(card, activity.getString(R.string.cash_dashboard_not_counted)));
-            clickText(card, activity.getString(R.string.cash_dashboard_adjust));
+            tapCashCardText(activity, R.string.cash_dashboard_adjust);
+        });
+        await(activity -> dialog(activity) != null);
+        scenario.onActivity(activity -> {
             AlertDialog adjustment = dialog(activity);
             assertNotNull(findText(adjustment.getWindow().getDecorView(),
                 activity.getString(R.string.cash_dashboard_adjust_message)));
@@ -163,7 +182,14 @@ public final class DashboardCashTest {
 
     private void launch() {
         scenario = ActivityScenario.launch(MainActivity.class);
-        await(activity -> activity.findViewById(R.id.dashboard_cash_card) != null);
+        awaitCashCardLayout();
+    }
+
+    private void awaitCashCardLayout() {
+        await(activity -> {
+            View card = activity.findViewById(R.id.dashboard_cash_card);
+            return card != null && card.isLaidOut();
+        });
     }
 
     private void requestToggle(int confirmationButton) {
@@ -249,6 +275,28 @@ public final class DashboardCashTest {
         TextView button = findText(root, text);
         assertNotNull(text, button);
         assertTrue(button.performClick());
+    }
+
+    private static void tapCashCardText(MainActivity activity, int textRes) {
+        ViewGroup card = activity.findViewById(R.id.dashboard_cash_card);
+        String label = activity.getString(textRes);
+        TextView target = findText(card, label);
+        assertNotNull(label, target);
+        Rect bounds = new Rect();
+        target.getDrawingRect(bounds);
+        card.offsetDescendantRectToMyCoords(target, bounds);
+        long now = SystemClock.uptimeMillis();
+        MotionEvent down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN,
+            bounds.exactCenterX(), bounds.exactCenterY(), 0);
+        MotionEvent up = MotionEvent.obtain(now, now, MotionEvent.ACTION_UP,
+            bounds.exactCenterX(), bounds.exactCenterY(), 0);
+        try {
+            assertTrue(card.dispatchTouchEvent(down));
+            assertTrue(card.dispatchTouchEvent(up));
+        } finally {
+            down.recycle();
+            up.recycle();
+        }
     }
 
     private static TextView findText(View root, String text) {

@@ -7,6 +7,7 @@
     <string name="cash_dashboard_not_counted">No cash balance set yet</string>
     <string name="cash_dashboard_last_updated">Last updated: %1$s</string>
     <string name="cash_dashboard_add">Add transaction</string>
+    <string name="cash_dashboard_open_history">View cash history</string>
     <string name="cash_dashboard_history">Cash history</string>
     <string name="cash_dashboard_adjust">Adjust balance</string>
     <string name="cash_dashboard_adjust_message">Enter how much cash you have now. This replaces your cash balance without recording a transaction. To record a deposit or withdrawal, use Add transaction.</string>
