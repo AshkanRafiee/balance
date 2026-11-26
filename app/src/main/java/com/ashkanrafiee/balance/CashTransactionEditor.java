@@ -50,6 +50,8 @@ final class CashTransactionEditor {
     private final int fg, muted;
     private final boolean iranCalendar, persian;
     private Editor activeEditor;
+    private int editorRequest;
+    private boolean loadingEdit;
 
     CashTransactionEditor(Activity activity, Runnable onChanged, Runnable onClosed) {
         this(activity, onChanged, onClosed, () -> false);
@@ -69,17 +71,40 @@ final class CashTransactionEditor {
 
     void showNew() {
         if (isShowing() || !canShow() || !CashStore.isEnabled(activity)) return;
-        open(new CashDraft(null, System.currentTimeMillis(), "", false, ""), null);
+        open(new CashDraft(null, System.currentTimeMillis(), "", false, "",
+            java.util.Collections.emptyList(), null), null);
     }
 
     void showEdit(Transaction transaction) {
         if (isShowing() || !canShow()) return;
-        open(new CashDraft(transaction, transaction.date, cashInput(Math.abs(transaction.amount)),
-            transaction.amount < 0, ""), null);
+        loadingEdit = true;
+        int request = ++editorRequest;
+        Context app = activity.getApplicationContext();
+        new Thread(() -> {
+            CashStore.Annotation annotation;
+            try {
+                annotation = CashStore.readAnnotation(app, transaction);
+            } catch (Exception failure) {
+                annotation = null;
+            }
+            CashStore.Annotation loaded = annotation;
+            activity.runOnUiThread(() -> {
+                if (request != editorRequest) return;
+                loadingEdit = false;
+                if (!canShow()) return;
+                if (loaded == null) {
+                    android.widget.Toast.makeText(activity, R.string.cash_history_annotation_load_failed,
+                        android.widget.Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                open(new CashDraft(transaction, transaction.date, cashInput(Math.abs(transaction.amount)),
+                    transaction.amount < 0, loaded.note, loaded.tags, loaded), null);
+            });
+        }, "cash-load-annotations").start();
     }
 
     boolean isShowing() {
-        return activeEditor != null && activeEditor.dialog.isShowing();
+        return loadingEdit || (activeEditor != null && activeEditor.dialog.isShowing());
     }
 
     void requestPreview() {
@@ -87,6 +112,8 @@ final class CashTransactionEditor {
     }
 
     void dismiss() {
+        editorRequest++;
+        loadingEdit = false;
         if (activeEditor != null) activeEditor.cancelPendingWork();
         boolean wasOpen = activeEditor != null;
         activeEditor = null;
@@ -141,14 +168,18 @@ final class CashTransactionEditor {
         final String amountText;
         final boolean withdrawal;
         final String noteText;
+        final List<String> tags;
+        final CashStore.Annotation original;
 
         CashDraft(Transaction replacing, long timestamp, String amountText, boolean withdrawal,
-                String noteText) {
+                String noteText, List<String> tags, CashStore.Annotation original) {
             this.replacing = replacing;
             this.timestamp = timestamp;
             this.amountText = amountText;
             this.withdrawal = withdrawal;
             this.noteText = noteText;
+            this.tags = tags;
+            this.original = original;
         }
     }
 
@@ -171,6 +202,10 @@ final class CashTransactionEditor {
         private final int withdrawalId = View.generateViewId();
         private final EditText amount = new EditText(activity);
         private final EditText note;
+        private final EditText tag;
+        private final LinearLayout tagRows = new LinearLayout(activity);
+        private final List<String> tags;
+        private final CashStore.Annotation original;
         private final TextView dateButton = ExpressiveUi.button(activity, "", false);
         private final TextView timeButton = ExpressiveUi.button(activity, "", false);
         private final TextView preview = text("", 14, fg);
@@ -190,6 +225,8 @@ final class CashTransactionEditor {
 
         Editor(CashDraft draft, CashDraft returnDraft) {
             replacing = draft.replacing;
+            original = draft.original;
+            tags = new ArrayList<>(draft.tags);
             timestamp = draft.timestamp;
             this.returnDraft = returnDraft;
             form.setOrientation(LinearLayout.VERTICAL);
@@ -229,20 +266,32 @@ final class CashTransactionEditor {
             form.addView(amountLabel);
             form.addView(amount, margins(0, 8));
 
-            if (replacing == null) {
-                note = new EditText(activity);
-                note.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
-                    | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-                note.setMaxLines(3);
-                note.setHint(R.string.cash_history_note_optional);
-                note.setImeOptions(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
-                note.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
-                note.setSaveEnabled(false);
-                note.setText(draft.noteText);
-                form.addView(note, margins(0, 8));
-            } else {
-                note = null;
-            }
+            note = annotationInput(R.string.cash_history_note_optional);
+            note.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+            note.setMaxLines(3);
+            note.setText(draft.noteText);
+            form.addView(note, margins(0, 8));
+
+            tag = annotationInput(R.string.cash_history_tag_optional);
+            tag.setSingleLine(true);
+            tag.setImeOptions(EditorInfo.IME_ACTION_DONE | EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
+            tag.setOnEditorActionListener((v, action, event) -> {
+                if (action != EditorInfo.IME_ACTION_DONE) return false;
+                addTypedTag();
+                return true;
+            });
+            LinearLayout tagInput = new LinearLayout(activity);
+            tagInput.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            tagInput.addView(tag, new LinearLayout.LayoutParams(0, -2, 1));
+            TextView addTag = ExpressiveUi.button(activity,
+                activity.getString(R.string.cash_history_add_tag), false);
+            addTag.setOnClickListener(v -> addTypedTag());
+            tagInput.addView(addTag);
+            form.addView(tagInput, margins(0, 4));
+            tagRows.setOrientation(LinearLayout.VERTICAL);
+            form.addView(tagRows, margins(0, 4));
+            renderTags();
 
             updateDateLabels();
             dateButton.setOnClickListener(v -> showCashDatePicker(timestamp, this::pickTimestamp));
@@ -418,10 +467,12 @@ final class CashTransactionEditor {
                     recover.setVisibility(View.VISIBLE);
                     recover.setOnClickListener(v -> {
                         CashDraft draft = new CashDraft(replacing, timestamp,
-                            amount.getText().toString(), isWithdrawal(), noteText());
+                            amount.getText().toString(), isWithdrawal(),
+                            note.getText().toString(), selectedTags(), original);
                         String depositAmount = hideBalances.getAsBoolean()
                             ? "" : cashInput(result.shortfall);
-                        open(new CashDraft(null, result.recoveryDate, depositAmount, false, ""), draft);
+                        open(new CashDraft(null, result.recoveryDate, depositAmount, false, "",
+                            java.util.Collections.emptyList(), null), draft);
                     });
                 }
             } else if (result.affectsBalance) {
@@ -438,8 +489,42 @@ final class CashTransactionEditor {
             if (returnDraft != null && activeEditor == this) open(returnDraft, null);
         }
 
-        private String noteText() {
-            return note == null ? "" : note.getText().toString();
+        private EditText annotationInput(int hint) {
+            EditText field = new EditText(activity);
+            field.setHint(hint);
+            field.setImeOptions(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
+            field.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+            field.setSaveEnabled(false);
+            return field;
+        }
+
+        private List<String> selectedTags() {
+            List<String> selected = new ArrayList<>(tags);
+            String typed = tag.getText().toString().trim();
+            if (!typed.isEmpty() && selected.stream().noneMatch(current -> BalanceData.sameTag(current, typed)))
+                selected.add(typed);
+            return selected;
+        }
+
+        private void addTypedTag() {
+            List<String> selected = selectedTags();
+            tags.clear();
+            tags.addAll(selected);
+            tag.setText("");
+            renderTags();
+        }
+
+        private void renderTags() {
+            tagRows.removeAllViews();
+            for (String label : tags) {
+                TextView remove = ExpressiveUi.button(activity, label + "  ×", false);
+                remove.setContentDescription(activity.getString(R.string.cash_history_remove_tag, label));
+                remove.setOnClickListener(v -> {
+                    tags.remove(label);
+                    renderTags();
+                });
+                tagRows.addView(remove, margins(2, 2));
+            }
         }
 
         private void save() {
@@ -460,10 +545,11 @@ final class CashTransactionEditor {
             previewHandler.removeCallbacks(previewWork);
             setBusy(true);
             long date = timestamp;
-            String savedNote = noteText();
+            CashStore.Annotation annotation = new CashStore.Annotation(
+                note.getText().toString(), selectedTags());
             Context app = activity.getApplicationContext();
             new Thread(() -> {
-                int result = write(app, date, signedAmount, savedNote);
+                int result = write(app, date, signedAmount, annotation);
                 activity.runOnUiThread(() -> {
                     if (!isActive()) return;
                     if (result == 0) {
@@ -487,13 +573,13 @@ final class CashTransactionEditor {
             }, "cash-save").start();
         }
 
-        private int write(Context app, long date, long signedAmount, String savedNote) {
+        private int write(Context app, long date, long signedAmount, CashStore.Annotation annotation) {
             try {
                 synchronized (BalanceData.class) {
                     if (canceled || isLocked(app)) return R.string.cash_history_save_failed;
                     if (!CashStore.isEnabled(app)) return R.string.cash_history_disabled;
-                    if (replacing == null) CashStore.add(app, date, signedAmount, savedNote);
-                    else CashStore.update(app, replacing, date, signedAmount);
+                    if (replacing == null) CashStore.add(app, date, signedAmount, annotation);
+                    else CashStore.update(app, replacing, date, signedAmount, original, annotation);
                 }
                 return 0;
             } catch (CashStore.StaleCashTransactionException stale) {

@@ -5,6 +5,10 @@
     <string name="cash_history_add">Add cash transaction</string>
     <string name="cash_history_amount">Amount (%1$s)</string>
     <string name="cash_history_note_optional">Note (optional)</string>
+    <string name="cash_history_tag_optional">Tag (optional)</string>
+    <string name="cash_history_add_tag">Add tag</string>
+    <string name="cash_history_remove_tag">Remove tag %1$s</string>
+    <string name="cash_history_annotation_load_failed">Could not load the note and tags. Try again.</string>
     <string name="cash_history_date_value">Date: %1$s</string>
     <string name="cash_history_time_value">Time: %1$s</string>
     <string name="cash_history_choose_date">Choose transaction date</string>

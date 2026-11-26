@@ -5,6 +5,10 @@
     <string name="cash_history_add">افزودن تراکنش نقدی</string>
     <string name="cash_history_amount">مبلغ (%1$s)</string>
     <string name="cash_history_note_optional">یادداشت (اختیاری)</string>
+    <string name="cash_history_tag_optional">برچسب (اختیاری)</string>
+    <string name="cash_history_add_tag">افزودن برچسب</string>
+    <string name="cash_history_remove_tag">حذف برچسب %1$s</string>
+    <string name="cash_history_annotation_load_failed">یادداشت و برچسب‌ها بارگیری نشدند. دوباره تلاش کنید.</string>
     <string name="cash_history_date_value">تاریخ: %1$s</string>
     <string name="cash_history_time_value">ساعت: %1$s</string>
     <string name="cash_history_choose_date">انتخاب تاریخ تراکنش</string>

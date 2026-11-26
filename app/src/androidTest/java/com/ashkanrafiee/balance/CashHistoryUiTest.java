@@ -10,6 +10,7 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.os.SystemClock;
+import android.text.TextUtils;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
@@ -76,6 +77,7 @@ public class CashHistoryUiTest {
             assertEquals(activity.getString(R.string.cash_history_invalid_amount), amount.getError());
             amount.setText("25");
             editorNote(activity).setText("Cash from the market");
+            editorTag(activity).setText("market");
         });
         saveEditor();
         await(activity -> currentDialog(activity) == null && movement(activity) != null);
@@ -83,6 +85,7 @@ public class CashHistoryUiTest {
         assertEquals(250, added.amount);
         assertTrue(added.date >= beforeEditor && added.date <= System.currentTimeMillis());
         assertEquals("Cash from the market", BalanceData.getNote(context, added));
+        assertEquals(Collections.singletonList("market"), BalanceData.getTags(context, added));
 
         requestRemoval();
         scenario.onActivity(activity -> currentDialog(activity)
@@ -178,6 +181,35 @@ public class CashHistoryUiTest {
         }
     }
 
+    @Test public void editingCashMovementCanUpdateItsNoteAndReplaceATag() throws Exception {
+        Transaction original = CashStore.add(context, System.currentTimeMillis(), 120);
+        MetadataStore.setAnnotations(context, original, "Original note",
+            Collections.singletonList("old tag"));
+        launch(CashStore.KEY);
+        openEdit();
+        scenario.onActivity(activity -> {
+            assertEquals("Original note", editorNote(activity).getText().toString());
+            editorNote(activity).setText("Updated note");
+            click(removeTagControl(activity, "old tag"));
+            assertNull(removeTagControl(activity, "old tag"));
+            editorTag(activity).setText("new tag");
+            click(dialogText(activity, activity.getString(R.string.cash_history_add_tag)));
+            assertNotNull(removeTagControl(activity, "new tag"));
+        });
+        saveEditor();
+        await(activity -> currentDialog(activity) == null && HistoryActivity.idleForTest(activity));
+
+        CashStore.State state = CashStore.read(context);
+        assertEquals(1, state.transactions.size());
+        assertEquals(120, state.balance);
+        Transaction updated = state.transactions.get(0);
+        assertEquals(original.sig, updated.sig);
+        assertEquals(original.date, updated.date);
+        assertEquals(original.amount, updated.amount);
+        assertEquals("Updated note", BalanceData.getNote(context, updated));
+        assertEquals(Collections.singletonList("new tag"), BalanceData.getTags(context, updated));
+    }
+
     @Test public void recoveryFromAnEditRestoresDraftOnCancelAndSave() throws Exception {
         long timestamp = (System.currentTimeMillis() / 60_000 - 1) * 60_000 + 12_345;
         Transaction original = CashStore.add(context, timestamp, 12);
@@ -185,7 +217,8 @@ public class CashHistoryUiTest {
         launch(CashStore.KEY);
         openEdit();
         scenario.onActivity(activity -> {
-            assertNull(editorNote(activity));
+            assertEquals("cash note", editorNote(activity).getText().toString());
+            assertNotNull(removeTagControl(activity, "tag"));
             assertEquals(Long.valueOf(12), CashStore.parseAmount(activity,
                 editorAmount(activity).getText().toString()));
             RadioButton withdrawal = (RadioButton) dialogText(activity,
@@ -210,11 +243,15 @@ public class CashHistoryUiTest {
             click(dialogText(activity, activity.getString(R.string.cash_history_record_deposit)));
             assertEquals(Long.valueOf(43), CashStore.parseAmount(activity,
                 editorAmount(activity).getText().toString()));
+            assertEquals("", editorNote(activity).getText().toString());
+            assertNull(removeTagControl(activity, "tag"));
             currentDialog(activity).getButton(AlertDialog.BUTTON_NEGATIVE).performClick();
         });
         awaitRecoveryAction();
         scenario.onActivity(activity -> {
             assertEquals("۴٫۳", editorAmount(activity).getText().toString());
+            assertEquals("cash note", editorNote(activity).getText().toString());
+            assertNotNull(removeTagControl(activity, "tag"));
             click(dialogText(activity, activity.getString(R.string.cash_history_record_deposit)));
         });
         saveEditor();
@@ -222,6 +259,8 @@ public class CashHistoryUiTest {
             cashValue(activity, 55), cashValue(activity, 0))) != null);
         scenario.onActivity(activity -> {
             assertEquals("۴٫۳", editorAmount(activity).getText().toString());
+            assertEquals("cash note", editorNote(activity).getText().toString());
+            assertNotNull(removeTagControl(activity, "tag"));
             RadioButton withdrawal = (RadioButton) dialogText(activity,
                 activity.getString(R.string.history_withdrawal));
             assertTrue(withdrawal.isChecked());
@@ -237,6 +276,10 @@ public class CashHistoryUiTest {
         assertEquals(-43, updated.amount);
         assertEquals("cash note", MetadataStore.getNote(context, updated));
         assertEquals(Collections.singletonList("tag"), MetadataStore.getTags(context, updated));
+        Transaction deposit = state.transactions.stream().filter(tx -> tx.amount > 0)
+            .findFirst().orElseThrow(AssertionError::new);
+        assertNull(MetadataStore.getNote(context, deposit));
+        assertTrue(MetadataStore.getTags(context, deposit).isEmpty());
     }
 
     @Test public void editingHistoricalMovementShowsHistoryOnlyWithUnchangedBalance() {
@@ -349,11 +392,26 @@ public class CashHistoryUiTest {
     }
 
     private static EditText editorNote(HistoryActivity activity) {
+        return editorAnnotationField(activity, R.string.cash_history_note_optional);
+    }
+
+    private static EditText editorTag(HistoryActivity activity) {
+        return editorAnnotationField(activity, R.string.cash_history_tag_optional);
+    }
+
+    private static EditText editorAnnotationField(HistoryActivity activity, int hintRes) {
         AlertDialog dialog = currentDialog(activity);
-        String hint = activity.getString(R.string.cash_history_note_optional);
-        return dialog == null ? null : (EditText) find(dialog.getWindow().getDecorView(),
-            view -> view instanceof EditText && ((EditText) view).getHint() != null
-                && hint.contentEquals(((EditText) view).getHint()));
+        String hint = activity.getString(hintRes);
+        View field = find(dialog.getWindow().getDecorView(), view -> view instanceof EditText
+            && TextUtils.equals(hint, ((EditText) view).getHint()));
+        assertNotNull(hint, field);
+        return (EditText) field;
+    }
+
+    private static View removeTagControl(HistoryActivity activity, String tag) {
+        String description = activity.getString(R.string.cash_history_remove_tag, tag);
+        return find(currentDialog(activity).getWindow().getDecorView(),
+            view -> TextUtils.equals(description, view.getContentDescription()));
     }
 
     private static View dialogText(HistoryActivity activity, String text) {

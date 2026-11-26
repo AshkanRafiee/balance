@@ -15,6 +15,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Rect;
 import android.os.SystemClock;
+import android.text.TextUtils;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -33,6 +34,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import java.lang.reflect.Field;
+import java.util.Collections;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
@@ -115,18 +117,15 @@ public final class DashboardCashTest {
             tapCashCardText(activity, R.string.cash_dashboard_open_history));
     }
 
-    @Test public void addTransactionStaysOnDashboardAndSavesOptionalNote() {
+    @Test public void addTransactionStaysOnDashboardAndSavesOptionalNoteAndTag() {
         launch();
         scenario.onActivity(activity -> tapCashCardText(activity, R.string.cash_dashboard_add));
         await(activity -> activity.cashEditorDialogForTest() != null);
         scenario.onActivity(activity -> {
             AlertDialog editor = activity.cashEditorDialogForTest();
             amountField(editor).setText("10.5");
-            EditText note = (EditText) find(editor.getWindow().getDecorView(),
-                v -> v instanceof EditText && android.text.TextUtils.equals(
-                    activity.getString(R.string.cash_history_note_optional), ((EditText) v).getHint()));
-            assertNotNull("optional note field", note);
-            note.setText("lunch");
+            annotationField(editor, R.string.cash_history_note_optional).setText("lunch");
+            annotationField(editor, R.string.cash_history_tag_optional).setText("food");
         });
         await(activity -> activity.cashEditorDialogForTest() != null
             && activity.cashEditorDialogForTest().getButton(AlertDialog.BUTTON_POSITIVE).isEnabled());
@@ -145,6 +144,7 @@ public final class DashboardCashTest {
         try {
             assertEquals(105L, state.balance);
             assertEquals("lunch", BalanceData.getNote(context, transaction));
+            assertEquals(Collections.singletonList("food"), BalanceData.getTags(context, transaction));
         } finally {
             CashStore.remove(context, transaction);
         }
@@ -307,6 +307,14 @@ public final class DashboardCashTest {
     private static EditText amountField(AlertDialog dialog) {
         View field = find(dialog.getWindow().getDecorView(), view -> view instanceof EditText);
         assertNotNull("Cash amount field", field);
+        return (EditText) field;
+    }
+
+    private static EditText annotationField(AlertDialog dialog, int hintRes) {
+        String hint = dialog.getContext().getString(hintRes);
+        View field = find(dialog.getWindow().getDecorView(), view -> view instanceof EditText
+            && TextUtils.equals(hint, ((EditText) view).getHint()));
+        assertNotNull(hint, field);
         return (EditText) field;
     }
 
