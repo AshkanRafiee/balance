@@ -366,8 +366,12 @@ public class CashStoreTest {
             CashStore.setPublishHookForTests(null);
         }
         List<Transaction> movements = CashStore.read(context).transactions;
-        assertEquals(1, movements.size());
-        assertAnnotation(movements.get(0), annotation);
+        try {
+            assertEquals(1, movements.size());
+            assertAnnotation(movements.get(0), annotation);
+        } finally {
+            for (Transaction movement : movements) CashStore.remove(context, movement);
+        }
     }
 
     private void assertAnnotation(Transaction movement, CashStore.Annotation annotation)
