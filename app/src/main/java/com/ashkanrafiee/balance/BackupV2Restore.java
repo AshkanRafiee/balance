@@ -718,6 +718,7 @@ final class BackupV2Restore {
                     seen = once(seen, SECTION_CASH, "duplicate cash ledger");
                     String cash = reader.readCash(json);
                     try {
+                        // The receiving clock only matters when applying selected Cash.
                         CashStore.validateData(cash);
                     } catch (Exception malformed) {
                         // A JSON parser may include the input text in its diagnostic.

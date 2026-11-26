@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -94,6 +95,40 @@ public class CashBackupTest {
         assertFalse(result.cashImported);
         assertEquals(localWallet, CashStore.exportData(context));
         assertEquals(1, result.added);
+        assertEquals(123, BalanceData.read(context).get("Mellat").amount);
+    }
+
+    @Test public void cashClockRollbackDoesNotBlockBalanceRestore() throws Exception {
+        long beforeRollback = System.currentTimeMillis() + TimeUnit.DAYS.toMillis(1);
+        String snapshot = new JSONObject().put("countedAmount", 1000)
+            .put("countedAt", beforeRollback).put("updatedAt", beforeRollback)
+            .put("movements", new JSONArray()).toString();
+        assertTrue(DataGeneration.dataPrefs(context).edit()
+            .putString(CashStore.DATA, BalanceData.encryptStorePayload(snapshot)).commit());
+        LinkedHashMap<String, Bank> balances = new LinkedHashMap<>();
+        balances.put("Mellat", new Bank("Mellat", 123, DATE, "bank-sender", null));
+        BalanceData.write(context, balances);
+        BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
+        clearUserData();
+        CashStore.add(context, DATE, 2000);
+        String localWallet = CashStore.exportData(context);
+
+        BackupManager.RestoreResult balancesOnly = BackupManager.restore(context,
+            Uri.fromFile(backup), PASSWORD, null, EnumSet.of(BackupManager.Section.BALANCES));
+        assertFalse(balancesOnly.cashConflict);
+        assertFalse(balancesOnly.cashImported);
+        assertEquals(localWallet, CashStore.exportData(context));
+        assertEquals(1, balancesOnly.added);
+        assertEquals(123, BalanceData.read(context).get("Mellat").amount);
+
+        clearUserData();
+        BackupManager.RestoreResult withCash = BackupManager.restore(context,
+            Uri.fromFile(backup), PASSWORD, null,
+            EnumSet.of(BackupManager.Section.BALANCES, BackupManager.Section.CASH));
+        assertTrue(withCash.cashConflict);
+        assertFalse(withCash.cashImported);
+        assertNull(CashStore.exportData(context));
+        assertEquals(1, withCash.added);
         assertEquals(123, BalanceData.read(context).get("Mellat").amount);
     }
 

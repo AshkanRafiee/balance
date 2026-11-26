@@ -406,14 +406,8 @@ public class CashStoreTest {
     }
 
     private void assertRejectedImport(String snapshot) throws Exception {
-        try {
-            CashStore.validateData(snapshot);
-            fail("backup validation should reject a distant future cash timestamp");
-        } catch (IllegalArgumentException expected) {}
-        try {
-            CashStore.restoreData(context, snapshot);
-            fail("restore should reject a distant future cash timestamp");
-        } catch (IllegalArgumentException expected) {}
+        CashStore.validateData(snapshot);
+        assertEquals(CashStore.RestoreResult.CONFLICT, CashStore.restoreData(context, snapshot));
     }
 
     private static String snapshot(long countedAt, long updatedAt, String movements) {

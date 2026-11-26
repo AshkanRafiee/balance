@@ -530,34 +530,33 @@ final class CashStore {
     }
 
     static void validateData(String json) throws Exception {
-        decodeImport(json);
+        decode(json);
     }
 
     /** A cash count and movements cannot safely be merged across conflicting ledgers. */
     static RestoreResult restoreData(Context context, String json) throws Exception {
         synchronized (BalanceData.class) {
-            State incoming = decodeImport(json);
+            State incoming = decode(json);
             SharedPreferences prefs = DataGeneration.dataPrefs(context);
             State current = read(prefs);
             if (!incoming.hasData() || encode(incoming).equals(encode(current)))
                 return RestoreResult.UNCHANGED;
-            if (current.hasData()) return RestoreResult.CONFLICT;
+            if (current.hasData() || isTooFarInFuture(incoming)) return RestoreResult.CONFLICT;
             write(prefs, incoming);
             return RestoreResult.IMPORTED;
         }
     }
 
-    private static State decodeImport(String json) throws Exception {
-        State state = decode(json);
+    private static boolean isTooFarInFuture(State state) {
         long latest = System.currentTimeMillis() + IMPORT_CLOCK_SKEW_MS;
         // Recount absorbs future-dated movements as well as preserving the previous cutoff.
         if (state.countedAt > latest || state.updatedAt > latest)
-            throw new IllegalArgumentException("cash count or update time is too far in the future");
+            return true;
         for (Transaction movement : state.transactions) {
             if (movement.date > latest)
-                throw new IllegalArgumentException("cash movement time is too far in the future");
+                return true;
         }
-        return state;
+        return false;
     }
 
     private static String encode(State state) throws Exception {
