@@ -3989,9 +3989,9 @@ public class MainActivity extends Activity {
             }
             BigInteger shown = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(MainActivity.this))
                 ? value.divide(BigInteger.TEN) : value;
-            String text = exact ? CurrencyHelper.exactDisplayValue(MainActivity.this, value)
+            String amount = exact ? CurrencyHelper.exactDisplayValue(MainActivity.this, value)
                 .stripTrailingZeros().toPlainString() : shown.toString();
-            ClipData clip = ClipData.newPlainText(label, text);
+            ClipData clip = ClipData.newPlainText(label, amount);
             if (android.os.Build.VERSION.SDK_INT >= 33) {
                 android.os.PersistableBundle clipExtras = new android.os.PersistableBundle();
                 clipExtras.putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true);

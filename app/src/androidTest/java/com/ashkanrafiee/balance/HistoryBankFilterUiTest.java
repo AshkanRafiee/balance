@@ -34,7 +34,6 @@ public class HistoryBankFilterUiTest {
     private Context ctx;
     private String originalTag;
     private String originalCurrency;
-    private boolean originalCashEnabled;
 
     private static final String MELLAT = "Mellat";
     private static final String SAMAN = "Saman";
@@ -48,17 +47,14 @@ public class HistoryBankFilterUiTest {
         ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
         originalTag = LocaleHelper.currentTag(ctx);
         originalCurrency = CurrencyHelper.currency(ctx);
-        originalCashEnabled = CashStore.isEnabled(ctx);
         LocaleHelper.setLanguage(ctx, "en");
         CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_RIAL);
-        CashStore.setEnabled(ctx, true);
     }
 
     @After public void tearDown() {
         if (scenario != null) scenario.close();
         LocaleHelper.setLanguage(ctx, originalTag);
         CurrencyHelper.setCurrency(ctx, originalCurrency);
-        CashStore.setEnabled(ctx, originalCashEnabled);
         BalanceData.reset(ctx, true);
     }
 
@@ -98,16 +94,16 @@ public class HistoryBankFilterUiTest {
         await(() -> findByTextContaining("900,000") != null, 20_000);
 
         // Narrow to Saman only: the ID-less bank chip is gone, the name stays.
-        await(() -> findByText(ctx.getString(R.string.cash_history_sources)) != null, 20_000);
-        click(findByText(ctx.getString(R.string.cash_history_sources)));
-        await(() -> findInDialog(ctx.getString(R.string.cash_history_sources_title)) != null,
+        await(() -> findByText(ctx.getString(R.string.history_filter_banks)) != null, 20_000);
+        click(findByText(ctx.getString(R.string.history_filter_banks)));
+        await(() -> findInDialog(ctx.getString(R.string.history_filter_banks_title)) != null,
             10_000);
         checkInDialog(BankRules.displayName(ctx, SAMAN));
         click(findInDialog(ctx.getString(R.string.history_filter_apply)));
         // The chips refresh synchronously now, so only the rendered count proves the narrowed
         // render landed; asserting absences on the stale list would race it.
         await(() -> findByText(counted(1)) != null, 20_000);
-        assertNotNull(findByText(ctx.getString(R.string.cash_history_sources_count, 1)));
+        assertNotNull(findByText(ctx.getString(R.string.history_filter_banks_count, 1)));
         assertNotNull(findByTextContaining("900,000"));
         assertTrue(findByTextContaining("30,000,000") == null);
         assertTrue(findByTextContaining("5,000,000") == null);
@@ -130,8 +126,8 @@ public class HistoryBankFilterUiTest {
         assertNotNull(findByTextContaining("900,000"));
 
         // Switching banks prunes the stale account: Saman's 333 drops, Mellat opens whole.
-        click(findByText(ctx.getString(R.string.cash_history_sources_count, 1)));
-        await(() -> findInDialog(ctx.getString(R.string.cash_history_sources_title)) != null,
+        click(findByText(ctx.getString(R.string.history_filter_banks_count, 1)));
+        await(() -> findInDialog(ctx.getString(R.string.history_filter_banks_title)) != null,
             10_000);
         await(() -> findCheckInDialog(BankRules.displayName(ctx, MELLAT)) != null, 30_000);
         uncheckInDialog(BankRules.displayName(ctx, SAMAN));
@@ -145,10 +141,10 @@ public class HistoryBankFilterUiTest {
                 && findByText(ctx.getString(R.string.history_filter_accounts_count, 1)) == null);
 
         // Clearing the banks returns the full history.
-        click(findByText(ctx.getString(R.string.cash_history_sources_count, 1)));
-        await(() -> findInDialog(ctx.getString(R.string.cash_history_sources_title)) != null,
+        click(findByText(ctx.getString(R.string.history_filter_banks_count, 1)));
+        await(() -> findInDialog(ctx.getString(R.string.history_filter_banks_title)) != null,
             10_000);
-        click(findInDialog(ctx.getString(R.string.cash_history_sources_clear)));
+        click(findInDialog(ctx.getString(R.string.history_filter_banks_clear)));
         await(() -> findByTextContaining("30,000,000") != null, 20_000);
         await(() -> findByTextContaining("5,000,000") != null, 20_000);
 
@@ -202,12 +198,10 @@ public class HistoryBankFilterUiTest {
         await(() -> findByTextContaining("30,000,000") != null, 20_000);
         await(() -> findByTextContaining("7,000,000") != null, 20_000);
 
-        click(findByText(ctx.getString(R.string.cash_history_sources)));
-        await(() -> findInDialog(ctx.getString(R.string.cash_history_sources_title)) != null,
+        click(findByText(ctx.getString(R.string.history_filter_banks)));
+        await(() -> findInDialog(ctx.getString(R.string.history_filter_banks_title)) != null,
             10_000);
         await(() -> findCheckInDialog(BankRules.displayName(ctx, BLU)) != null, 30_000);
-        assertNotNull("Cash is offered as a source even without entries",
-            findCheckInDialog(ctx.getString(R.string.cash_label)));
         checkInDialog(BankRules.displayName(ctx, BLU));
         click(findInDialog(ctx.getString(R.string.history_filter_apply)));
         await(() -> findByText(counted(1)) != null, 20_000);
@@ -229,8 +223,8 @@ public class HistoryBankFilterUiTest {
         assertTrue("the older month starts collapsed",
             findByText("aged saman note") == null);
 
-        click(findByText(ctx.getString(R.string.cash_history_sources)));
-        await(() -> findInDialog(ctx.getString(R.string.cash_history_sources_title)) != null,
+        click(findByText(ctx.getString(R.string.history_filter_banks)));
+        await(() -> findInDialog(ctx.getString(R.string.history_filter_banks_title)) != null,
             10_000);
         await(() -> findCheckInDialog(BankRules.displayName(ctx, SAMAN)) != null, 30_000);
         checkInDialog(BankRules.displayName(ctx, SAMAN));
