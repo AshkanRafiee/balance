@@ -187,8 +187,7 @@ final class BalanceData {
             "(?m)^[ \\t]*(واریز|برداشت)[ \\t]+مبلغ(?:[ \\t]+|[ \\t]*:[ \\t]*)"
                 + "([0-9][0-9,]*)[ \\t]*ریال[ \\t]*\\r?$");
         private static final Pattern mofidHamiFeeLine = Pattern.compile(
-            "(?m)^[ \\t]*کارمزد\\b[^\\r\\n]*",
-            Pattern.UNICODE_CHARACTER_CLASS);
+            "(?m)^[ \\t]*کارمزد(?=[\\p{P}\\p{Z}\\t]|$)[^\\r\\n]*");
         /** The amount written directly after a deposit/withdrawal label, as Tejarat does with
          *  "برداشت: 490,098,000 ریال". Matching one of these also resolves the direction: a label that
          *  feeds the amount is authoritative, so a payment-method word like "پرداخت" in the same message
