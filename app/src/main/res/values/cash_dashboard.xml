@@ -4,11 +4,11 @@
     <item type="id" name="dashboard_cash_amount" />
     <string name="cash_dashboard_display">Show cash</string>
     <string name="cash_dashboard_value">%1$s %2$s</string>
-    <string name="cash_dashboard_not_counted">Cash hasn’t been counted yet</string>
+    <string name="cash_dashboard_not_counted">No cash balance set yet</string>
     <string name="cash_dashboard_last_updated">Last updated: %1$s</string>
-    <string name="cash_dashboard_count">Count cash</string>
+    <string name="cash_dashboard_count">Set cash balance</string>
     <string name="cash_dashboard_history">Cash history</string>
-    <string name="cash_dashboard_count_message">Enter how much cash you have now. This updates your balance without adding a transaction. To record a deposit or withdrawal, open Cash history. Entries dated after this count change your balance; older entries appear only in history.</string>
+    <string name="cash_dashboard_count_message">Enter how much cash you have now. This replaces your cash balance without adding a transaction. To record a deposit or withdrawal, open Cash history.</string>
     <string name="cash_dashboard_count_amount">Cash amount (%1$s)</string>
     <string name="cash_dashboard_amount_error">Enter a valid amount of zero or more.</string>
     <string name="cash_dashboard_save">Save</string>

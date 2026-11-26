@@ -11,6 +11,7 @@ import java.util.Map;
 final class BankIcon {
     private static final Map<String, Integer> ICON_RES = new HashMap<>();
     static {
+        ICON_RES.put(CashStore.KEY, R.drawable.ic_cash);
         ICON_RES.put("Ansar", R.drawable.bank_ansar);
         ICON_RES.put("Bankino", R.drawable.bank_bankino);
         ICON_RES.put("Blu", R.drawable.bank_blu);

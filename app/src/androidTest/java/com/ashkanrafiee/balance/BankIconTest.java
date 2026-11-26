@@ -22,6 +22,7 @@ import org.junit.runner.RunWith;
 public class BankIconTest {
     @Test public void mofidUsesItsOwnIcon_unknownBanksKeepInitialsFallback() {
         assertEquals(R.drawable.bank_mofid, BankIcon.iconFor("Mofid"));
+        assertEquals(R.drawable.ic_cash, BankIcon.iconFor(CashStore.KEY));
         assertEquals(R.drawable.bank_melli, BankIcon.iconFor("Melli"));
         assertEquals(0, BankIcon.iconFor("Unknown bank"));
         assertEquals(0, BankIcon.iconFor(""));
@@ -29,14 +30,20 @@ public class BankIconTest {
     }
 
     @Test public void mofidStrokesRemainVisibleAndUnclippedInLightMode() {
-        verifyRasterSizes(false);
+        verifyRasterSizes("Mofid", false, 1.8, 2.8);
     }
 
     @Test public void mofidStrokesRemainVisibleAndUnclippedInDarkMode() {
-        verifyRasterSizes(true);
+        verifyRasterSizes("Mofid", true, 1.8, 2.8);
     }
 
-    private static void verifyRasterSizes(boolean night) {
+    @Test public void cashBanknoteIsCenteredAndVisibleInBothThemes() {
+        verifyRasterSizes(CashStore.KEY, false, 1.35, 1.85);
+        verifyRasterSizes(CashStore.KEY, true, 1.35, 1.85);
+    }
+
+    private static void verifyRasterSizes(String name, boolean night, double minAspect,
+            double maxAspect) {
         Context base = InstrumentationRegistry.getInstrumentation().getTargetContext();
         Configuration configuration = new Configuration(base.getResources().getConfiguration());
         configuration.uiMode = (configuration.uiMode & ~Configuration.UI_MODE_NIGHT_MASK)
@@ -49,10 +56,10 @@ public class BankIconTest {
             night ? luminance(ink) > luminance(panel) : luminance(ink) < luminance(panel));
 
         // Exact raster pixels, independent of the emulator's display density.
-        int[] sizes = {26, 34, 36, 48}; // Widget, history, dashboard, intrinsic icon.
+        int[] sizes = {26, 30, 34, 36, 48}; // Widget, history row/header, dashboard, intrinsic icon.
         for (int size : sizes) {
             String label = (night ? "night" : "light") + " " + size + "px: ";
-            Drawable drawable = context.getDrawable(BankIcon.iconFor("Mofid"));
+            Drawable drawable = context.getDrawable(BankIcon.iconFor(name));
             assertNotNull(label + "drawable inflates", drawable);
             int intrinsic = Math.round(48 * context.getResources().getDisplayMetrics().density);
             assertEquals(label + "48dp width", intrinsic, drawable.getIntrinsicWidth());
@@ -61,14 +68,15 @@ public class BankIconTest {
             try {
                 drawable.setBounds(0, 0, size, size);
                 drawable.draw(new Canvas(bitmap));
-                verifyRaster(bitmap, ink, panel, label);
+                verifyRaster(bitmap, ink, panel, label, minAspect, maxAspect);
             } finally {
                 bitmap.recycle();
             }
         }
     }
 
-    private static void verifyRaster(Bitmap bitmap, int ink, int panel, String label) {
+    private static void verifyRaster(Bitmap bitmap, int ink, int panel, String label,
+            double minAspect, double maxAspect) {
         int size = bitmap.getWidth();
         int left = size, top = size, right = -1, bottom = -1;
         int strongest = Color.TRANSPARENT;
@@ -98,7 +106,8 @@ public class BankIconTest {
         assertEquals(label + "horizontally centered", size / 2.0, (left + right + 1) / 2.0, 1.5);
         assertEquals(label + "vertically centered", size / 2.0, (top + bottom + 1) / 2.0, 1.5);
         double aspect = (right - left + 1.0) / (bottom - top + 1.0);
-        assertTrue(label + "wide bull is not stretched: " + aspect, aspect >= 1.8 && aspect <= 2.8);
+        assertTrue(label + "artwork keeps its proportions: " + aspect,
+            aspect >= minAspect && aspect <= maxAspect);
         assertTrue(label + "artwork uses the available width", right - left + 1 >= size * 0.65);
 
         // Unpremultiplication can round RGB channels on thin antialiased strokes.

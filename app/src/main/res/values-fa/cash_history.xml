@@ -8,7 +8,7 @@
     <string name="cash_history_time_value">ساعت: %1$s</string>
     <string name="cash_history_choose_date">انتخاب تاریخ تراکنش</string>
     <string name="cash_history_choose_time">انتخاب ساعت تراکنش</string>
-    <string name="cash_history_count_rule">تراکنش‌هایی که در زمان آخرین شمارش پول نقد یا پیش از آن انجام شده‌اند، فقط در تاریخچه ثبت می‌شوند. تراکنش‌های بعدی موجودی نقدی را هم تغییر می‌دهند.</string>
+    <string name="cash_history_count_rule">واریز و برداشت، موجودی نقدی را تغییر می‌دهند. اگر زمان تراکنش هم‌زمان با آخرین تنظیم موجودی نقدی یا پیش از آن باشد، تراکنش فقط در تاریخچه نمایش داده می‌شود.</string>
     <string name="cash_history_invalid_amount">مبلغ معتبری بیشتر از صفر وارد کنید.</string>
     <string name="cash_history_future">تاریخ و ساعتی انتخاب کنید که در آینده نباشد.</string>
     <string name="cash_history_too_early">تاریخ یا ساعت دیرتری انتخاب کنید.</string>
@@ -22,7 +22,7 @@
     <string name="cash_history_row_hint">برای دیدن جزئیات، یادداشت و برچسب‌ها یا حذف تراکنش، بزنید.</string>
     <string name="cash_history_remove">حذف</string>
     <string name="cash_history_remove_title">تراکنش نقدی حذف شود؟</string>
-    <string name="cash_history_remove_message">این تراکنش از تاریخچه حذف می‌شود و اگر موجودی نقدی فعلی را تغییر داده باشد، اثر آن برگردانده می‌شود.</string>
+    <string name="cash_history_remove_message">این تراکنش از تاریخچه حذف می‌شود. اگر پس از آخرین تنظیم موجودی نقدی انجام شده باشد یا هنوز موجودی نقدی را تنظیم نکرده باشید، اثر واریز یا برداشت از موجودی هم برگردانده می‌شود.</string>
     <string name="cash_history_missing">این تراکنش نقدی دیگر در تاریخچه نیست.</string>
     <string name="cash_history_remove_insufficient">حذف این تراکنش موجودی نقدی را در این تاریخ یا پس از آن منفی می‌کند.</string>
     <string name="cash_history_remove_failed">تراکنش نقدی حذف نشد. دوباره تلاش کنید.</string>
