@@ -219,6 +219,7 @@ public class CashStoreTest {
         assertEquals(100L, preview.currentBalance);
         assertEquals(0L, preview.availableAtShortfall);
         assertEquals(40L, preview.requiredAtShortfall);
+        assertEquals(date, preview.shortfallDate);
         assertEquals(40L, preview.shortfall);
         assertTrue(preview.recoveryDate < date);
 

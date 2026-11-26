@@ -62,6 +62,7 @@ final class CashStore {
         final boolean insufficient;
         final long availableAtShortfall;
         final long requiredAtShortfall;
+        final long shortfallDate;
         final long shortfall;
         final long recoveryDate;
 
@@ -73,6 +74,7 @@ final class CashStore {
             insufficient = failure != null;
             availableAtShortfall = insufficient ? failure.available : 0;
             requiredAtShortfall = insufficient ? failure.required : 0;
+            shortfallDate = insufficient ? failure.date : 0;
             shortfall = insufficient ? failure.shortfall : 0;
             recoveryDate = insufficient && failure.date - 1 > current.countedAt
                 ? failure.date - 1 : 0;

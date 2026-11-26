@@ -4937,6 +4937,8 @@ public final class HistoryActivity extends Activity {
             }
             if (result.insufficient) {
                 preview.setText(getString(R.string.cash_history_preview_insufficient,
+                    dateText(calOf(result.shortfallDate, iranCalendar)) + " · "
+                        + timeText(result.shortfallDate),
                     cashBalanceValue(result.availableAtShortfall),
                     cashBalanceValue(result.requiredAtShortfall)));
                 feedback.setVisibility(View.GONE);

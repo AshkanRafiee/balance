@@ -14,10 +14,10 @@
     <string name="cash_history_too_early">تاریخ یا ساعت دیرتری انتخاب کنید.</string>
     <string name="cash_history_invalid_time">این ساعت محلی در این تاریخ وجود ندارد. ساعت دیگری انتخاب کنید.</string>
     <string name="cash_history_disabled">پول نقد غیرفعال است.</string>
-    <string name="cash_history_insufficient">این تغییر موجودی نقدی را در این تاریخ یا پس از آن منفی می‌کند.</string>
-    <string name="cash_history_preview_insufficient">موجودی نقدی در این تاریخ یا پس از آن کافی نیست.\nموجودی در دسترس: %1$s\nمبلغ لازم: %2$s</string>
+    <string name="cash_history_insufficient">با این تغییر، موجودی نقدی برای یکی از برداشت‌ها کافی نخواهد بود.</string>
+    <string name="cash_history_preview_insufficient">موجودی نقدی برای برداشت در %1$s کافی نیست.\nموجودی در دسترس: %2$s\nمبلغ لازم: %3$s</string>
     <string name="cash_history_record_deposit">ثبت واریز</string>
-    <string name="cash_history_recovery_hint">واریز را ذخیره کنید، سپس تراکنش اولیه را بررسی و ذخیره کنید.</string>
+    <string name="cash_history_recovery_hint">پول نقد دریافتی را ثبت کنید، سپس تراکنش اولیه را بررسی و ذخیره کنید.</string>
     <string name="cash_history_preview_balance">موجودی نقدی قبل: %1$s\nموجودی نقدی بعد: %2$s</string>
     <string name="cash_history_preview_history_only">فقط در تاریخچه ثبت می‌شود. موجودی نقدی %1$s باقی می‌ماند.</string>
     <string name="cash_history_preview_loading">در حال بررسی موجودی نقدی…</string>

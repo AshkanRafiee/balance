@@ -14,10 +14,10 @@
     <string name="cash_history_too_early">Choose a later date or time.</string>
     <string name="cash_history_invalid_time">That local time does not exist on this date. Choose another time.</string>
     <string name="cash_history_disabled">Cash is turned off.</string>
-    <string name="cash_history_insufficient">This change would make your cash balance negative on this date or later.</string>
-    <string name="cash_history_preview_insufficient">Not enough cash on this date or later.\nAvailable: %1$s\nNeeded: %2$s</string>
+    <string name="cash_history_insufficient">This change would leave too little cash for a withdrawal.</string>
+    <string name="cash_history_preview_insufficient">Not enough cash for a withdrawal on %1$s.\nAvailable: %2$s\nNeeded: %3$s</string>
     <string name="cash_history_record_deposit">Record a deposit</string>
-    <string name="cash_history_recovery_hint">Save the deposit, then review and save your original transaction.</string>
+    <string name="cash_history_recovery_hint">Record cash you received, then review and save your original transaction.</string>
     <string name="cash_history_preview_balance">Cash balance before: %1$s\nCash balance after: %2$s</string>
     <string name="cash_history_preview_history_only">History only. Cash balance stays at %1$s.</string>
     <string name="cash_history_preview_loading">Checking cash balance…</string>
