@@ -1,0 +1,4 @@
+• Track cash from the dashboard. Record deposits and withdrawals, preview the new balance, and edit entries with notes and tags.
+• Adjust your cash balance without adding a transaction, or hide Cash from totals and History while keeping your entries.
+• See cash in the widget and include cash entries in CSV exports and encrypted backups.
+• Balance now recognizes MofidCard messages and records Hami withdrawals with the fee included in the stated amount.
