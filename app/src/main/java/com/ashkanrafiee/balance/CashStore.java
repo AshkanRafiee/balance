@@ -307,6 +307,8 @@ final class CashStore {
                 throw failure;
             }
         } catch (UnconfirmedCashSaveException failure) {
+            // The selected generation might be visible even if durability cannot be confirmed.
+            BalanceData.notifyHistoryChanged();
             throw failure;
         } catch (Exception failure) {
             throw new IllegalStateException("cash movement and annotation could not be saved", failure);
