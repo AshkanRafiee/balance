@@ -4,7 +4,6 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.JsonReader;
 import android.util.JsonToken;
-import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -20,6 +19,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
 
@@ -34,6 +34,7 @@ final class CashStore {
     static final String DATA = "cash_ledger";
     static final String REVISION = "cash_revision";
     static final int MAX_SNAPSHOT_CHARS = 4 * 1024 * 1024;
+    private static final long IMPORT_CLOCK_SKEW_MS = TimeUnit.MINUTES.toMillis(5);
     private static final Pattern AMOUNT_INPUT =
         Pattern.compile("(?:[0-9]++|[0-9]{1,3}(?:,[0-9]{3})++)(?:\\.[0-9]+)?");
 
@@ -41,8 +42,15 @@ final class CashStore {
     // preference changes; a successful write can publish its already validated immutable state.
     private static String cachedCiphertext;
     private static State cachedState;
+    private static DataGeneration.PublishHook publishHookForTests;
 
     private CashStore() {}
+
+    static void setPublishHookForTests(DataGeneration.PublishHook hook) {
+        synchronized (BalanceData.class) {
+            publishHookForTests = hook;
+        }
+    }
 
     enum RestoreResult { IMPORTED, UNCHANGED, CONFLICT }
 
@@ -245,24 +253,16 @@ final class CashStore {
                 affectsBalance(previous, expected, date) ? now : previous.updatedAt, movements) : null;
             boolean annotationChanged = annotation != null
                 && !(original == null ? EMPTY_ANNOTATION : original).sameAs(annotation);
-            Annotation before = !annotationChanged || expected == null ? EMPTY_ANNOTATION
-                : currentAnnotation(context, expected);
-            if (annotationChanged && original != null && !original.sameAs(before))
+            if (annotationChanged && expected != null && original != null
+                    && !original.sameAs(currentAnnotation(context, expected)))
                 throw new StaleCashTransactionException();
             if (!movementChanged && !annotationChanged) return expected;
-            if (annotationChanged) writeAnnotation(context, saved, annotation);
-            try {
-                if (movementChanged) write(prefs, next);
-            } catch (RuntimeException failure) {
-                if (annotationChanged) {
-                    try {
-                        writeAnnotation(context, saved, before);
-                    } catch (RuntimeException rollback) {
-                        Log.w("CashStore", "cash annotation rollback failed");
-                    }
-                }
-                throw failure;
-            }
+            if (movementChanged && annotationChanged)
+                writeWithAnnotation(context, next, saved, annotation);
+            else if (movementChanged)
+                write(prefs, next);
+            else
+                writeAnnotation(context, saved, annotation);
         }
         BalanceData.notifyHistoryChanged();
         return saved;
@@ -284,6 +284,33 @@ final class CashStore {
             // Do not include annotation text in diagnostics.
         }
         throw new IllegalStateException("cash annotation could not be saved");
+    }
+
+    /** Only edits spanning both stores pay for a new generation. */
+    private static void writeWithAnnotation(Context context, State state, Transaction transaction,
+            Annotation annotation) {
+        try (DataGeneration.Stage stage = DataGeneration.beginStage(context)) {
+            Context staged = stage.context();
+            SharedPreferences stagedPrefs = DataGeneration.dataPrefs(staged);
+            write(stagedPrefs, state);
+            writeAnnotation(staged, transaction, annotation);
+            stage.setPublishHookForTests(publishHookForTests);
+            try {
+                stage.publish();
+            } catch (Exception failure) {
+                // A failure after replacing the selector may already have made both changes
+                // visible. Do not report a failed add that a caller could retry and duplicate.
+                try {
+                    if (stagedPrefs.getString(REVISION, null).equals(
+                            DataGeneration.dataPrefs(context).getString(REVISION, null))) return;
+                } catch (Exception verification) {
+                    failure.addSuppressed(verification);
+                }
+                throw failure;
+            }
+        } catch (Exception failure) {
+            throw new IllegalStateException("cash movement and annotation could not be saved", failure);
+        }
     }
 
     /** Uses the same chronological check as Save, without writing anything. */
@@ -343,19 +370,23 @@ final class CashStore {
             long updatedAt = previous.updatedAt;
             if (expected.date > previous.countedAt) updatedAt = System.currentTimeMillis();
             if (previous.countedAt == 0 && movements.isEmpty()) updatedAt = 0;
-            write(prefs, new State(previous.countedAmount, previous.countedAt, updatedAt, movements));
-            clearAnnotation(context, expected);
+            State next = new State(previous.countedAmount, previous.countedAt, updatedAt, movements);
+            if (hasAnnotation(context, expected))
+                writeWithAnnotation(context, next, expected, EMPTY_ANNOTATION);
+            else
+                write(prefs, next);
         }
         BalanceData.notifyHistoryChanged();
         return true;
     }
 
-    private static void clearAnnotation(Context context, Transaction transaction) {
+    private static boolean hasAnnotation(Context context, Transaction transaction) {
         try {
-            MetadataStore.setAnnotations(context, transaction, null, Collections.emptyList());
+            // A legacy backup may contain whitespace-only text that the editor trims away.
+            return MetadataStore.getNote(context, transaction) != null
+                || !MetadataStore.getTags(context, transaction).isEmpty();
         } catch (Exception failure) {
-            // An annotation cleanup failure must not cause a committed deletion to be retried.
-            Log.w("CashStore", "cash annotation cleanup failed");
+            throw new IllegalStateException("cash annotation could not be read");
         }
     }
 
@@ -498,13 +529,13 @@ final class CashStore {
     }
 
     static void validateData(String json) throws Exception {
-        decode(json);
+        decodeImport(json);
     }
 
     /** A cash count and movements cannot safely be merged across conflicting ledgers. */
     static RestoreResult restoreData(Context context, String json) throws Exception {
         synchronized (BalanceData.class) {
-            State incoming = decode(json);
+            State incoming = decodeImport(json);
             SharedPreferences prefs = DataGeneration.dataPrefs(context);
             State current = read(prefs);
             if (!incoming.hasData() || encode(incoming).equals(encode(current)))
@@ -513,6 +544,19 @@ final class CashStore {
             write(prefs, incoming);
             return RestoreResult.IMPORTED;
         }
+    }
+
+    private static State decodeImport(String json) throws Exception {
+        State state = decode(json);
+        long latest = System.currentTimeMillis() + IMPORT_CLOCK_SKEW_MS;
+        // Recount absorbs future-dated movements as well as preserving the previous cutoff.
+        if (state.countedAt > latest || state.updatedAt > latest)
+            throw new IllegalArgumentException("cash count or update time is too far in the future");
+        for (Transaction movement : state.transactions) {
+            if (movement.date > latest)
+                throw new IllegalArgumentException("cash movement time is too far in the future");
+        }
+        return state;
     }
 
     private static String encode(State state) throws Exception {

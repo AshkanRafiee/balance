@@ -18,9 +18,11 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -37,6 +39,7 @@ public class CashStoreTest {
     }
 
     @After public void tearDown() {
+        CashStore.setPublishHookForTests(null);
         clear(context);
     }
 
@@ -259,6 +262,131 @@ public class CashStoreTest {
         } finally {
             CashStore.remove(context, transaction);
         }
+    }
+
+    @Test public void interruptedAnnotatedAddEditAndDeletePublishBothChangesOrNeither()
+            throws Exception {
+        long date = System.currentTimeMillis() - 60_000;
+        CashStore.Annotation original = new CashStore.Annotation("Lunch",
+            Collections.singletonList("food"));
+        CashStore.Annotation replacement = new CashStore.Annotation("Dinner",
+            Collections.singletonList("home"));
+        Map<String, String> priorNotes = BalanceData.readNotes(context);
+        Map<String, List<String>> priorTags = MetadataStore.readTags(context);
+        String emptyRevision = CashStore.revision(context);
+
+        failBeforePublish(() -> CashStore.add(context, date, 10, original));
+        assertTrue(CashStore.read(context).transactions.isEmpty());
+        assertEquals(emptyRevision, CashStore.revision(context));
+        assertEquals(priorNotes, BalanceData.readNotes(context));
+        assertEquals(priorTags, MetadataStore.readTags(context));
+
+        int[] interruptions = {0};
+        DataGeneration.PublishHook interruptAfterPublish = point -> {
+            if (point == DataGeneration.PublishPoint.AFTER_MANIFEST) {
+                interruptions[0]++;
+                throw new IOException("injected failure after cash publication");
+            }
+        };
+        CashStore.setPublishHookForTests(interruptAfterPublish);
+        Transaction added = CashStore.add(context, date, 10, original);
+        assertTrue(CashStore.containsVisible(context, added));
+        assertEquals(1, CashStore.read(context).transactions.size());
+        assertAnnotation(added, original);
+        String addedRevision = CashStore.revision(context);
+
+        failBeforePublish(() -> CashStore.update(context, added, date, 20, original, replacement));
+        assertTrue(CashStore.containsVisible(context, added));
+        assertEquals(10L, CashStore.read(context).balance);
+        assertEquals(addedRevision, CashStore.revision(context));
+        assertAnnotation(added, original);
+
+        CashStore.setPublishHookForTests(interruptAfterPublish);
+        Transaction edited = CashStore.update(context, added, date, 20, original, replacement);
+        assertTrue(CashStore.containsVisible(context, edited));
+        assertFalse(CashStore.containsVisible(context, added));
+        assertEquals(20L, CashStore.read(context).balance);
+        assertAnnotation(edited, replacement);
+        String editedRevision = CashStore.revision(context);
+
+        failBeforePublish(() -> CashStore.remove(context, edited));
+        assertTrue(CashStore.containsVisible(context, edited));
+        assertEquals(editedRevision, CashStore.revision(context));
+        assertAnnotation(edited, replacement);
+
+        CashStore.setPublishHookForTests(interruptAfterPublish);
+        assertTrue(CashStore.remove(context, edited));
+        assertTrue(CashStore.read(context).transactions.isEmpty());
+        assertEquals(0L, CashStore.read(context).balance);
+        assertEquals(priorNotes, BalanceData.readNotes(context));
+        assertEquals(priorTags, MetadataStore.readTags(context));
+        assertEquals(3, interruptions[0]);
+    }
+
+    private static void failBeforePublish(Runnable mutation) {
+        CashStore.setPublishHookForTests(point -> {
+            if (point == DataGeneration.PublishPoint.BEFORE_MANIFEST)
+                throw new IOException("injected failure before cash publication");
+        });
+        try {
+            mutation.run();
+            fail("cash publication should have failed");
+        } catch (IllegalStateException expected) {
+            assertEquals("injected failure before cash publication", expected.getCause().getMessage());
+        } finally {
+            CashStore.setPublishHookForTests(null);
+        }
+    }
+
+    private void assertAnnotation(Transaction movement, CashStore.Annotation annotation)
+            throws Exception {
+        assertEquals(annotation.note, MetadataStore.getNote(context, movement));
+        assertEquals(annotation.tags, MetadataStore.getTags(context, movement));
+    }
+
+    @Test public void importRejectsDistantFutureTimestampsThatCouldStrandCash() throws Exception {
+        long now = System.currentTimeMillis();
+        assertRejectedImport(snapshot(Long.MAX_VALUE, now, ""));
+        assertRejectedImport(snapshot(now, Long.MAX_VALUE, ""));
+        assertRejectedImport(snapshot(now, now, "{\"id\":\"00000000-0000-0000-0000-000000000001\","
+            + "\"date\":" + Long.MAX_VALUE + ",\"amount\":1}"));
+        assertFalse(CashStore.read(context).hasData());
+
+        long skewedCount = now + TimeUnit.MINUTES.toMillis(1);
+        assertEquals(CashStore.RestoreResult.IMPORTED,
+            CashStore.restoreData(context, snapshot(skewedCount, skewedCount, "")));
+        assertEquals(skewedCount, CashStore.read(context).countedAt);
+        assertEquals(100L, CashStore.read(context).balance);
+    }
+
+    @Test public void storedLedgerCanStillBeReadAndRecountedAfterClockRollback() throws Exception {
+        long beforeRollback = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(10);
+        String stored = snapshot(beforeRollback, beforeRollback, "");
+        assertTrue(DataGeneration.dataPrefs(context).edit()
+            .putString(CashStore.DATA, BalanceData.encryptStorePayload(stored)).commit());
+        assertEquals(100L, CashStore.read(context).balance);
+
+        CashStore.setBalance(context, 150);
+        assertEquals(beforeRollback, CashStore.read(context).countedAt);
+        CashStore.add(context, System.currentTimeMillis(), 10);
+        assertEquals(150L, CashStore.read(context).balance);
+        assertEquals(1, CashStore.read(context).transactions.size());
+    }
+
+    private void assertRejectedImport(String snapshot) throws Exception {
+        try {
+            CashStore.validateData(snapshot);
+            fail("backup validation should reject a distant future cash timestamp");
+        } catch (IllegalArgumentException expected) {}
+        try {
+            CashStore.restoreData(context, snapshot);
+            fail("restore should reject a distant future cash timestamp");
+        } catch (IllegalArgumentException expected) {}
+    }
+
+    private static String snapshot(long countedAt, long updatedAt, String movements) {
+        return "{\"countedAmount\":100,\"countedAt\":" + countedAt + ",\"updatedAt\":" + updatedAt
+            + ",\"movements\":[" + movements + "]}";
     }
 
     @Test public void snapshotCacheDoesNotMaskReplacementOrReadForCancelledPreview() {
