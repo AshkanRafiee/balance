@@ -19,6 +19,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
+import java.util.function.BooleanSupplier;
+import java.util.regex.Pattern;
 
 /**
  * Manual cash, independent of SMS scans. A count and its movements are encrypted and committed
@@ -31,6 +34,13 @@ final class CashStore {
     static final String DATA = "cash_ledger";
     static final String REVISION = "cash_revision";
     static final int MAX_SNAPSHOT_CHARS = 4 * 1024 * 1024;
+    private static final Pattern AMOUNT_INPUT =
+        Pattern.compile("(?:[0-9]++|[0-9]{1,3}(?:,[0-9]{3})++)(?:\\.[0-9]+)?");
+
+    // Guarded by BalanceData.class. The ciphertext key also detects restored generations and
+    // preference changes; a successful write can publish its already validated immutable state.
+    private static String cachedCiphertext;
+    private static State cachedState;
 
     private CashStore() {}
 
@@ -134,9 +144,16 @@ final class CashStore {
 
     private static State read(SharedPreferences prefs) {
         String encrypted = prefs.getString(DATA, null);
-        if (encrypted == null) return EMPTY;
+        if (encrypted == null) {
+            cachedCiphertext = null;
+            cachedState = null;
+            return EMPTY;
+        }
+        if (encrypted.equals(cachedCiphertext)) return cachedState;
         try {
-            return decode(BalanceData.decryptStorePayload(encrypted));
+            State state = decode(BalanceData.decryptStorePayload(encrypted));
+            cache(encrypted, state);
+            return state;
         } catch (Exception failure) {
             // JSON reader errors may include a fragment of the decrypted input.
             throw new IllegalStateException("cash ledger could not be read");
@@ -197,11 +214,18 @@ final class CashStore {
 
     /** Uses the same chronological check as Save, without writing anything. */
     static Preview preview(Context context, long date, long amount, Transaction replacing) {
+        return preview(context, date, amount, replacing, () -> true);
+    }
+
+    static Preview preview(Context context, long date, long amount, Transaction replacing,
+            BooleanSupplier stillNeeded) {
         validateEntryTime(date, amount, System.currentTimeMillis());
         State current;
         synchronized (BalanceData.class) {
+            if (!stillNeeded.getAsBoolean()) throw new CancellationException();
             current = read(writable(context));
         }
+        if (!stillNeeded.getAsBoolean()) throw new CancellationException();
         boolean affects = affectsBalance(current, replacing, date);
         Transaction candidate = new Transaction(KEY, date, amount,
             replacing == null ? null : replacing.sig);
@@ -299,7 +323,7 @@ final class CashStore {
     static Long parseAmount(Context context, String input) {
         if (input == null) return null;
         String number = TextNormalizer.normalize(input).trim();
-        if (!number.matches("(?:[0-9]++|[0-9]{1,3}(?:,[0-9]{3})++)(?:\\.[0-9]+)?"))
+        if (!AMOUNT_INPUT.matcher(number).matches())
             return null;
         try {
             BigDecimal amount = new BigDecimal(number.replace(",", ""));
@@ -378,9 +402,15 @@ final class CashStore {
                 prefs.edit().putString(DATA, previous).putString(REVISION, previousRevision).commit();
                 throw new IllegalStateException("cash ledger commit failed");
             }
+            cache(encrypted, state);
         } catch (Exception failure) {
             throw new IllegalStateException("cash ledger could not be saved", failure);
         }
+    }
+
+    private static void cache(String ciphertext, State state) {
+        cachedCiphertext = ciphertext;
+        cachedState = state;
     }
 
     static String exportData(Context context) throws Exception {

@@ -211,6 +211,26 @@ public class CashStoreTest {
         assertEquals(0L, withdrawal.resultingBalance);
     }
 
+    @Test public void snapshotCacheDoesNotMaskReplacementOrReadForCancelledPreview() {
+        CashStore.setBalance(context, 30);
+        CashStore.State original = CashStore.read(context);
+        assertTrue(original == CashStore.read(context));
+        CashStore.setBalance(context, 45);
+        assertEquals(45L, CashStore.read(context).balance);
+        assertTrue(original != CashStore.read(context));
+
+        assertTrue(DataGeneration.dataPrefs(context).edit()
+            .putString(CashStore.DATA, "invalid").commit());
+        try {
+            CashStore.preview(context, System.currentTimeMillis(), 10, null, () -> false);
+            fail("superseded preview should not read the ledger");
+        } catch (java.util.concurrent.CancellationException expected) {}
+        try {
+            CashStore.read(context);
+            fail("cached state must not mask a changed encrypted payload");
+        } catch (IllegalStateException expected) {}
+    }
+
     @Test public void shortfallPreviewUsesChronologicalBalanceAndSuggestsFundingBeforeDebit() {
         long date = System.currentTimeMillis() - 60_000;
         CashStore.add(context, date + 2_000, 100);

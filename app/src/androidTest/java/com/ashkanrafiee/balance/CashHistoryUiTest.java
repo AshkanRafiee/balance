@@ -20,6 +20,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import org.junit.After;
 import org.junit.Before;
@@ -115,19 +117,29 @@ public class CashHistoryUiTest {
         });
     }
 
-    @Test public void dashboardRequestOpensOnceAndShowsLatestExactCashBalancePreview() {
+    @Test public void dashboardRequestDoesNotWaitForHistoryAndShowsLatestPreview() throws Exception {
         CashStore.setBalance(context, 21);
-        launch(CashStore.KEY, true);
-        await(activity -> editorAmount(activity) != null);
-        scenario.onActivity(activity -> {
-            editorAmount(activity).setText("5.2");
-            editorAmount(activity).setText("1.3");
-        });
-        await(activity -> dialogText(activity, activity.getString(R.string.cash_history_preview_balance,
-            cashValue(activity, 21), cashValue(activity, 34))) != null);
-        scenario.onActivity(activity -> currentDialog(activity)
-            .getButton(AlertDialog.BUTTON_NEGATIVE).performClick());
-        await(activity -> currentDialog(activity) == null);
+        CountDownLatch renderStarted = new CountDownLatch(1);
+        CountDownLatch releaseRender = new CountDownLatch(1);
+        HistoryActivity.setRenderGateForTest(renderStarted, releaseRender);
+        try {
+            launch(CashStore.KEY, true);
+            assertTrue(renderStarted.await(5, TimeUnit.SECONDS));
+            await(activity -> editorAmount(activity) != null);
+            scenario.onActivity(activity -> {
+                editorAmount(activity).setText("5.2");
+                editorAmount(activity).setText("1.3");
+            });
+            await(activity -> dialogText(activity, activity.getString(
+                R.string.cash_history_preview_balance, cashValue(activity, 21),
+                cashValue(activity, 34))) != null);
+            scenario.onActivity(activity -> currentDialog(activity)
+                .getButton(AlertDialog.BUTTON_NEGATIVE).performClick());
+            await(activity -> currentDialog(activity) == null);
+        } finally {
+            releaseRender.countDown();
+            HistoryActivity.setRenderGateForTest(null, null);
+        }
         scenario.recreate();
         await(activity -> findByDescription(activity, R.string.cash_history_add) != null
             && HistoryActivity.idleForTest(activity));

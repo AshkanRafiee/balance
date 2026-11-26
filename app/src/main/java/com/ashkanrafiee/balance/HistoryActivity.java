@@ -23,6 +23,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.Telephony;
 import android.text.Editable;
 import android.text.InputType;
@@ -139,6 +140,10 @@ public final class HistoryActivity extends Activity {
     private LockOverlay lockOverlay;
     private boolean pendingAddCash;
     private CashEditor activeCashEditor;
+    private boolean cashEditorDeferredScan;
+    private static final java.util.concurrent.Executor CASH_PREVIEW_WORKER =
+        java.util.concurrent.Executors.newSingleThreadExecutor(
+            task -> new Thread(task, "cash-history-preview"));
     /** Draws the pull-to-refresh chip pinned to the true top of the screen — clear of the hero card
      *  and the rows — while the gesture and its state stay in the list's scroll view. */
     private PullIndicatorOverlay indicatorOverlay;
@@ -2818,15 +2823,16 @@ public final class HistoryActivity extends Activity {
         });
         BalanceData.addHistoryListener(onHistoryChanged);
         registerSmsObserver();
-        // Revision validation happens on the worker; an unchanged resume keeps the tree, pages,
-        // picker caches, expansion and scroll exactly as they were.
-        render();
         // The delayed lock may have engaged while we were paused on a ROM that skipped onStop;
         // reflect it now that we are back in the foreground.
         if (LockManager.isEnabled(this) && LockManager.isSessionLocked()
                 && lockOverlay != null && !lockOverlay.isShowing()) {
             lockOverlay.showLock();
         }
+        maybeOpenRequestedCashEditor();
+        // Revision validation happens on the worker; an unchanged resume keeps the tree, pages,
+        // picker caches, expansion and scroll exactly as they were.
+        render();
         // Re-scan in the background (coalesced if a scan is already running) so messages that
         // arrived while the screen was closed are reflected as soon as it opens. The generation
         // check is on the UI thread before the raw worker is launched; once launched, the worker
@@ -2990,6 +2996,11 @@ public final class HistoryActivity extends Activity {
     private void startHistoryScan(int listenerGen, Context app) {
         if (listenerGen != historyListenerGen || !historyResumed
                 || isDestroyed() || isFinishing()) return;
+        if (isCashScope() && (pendingAddCash || activeCashEditor != null)) {
+            cashEditorDeferredScan = true;
+            return;
+        }
+        cashEditorDeferredScan = false;
         // A previous scan's pending render must not settle feedback owned by this request,
         // including a request folded into the running scan's follow-up.
         automaticRefreshTargetGen = -1;
@@ -3333,12 +3344,11 @@ public final class HistoryActivity extends Activity {
     private void finishRenderWork() {
         renderRunning = false;
         if (renderQueued && historyResumed && !isDestroyed() && !isFinishing()) render();
-        maybeOpenRequestedCashEditor();
     }
 
     private void maybeOpenRequestedCashEditor() {
-        if (!pendingAddCash || renderRunning || historyResult == null
-                || !annotationUiActive(residualNoteUiEpoch) || lockOverlay.isShowing()) return;
+        if (!pendingAddCash || !annotationUiActive(residualNoteUiEpoch)
+                || lockOverlay.isShowing()) return;
         pendingAddCash = false;
         if (isCashScope()) showCashEditor();
     }
@@ -4736,6 +4746,7 @@ public final class HistoryActivity extends Activity {
     }
 
     private final class CashEditor {
+        private static final long AMOUNT_PREVIEW_DELAY_MS = 240;
         private final Transaction replacing;
         private final CashDraft returnDraft;
         private final int epoch = residualNoteUiEpoch;
@@ -4753,7 +4764,9 @@ public final class HistoryActivity extends Activity {
         private final Handler previewHandler = new Handler(Looper.getMainLooper());
         private final Runnable previewWork = this::loadPreview;
         private long timestamp;
-        private int previewGeneration;
+        private long previewDueAt;
+        private Long previewAmount;
+        private volatile int previewGeneration;
         private boolean previewRunning;
         private boolean saving;
 
@@ -4788,6 +4801,9 @@ public final class HistoryActivity extends Activity {
                 "0123456789۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩,٬،" + (decimal ? ".٫" : "")));
             amount.setRawInputType(InputType.TYPE_CLASS_NUMBER
                 | (decimal ? InputType.TYPE_NUMBER_FLAG_DECIMAL : 0));
+            amount.setImeOptions(android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
+            amount.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+            amount.setSaveEnabled(false);
             amount.setText(draft.amountText);
             TextView amountLabel = text(getString(R.string.cash_history_amount,
                 CurrencyHelper.label(HistoryActivity.this)), 13, muted);
@@ -4826,11 +4842,11 @@ public final class HistoryActivity extends Activity {
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> save());
                 requestPreview();
             });
-            direction.setOnCheckedChangeListener((group, checked) -> draftChanged());
+            direction.setOnCheckedChangeListener((group, checked) -> draftChanged(0));
             amount.addTextChangedListener(new TextWatcher() {
                 @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
                 @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                    draftChanged();
+                    draftChanged(AMOUNT_PREVIEW_DELAY_MS);
                 }
                 @Override public void afterTextChanged(Editable s) {}
             });
@@ -4838,8 +4854,14 @@ public final class HistoryActivity extends Activity {
 
         void show() {
             showDialog(dialog, () -> {
+                previewGeneration++;
                 previewHandler.removeCallbacks(previewWork);
                 if (activeCashEditor == this) activeCashEditor = null;
+                // Deposit recovery can replace this editor immediately after dismissing it.
+                previewHandler.post(() -> {
+                    if (cashEditorDeferredScan && activeCashEditor == null)
+                        startHistoryScan(historyListenerGen, getApplicationContext());
+                });
             });
         }
 
@@ -4856,7 +4878,7 @@ public final class HistoryActivity extends Activity {
         private void pickTimestamp(long value) {
             timestamp = value;
             updateDateLabels();
-            draftChanged();
+            draftChanged(0);
         }
 
         private boolean isWithdrawal() {
@@ -4869,41 +4891,53 @@ public final class HistoryActivity extends Activity {
             return isWithdrawal() ? -value : value;
         }
 
-        private void draftChanged() {
+        private void draftChanged(long delayMs) {
             feedback.setVisibility(View.GONE);
             amount.setError(null);
-            requestPreview();
+            requestPreview(delayMs);
         }
 
         void requestPreview() {
+            // A history notification should not cut short the pause after the latest keystroke.
+            requestPreview(Math.max(0, previewDueAt - SystemClock.uptimeMillis()));
+        }
+
+        private void requestPreview(long delayMs) {
             if (!isActive() || saving) return;
             previewGeneration++;
             previewHandler.removeCallbacks(previewWork);
-            boolean validAmount = parseAmount() != null;
+            previewDueAt = SystemClock.uptimeMillis() + delayMs;
+            previewAmount = parseAmount();
+            boolean validAmount = previewAmount != null;
             preview.setText(R.string.cash_history_preview_loading);
             preview.setVisibility(validAmount ? View.VISIBLE : View.GONE);
             recover.setVisibility(View.GONE);
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(!validAmount);
-            if (validAmount && !previewRunning) previewHandler.postDelayed(previewWork, 100);
+            if (validAmount && !previewRunning) previewHandler.postAtTime(previewWork, previewDueAt);
         }
 
         private void loadPreview() {
             if (!isActive() || saving) return;
-            Long signedAmount = parseAmount();
+            Long signedAmount = previewAmount;
             if (signedAmount == null) return;
             long date = timestamp;
             int generation = previewGeneration;
             Context app = getApplicationContext();
             previewRunning = true;
-            new Thread(() -> {
+            CASH_PREVIEW_WORKER.execute(() -> {
                 CashStore.Preview result = null;
                 int error = 0;
                 try {
+                    if (generation != previewGeneration)
+                        throw new java.util.concurrent.CancellationException();
                     if (!CashStore.isEnabled(app)) {
                         error = R.string.cash_history_disabled;
                     } else {
-                        result = CashStore.preview(app, date, signedAmount, replacing);
+                        result = CashStore.preview(app, date, signedAmount, replacing,
+                            () -> generation == previewGeneration);
                     }
+                } catch (java.util.concurrent.CancellationException superseded) {
+                    // Completion below releases the worker slot and schedules the newest input.
                 } catch (CashStore.StaleCashTransactionException stale) {
                     error = R.string.cash_history_stale;
                 } catch (IllegalArgumentException invalid) {
@@ -4918,12 +4952,13 @@ public final class HistoryActivity extends Activity {
                     previewRunning = false;
                     if (!isActive() || saving) return;
                     if (generation != previewGeneration) {
-                        previewHandler.post(previewWork);
+                        if (previewAmount != null)
+                            previewHandler.postAtTime(previewWork, previewDueAt);
                     } else {
                         showPreview(loaded, failureMessage);
                     }
                 });
-            }, "cash-history-preview").start();
+            });
         }
 
         private void showPreview(CashStore.Preview result, int error) {

@@ -466,6 +466,22 @@ final class HistoryReader {
         }
     }
 
+    private static void forEachInScope(Context context, Request request, int pageSize,
+            TransactionStore.Visitor visitor) throws Exception {
+        if (cashOnly(request)) {
+            CashStore.forEachVisible(context, visitor);
+        } else if (!request.accounts.isEmpty()
+                || (!request.banks.isEmpty() && !request.banks.contains(CashStore.KEY))) {
+            TransactionStore.forEach(context, pageSize, visitor);
+        } else {
+            forEachVisible(context, pageSize, visitor);
+        }
+    }
+
+    private static boolean cashOnly(Request request) {
+        return request.banks.size() == 1 && request.banks.contains(CashStore.KEY);
+    }
+
     /** One stable pass over both ledgers; rows remain available through the timeline. */
     static Result summary(Context context, Request request) throws Exception {
         return timelineSummary(context, request, false);
@@ -524,7 +540,8 @@ final class HistoryReader {
             Accumulator accumulator = new Accumulator(context, request, timeline);
             try (MetadataStore.LookupSession metadata = MetadataStore.LookupSession.open(context)) {
                 Matcher matcher = new Matcher(context, request, metadata);
-                boolean stageResiduals = residuals && request.selectedTags.isEmpty();
+                boolean stageResiduals = residuals && !cashOnly(request)
+                    && request.selectedTags.isEmpty();
                 // SMS-scale scopes skip the encrypted staging database: the scoped rows are
                 // already decrypted in hand, and Residual.between over them is exactly what the
                 // reference oracle computes. Larger scopes keep the bounded external walk.
@@ -540,7 +557,7 @@ final class HistoryReader {
                     List<Transaction> matchingBatch = new ArrayList<>(batchSize);
                     int pageSize = cancel == null ? request.pageSize
                         : Math.min(batchSize, request.pageSize);
-                    forEachVisible(context, pageSize, transaction -> {
+                    forEachInScope(context, request, pageSize, transaction -> {
                         if (cancel != null) cancel.throwIfCanceled();
                         // Scope narrowing precedes all other filters. Residual detection needs the
                         // whole bank/account scope, so staging happens before narrowing predicates.
@@ -603,6 +620,7 @@ final class HistoryReader {
      */
     static Result reference(Context context, Request request) throws Exception {
         synchronized (BalanceData.class) {
+            BalanceData.ensureResetComplete(context);
             return referenceLocked(context, request);
         }
     }
@@ -610,7 +628,7 @@ final class HistoryReader {
     private static Result referenceLocked(Context context, Request request) throws Exception {
         List<Transaction> scope = new ArrayList<>();
         List<Transaction> bankScope = new ArrayList<>();
-        forEachVisible(context, request.pageSize, transaction -> {
+        forEachInScope(context, request, request.pageSize, transaction -> {
             if (!inScope(transaction, request)) return;
             scope.add(transaction);
             if (!CashStore.isCash(transaction)) bankScope.add(transaction);
