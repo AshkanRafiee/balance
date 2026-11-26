@@ -3,6 +3,7 @@ package com.ashkanrafiee.balance;
 import android.content.Context;
 import android.os.CancellationSignal;
 
+import java.math.BigInteger;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -232,18 +233,18 @@ final class HistoryReader {
 
         // Direct aliases make the result convenient for the eventual hero/header adapter and keep
         // the names close to HistoryActivity.Lists without retaining that UI model.
-        final long total;
-        final long todayTotal;
-        final long monthTotal;
-        final long yearTotal;
-        final long totalDeposits;
-        final long totalWithdrawals;
-        final long todayDeposits;
-        final long todayWithdrawals;
-        final long monthDeposits;
-        final long monthWithdrawals;
-        final long yearDeposits;
-        final long yearWithdrawals;
+        final BigInteger total;
+        final BigInteger todayTotal;
+        final BigInteger monthTotal;
+        final BigInteger yearTotal;
+        final BigInteger totalDeposits;
+        final BigInteger totalWithdrawals;
+        final BigInteger todayDeposits;
+        final BigInteger todayWithdrawals;
+        final BigInteger monthDeposits;
+        final BigInteger monthWithdrawals;
+        final BigInteger yearDeposits;
+        final BigInteger yearWithdrawals;
         final long movementCount;
 
         final List<YearSummary> years;
@@ -331,16 +332,20 @@ final class HistoryReader {
 
     /** Signed totals and the count of actual movements in a period. */
     static final class Stats {
-        final long sum;
-        final long deposits;
-        final long withdrawals;
+        final BigInteger sum;
+        final BigInteger deposits;
+        final BigInteger withdrawals;
         final long movementCount;
+        /** Whether this aggregate includes at least one visible Cash movement. */
+        final boolean hasCash;
 
-        private Stats(long sum, long deposits, long withdrawals, long movementCount) {
-            this.sum = sum;
+        private Stats(BigInteger deposits, BigInteger withdrawals, long movementCount,
+                boolean hasCash) {
+            this.sum = deposits.add(withdrawals);
             this.deposits = deposits;
             this.withdrawals = withdrawals;
             this.movementCount = movementCount;
+            this.hasCash = hasCash;
         }
     }
 
@@ -866,18 +871,20 @@ final class HistoryReader {
     }
 
     private static final class MutableStats {
-        long deposits;
-        long withdrawals;
+        BigInteger deposits = BigInteger.ZERO;
+        BigInteger withdrawals = BigInteger.ZERO;
         long movementCount;
+        boolean hasCash;
 
-        void add(long amount, boolean movement) {
-            if (amount > 0) deposits = Math.addExact(deposits, amount);
-            else withdrawals = Math.addExact(withdrawals, amount);
+        void add(BigInteger amount, boolean movement, boolean cash) {
+            if (amount.signum() > 0) deposits = deposits.add(amount);
+            else withdrawals = withdrawals.add(amount);
             if (movement) movementCount++;
+            hasCash |= cash;
         }
 
         Stats freeze() {
-            return new Stats(deposits + withdrawals, deposits, withdrawals, movementCount);
+            return new Stats(deposits, withdrawals, movementCount, hasCash);
         }
     }
 
@@ -938,7 +945,8 @@ final class HistoryReader {
         }
 
         void addTransaction(Transaction transaction) throws Exception {
-            CalDate date = add(transaction.date, transaction.amount, true);
+            CalDate date = add(transaction.date, transaction.amount, true,
+                CashStore.isCash(transaction));
             if (timeline != null) {
                 timeline.addTransaction(date.key(), transaction, transactionOrdinal);
                 transactionOrdinal = nextOrdinal(transactionOrdinal);
@@ -946,7 +954,7 @@ final class HistoryReader {
         }
 
         void addResidual(Residual residual) throws Exception {
-            CalDate date = add(residual.toDate, residual.amount, false);
+            CalDate date = add(residual.toDate, residual.amount, false, false);
             residualCount++;
             if (timeline != null) {
                 timeline.addResidual(date.key(), residual, residualOrdinal);
@@ -954,34 +962,35 @@ final class HistoryReader {
             }
         }
 
-        private CalDate add(long dateMillis, long amount, boolean movement) {
+        private CalDate add(long dateMillis, long rials, boolean movement, boolean cash) {
+            BigInteger amount = BigInteger.valueOf(rials);
             CalDate date = calendarDate(dateMillis, request.iran, dateCalendar());
-            allTime.add(amount, movement);
-            if (date.sameDay(todayDate)) today.add(amount, movement);
+            allTime.add(amount, movement, cash);
+            if (date.sameDay(todayDate)) today.add(amount, movement, cash);
             if (date.year == todayDate.year && date.month == todayDate.month)
-                month.add(amount, movement);
-            if (date.year == todayDate.year) year.add(amount, movement);
+                month.add(amount, movement, cash);
+            if (date.year == todayDate.year) year.add(amount, movement, cash);
 
             MutableYear yearGroup = years.get(date.year);
             if (yearGroup == null) {
                 yearGroup = new MutableYear(date.year);
                 years.put(date.year, yearGroup);
             }
-            yearGroup.stats.add(amount, movement);
+            yearGroup.stats.add(amount, movement, cash);
 
             MutableMonth monthGroup = yearGroup.months.get(date.month);
             if (monthGroup == null) {
                 monthGroup = new MutableMonth(date.year, date.month);
                 yearGroup.months.put(date.month, monthGroup);
             }
-            monthGroup.stats.add(amount, movement);
+            monthGroup.stats.add(amount, movement, cash);
 
             MutableDay dayGroup = monthGroup.days.get(date.day);
             if (dayGroup == null) {
                 dayGroup = new MutableDay(date);
                 monthGroup.days.put(date.day, dayGroup);
             }
-            dayGroup.stats.add(amount, movement);
+            dayGroup.stats.add(amount, movement, cash);
             return date;
         }
 

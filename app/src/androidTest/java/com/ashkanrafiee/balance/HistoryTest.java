@@ -349,14 +349,14 @@ public class HistoryTest {
         assertEquals(1, lists.years.size());
         HistoryActivity.YearGroup year = lists.years.get(0);
         assertEquals(1405, year.year);
-        assertEquals(-2000000L + 5000000L, year.sum);
-        assertEquals(5000000L, year.dep);
-        assertEquals(-2000000L, year.wit);
+        assertEquals(java.math.BigInteger.valueOf(-2000000L + 5000000L), year.sum);
+        assertEquals(java.math.BigInteger.valueOf(5000000L), year.dep);
+        assertEquals(java.math.BigInteger.valueOf(-2000000L), year.wit);
         assertEquals(2, year.months.size());
         assertEquals(sep.month, year.months.get(0).month);
         assertEquals(aug.month, year.months.get(1).month);
-        assertEquals(-2000000L, year.months.get(0).sum);
-        assertEquals(5000000L, year.months.get(1).sum);
+        assertEquals(java.math.BigInteger.valueOf(-2000000L), year.months.get(0).sum);
+        assertEquals(java.math.BigInteger.valueOf(5000000L), year.months.get(1).sum);
     }
 
     @Test public void yearsAndMonths_depWithSubtotalsPerMonth() {
@@ -368,18 +368,18 @@ public class HistoryTest {
         HistoryActivity.Lists lists = HistoryActivity.buildLists(txs);
         HistoryActivity.YearGroup year = lists.years.get(0);
         HistoryActivity.MonthGroup month = year.months.get(0);
-        assertEquals(6000000L, year.dep);
-        assertEquals(-1000000L, year.wit);
-        assertEquals(6000000L, month.dep);
-        assertEquals(-1000000L, month.wit);
-        assertEquals(2000000L, month.days.get(0).sum);
-        assertEquals(3000000L, month.days.get(1).sum);
+        assertEquals(java.math.BigInteger.valueOf(6000000L), year.dep);
+        assertEquals(java.math.BigInteger.valueOf(-1000000L), year.wit);
+        assertEquals(java.math.BigInteger.valueOf(6000000L), month.dep);
+        assertEquals(java.math.BigInteger.valueOf(-1000000L), month.wit);
+        assertEquals(java.math.BigInteger.valueOf(2000000L), month.days.get(0).sum);
+        assertEquals(java.math.BigInteger.valueOf(3000000L), month.days.get(1).sum);
         // Day headers carry their own gross pair: the mixed day shows both sides, the
         // single-sided day only its own.
-        assertEquals(2000000L, month.days.get(0).dep);
-        assertEquals(0L, month.days.get(0).wit);
-        assertEquals(4000000L, month.days.get(1).dep);
-        assertEquals(-1000000L, month.days.get(1).wit);
+        assertEquals(java.math.BigInteger.valueOf(2000000L), month.days.get(0).dep);
+        assertEquals(java.math.BigInteger.ZERO, month.days.get(0).wit);
+        assertEquals(java.math.BigInteger.valueOf(4000000L), month.days.get(1).dep);
+        assertEquals(java.math.BigInteger.valueOf(-1000000L), month.days.get(1).wit);
     }
 
     @Test public void yearsAndMonths_splitAcrossYearBoundary() {
@@ -392,13 +392,13 @@ public class HistoryTest {
         assertEquals(2, lists.years.size());
         HistoryActivity.YearGroup y1405 = lists.years.get(0);
         assertEquals(1405, y1405.year);
-        assertEquals(-500000L, y1405.sum);
-        assertEquals(-500000L, y1405.wit);
+        assertEquals(java.math.BigInteger.valueOf(-500000L), y1405.sum);
+        assertEquals(java.math.BigInteger.valueOf(-500000L), y1405.wit);
         assertEquals(1, y1405.months.get(0).month);
         HistoryActivity.YearGroup y1404 = lists.years.get(1);
         assertEquals(1404, y1404.year);
-        assertEquals(1000000L, y1404.sum);
-        assertEquals(1000000L, y1404.dep);
+        assertEquals(java.math.BigInteger.valueOf(1000000L), y1404.sum);
+        assertEquals(java.math.BigInteger.valueOf(1000000L), y1404.dep);
         assertEquals(12, y1404.months.get(0).month);
     }
 
@@ -411,14 +411,14 @@ public class HistoryTest {
         HistoryActivity.Lists lists = HistoryActivity.buildLists(txs);
         assertEquals(1, lists.years.size());
         HistoryActivity.MonthGroup month = lists.years.get(0).months.get(0);
-        assertEquals(6000000L, month.sum);
+        assertEquals(java.math.BigInteger.valueOf(6000000L), month.sum);
         assertEquals(2, month.days.size());
         assertEquals(20, month.days.get(0).date.day);
         assertEquals(1, month.days.get(0).txs.size());
-        assertEquals(2000000L, month.days.get(0).sum);
+        assertEquals(java.math.BigInteger.valueOf(2000000L), month.days.get(0).sum);
         assertEquals(19, month.days.get(1).date.day);
         assertEquals(2, month.days.get(1).txs.size());
-        assertEquals(4000000L, month.days.get(1).sum);
+        assertEquals(java.math.BigInteger.valueOf(4000000L), month.days.get(1).sum);
     }
 
     @Test public void sums_byPeriod() {
@@ -430,15 +430,15 @@ public class HistoryTest {
         txs.add(new Transaction("Saman", now, 1000000L));
         txs.add(new Transaction("Saman", now, -300000L));
         HistoryActivity.Lists lists = HistoryActivity.buildLists(txs);
-        assertEquals(700000L, lists.today);
-        assertEquals(700000L, lists.month);
-        assertEquals(700000L, lists.year);
-        assertEquals(1000000L, lists.todayDep);
-        assertEquals(-300000L, lists.todayWit);
-        assertEquals(1000000L, lists.yearDep);
-        assertEquals(-300000L, lists.yearWit);
-        assertEquals(700000L, lists.years.get(0).sum);
-        assertEquals(700000L, lists.years.get(0).months.get(0).sum);
+        assertEquals(java.math.BigInteger.valueOf(700000L), lists.today);
+        assertEquals(java.math.BigInteger.valueOf(700000L), lists.month);
+        assertEquals(java.math.BigInteger.valueOf(700000L), lists.year);
+        assertEquals(java.math.BigInteger.valueOf(1000000L), lists.todayDep);
+        assertEquals(java.math.BigInteger.valueOf(-300000L), lists.todayWit);
+        assertEquals(java.math.BigInteger.valueOf(1000000L), lists.yearDep);
+        assertEquals(java.math.BigInteger.valueOf(-300000L), lists.yearWit);
+        assertEquals(java.math.BigInteger.valueOf(700000L), lists.years.get(0).sum);
+        assertEquals(java.math.BigInteger.valueOf(700000L), lists.years.get(0).months.get(0).sum);
     }
 
     @Test public void sums_totalCoversAllYears() {
@@ -448,11 +448,12 @@ public class HistoryTest {
         txs.add(new Transaction("Saman", epoch(2026, 3, 20), 1000000L));
         txs.add(new Transaction("Saman", epoch(2026, 3, 21), -500000L));
         HistoryActivity.Lists lists = HistoryActivity.buildLists(txs);
-        assertEquals(500000L, lists.total);
+        assertEquals(java.math.BigInteger.valueOf(500000L), lists.total);
         assertEquals(2, lists.years.size());
-        assertEquals(500000L, lists.years.get(0).sum + lists.years.get(1).sum);
+        assertEquals(java.math.BigInteger.valueOf(500000L),
+            lists.years.get(0).sum.add(lists.years.get(1).sum));
         // The current-year sum excludes past years, so it is not the total.
-        assertEquals(-500000L, lists.year);
+        assertEquals(java.math.BigInteger.valueOf(-500000L), lists.year);
     }
 
     @Test public void sums_totalDepWitCoverAllYears() {
@@ -462,18 +463,18 @@ public class HistoryTest {
         txs.add(new Transaction("Saman", epoch(2026, 3, 20), 1000000L));
         txs.add(new Transaction("Saman", epoch(2026, 3, 21), -500000L));
         HistoryActivity.Lists lists = HistoryActivity.buildLists(txs);
-        assertEquals(1000000L, lists.totalDep);
-        assertEquals(-500000L, lists.totalWit);
-        assertEquals(lists.totalDep + lists.totalWit, lists.total);
+        assertEquals(java.math.BigInteger.valueOf(1000000L), lists.totalDep);
+        assertEquals(java.math.BigInteger.valueOf(-500000L), lists.totalWit);
+        assertEquals(lists.totalDep.add(lists.totalWit), lists.total);
     }
 
     @Test public void sums_totalDepWit_singleSided() {
         List<Transaction> txs = new ArrayList<>();
         txs.add(new Transaction("Saman", epoch(2026, 9, 10), -300000L));
         HistoryActivity.Lists lists = HistoryActivity.buildLists(txs);
-        assertEquals(0L, lists.totalDep);
-        assertEquals(-300000L, lists.totalWit);
-        assertEquals(-300000L, lists.total);
+        assertEquals(java.math.BigInteger.ZERO, lists.totalDep);
+        assertEquals(java.math.BigInteger.valueOf(-300000L), lists.totalWit);
+        assertEquals(java.math.BigInteger.valueOf(-300000L), lists.total);
     }
 
     // ---- message fingerprints (exact-duplicate detection) -------------------------
@@ -580,7 +581,7 @@ public class HistoryTest {
         for (HistoryActivity.DayGroup g : HistoryActivity.buildLists(only).years.get(0).months.get(0).days) {
             for (Transaction t : g.txs) assertEquals("Saman", t.bank);
         }
-        assertEquals(3000000L, HistoryActivity.buildLists(only).total);
+        assertEquals(java.math.BigInteger.valueOf(3000000L), HistoryActivity.buildLists(only).total);
     }
 
     @Test public void filterByBank_unknownBank_isEmpty() {
@@ -609,7 +610,7 @@ public class HistoryTest {
         List<Transaction> only = HistoryActivity.filterByAccount(txs, "1110000222");
         assertEquals(2, only.size());
         for (Transaction t : only) assertEquals("1110000222", t.account);
-        assertEquals(3000000L, HistoryActivity.buildLists(only).total);
+        assertEquals(java.math.BigInteger.valueOf(3000000L), HistoryActivity.buildLists(only).total);
     }
 
     @Test public void filterByAccount_unknownAccount_isEmpty() {
@@ -749,7 +750,7 @@ public class HistoryTest {
         HistoryActivity.Filter f = new HistoryActivity.Filter(HistoryActivity.DIR_ALL,
             HistoryActivity.RANGE_CUSTOM, CalDate.of(1405, 1, 1), null);
         HistoryActivity.Lists lists = HistoryActivity.buildLists(HistoryActivity.applyFilters(txs, f));
-        assertEquals(700000L, lists.total);
+        assertEquals(java.math.BigInteger.valueOf(700000L), lists.total);
         assertEquals(1, lists.years.size());
         assertEquals(1405, lists.years.get(0).year);
     }
@@ -827,11 +828,11 @@ public class HistoryTest {
         txs.add(new Transaction("Saman", epoch(2025, 12, 31), 1000000L));
         txs.add(new Transaction("Saman", epoch(2026, 1, 1), -500000L));
         HistoryActivity.Lists lists = HistoryActivity.buildLists(txs, false);
-        assertEquals(500000L, lists.total);
+        assertEquals(java.math.BigInteger.valueOf(500000L), lists.total);
         assertEquals(2, lists.years.size());
         HistoryActivity.YearGroup y2026 = lists.years.get(0);
         assertEquals(2026, y2026.year);
-        assertEquals(-500000L, y2026.sum);
+        assertEquals(java.math.BigInteger.valueOf(-500000L), y2026.sum);
         assertEquals(1, y2026.months.get(0).month);
         assertEquals(1, y2026.months.get(0).days.get(0).date.day);
         HistoryActivity.YearGroup y2025 = lists.years.get(1);

@@ -205,7 +205,7 @@ public class HistoryReaderTest {
                 assertTrue(result.residualsComplete);
                 assertEquals(reference.total, result.total);
                 assertEquals(reference.movementCount, result.movementCount);
-                assertEquals(-37L, result.total);
+                assertEquals(java.math.BigInteger.valueOf(-37), result.total);
             }
         }
     }
@@ -226,7 +226,7 @@ public class HistoryReaderTest {
         HistoryReader.Result result = HistoryReader.summaryWithResiduals(context, request);
         try (AutoCloseable snapshot = result::close) {
             assertEquals(0L, result.movementCount);
-            assertEquals(-2L, result.total);
+            assertEquals(java.math.BigInteger.valueOf(-2), result.total);
             HistoryReader.DayRows rows = result.requestedDayRows.get(day);
             assertEquals(1, rows.residuals.size());
             assertEquals("cash withdrawal", rows.metadata.get(BalanceData.residualNoteKey(residual)).note);
@@ -250,16 +250,16 @@ public class HistoryReaderTest {
             assertEquals(result.total, lists.total);
             assertEquals(result.totalDeposits, lists.totalDep);
             assertEquals(result.totalWithdrawals, lists.totalWit);
-            assertEquals(30L, lists.totalDep);
-            assertEquals(-10L, lists.totalWit);
+            assertEquals(java.math.BigInteger.valueOf(30), lists.totalDep);
+            assertEquals(java.math.BigInteger.valueOf(-10), lists.totalWit);
             assertEquals(result.movementCount, lists.years.get(0).n);
             HistoryActivity.DayGroup selected = lists.years.get(0).months.get(0).days.get(0);
             HistoryActivity.DayGroup collapsed = lists.years.get(0).months.get(0).days.get(1);
             // Day headers keep their own gross pair through the summary conversion.
-            assertEquals(0L, selected.dep);
-            assertEquals(-10L, selected.wit);
-            assertEquals(30L, collapsed.dep);
-            assertEquals(0L, collapsed.wit);
+            assertEquals(java.math.BigInteger.ZERO, selected.dep);
+            assertEquals(java.math.BigInteger.valueOf(-10), selected.wit);
+            assertEquals(java.math.BigInteger.valueOf(30), collapsed.dep);
+            assertEquals(java.math.BigInteger.ZERO, collapsed.wit);
             assertEquals(1, selected.txs.size());
             assertEquals(1, selected.lines.size());
             assertTrue(collapsed.txs.isEmpty());

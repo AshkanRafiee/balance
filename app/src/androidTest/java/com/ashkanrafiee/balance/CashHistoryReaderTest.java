@@ -17,6 +17,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
@@ -77,18 +78,18 @@ public class CashHistoryReaderTest {
                 HistoryReader.Result reference = HistoryReader.reference(context, request);
                 HistoryReader.Result withoutGaps = HistoryReader.summary(context, request)) {
             assertEquals(4L, summary.movementCount);
-            assertEquals(5L, summary.total);
-            assertEquals(50L, summary.totalDeposits);
-            assertEquals(-45L, summary.totalWithdrawals);
+            assertEquals(BigInteger.valueOf(5), summary.total);
+            assertEquals(BigInteger.valueOf(50), summary.totalDeposits);
+            assertEquals(BigInteger.valueOf(-45), summary.totalWithdrawals);
             assertEquals(1L, summary.residualCount);
             assertEquals(4L, summary.daySummaries.get(day).stats.movementCount);
-            assertEquals(5L, summary.daySummaries.get(day).stats.sum);
+            assertEquals(BigInteger.valueOf(5), summary.daySummaries.get(day).stats.sum);
             assertEquals(summary.total, reference.total);
             assertEquals(summary.movementCount, reference.visibleTransactions().size());
             assertEquals(1, reference.visibleResiduals().size());
             assertEquals(BANK, reference.visibleResiduals().get(0).bank);
             assertEquals(-2L, reference.visibleResiduals().get(0).amount);
-            assertEquals(7L, withoutGaps.total);
+            assertEquals(BigInteger.valueOf(7), withoutGaps.total);
 
             HistoryReader.DayRows gapPage = summary.requestedDayRows.get(day);
             assertEquals(-2L, gapPage.residuals.get(0).amount);
@@ -107,6 +108,35 @@ public class CashHistoryReaderTest {
         }
     }
 
+    @Test public void mixedHistoryKeepsBothGrossTotalsBeyondLongRange() throws Exception {
+        assertTrue(BalanceData.writeTransactions(context, Arrays.asList(
+            new Transaction(BANK, ACCOUNT, noon, 20L, "deposit"),
+            new Transaction(BANK, ACCOUNT, noon + 1000, -20L, "withdrawal"))));
+        CashStore.add(context, noon, Long.MAX_VALUE);
+        CashStore.add(context, noon + 1000, -(Long.MAX_VALUE - 1));
+        BigInteger max = BigInteger.valueOf(Long.MAX_VALUE);
+        BigInteger deposits = max.add(BigInteger.valueOf(20));
+        BigInteger withdrawals = max.add(BigInteger.valueOf(19)).negate();
+        HistoryReader.Request request = HistoryReader.Request.all(false, 1);
+
+        try (HistoryReader.Result summary = HistoryReader.summaryWithResiduals(context, request);
+                HistoryReader.Result reference = HistoryReader.reference(context, request)) {
+            assertEquals(4L, summary.movementCount);
+            assertEquals(BigInteger.ONE, summary.total);
+            assertEquals(deposits, summary.totalDeposits);
+            assertEquals(withdrawals, summary.totalWithdrawals);
+            assertEquals(deposits, reference.totalDeposits);
+            assertEquals(withdrawals, reference.totalWithdrawals);
+            assertTrue(summary.requestedDayRows.isEmpty());
+            assertTrue(summary.allTime.hasCash);
+            HistoryReader.DaySummary day = summary.daySummaries.get(date.key());
+            assertTrue(day.stats.hasCash);
+            assertEquals(deposits, day.stats.deposits);
+            assertEquals(withdrawals, day.stats.withdrawals);
+            assertEquals(BigInteger.ONE, day.stats.sum);
+        }
+    }
+
     @Test public void cashScopeSupportsTagsSearchDirectionAndDateButHasNoAccount() throws Exception {
         seedBankGap();
         CashStore.add(context, noon, 50L);
@@ -118,9 +148,11 @@ public class CashHistoryReaderTest {
                 HistoryReader.Result cash = summary(CashStore.KEY, null);
                 HistoryReader.Result cashWithBankAccount = summary(CashStore.KEY, ACCOUNT)) {
             assertEquals(2L, bank.movementCount);
-            assertEquals(-37L, bank.total);
+            assertEquals(BigInteger.valueOf(-37), bank.total);
+            assertFalse(bank.allTime.hasCash);
             assertEquals(2L, cash.movementCount);
-            assertEquals(42L, cash.total);
+            assertEquals(BigInteger.valueOf(42), cash.total);
+            assertTrue(cash.allTime.hasCash);
             assertEquals(0L, cash.residualCount);
             assertEquals(0L, cashWithBankAccount.movementCount);
         }
@@ -132,7 +164,7 @@ public class CashHistoryReaderTest {
             Collections.singleton(date.key()), 1, 1);
         try (HistoryReader.Result filtered = HistoryReader.summaryWithResiduals(context, request)) {
             assertEquals(1L, filtered.movementCount);
-            assertEquals(-8L, filtered.total);
+            assertEquals(BigInteger.valueOf(-8), filtered.total);
             HistoryReader.DayRows page = filtered.requestedDayRows.get(date.key());
             assertEquals(withdrawal.sig, page.transactions.get(0).sig);
             assertEquals("Lunch at the park",
@@ -147,7 +179,7 @@ public class CashHistoryReaderTest {
         HistoryReader.RevisionStamp before;
         try (HistoryReader.Result warm = takeDefault()) {
             assertNotNull(warm);
-            assertEquals(13L, warm.total);
+            assertEquals(BigInteger.valueOf(13), warm.total);
             before = warm.revisionStamp;
         }
 
@@ -159,7 +191,7 @@ public class CashHistoryReaderTest {
         HistoryReader.RevisionStamp added;
         try (HistoryReader.Result warm = takeDefault()) {
             assertNotNull(warm);
-            assertEquals(33L, warm.total);
+            assertEquals(BigInteger.valueOf(33), warm.total);
             added = warm.revisionStamp;
             assertNotEquals(before.cash, added.cash);
             assertEquals(before.transactions, added.transactions);
@@ -173,14 +205,15 @@ public class CashHistoryReaderTest {
         try (HistoryReader.Result hidden = summary(null, null);
                 HistoryReader.Result hiddenCash = summary(CashStore.KEY, null)) {
             assertNotEquals(added.cash, hidden.revisionStamp.cash);
-            assertEquals(-37L, hidden.total);
+            assertEquals(BigInteger.valueOf(-37), hidden.total);
+            assertFalse(hidden.allTime.hasCash);
             assertEquals(2L, hidden.movementCount);
             assertEquals(0L, hiddenCash.movementCount);
             assertTrue(hiddenCash.daySummaries.isEmpty());
         }
         CashStore.setEnabled(context, true);
         try (HistoryReader.Result visible = summary(null, null)) {
-            assertEquals(33L, visible.total);
+            assertEquals(BigInteger.valueOf(33), visible.total);
             assertEquals(4L, visible.movementCount);
         }
     }
@@ -197,7 +230,7 @@ public class CashHistoryReaderTest {
                 HistoryReader.Result cash = summary(CashStore.KEY, null)) {
             assertNull(stale);
             assertEquals(1L, cash.movementCount);
-            assertEquals(35L, cash.total);
+            assertEquals(BigInteger.valueOf(35), cash.total);
             assertEquals(1, cash.daySummaries.size());
             String day = CalDate.of(previousDay.get(Calendar.YEAR),
                 previousDay.get(Calendar.MONTH) + 1, previousDay.get(Calendar.DAY_OF_MONTH)).key();

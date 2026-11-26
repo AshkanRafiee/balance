@@ -254,7 +254,7 @@ public class HistoryRestorationTest {
         HistoryReader.Result result = result(activity);
         assertNotNull("the restored range must have a rendered history result", result);
         assertEquals("out-of-range movements must remain excluded", 2L, result.movementCount);
-        assertEquals(5_000L, result.total);
+        assertEquals(java.math.BigInteger.valueOf(5_000), result.total);
     }
 
     private static void applyFilter(HistoryActivity activity, HistoryActivity.Filter filter) {

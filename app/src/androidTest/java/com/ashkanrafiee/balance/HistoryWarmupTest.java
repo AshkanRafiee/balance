@@ -189,7 +189,7 @@ public class HistoryWarmupTest {
         assertNotNull(fresh);
         try {
             assertEquals(1L, fresh.movementCount);
-            assertEquals(9L, fresh.total);
+            assertEquals(java.math.BigInteger.valueOf(9), fresh.total);
         } finally {
             fresh.close();
         }

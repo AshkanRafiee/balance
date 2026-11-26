@@ -46,6 +46,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -3312,28 +3313,28 @@ public final class HistoryActivity extends Activity {
         top.addView(label, labelParams);
         hero.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
-        long dep = lists.totalDep;
-        long wit = lists.totalWit;
-        long net = lists.total;
+        BigInteger dep = lists.totalDep;
+        BigInteger wit = lists.totalWit;
+        BigInteger net = lists.total;
         if (filter.direction == DIR_DEPOSIT) {
             hero.addView(heroGrossCell(getString(R.string.history_filter_deposits), dep, depFg,
-                28), margin(0, 10, 0, 0));
+                28, lists.totalHasCash), margin(0, 10, 0, 0));
         } else if (filter.direction == DIR_WITHDRAWAL) {
-            hero.addView(heroGrossCell(getString(R.string.history_filter_withdrawals), -wit,
-                witFg, 28), margin(0, 10, 0, 0));
+            hero.addView(heroGrossCell(getString(R.string.history_filter_withdrawals), wit.negate(),
+                witFg, 28, lists.totalHasCash), margin(0, 10, 0, 0));
         } else {
             // Gross in/out side by side; the net stays as the secondary line below.
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.addView(heroGrossCell(getString(R.string.history_filter_deposits), dep, depFg,
-                24), new LinearLayout.LayoutParams(0, -2, 1));
+                24, lists.totalHasCash), new LinearLayout.LayoutParams(0, -2, 1));
             LinearLayout.LayoutParams grossDividerParams = new LinearLayout.LayoutParams(
                 dp(1), dp(44));
             grossDividerParams.setMargins(dp(12), dp(6), dp(12), dp(6));
             row.addView(hairDivider(), grossDividerParams);
-            row.addView(heroGrossCell(getString(R.string.history_filter_withdrawals), -wit,
-                witFg, 24), new LinearLayout.LayoutParams(0, -2, 1));
+            row.addView(heroGrossCell(getString(R.string.history_filter_withdrawals), wit.negate(),
+                witFg, 24, lists.totalHasCash), new LinearLayout.LayoutParams(0, -2, 1));
             hero.addView(row, margin(0, 10, 0, 0));
 
             LinearLayout netRow = new LinearLayout(this);
@@ -3341,7 +3342,8 @@ public final class HistoryActivity extends Activity {
             netRow.setGravity(Gravity.CENTER_VERTICAL);
             netRow.addView(text(getString(R.string.history_net), 12, muted, medium()),
                 new LinearLayout.LayoutParams(-2, -2));
-            TextView netValue = bold(signedAmount(net), 13, valueColor(net));
+            TextView netValue = bold(signedAmount(net, lists.totalHasCash), 13,
+                valueColor(net.signum()));
             fitToWidth(netValue, 13, 10, 0);
             LinearLayout.LayoutParams netValueParams = new LinearLayout.LayoutParams(-2, -2);
             netValueParams.setMarginStart(dp(6));
@@ -3371,19 +3373,22 @@ public final class HistoryActivity extends Activity {
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.addView(periodCell(getString(R.string.history_today), lists.todayDep,
-                lists.todayWit, todayColor), new LinearLayout.LayoutParams(0, -2, 1));
+                lists.todayWit, todayColor, lists.todayHasCash),
+                new LinearLayout.LayoutParams(0, -2, 1));
             LinearLayout.LayoutParams todayDividerParams = new LinearLayout.LayoutParams(
                 dp(1), dp(50));
             todayDividerParams.setMargins(dp(10), dp(6), dp(10), dp(6));
             row.addView(hairDivider(), todayDividerParams);
             row.addView(periodCell(getString(R.string.history_this_month), lists.monthDep,
-                lists.monthWit, monthColor), new LinearLayout.LayoutParams(0, -2, 1));
+                lists.monthWit, monthColor, lists.monthHasCash),
+                new LinearLayout.LayoutParams(0, -2, 1));
             LinearLayout.LayoutParams monthDividerParams = new LinearLayout.LayoutParams(
                 dp(1), dp(50));
             monthDividerParams.setMargins(dp(10), dp(6), dp(10), dp(6));
             row.addView(hairDivider(), monthDividerParams);
             row.addView(periodCell(getString(R.string.history_this_year), lists.yearDep,
-                lists.yearWit, yearColor), new LinearLayout.LayoutParams(0, -2, 1));
+                lists.yearWit, yearColor, lists.yearHasCash),
+                new LinearLayout.LayoutParams(0, -2, 1));
             hero.addView(row, new LinearLayout.LayoutParams(-1, -2));
         }
         return hero;
@@ -3414,11 +3419,12 @@ public final class HistoryActivity extends Activity {
 
     /** One gross hero figure: plain label over the absolute amount in its side's color.
      *  The label carries the direction in words so color is never the only signal. */
-    private LinearLayout heroGrossCell(String labelText, long absAmount, int color, int maxSp) {
+    private LinearLayout heroGrossCell(String labelText, BigInteger absAmount, int color,
+            int maxSp, boolean hasCash) {
         LinearLayout cell = new LinearLayout(this);
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setGravity(Gravity.START);
-        String amountText = historyAmount(Math.max(absAmount, 0));
+        String amountText = historyAmount(absAmount, hasCash);
         TextView l = text(labelText, 12, color, medium());
         l.setGravity(Gravity.START);
         fitToWidth(l, 12, 9, 0);
@@ -3439,7 +3445,8 @@ public final class HistoryActivity extends Activity {
      *  Narrow columns get arrows instead of repeated words; the content description keeps the
      *  full words for screen readers. Under a direction filter only that side is shown, where
      *  the second line would always read zero. */
-    private LinearLayout periodCell(String label, long deposits, long withdrawals, int color) {
+    private LinearLayout periodCell(String label, BigInteger deposits, BigInteger withdrawals,
+            int color, boolean hasCash) {
         LinearLayout cell = new LinearLayout(this);
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -3448,7 +3455,7 @@ public final class HistoryActivity extends Activity {
         fitToWidth(l, 12, 9, 0);
         cell.addView(l, new LinearLayout.LayoutParams(-1, -2));
         if (filter.direction == DIR_DEPOSIT) {
-            String amountText = historyAmount(Math.max(deposits, 0));
+            String amountText = historyAmount(deposits, hasCash);
             TextView v = bold(amountText, 16, depFg);
             v.setGravity(Gravity.CENTER_HORIZONTAL);
             v.setContentDescription(getString(R.string.history_deposit) + " " + amountText);
@@ -3459,8 +3466,7 @@ public final class HistoryActivity extends Activity {
             return cell;
         }
         if (filter.direction == DIR_WITHDRAWAL) {
-            long abs = Math.max(-withdrawals, 0);
-            String amountText = historyAmount(abs);
+            String amountText = historyAmount(withdrawals.negate(), hasCash);
             TextView v = bold(amountText, 16, witFg);
             v.setGravity(Gravity.CENTER_HORIZONTAL);
             v.setContentDescription(getString(R.string.history_withdrawal) + " " + amountText);
@@ -3470,7 +3476,7 @@ public final class HistoryActivity extends Activity {
             cell.addView(v, vp);
             return cell;
         }
-        String depositAmount = historyAmount(Math.max(deposits, 0));
+        String depositAmount = historyAmount(deposits, hasCash);
         String depText = "\u2191 " + depositAmount;
         TextView depView = bold(depText, 14, depFg);
         depView.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -3480,8 +3486,7 @@ public final class HistoryActivity extends Activity {
         LinearLayout.LayoutParams depParams = new LinearLayout.LayoutParams(-1, -2);
         depParams.topMargin = dp(5);
         cell.addView(depView, depParams);
-        long absWit = Math.max(-withdrawals, 0);
-        String withdrawalAmount = historyAmount(absWit);
+        String withdrawalAmount = historyAmount(withdrawals.negate(), hasCash);
         String witText = "\u2193 " + withdrawalAmount;
         TextView witView = bold(witText, 14, witFg);
         witView.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -3800,14 +3805,15 @@ public final class HistoryActivity extends Activity {
         head.addView(countChip(y.n), chipsOnHead);
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
-        TextView sum = bold(signedAmount(y.sum), 16, valueColor(y.sum));
+        String amount = signedAmount(y.sum, y.hasCash);
+        TextView sum = bold(amount, 16, valueColor(y.sum.signum()));
         fitToWidth(sum, 16, 11, 0);
         head.addView(sum, sumParams);
-        head.setContentDescription(state(yTitle, y.sum, open));
+        head.setContentDescription(state(yTitle, amount, open));
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
 
-        if (y.dep > 0 || y.wit < 0) {
-            LinearLayout chips = chipsRow(y.dep, y.wit);
+        if (y.dep.signum() > 0 || y.wit.signum() < 0) {
+            LinearLayout chips = chipsRow(y.dep, y.wit, y.hasCash);
             LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1, -2);
             cp.setMarginStart(dp(30));
             box.addView(chips, cp);
@@ -3885,14 +3891,15 @@ public final class HistoryActivity extends Activity {
         head.addView(count);
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
-        TextView sum = bold(signedAmount(m.sum), 14, valueColor(m.sum));
+        String amount = signedAmount(m.sum, m.hasCash);
+        TextView sum = bold(amount, 14, valueColor(m.sum.signum()));
         fitToWidth(sum, 14, 10, 0);
         head.addView(sum, sumParams);
-        head.setContentDescription(state(monthName(m.month), m.sum, open));
+        head.setContentDescription(state(monthName(m.month), amount, open));
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
 
-        if (m.dep > 0 || m.wit < 0) {
-            LinearLayout chips = chipsRow(m.dep, m.wit);
+        if (m.dep.signum() > 0 || m.wit.signum() < 0) {
+            LinearLayout chips = chipsRow(m.dep, m.wit, m.hasCash);
             LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1, -2);
             cp.setMarginStart(dp(26));
             cp.topMargin = dp(2);
@@ -4000,17 +4007,18 @@ public final class HistoryActivity extends Activity {
         head.addView(count);
         LinearLayout.LayoutParams sumParams = new LinearLayout.LayoutParams(-2, -2);
         sumParams.setMarginStart(dp(10));
-        TextView sum = bold(signedAmount(g.sum), 13, valueColor(g.sum));
+        String amount = signedAmount(g.sum, g.hasCash);
+        TextView sum = bold(amount, 13, valueColor(g.sum.signum()));
         fitToWidth(sum, 13, 10, 0);
         head.addView(sum, sumParams);
-        head.setContentDescription(state(dayLabel, g.sum, open));
+        head.setContentDescription(state(dayLabel, amount, open));
         box.addView(head, new LinearLayout.LayoutParams(-1, -2));
 
         // Gross in/out below the header, but only where the net hides something: on a mixed
         // day the net alone reads as quiet while real volume moved. A single-sided day shows
         // no chips because its net already is that side's gross.
-        if (g.dep > 0 && g.wit < 0) {
-            LinearLayout chips = chipsRow(g.dep, g.wit);
+        if (g.dep.signum() > 0 && g.wit.signum() < 0) {
+            LinearLayout chips = chipsRow(g.dep, g.wit, g.hasCash);
             LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1, -2);
             cp.setMarginStart(dp(26));
             cp.topMargin = dp(2);
@@ -5117,22 +5125,22 @@ public final class HistoryActivity extends Activity {
     }
 
     /** Content description for a collapsible group header also states its current expansion. */
-    private String state(String title, long sum, boolean open) {
-        return title + ", " + signedAmount(sum) + ", "
+    private String state(String title, String amount, boolean open) {
+        return title + ", " + amount + ", "
             + getString(open ? R.string.history_expanded : R.string.history_collapsed);
     }
 
     /** Deposit and withdrawal subtotals as compact colored pills; sign is shown by the arrow. */
-    private LinearLayout chipsRow(long deposits, long withdrawals) {
+    private LinearLayout chipsRow(BigInteger deposits, BigInteger withdrawals, boolean hasCash) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        if (deposits > 0) {
-            String amountText = historyAmount(deposits);
+        if (deposits.signum() > 0) {
+            String amountText = historyAmount(deposits, hasCash);
             row.addView(chip("\u2191 " + amountText, depBg, depFg,
                 getString(R.string.history_deposit) + " " + amountText));
         }
-        if (withdrawals < 0) {
-            String amountText = historyAmount(-withdrawals);
+        if (withdrawals.signum() < 0) {
+            String amountText = historyAmount(withdrawals.negate(), hasCash);
             row.addView(chip("\u2193 " + amountText, witBg, witFg,
                 getString(R.string.history_withdrawal) + " " + amountText));
         }
@@ -5152,9 +5160,12 @@ public final class HistoryActivity extends Activity {
 
     /** A deposit/withdrawal proportion track showing the deposit share (green) vs withdrawal share
      *  (red), so direction density is scannable at a glance. */
-    private View depWitTrack(long deposits, long withdrawals) {
-        float d = Math.max(deposits, 0), w = Math.max(-withdrawals, 0);
-        if (d == 0 && w == 0) return null;
+    private View depWitTrack(BigInteger deposits, BigInteger withdrawals) {
+        BigInteger volume = deposits.subtract(withdrawals);
+        if (volume.signum() == 0) return null;
+        double total = volume.doubleValue();
+        float d = (float) (deposits.doubleValue() / total);
+        float w = (float) (-withdrawals.doubleValue() / total);
         LinearLayout track = new LinearLayout(this);
         track.setOrientation(LinearLayout.HORIZONTAL);
         track.setBackground(rounded(divider, 2));
@@ -5206,17 +5217,21 @@ public final class HistoryActivity extends Activity {
      *  total scope keeps its own deposit/withdrawal subtotals so the hero can lead with gross
      *  in/out figures instead of the net alone. */
     static final class Lists {
-        long today, month, year, total;
-        long todayDep, monthDep, yearDep, totalDep;
-        long todayWit, monthWit, yearWit, totalWit;
+        BigInteger today = BigInteger.ZERO, month = BigInteger.ZERO;
+        BigInteger year = BigInteger.ZERO, total = BigInteger.ZERO;
+        BigInteger todayDep = BigInteger.ZERO, todayWit = BigInteger.ZERO;
+        BigInteger monthDep = BigInteger.ZERO, monthWit = BigInteger.ZERO;
+        BigInteger yearDep = BigInteger.ZERO, yearWit = BigInteger.ZERO;
+        BigInteger totalDep = BigInteger.ZERO, totalWit = BigInteger.ZERO;
+        boolean todayHasCash, monthHasCash, yearHasCash, totalHasCash;
         final List<YearGroup> years = new ArrayList<>();
     }
 
     static final class DayGroup {
         final CalDate date;
-        long sum;
-        long dep, wit;
+        BigInteger sum = BigInteger.ZERO, dep = BigInteger.ZERO, wit = BigInteger.ZERO;
         long n;
+        boolean hasCash;
         final List<Transaction> txs = new ArrayList<>();
         /** Unaccounted money detected on this day, shown beside the movements rather than among
          *  them: it is proven by the day's own balance statements, not read off a message. */
@@ -5237,8 +5252,9 @@ public final class HistoryActivity extends Activity {
      *  and its day-by-day groups, kept in descending date order. */
     static final class MonthGroup {
         final int year, month;
-        long sum, dep, wit;
+        BigInteger sum = BigInteger.ZERO, dep = BigInteger.ZERO, wit = BigInteger.ZERO;
         long n;
+        boolean hasCash;
         final List<DayGroup> days = new ArrayList<>();
         MonthGroup(int year, int month) {
             this.year = year;
@@ -5253,8 +5269,9 @@ public final class HistoryActivity extends Activity {
      *  and its months, kept in descending date order. */
     static final class YearGroup {
         final int year;
-        long sum, dep, wit;
+        BigInteger sum = BigInteger.ZERO, dep = BigInteger.ZERO, wit = BigInteger.ZERO;
         long n;
+        boolean hasCash;
         final List<MonthGroup> months = new ArrayList<>();
         YearGroup(int year) {
             this.year = year;
@@ -5590,6 +5607,10 @@ public final class HistoryActivity extends Activity {
         lists.monthWit = result.monthWithdrawals;
         lists.yearWit = result.yearWithdrawals;
         lists.totalWit = result.totalWithdrawals;
+        lists.todayHasCash = result.today.hasCash;
+        lists.monthHasCash = result.month.hasCash;
+        lists.yearHasCash = result.year.hasCash;
+        lists.totalHasCash = result.allTime.hasCash;
 
         for (HistoryReader.YearSummary summaryYear : result.years) {
             YearGroup year = new YearGroup(summaryYear.year);
@@ -5597,18 +5618,21 @@ public final class HistoryActivity extends Activity {
             year.dep = summaryYear.stats.deposits;
             year.wit = summaryYear.stats.withdrawals;
             year.n = summaryYear.stats.movementCount;
+            year.hasCash = summaryYear.stats.hasCash;
             for (HistoryReader.MonthSummary summaryMonth : summaryYear.months) {
                 MonthGroup month = new MonthGroup(summaryMonth.year, summaryMonth.month);
                 month.sum = summaryMonth.stats.sum;
                 month.dep = summaryMonth.stats.deposits;
                 month.wit = summaryMonth.stats.withdrawals;
                 month.n = summaryMonth.stats.movementCount;
+                month.hasCash = summaryMonth.stats.hasCash;
                 for (HistoryReader.DaySummary summaryDay : summaryMonth.days) {
                     DayGroup day = new DayGroup(summaryDay.date);
                     day.sum = summaryDay.stats.sum;
                     day.dep = summaryDay.stats.deposits;
                     day.wit = summaryDay.stats.withdrawals;
                     day.n = summaryDay.stats.movementCount;
+                    day.hasCash = summaryDay.stats.hasCash;
                     HistoryReader.DayRows rows = loadedPages == null ? null : loadedPages.get(day.key());
                     if (rows != null) {
                         day.txs.addAll(rows.transactions);
@@ -5699,8 +5723,9 @@ public final class HistoryActivity extends Activity {
         for (Line l : lines) {
             boolean isResidual = l.residual != null;
             long amount = isResidual ? l.residual.amount : l.tx.amount;
+            boolean cash = !isResidual && CashStore.isCash(l.tx);
             DayGroup day = accumulate(lists, yearIndex, monthIndex, calOf(l.date, iran), amount,
-                !isResidual, today);
+                !isResidual, cash, today);
             if (isResidual) day.residuals.add(l.residual); else day.txs.add(l.tx);
             // The stream above is already in display order, so each day collects its own lines
             // in that order as it is built; dayLines then hands them out without re-sorting.
@@ -5719,23 +5744,33 @@ public final class HistoryActivity extends Activity {
      *  returns the day group it landed in. {@code count} is false for unaccounted money, which moves
      *  every total but is not a movement. */
     private static DayGroup accumulate(Lists lists, Map<String, YearGroup> yearIndex,
-            Map<String, MonthGroup> monthIndex, CalDate jc, long amount, boolean count, CalDate today) {
-        lists.total += amount;
-        if (amount > 0) lists.totalDep += amount; else lists.totalWit += amount;
+            Map<String, MonthGroup> monthIndex, CalDate jc, long rials, boolean count,
+            boolean cash, CalDate today) {
+        BigInteger amount = BigInteger.valueOf(rials);
+        lists.total = lists.total.add(amount);
+        if (rials > 0) lists.totalDep = lists.totalDep.add(amount);
+        else lists.totalWit = lists.totalWit.add(amount);
+        lists.totalHasCash |= cash;
         boolean todayMatch = jc.sameDay(today);
         boolean monthMatch = jc.year == today.year && jc.month == today.month;
         boolean yearMatch = jc.year == today.year;
         if (todayMatch) {
-            lists.today += amount;
-            if (amount > 0) lists.todayDep += amount; else lists.todayWit += amount;
+            lists.today = lists.today.add(amount);
+            if (rials > 0) lists.todayDep = lists.todayDep.add(amount);
+            else lists.todayWit = lists.todayWit.add(amount);
+            lists.todayHasCash |= cash;
         }
         if (monthMatch) {
-            lists.month += amount;
-            if (amount > 0) lists.monthDep += amount; else lists.monthWit += amount;
+            lists.month = lists.month.add(amount);
+            if (rials > 0) lists.monthDep = lists.monthDep.add(amount);
+            else lists.monthWit = lists.monthWit.add(amount);
+            lists.monthHasCash |= cash;
         }
         if (yearMatch) {
-            lists.year += amount;
-            if (amount > 0) lists.yearDep += amount; else lists.yearWit += amount;
+            lists.year = lists.year.add(amount);
+            if (rials > 0) lists.yearDep = lists.yearDep.add(amount);
+            else lists.yearWit = lists.yearWit.add(amount);
+            lists.yearHasCash |= cash;
         }
 
         YearGroup year = yearIndex.get(String.valueOf(jc.year));
@@ -5744,9 +5779,11 @@ public final class HistoryActivity extends Activity {
             yearIndex.put(String.valueOf(jc.year), year);
             lists.years.add(year);
         }
-        year.sum += amount;
+        year.sum = year.sum.add(amount);
         if (count) year.n++;
-        if (amount > 0) year.dep += amount; else year.wit += amount;
+        if (rials > 0) year.dep = year.dep.add(amount);
+        else year.wit = year.wit.add(amount);
+        year.hasCash |= cash;
 
         String monthKey = jc.year + "/" + jc.month;
         MonthGroup month = monthIndex.get(monthKey);
@@ -5755,18 +5792,22 @@ public final class HistoryActivity extends Activity {
             monthIndex.put(monthKey, month);
             year.months.add(month);
         }
-        month.sum += amount;
+        month.sum = month.sum.add(amount);
         if (count) month.n++;
-        if (amount > 0) month.dep += amount; else month.wit += amount;
+        if (rials > 0) month.dep = month.dep.add(amount);
+        else month.wit = month.wit.add(amount);
+        month.hasCash |= cash;
 
         DayGroup day = month.days.isEmpty() ? null : month.days.get(month.days.size() - 1);
         if (day == null || day.date.day != jc.day) {
             day = new DayGroup(jc);
             month.days.add(day);
         }
-        day.sum += amount;
-        if (amount > 0) day.dep += amount; else day.wit += amount;
+        day.sum = day.sum.add(amount);
+        if (rials > 0) day.dep = day.dep.add(amount);
+        else day.wit = day.wit.add(amount);
         if (count) day.n++;
+        day.hasCash |= cash;
         return day;
     }
 
@@ -5895,23 +5936,27 @@ public final class HistoryActivity extends Activity {
      *  the chosen currency's value (toman divides by ten, other currencies show the raw amount). */
     private String signedAmount(long n) {
         String magnitude = n == Long.MIN_VALUE
-            ? CurrencyHelper.amount(this, java.math.BigInteger.valueOf(n).negate())
-            : historyAmount(Math.abs(n));
-        return signedAmount(n, magnitude);
+            ? CurrencyHelper.amount(this, BigInteger.valueOf(n).negate())
+            : CurrencyHelper.amount(this, Math.abs(n));
+        return signedAmount(Long.signum(n), magnitude);
     }
 
-    private String historyAmount(long amount) {
-        return isCashScope() ? CurrencyHelper.amountExact(this, amount)
+    private String historyAmount(BigInteger amount, boolean hasCash) {
+        return hasCash ? CurrencyHelper.amountExact(this, amount)
             : CurrencyHelper.amount(this, amount);
     }
 
-    private String signedCashAmount(long n) {
-        return signedAmount(n, CurrencyHelper.amountExact(this, Math.abs(n)));
+    private String signedAmount(BigInteger amount, boolean hasCash) {
+        return signedAmount(amount.signum(), historyAmount(amount.abs(), hasCash));
     }
 
-    private String signedAmount(long n, String mag) {
-        if (n == 0) return mag;
-        String sign = (n < 0 ? "\u2212" : "+");
+    private String signedCashAmount(long n) {
+        return signedAmount(BigInteger.valueOf(n), true);
+    }
+
+    private String signedAmount(int signum, String mag) {
+        if (signum == 0) return mag;
+        String sign = signum < 0 ? "\u2212" : "+";
         if (!LocaleHelper.isPersian(this)) return sign + mag;
         return "\u2066" + sign + mag + "\u2069";
     }

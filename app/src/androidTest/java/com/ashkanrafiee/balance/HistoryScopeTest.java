@@ -199,7 +199,7 @@ public class HistoryScopeTest {
             assertEquals(3, result.visibleTransactions().size());
             assertEquals(Arrays.asList("Mellat|111|a", "Saman|333|b", "Mellat|222|c"),
                 identities(result.visibleTransactions()));
-            assertEquals(940L, result.total);
+            assertEquals(java.math.BigInteger.valueOf(940), result.total);
         } finally {
             result.close();
         }
@@ -221,7 +221,7 @@ public class HistoryScopeTest {
             assertEquals(2, result.visibleTransactions().size());
             assertEquals(Arrays.asList("Mellat|111|a", "Saman|111|b"),
                 identities(result.visibleTransactions()));
-            assertEquals(870L, result.total);
+            assertEquals(java.math.BigInteger.valueOf(870), result.total);
         } finally {
             result.close();
         }
@@ -244,7 +244,7 @@ public class HistoryScopeTest {
             assertEquals(1, result.visibleTransactions().size());
             assertEquals(Collections.singletonList("Mellat|111|a"),
                 identities(result.visibleTransactions()));
-            assertEquals(-30L, result.total);
+            assertEquals(java.math.BigInteger.valueOf(-30), result.total);
         } finally {
             result.close();
         }
@@ -263,7 +263,7 @@ public class HistoryScopeTest {
             HistoryActivity.Filter.ALL, "", null, null, 0, 0);
         HistoryReader.Result result = HistoryReader.summary(context, request);
         try {
-            assertEquals(900L, result.total);
+            assertEquals(java.math.BigInteger.valueOf(900), result.total);
             assertEquals(1, result.movementCount);
         } finally {
             result.close();

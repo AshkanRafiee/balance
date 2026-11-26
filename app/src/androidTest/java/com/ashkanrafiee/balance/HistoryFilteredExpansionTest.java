@@ -138,7 +138,7 @@ public class HistoryFilteredExpansionTest {
             assertEquals(138L, result(activity).movementCount);
             assertEquals("collapsed days still contribute to the complete summary",
                 dayKeys(dates), result(activity).daySummaries.keySet());
-            assertEquals(13_808_256L, result(activity).total);
+            assertEquals(java.math.BigInteger.valueOf(13_808_256), result(activity).total);
             assertExpansion(activity, dates.subList(0, 8));
             Map<String, HistoryReader.DayRows> pages = pages(activity);
             HistoryReader.DayRows newest = pages.get(dates.get(0).key());
