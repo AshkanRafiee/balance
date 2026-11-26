@@ -130,11 +130,13 @@ public class MofidTest {
 
     @Test public void feeAloneIsNotAWithdrawalAmount() {
         String message = FEE_WITHDRAWAL.replace("برداشت مبلغ 3,766,300 ریال", "برداشت انجام شد");
-        assertNull(BalanceData.extractTransaction(message));
-        Transaction movement = BalanceData.parseMovement(BANK, CARD_SENDER, message,
-            CARD_WITHDRAWAL_DATE, true, CARD_DEPOSIT_BALANCE);
-        assertNotNull(movement);
-        assertEquals(CARD_WITHDRAWAL_AMOUNT, movement.amount);
+        for (String variant : new String[]{message, message.replace("کارمزد بانک", "کارمزد")}) {
+            assertNull(BalanceData.extractTransaction(variant));
+            Transaction movement = BalanceData.parseMovement(BANK, CARD_SENDER, variant,
+                CARD_WITHDRAWAL_DATE, true, CARD_DEPOSIT_BALANCE);
+            assertNotNull(movement);
+            assertEquals(CARD_WITHDRAWAL_AMOUNT, movement.amount);
+        }
     }
 
     @Test public void persianDigitsArabicLettersAndCrLf_preserveBothMovements() {
