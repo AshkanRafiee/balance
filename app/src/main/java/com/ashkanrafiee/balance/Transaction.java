@@ -1,8 +1,8 @@
 package com.ashkanrafiee.balance;
 
 /**
- * A single transaction parsed from a bank SMS: a signed money movement (deposit or withdrawal) and
- * the time it was reported. Unlike a {@link Bank} balance (which is a point-in-time remaining amount),
+ * A single signed money movement (deposit or withdrawal), reported in a bank SMS or recorded
+ * manually in Cash. Unlike a {@link Bank} balance (which is a point-in-time remaining amount),
  * a transaction records the movement itself, so history can sum them over a day, month or year.
  */
 final class Transaction {
@@ -10,7 +10,7 @@ final class Transaction {
     final String bank;
     /** Account number this transaction belongs to, or null when the bank message did not state one. */
     final String account;
-    /** Epoch millis of the SMS that reported the transaction. */
+    /** Epoch millis of the event. */
     final long date;
     /** Signed amount in rials: positive for a deposit, negative for a withdrawal. */
     final long amount;
@@ -21,7 +21,7 @@ final class Transaction {
      *  {@link Residual}. This is reported state, never an estimate: it is read straight off the
      *  message by the same {@code extract} the balance screen itself trusts. */
     final Long balance;
-    /** Deterministic fingerprint of the source SMS, used to reject exact duplicate redeliveries. */
+    /** Fingerprint of the source SMS, or the unique identity of a manual cash entry. */
     final String sig;
     /** Parse-independent digest of the source message (sender + normalized body). Unlike {@link #sig}
      *  it folds no parsed values, so it stays identical however the parsing rules change; the history

@@ -63,6 +63,7 @@ final class BankRules {
 
     /** Localized name for display; the canonical name passed in remains the storage/lookup key everywhere else. */
     static String displayName(Context context, String canonical) {
+        if (CashStore.KEY.equals(canonical)) return context.getString(R.string.cash_label);
         Integer resId = DISPLAY_NAME_RES.get(canonical);
         return resId != null ? context.getString(resId) : canonical;
     }

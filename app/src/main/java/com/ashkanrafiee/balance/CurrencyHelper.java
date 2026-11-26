@@ -2,6 +2,7 @@ package com.ashkanrafiee.balance;
 
 import android.content.Context;
 
+import java.math.BigInteger;
 import java.text.NumberFormat;
 import java.util.Locale;
 
@@ -53,6 +54,11 @@ public final class CurrencyHelper {
         return amount(CURRENCY_TOMAN.equals(currency(context)), LocaleHelper.isPersian(context), n);
     }
 
+    static String amount(Context context, BigInteger n) {
+        BigInteger displayed = CURRENCY_TOMAN.equals(currency(context)) ? n.divide(BigInteger.TEN) : n;
+        return formatter(LocaleHelper.isPersian(context)).format(displayed);
+    }
+
     /** Formats without re-reading the stored currency and language, for passes over many rows
      *  whose caller resolves both once. The result is identical to {@link #amount(Context, long)}. */
     static String amount(boolean toman, boolean persian, long n) {
@@ -65,13 +71,17 @@ public final class CurrencyHelper {
     }
 
     private static String display(boolean persian, long n) {
+        return formatter(persian).format(n);
+    }
+
+    private static NumberFormat formatter(boolean persian) {
         Locale locale = persian ? FA : Locale.US;
         Numbers c = NUMBERS.get();
         if (!locale.equals(c.locale)) {
             c.format = NumberFormat.getNumberInstance(locale);
             c.locale = locale;
         }
-        return c.format.format(n);
+        return c.format;
     }
 
     /** One formatter, belonging to the thread that asked for it and rebuilt when the language

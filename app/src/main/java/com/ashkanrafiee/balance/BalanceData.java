@@ -3394,7 +3394,7 @@ final class BalanceData {
         synchronized (historyListeners) { historyListeners.remove(r); }
     }
 
-    private static void notifyHistoryChanged() {
+    static void notifyHistoryChanged() {
         List<Runnable> copy;
         synchronized (historyListeners) { copy = new ArrayList<>(historyListeners); }
         for (Runnable r : copy) {

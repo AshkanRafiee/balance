@@ -436,6 +436,12 @@ final class MetadataStore {
             if (!canSave.getAsBoolean()) return false;
             Context current = DataGeneration.context(context);
             String key = BalanceData.noteKey(expected);
+            if (CashStore.isCash(expected)) {
+                if (!CashStore.containsVisible(current, expected))
+                    throw new StaleAnnotationTargetException();
+                if (!canSave.getAsBoolean()) return false;
+                return setAnnotations(current, key, note, tags);
+            }
             int[] matchingKeys = {0};
             boolean[] exact = {false};
             TransactionStore.forEach(current, 256, transaction -> {
