@@ -233,6 +233,34 @@ public class CashStoreTest {
         }
     }
 
+    @Test public void editCanReplaceOrClearAnnotationsWithoutChangingTheMovement() throws Exception {
+        long date = System.currentTimeMillis() - 60_000;
+        CashStore.Annotation added = new CashStore.Annotation("", Collections.singletonList("food"));
+        Transaction transaction = CashStore.add(context, date, 10, added);
+        try {
+            assertEquals(Collections.singletonList("food"), BalanceData.getTags(context, transaction));
+            assertNull(BalanceData.getNote(context, transaction));
+            CashStore.Annotation replacement = new CashStore.Annotation("Lunch",
+                Collections.singletonList("home"));
+            CashStore.update(context, transaction, date, 10, added, replacement);
+            assertEquals("Lunch", BalanceData.getNote(context, transaction));
+            assertEquals(Collections.singletonList("home"), BalanceData.getTags(context, transaction));
+            try {
+                CashStore.update(context, transaction, date, 10, added,
+                    new CashStore.Annotation("", Collections.emptyList()));
+                fail("stale annotations must not overwrite the saved edit");
+            } catch (CashStore.StaleCashTransactionException expected) {}
+            CashStore.update(context, transaction, date, 10, replacement,
+                new CashStore.Annotation("", Collections.emptyList()));
+            assertNull(BalanceData.getNote(context, transaction));
+            assertTrue(BalanceData.getTags(context, transaction).isEmpty());
+            assertEquals(transaction.sig, CashStore.read(context).transactions.get(0).sig);
+            assertEquals(10L, CashStore.read(context).balance);
+        } finally {
+            CashStore.remove(context, transaction);
+        }
+    }
+
     @Test public void snapshotCacheDoesNotMaskReplacementOrReadForCancelledPreview() {
         CashStore.setBalance(context, 30);
         CashStore.State original = CashStore.read(context);

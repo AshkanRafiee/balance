@@ -185,20 +185,52 @@ final class CashStore {
     }
 
     static Transaction add(Context context, long date, long amount) {
-        return add(context, date, amount, null);
+        return saveMovement(context, null, date, amount, null, null);
     }
 
     static Transaction add(Context context, long date, long amount, String note) {
-        return saveMovement(context, null, date, amount, note == null ? "" : note.trim());
+        return add(context, date, amount, new Annotation(note, Collections.emptyList()));
+    }
+
+    static Transaction add(Context context, long date, long amount, Annotation annotation) {
+        return saveMovement(context, null, date, amount, null, annotation);
     }
 
     static Transaction update(Context context, Transaction expected, long date, long amount) {
+        return update(context, expected, date, amount, null, null);
+    }
+
+    static Transaction update(Context context, Transaction expected, long date, long amount,
+            Annotation original, Annotation annotation) {
         if (!isCash(expected)) throw new StaleCashTransactionException();
-        return saveMovement(context, expected, date, amount, "");
+        return saveMovement(context, expected, date, amount, original, annotation);
+    }
+
+    static final class Annotation {
+        final String note;
+        final List<String> tags;
+
+        Annotation(String note, List<String> tags) {
+            this.note = note == null ? "" : note.trim();
+            this.tags = Collections.unmodifiableList(new ArrayList<>(tags));
+        }
+
+        boolean sameAs(Annotation other) {
+            return note.equals(other.note) && tags.equals(other.tags);
+        }
+    }
+
+    private static final Annotation EMPTY_ANNOTATION = new Annotation(null, Collections.emptyList());
+
+    static Annotation readAnnotation(Context context, Transaction transaction) throws Exception {
+        synchronized (BalanceData.class) {
+            return new Annotation(MetadataStore.getNote(context, transaction),
+                MetadataStore.getTags(context, transaction));
+        }
     }
 
     private static Transaction saveMovement(Context context, Transaction expected, long date,
-            long amount, String note) {
+            long amount, Annotation original, Annotation annotation) {
         Transaction saved;
         synchronized (BalanceData.class) {
             SharedPreferences prefs = writable(context);
@@ -208,28 +240,50 @@ final class CashStore {
             String sig = expected == null ? SIGNATURE_PREFIX + UUID.randomUUID() : expected.sig;
             saved = new Transaction(KEY, date, amount, sig);
             List<Transaction> movements = withMovement(previous, expected, saved);
-            if (expected != null && sameMovement(expected, saved)) return expected;
-            State next = new State(previous.countedAmount, previous.countedAt,
-                affectsBalance(previous, expected, date) ? now : previous.updatedAt, movements);
-            // Validate the movement first. Publish its note before the row so a visible entry can
-            // never be saved without the note the user submitted.
-            if (!note.isEmpty()) {
-                try {
-                    if (!MetadataStore.setAnnotations(context, saved, note, Collections.emptyList()))
-                        throw new IllegalStateException("cash note was not saved");
-                } catch (Exception failure) {
-                    throw new IllegalStateException("cash note could not be saved");
-                }
-            }
+            boolean movementChanged = expected == null || !sameMovement(expected, saved);
+            State next = movementChanged ? new State(previous.countedAmount, previous.countedAt,
+                affectsBalance(previous, expected, date) ? now : previous.updatedAt, movements) : null;
+            boolean annotationChanged = annotation != null
+                && !(original == null ? EMPTY_ANNOTATION : original).sameAs(annotation);
+            Annotation before = !annotationChanged || expected == null ? EMPTY_ANNOTATION
+                : currentAnnotation(context, expected);
+            if (annotationChanged && original != null && !original.sameAs(before))
+                throw new StaleCashTransactionException();
+            if (!movementChanged && !annotationChanged) return expected;
+            if (annotationChanged) writeAnnotation(context, saved, annotation);
             try {
-                write(prefs, next);
+                if (movementChanged) write(prefs, next);
             } catch (RuntimeException failure) {
-                if (!note.isEmpty()) clearAnnotation(context, saved);
+                if (annotationChanged) {
+                    try {
+                        writeAnnotation(context, saved, before);
+                    } catch (RuntimeException rollback) {
+                        Log.w("CashStore", "cash annotation rollback failed");
+                    }
+                }
                 throw failure;
             }
         }
         BalanceData.notifyHistoryChanged();
         return saved;
+    }
+
+    private static Annotation currentAnnotation(Context context, Transaction transaction) {
+        try {
+            return readAnnotation(context, transaction);
+        } catch (Exception failure) {
+            throw new IllegalStateException("cash annotation could not be read");
+        }
+    }
+
+    private static void writeAnnotation(Context context, Transaction transaction, Annotation annotation) {
+        try {
+            if (MetadataStore.setAnnotations(context, transaction, annotation.note, annotation.tags))
+                return;
+        } catch (Exception ignored) {
+            // Do not include annotation text in diagnostics.
+        }
+        throw new IllegalStateException("cash annotation could not be saved");
     }
 
     /** Uses the same chronological check as Save, without writing anything. */
