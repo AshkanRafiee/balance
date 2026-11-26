@@ -106,7 +106,7 @@ final class BankRules {
         {"Tosee Saderat", "Tosee Saderat|ToseeSaderat", "J"},
         {"Bankino", "Bankino|Bankino Bank", "J"},
         {"Wepod", "Wepod|Wepod Bank", "J"},
-        {"Mofid", "10008700", "J"}
+        {"Mofid", "10008700|MofidCard", "J"}
     };
     private static final String[][] OFFICIAL_EXTRA_RULES = {
         {"Saderat", "+987007851040|+9830009419|9830009419|30009419|983-000-9419|+98200060|+98200040|+9820004008|+98700719|700710|700718|98700719|700719|7007190", "J"},
@@ -154,7 +154,7 @@ final class BankRules {
     // Only integer rial amounts: grouping is either absent or consistently three digits.
     private static final String AUTH_INTEGER = "([0-9]{1,19}|[0-9]{1,3}(?:,[0-9]{3}){1,6})";
     private static final String AUTH_LAYOUT_VERSION = "strict-purchase-layouts-v2";
-    private static final String MOVEMENT_LAYOUT_VERSION = "line-local-movement-labels-v1";
+    private static final String MOVEMENT_LAYOUT_VERSION = "line-local-movement-labels-v2";
     private static final Pattern AUTH_AMOUNT = Pattern.compile(
         "مبلغ\\s*[:：]?\\s*" + AUTH_INTEGER + "(?:\\s*ریال)?");
     private static final Pattern AUTH_RIAL_AMOUNT = Pattern.compile(
@@ -418,8 +418,10 @@ final class BankRules {
     /** Keeps distinct products from a shared sender out of an unidentified account's balance chain. */
     static boolean acceptsBalance(String bank, String body) {
         if (!"Mofid".equals(bank)) return true;
-        if (body == null) return false;
-        String normalized = TextNormalizer.normalize(body);
+        return body != null && isMofidHamiMessage(TextNormalizer.normalize(body));
+    }
+
+    static boolean isMofidHamiMessage(String normalized) {
         return MOFID_HEADER.matcher(normalized).find()
             && MOFID_HAMI_ACCOUNT.matcher(normalized).find();
     }

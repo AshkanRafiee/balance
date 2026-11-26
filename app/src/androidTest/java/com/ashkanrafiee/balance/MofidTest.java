@@ -24,6 +24,7 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -33,6 +34,7 @@ import java.util.Locale;
 public class MofidTest {
     private static final String BANK = "Mofid";
     private static final String SENDER = "10008700";
+    private static final String CARD_SENDER = "MofidCard";
     private static final long DEPOSIT_AMOUNT = 47_381_295L;
     private static final long DEPOSIT_BALANCE = 83_146_702L;
     private static final long WITHDRAWAL_AMOUNT = -72_614L;
@@ -52,6 +54,27 @@ public class MofidTest {
         + "مانده: 83,074,088 ریال\n"
         + "1402/04/27\n"
         + "15:08";
+
+    private static final long CARD_DEPOSIT_AMOUNT = 3_760_000L;
+    private static final long CARD_DEPOSIT_BALANCE = 73_894_216L;
+    private static final long CARD_WITHDRAWAL_AMOUNT = -3_766_300L;
+    private static final long CARD_WITHDRAWAL_BALANCE = 70_127_916L;
+    private static final long CARD_DEPOSIT_DATE = persian(1402, 4, 27, 9, 48);
+    private static final long CARD_WITHDRAWAL_DATE = persian(1402, 4, 27, 9, 51);
+    private static final String CARD_DEPOSIT = "کارگزاری مفید\n"
+        + "واریز مبلغ 3,760,000 ریال\n"
+        + "به حساب حامی\n"
+        + "مانده: 73,894,216 ریال\n"
+        + "1402/04/27\n"
+        + "09:48";
+    // The stated debit already includes the fee: 3,760,000 + 6,300.
+    private static final String FEE_WITHDRAWAL = "کارگزاری مفید\n"
+        + "برداشت مبلغ 3,766,300 ریال\n"
+        + "کارمزد بانک به مبلغ 6,300 ریال\n"
+        + "از حساب حامی\n"
+        + "مانده: 70,127,916 ریال\n"
+        + "1402/04/27\n"
+        + "09:51";
 
     private Context context;
     private boolean providerTouched;
@@ -76,16 +99,37 @@ public class MofidTest {
             BankRules.displayName(target.createConfigurationContext(persian), BANK));
     }
 
+    @Test public void mofidCardSender_requiresExactNormalizedAlias() {
+        for (String sender : new String[]{CARD_SENDER, "mOFIDcARD", " \u200fMofid-Card\u200e "}) {
+            assertEquals(sender, BANK, BankRules.resolve(sender));
+        }
+        for (String sender : new String[]{"Mofid", "XMofidCard", "MofidCards", "MofidCard1"}) {
+            assertNull(sender, BankRules.resolve(sender));
+        }
+    }
+
     @Test public void exactFixtures_readBalancesSignedMovementsAndJalaliDates_withoutNumericAccount() {
-        assertFixture(DEPOSIT, DEPOSIT_AMOUNT, DEPOSIT_BALANCE, persian(1402, 4, 26, 9, 41));
-        assertFixture(WITHDRAWAL, WITHDRAWAL_AMOUNT, WITHDRAWAL_BALANCE,
+        assertFixture(SENDER, DEPOSIT, DEPOSIT_AMOUNT, DEPOSIT_BALANCE,
+            persian(1402, 4, 26, 9, 41));
+        assertFixture(SENDER, WITHDRAWAL, WITHDRAWAL_AMOUNT, WITHDRAWAL_BALANCE,
             persian(1402, 4, 27, 15, 8));
     }
 
+    @Test public void hamiFeeWithdrawal_usesStatedDebitWithoutAddingFeeOrNeedingPriorBalance() {
+        assertFixture(CARD_SENDER, CARD_DEPOSIT, CARD_DEPOSIT_AMOUNT, CARD_DEPOSIT_BALANCE,
+            CARD_DEPOSIT_DATE);
+        assertFixture(CARD_SENDER, FEE_WITHDRAWAL, CARD_WITHDRAWAL_AMOUNT, CARD_WITHDRAWAL_BALANCE,
+            CARD_WITHDRAWAL_DATE);
+        assertFixture(SENDER, FEE_WITHDRAWAL, CARD_WITHDRAWAL_AMOUNT, CARD_WITHDRAWAL_BALANCE,
+            CARD_WITHDRAWAL_DATE);
+        assertFixture(CARD_SENDER, alternate(FEE_WITHDRAWAL), CARD_WITHDRAWAL_AMOUNT,
+            CARD_WITHDRAWAL_BALANCE, CARD_WITHDRAWAL_DATE);
+    }
+
     @Test public void persianDigitsArabicLettersAndCrLf_preserveBothMovements() {
-        assertFixture(alternate(DEPOSIT), DEPOSIT_AMOUNT, DEPOSIT_BALANCE,
+        assertFixture(SENDER, alternate(DEPOSIT), DEPOSIT_AMOUNT, DEPOSIT_BALANCE,
             persian(1402, 4, 26, 9, 41));
-        assertFixture(alternate(WITHDRAWAL), WITHDRAWAL_AMOUNT, WITHDRAWAL_BALANCE,
+        assertFixture(SENDER, alternate(WITHDRAWAL), WITHDRAWAL_AMOUNT, WITHDRAWAL_BALANCE,
             persian(1402, 4, 27, 15, 8));
     }
 
@@ -126,19 +170,28 @@ public class MofidTest {
         }
     }
 
-    @Test public void unsupportedProduct_diagnosticsKeepItKnownButUnparsed() {
-        String otherProduct = DEPOSIT.replace("به حساب حامی", "به حساب معاملات");
+    @Test public void mofidCardDiagnostics_distinguishParsedHamiUnsupportedProductAndUnknownSender() {
+        String otherProduct = FEE_WITHDRAWAL.replace("از حساب حامی", "از حساب معاملات");
+        String unknown = "MofidCards";
         ScanDiagnostics.Summary summary = ScanDiagnostics.analyze(Arrays.asList(
             new Object[]{SENDER, DEPOSIT, ARRIVAL},
-            new Object[]{SENDER, otherProduct, ARRIVAL + 1_000L}));
-        assertEquals(2, summary.messages);
-        assertEquals(1, summary.parsedMessages);
+            new Object[]{CARD_SENDER, CARD_DEPOSIT, ARRIVAL + 1_000L},
+            new Object[]{CARD_SENDER, FEE_WITHDRAWAL, ARRIVAL + 2_000L},
+            new Object[]{CARD_SENDER, otherProduct, ARRIVAL + 3_000L},
+            new Object[]{unknown, FEE_WITHDRAWAL, ARRIVAL + 4_000L}));
+        assertEquals(5, summary.messages);
+        assertEquals(3, summary.parsedMessages);
         assertEquals(1, summary.unparsedSendersMessages);
-        assertEquals(0, summary.unknownSendersMessages);
+        assertEquals(1, summary.unknownSendersMessages);
+        assertEquals(1, summary.banks.size());
+        assertEquals(BANK, summary.banks.get(0).bank);
+        assertEquals(3, summary.banks.get(0).messages);
+        assertEquals(1, summary.unknownSenders.size());
+        assertEquals(unknown, summary.unknownSenders.get(0).sender);
         assertEquals(1, summary.unparsedSenders.size());
         ScanDiagnostics.SenderHit hit = summary.unparsedSenders.get(0);
         assertEquals(BANK, hit.bank);
-        assertEquals(SENDER, hit.sender);
+        assertEquals(CARD_SENDER, hit.sender);
         assertEquals(otherProduct, hit.stored.get(0).body);
     }
 
@@ -164,16 +217,16 @@ public class MofidTest {
         assertHistory();
     }
 
-    @Test public void olderInboxFixtures_areDiscoveredAutomaticallyAfterRulesVersionChange()
+    @Test public void olderMofidCardMessages_areFoundAfterRulesVersionChangeWithoutDuplicates()
             throws Exception {
         prepareProvider();
-        // Establish both scan cursors beyond the fixtures, as an install without Mofid support did.
+        // Establish both scan cursors beyond the fixtures, as an install without this alias did.
         seed("unknown-mofid-test", "not a bank message", ARRIVAL + 10_000L);
         LinkedHashMap<String, Bank> saved = new LinkedHashMap<>();
         assertEquals(0, BalanceData.scanSms(context, saved));
         assertEquals(0, BalanceData.scanHistory(context));
-        seed(SENDER, DEPOSIT, ARRIVAL);
-        seed(SENDER, WITHDRAWAL, ARRIVAL + 1_000L);
+        seed(CARD_SENDER, CARD_DEPOSIT, ARRIVAL);
+        seed(CARD_SENDER, FEE_WITHDRAWAL, ARRIVAL + 1_000L);
         assertTrue(prefs().edit()
             .putInt(BalanceData.KEY_RULES_VERSION, BankRules.VERSION - 1)
             .putInt(BalanceData.KEY_HISTORY_RULES_VERSION, BalanceData.historyRulesVersion() - 1)
@@ -181,13 +234,44 @@ public class MofidTest {
 
         assertEquals(1, BalanceData.scanSms(context, saved));
         assertEquals(2, BalanceData.scanHistory(context));
-        assertNewestBalance(saved);
-        assertHistory();
+        assertNewestBalance(saved, CARD_WITHDRAWAL_BALANCE, CARD_WITHDRAWAL_DATE);
+        assertNewestBalance(BalanceData.read(context), CARD_WITHDRAWAL_BALANCE, CARD_WITHDRAWAL_DATE);
+        assertCardHistory();
         assertEquals(BankRules.VERSION, prefs().getInt(BalanceData.KEY_RULES_VERSION, -1));
         assertEquals(BalanceData.historyRulesVersion(),
             prefs().getInt(BalanceData.KEY_HISTORY_RULES_VERSION, -1));
+        assertEquals(0, BalanceData.scanSms(context, saved));
         assertEquals(0, BalanceData.scanHistory(context));
-        assertHistory();
+        assertNewestBalance(saved, CARD_WITHDRAWAL_BALANCE, CARD_WITHDRAWAL_DATE);
+        assertCardHistory();
+    }
+
+    @Test public void rulesUpgrade_replacesStoredNumericSenderFeeAmountFromInbox() throws Exception {
+        prepareProvider();
+        seed("unknown-mofid-test", "not a bank message", ARRIVAL + 10_000L);
+        assertEquals(0, BalanceData.scanHistory(context));
+        seed(SENDER, FEE_WITHDRAWAL, ARRIVAL);
+
+        // The old parser took the last amount label and stored only the fee as the withdrawal.
+        Transaction old = new Transaction(BANK, null, CARD_WITHDRAWAL_DATE, -6_300L,
+            CARD_WITHDRAWAL_BALANCE, "pre-upgrade-mofid-fee-signature",
+            BalanceData.contentHash(SENDER, FEE_WITHDRAWAL));
+        assertTrue(BalanceData.writeTransactions(context, Collections.singletonList(old)));
+        SourceStore.Source source = SourceStore.capture(context, SENDER, FEE_WITHDRAWAL,
+            ARRIVAL, BankRules.VERSION - 1);
+        assertNotNull(source);
+        assertTrue(SourceStore.observeTransaction(context, source, 0, old));
+        assertTrue(prefs().edit()
+            .putInt(BalanceData.KEY_HISTORY_RULES_VERSION, BalanceData.historyRulesVersion() - 1)
+            .commit());
+
+        assertEquals(1, BalanceData.scanHistory(context));
+        List<Transaction> transactions = BalanceData.readTransactions(context);
+        assertEquals(1, transactions.size());
+        assertMovement(transactions.get(0), CARD_WITHDRAWAL_AMOUNT, CARD_WITHDRAWAL_BALANCE,
+            CARD_WITHDRAWAL_DATE);
+        assertEquals(0, BalanceData.scanHistory(context));
+        assertEquals(1, BalanceData.readTransactions(context).size());
     }
 
     @Test public void interleavedOtherProduct_doesNotDisruptReconciliationOrNextDelta()
@@ -219,7 +303,8 @@ public class MofidTest {
         assertEquals(3, BalanceData.readTransactions(context).size());
     }
 
-    private void assertFixture(String body, long amount, long balance, long expectedDate) {
+    private void assertFixture(String sender, String body, long amount, long balance,
+                               long expectedDate) {
         assertTrue(BankRules.acceptsBalance(BANK, body));
         assertEquals(balance, BalanceData.extract(BANK, body));
         assertEquals(Long.valueOf(amount), BalanceData.extractTransaction(body));
@@ -228,42 +313,53 @@ public class MofidTest {
         assertNull(BankRules.extractChannel(BANK, body));
         long event = MessageDate.eventTime(body, ARRIVAL, BankRules.calendar(BANK));
         assertEquals(expectedDate, event);
-        Transaction transaction = BalanceData.parseMovement(BANK, SENDER, body, event, false, 0);
+        Transaction transaction = BalanceData.parseMovement(BANK, sender, body, event, false, 0);
         assertNotNull(transaction);
-        assertEquals(BANK, transaction.bank);
-        assertEquals(amount, transaction.amount);
-        assertEquals(Long.valueOf(balance), transaction.balance);
-        assertEquals(expectedDate, transaction.date);
-        assertNull(transaction.account);
+        assertMovement(transaction, amount, balance, expectedDate);
     }
 
     private void assertNewestBalance(LinkedHashMap<String, Bank> saved) {
+        assertNewestBalance(saved, WITHDRAWAL_BALANCE, persian(1402, 4, 27, 15, 8));
+    }
+
+    private void assertNewestBalance(LinkedHashMap<String, Bank> saved, long amount, long date) {
         assertEquals(1, saved.size());
         Bank bank = saved.get(BANK);
         assertNotNull(bank);
         assertEquals(BANK, bank.name);
-        assertEquals(WITHDRAWAL_BALANCE, bank.amount);
-        assertEquals(persian(1402, 4, 27, 15, 8), bank.date);
+        assertEquals(amount, bank.amount);
+        assertEquals(date, bank.date);
         assertNull(bank.account);
     }
 
     private void assertHistory() {
         List<Transaction> transactions = BalanceData.readTransactions(context);
         assertEquals(2, transactions.size());
-        Transaction withdrawal = transactions.get(0);
-        Transaction deposit = transactions.get(1);
-        assertEquals(WITHDRAWAL_AMOUNT, withdrawal.amount);
-        assertEquals(Long.valueOf(WITHDRAWAL_BALANCE), withdrawal.balance);
-        assertEquals(persian(1402, 4, 27, 15, 8), withdrawal.date);
-        assertEquals(DEPOSIT_AMOUNT, deposit.amount);
-        assertEquals(Long.valueOf(DEPOSIT_BALANCE), deposit.balance);
-        assertEquals(persian(1402, 4, 26, 9, 41), deposit.date);
-        for (Transaction transaction : transactions) {
-            assertEquals(BANK, transaction.bank);
-            assertNull(transaction.account);
-        }
+        assertMovement(transactions.get(0), WITHDRAWAL_AMOUNT, WITHDRAWAL_BALANCE,
+            persian(1402, 4, 27, 15, 8));
+        assertMovement(transactions.get(1), DEPOSIT_AMOUNT, DEPOSIT_BALANCE,
+            persian(1402, 4, 26, 9, 41));
         assertTrue(BalanceData.readReasons(context).isEmpty());
         assertTrue(BalanceData.readChannels(context).isEmpty());
+    }
+
+    private void assertCardHistory() {
+        List<Transaction> transactions = BalanceData.readTransactions(context);
+        assertEquals(2, transactions.size());
+        assertMovement(transactions.get(0), CARD_WITHDRAWAL_AMOUNT, CARD_WITHDRAWAL_BALANCE,
+            CARD_WITHDRAWAL_DATE);
+        assertMovement(transactions.get(1), CARD_DEPOSIT_AMOUNT, CARD_DEPOSIT_BALANCE,
+            CARD_DEPOSIT_DATE);
+        assertTrue(BalanceData.readReasons(context).isEmpty());
+        assertTrue(BalanceData.readChannels(context).isEmpty());
+    }
+
+    private void assertMovement(Transaction transaction, long amount, long balance, long date) {
+        assertEquals(BANK, transaction.bank);
+        assertEquals(amount, transaction.amount);
+        assertEquals(Long.valueOf(balance), transaction.balance);
+        assertEquals(date, transaction.date);
+        assertNull(transaction.account);
     }
 
     private static String alternate(String body) {

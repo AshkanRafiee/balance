@@ -183,6 +183,8 @@ final class BalanceData {
          *  where the trailing minus marks a withdrawal). */
         private static final Pattern amountLabel = Pattern.compile(
             "(?:\u0645\u0628\u0644\u063A)[^\\d]{0,12}?([+-]?\\s*[0-9][0-9,]*\\s*[+-]?)");
+        private static final Pattern mofidHamiMovement = Pattern.compile(
+            "(?m)^[ \\t]*(واریز|برداشت)[ \\t]+مبلغ[ \\t]+([0-9][0-9,]*)[ \\t]*ریال[ \\t]*\\r?$");
         /** The amount written directly after a deposit/withdrawal label, as Tejarat does with
          *  "برداشت: 490,098,000 ریال". Matching one of these also resolves the direction: a label that
          *  feeds the amount is authoritative, so a payment-method word like "پرداخت" in the same message
@@ -3565,8 +3567,9 @@ final class BalanceData {
     }
 
     /** Parses a signed transaction amount (in rials) from a bank message, or null if the message does
-     *  not describe a completed money movement. The amount is recognized, in order: as a bare
-     *  signed amount on its own line (Resalat's "-200,000,000" first line) or followed by "ریال"
+     *  not describe a completed money movement. The amount is recognized, in order: on a Mofid Hami
+     *  deposit or withdrawal line, as a bare signed amount on its own line (Resalat's "-200,000,000"
+     *  first line) or followed by "ریال"
      *  (Eghtesad Novin's "-3,100,000ريال" layout) — where an explicit "+"/"-" sign is authoritative
      *  — after the "مبلغ" (amount) label (e.g. Parsian's "مبلغ:500,000-"), after a deposit/withdrawal
      *  label ("واریز:"/"برداشت:", Tejarat), as a "<label>:<amount><sign>" line with a trailing sign
@@ -3589,11 +3592,21 @@ final class BalanceData {
         int sign = 0;
         int labelDir = 0;
 
+        // Hami states the total debit on the withdrawal line. The fee line repeats "مبلغ"
+        // but only describes a component of that debit.
+        if (BankRules.isMofidHamiMessage(n)) {
+            Matcher movement = SmsPatterns.mofidHamiMovement.matcher(n);
+            if (movement.find()) {
+                amount = toLong(movement.group(2));
+                if (amount > 0) labelDir = movement.group(1).equals("برداشت") ? -1 : 1;
+            }
+        }
+
         // A signed amount on its own line is unambiguous. Resolve it before broad "مبلغ" scans:
         // a later explanatory sentence can contain that word and a following date, which must never
         // be mistaken for the movement amount.
         Matcher leadingSigned = SmsPatterns.signedAmount.matcher(n);
-        if (leadingSigned.find()) {
+        if (amount <= 0 && leadingSigned.find()) {
             sign = leadingSigned.group(1).equals("-") ? -1 : 1;
             amount = toLong(leadingSigned.group(2));
         }
