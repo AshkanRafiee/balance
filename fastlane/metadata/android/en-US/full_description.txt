@@ -4,7 +4,7 @@ Supports Persian SMS formats from Iranian banks and selected financial services.
 
 See your money clearly:
 - Latest balances by bank and account, a combined total, and accounts you can exclude
-- Track cash separately: count it on the dashboard or log deposits and withdrawals in History. Hide cash whenever you want and keep your entries
+- Track cash on the dashboard: adjust your balance or log deposits and withdrawals with optional notes. Hide cash whenever you want and keep your entries
 - Configurable warnings for old balances, plus a home-screen widget
 - Explanations for individual account balances and history entries
 - Deposits and withdrawals by day, month and year; filter and search, with recent matches opened automatically and older history still expandable
