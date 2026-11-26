@@ -2294,43 +2294,44 @@ public class MainActivity extends Activity {
         }
 
         private LinearLayout buildCommitmentsCard() {
+            int onContainer = ExpressiveUi.color(this, R.color.expressive_on_primary_container);
             LinearLayout card = ExpressiveUi.card(this,
-                ExpressiveUi.color(this, R.color.expressive_secondary_container),
+                ExpressiveUi.color(this, R.color.expressive_primary_container),
                 ExpressiveUi.RADIUS_CARD, 18);
             card.setId(R.id.dashboard_commitments_card);
             LinearLayout titleRow = ExpressiveUi.row(this);
             TextView title = ExpressiveUi.heading(this,
                 getString(R.string.commitments_card_title, commitmentMonthLabel()), 16);
+            title.setTextColor(onContainer);
             titleRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-            TextView open = ExpressiveUi.label(this, rtl ? "←" : "→", 22,
-                ExpressiveUi.color(this, R.color.expressive_secondary));
+            TextView open = ExpressiveUi.label(this, rtl ? "←" : "→", 22, onContainer);
             open.setGravity(Gravity.CENTER);
             titleRow.addView(open, new LinearLayout.LayoutParams(48, 48));
             card.addView(titleRow);
             if (!view.commitmentSummaryLoaded) {
                 view.ensureCommitmentSummary();
                 card.addView(ExpressiveUi.label(this, getString(R.string.commitments_loading), 13,
-                    ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 8, 0));
+                    onContainer), ExpressiveUi.widthMatch(this, 8, 0));
             } else if (view.commitmentSummaryFailed && !view.commitmentSummaryGood) {
-                addCommitmentRetry(card);
+                addCommitmentRetry(card, onContainer);
             } else if (!view.hasCommitments) {
                 card.addView(ExpressiveUi.label(this, getString(R.string.commitments_card_empty), 13,
-                    ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 8, 0));
+                    onContainer), ExpressiveUi.widthMatch(this, 8, 0));
                 card.addView(ExpressiveUi.label(this, getString(R.string.commitments_card_empty_action), 12,
-                    ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 4, 0));
+                    onContainer), ExpressiveUi.widthMatch(this, 4, 0));
             } else {
                 DashboardCommitments summary = view.commitmentSummary;
                 LinearLayout values = ExpressiveUi.row(this);
                 values.addView(commitmentValue(R.string.commitments_remaining_payable,
-                    summary.remainingPay(), R.color.negative),
+                    summary.remainingPay(), R.color.negative, onContainer),
                     new LinearLayout.LayoutParams(0, -2, 1));
                 values.addView(commitmentValue(R.string.commitments_remaining_receivable,
-                    summary.remainingReceive(), R.color.accent),
+                    summary.remainingReceive(), R.color.accent, onContainer),
                     new LinearLayout.LayoutParams(0, -2, 1));
                 card.addView(values, ExpressiveUi.widthMatch(this, 12, 0));
             }
             if (view.commitmentSummaryFailed && view.commitmentSummaryGood)
-                addCommitmentRetry(card);
+                addCommitmentRetry(card, onContainer);
             card.setClickable(true);
             card.setFocusable(true);
             card.setContentDescription(getString(R.string.dashboard_open_commitments));
@@ -2339,18 +2340,18 @@ public class MainActivity extends Activity {
             return card;
         }
 
-        private void addCommitmentRetry(LinearLayout card) {
+        private void addCommitmentRetry(LinearLayout card, int onContainer) {
             card.addView(ExpressiveUi.label(this, getString(R.string.commitments_load_failed), 13,
-                ExpressiveUi.color(this, R.color.muted)), ExpressiveUi.widthMatch(this, 8, 0));
+                onContainer), ExpressiveUi.widthMatch(this, 8, 0));
             TextView retry = ExpressiveUi.button(this, getString(R.string.commitments_retry), false);
             retry.setOnClickListener(v -> view.invalidateCommitmentSummary());
             card.addView(retry, ExpressiveUi.widthMatch(this, 6, 0));
         }
 
-        private LinearLayout commitmentValue(int labelRes, BigInteger amount, int colorRes) {
+        private LinearLayout commitmentValue(int labelRes, BigInteger amount, int colorRes,
+                int onContainer) {
             LinearLayout column = ExpressiveUi.column(this);
-            TextView label = ExpressiveUi.label(this, getString(labelRes), 11,
-                ExpressiveUi.color(this, R.color.muted));
+            TextView label = ExpressiveUi.label(this, getString(labelRes), 11, onContainer);
             TextView value = ExpressiveUi.heading(this, view.hidden ? "••••••"
                 : commitmentMagnitude(amount), 19);
             value.setTextColor(ExpressiveUi.color(this, colorRes));

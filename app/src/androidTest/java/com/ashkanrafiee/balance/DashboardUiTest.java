@@ -8,6 +8,7 @@ import static org.junit.Assert.assertTrue;
 import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -107,6 +108,42 @@ public final class DashboardUiTest {
                 assertNotNull(findText(activity.getWindow().getDecorView(),
                     activity.getString(R.string.dashboard_no_accounts_title)));
             }
+        });
+    }
+
+    @Test public void commitmentsCardFollowsThemeColorInLightAndDarkMode() {
+        String originalTheme = ThemeHelper.theme(context);
+        String originalColor = ThemeColorHelper.themeColor(context);
+        BalanceData.setShowCommitments(context, true);
+        try {
+            ThemeHelper.setTheme(context, ThemeHelper.THEME_LIGHT);
+            ThemeColorHelper.setThemeColor(context, ThemeColorHelper.COLOR_OCEAN);
+            launch();
+            assertCommitmentsCardColor(0xFFA8EEF2);
+
+            ThemeColorHelper.setThemeColor(context, ThemeColorHelper.COLOR_ROSE);
+            scenario.recreate();
+            assertCommitmentsCardColor(0xFFFFD9E2);
+
+            ThemeHelper.setTheme(context, ThemeHelper.THEME_DARK);
+            scenario.recreate();
+            assertCommitmentsCardColor(0xFF7D2947);
+
+            ThemeColorHelper.setThemeColor(context, ThemeColorHelper.COLOR_OCEAN);
+            scenario.recreate();
+            assertCommitmentsCardColor(0xFF004F55);
+        } finally {
+            ThemeColorHelper.setThemeColor(context, originalColor);
+            ThemeHelper.setTheme(context, originalTheme);
+        }
+    }
+
+    private void assertCommitmentsCardColor(int expected) {
+        scenario.onActivity(activity -> {
+            View card = activity.findViewById(R.id.dashboard_commitments_card);
+            assertNotNull(card);
+            GradientDrawable background = (GradientDrawable) card.getBackground();
+            assertEquals(expected, background.getColor().getDefaultColor());
         });
     }
 
