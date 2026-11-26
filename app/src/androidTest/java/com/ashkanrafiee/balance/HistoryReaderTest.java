@@ -16,6 +16,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import java.io.File;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
@@ -161,6 +162,51 @@ public class HistoryReaderTest {
         HistoryReader.Result tagged = HistoryReader.summary(context, tags);
         try (AutoCloseable snapshot = tagged::close) {
             assertEquals(1L, tagged.movementCount);
+        }
+    }
+
+    @Test public void searchesExactCashTomanAmountsAcrossLanguages() throws Exception {
+        String originalCash = CashStore.exportData(context);
+        boolean cashWasEnabled = CashStore.isEnabled(context);
+        try {
+            CashStoreTest.clear(context);
+            CashStore.setEnabled(context, true);
+            CurrencyHelper.setCurrency(context, CurrencyHelper.CURRENCY_TOMAN);
+            long now = System.currentTimeMillis();
+            CashStore.add(context, now - 2_000, 80_000);
+            CashStore.add(context, now - 1_000, -12_345);
+            assertTrue(BalanceData.writeTransactions(context, Collections.singletonList(
+                new Transaction(BANK, ACCOUNT, now, -12_345, null, "bank-withdrawal", null))));
+
+            for (String language : new String[]{"en", "fa"}) {
+                LocaleHelper.setLanguage(context, language);
+                assertSearchTotal("-1,234.5", -12_345, 1);
+                assertSearchTotal("\u2066−۱٬۲۳۴٫۵\u2069", -12_345, 1);
+                assertSearchTotal("۱٬۲۳۴٫۶", 0, 0);
+                assertSearchTotal(BANK + " 12,345", -12_345, 1);
+            }
+        } finally {
+            try {
+                CashStoreTest.clear(context);
+                if (originalCash != null) {
+                    assertEquals(CashStore.RestoreResult.IMPORTED,
+                        CashStore.restoreData(context, originalCash));
+                }
+            } finally {
+                CashStore.setEnabled(context, cashWasEnabled);
+            }
+        }
+    }
+
+    private void assertSearchTotal(String query, long total, long count) throws Exception {
+        HistoryReader.Request request = new HistoryReader.Request(false, 2, (String) null, null,
+            HistoryActivity.Filter.ALL, query, null, null, 0, 0);
+        try (HistoryReader.Result summary = HistoryReader.summaryWithResiduals(context, request);
+                HistoryReader.Result reference = HistoryReader.reference(context, request)) {
+            assertEquals(query, count, summary.movementCount);
+            assertEquals(query, BigInteger.valueOf(total), summary.total);
+            assertEquals(query, summary.movementCount, reference.movementCount);
+            assertEquals(query, summary.total, reference.total);
         }
     }
 

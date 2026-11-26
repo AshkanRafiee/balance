@@ -1,6 +1,7 @@
 package com.ashkanrafiee.balance;
 
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.fail;
 
@@ -24,6 +25,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /** Drives {@code HistoryActivity.writeExport} end to end. The worker's stage/progress callbacks
@@ -115,6 +117,46 @@ public class HistoryExportDialogTest {
             assertTrue(!csv.contains("-20000"));
         } finally {
             dest.delete();
+        }
+    }
+
+    @Test public void writeExport_filtersByExactCashTomanAmount() throws Exception {
+        String originalCash = CashStore.exportData(ctx);
+        boolean cashWasEnabled = CashStore.isEnabled(ctx);
+        File dest = new File(ctx.getCacheDir(), "export-dialog-cash-amount-test.csv");
+        try {
+            CashStoreTest.clear(ctx);
+            CashStore.setEnabled(ctx, true);
+            CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_TOMAN);
+            long now = System.currentTimeMillis();
+            CashStore.add(ctx, now - 1_000, 12_345, "fractional cash movement");
+            Transaction bank = new Transaction("bank_melli", "acc", now, 12_345L, "s1", "c1");
+            assertTrue(BalanceData.writeTransactions(ctx, Collections.singletonList(bank)));
+
+            Intent intent = new Intent(ctx, HistoryActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            InstrumentationRegistry.getInstrumentation().startActivitySync(intent);
+            HistoryActivity activity = history();
+            for (String query : new String[]{"+1,234.5", "+۱٬۲۳۴٫۵"}) {
+                if (dest.exists() && !dest.delete()) fail("stale export destination");
+                setSearchQuery(activity, query);
+                exportAndJoin(activity, Uri.fromFile(dest));
+                String csv = readFully(dest);
+                assertTrue(query, csv.contains("fractional cash movement"));
+                assertEquals(query, 2, csv.split("\\r?\\n").length);
+            }
+        } finally {
+            dest.delete();
+            try {
+                CashStoreTest.clear(ctx);
+                if (originalCash != null) {
+                    assertEquals(CashStore.RestoreResult.IMPORTED,
+                        CashStore.restoreData(ctx, originalCash));
+                }
+            } finally {
+                CurrencyHelper.setCurrency(ctx, CurrencyHelper.CURRENCY_RIAL);
+                CashStore.setEnabled(ctx, cashWasEnabled);
+            }
         }
     }
 

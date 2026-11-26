@@ -1343,8 +1343,9 @@ public final class HistoryActivity extends Activity {
         String haystack = transactionSearchText(transaction,
             BankRules.displayName(context, transaction.bank), lookup.note(key), reason,
             BankRules.reasonCaption(context, reason), channel,
-            BankRules.channelCaption(context, channel), CurrencyHelper.amount(toman, fa,
-                transaction.amount), transaction.amount > 0 ? context.getString(R.string.history_deposit)
+            BankRules.channelCaption(context, channel),
+            transactionSearchAmount(context, toman, fa, transaction),
+            transaction.amount > 0 ? context.getString(R.string.history_deposit)
                 : transaction.amount < 0 ? context.getString(R.string.history_withdrawal) : null,
             dateText(date, fa), timeText(transaction.date, fa),
             CalDate.monthName(date.month, iran, fa), compactDate(date, fa), tags, merchant);
@@ -2788,7 +2789,8 @@ public final class HistoryActivity extends Activity {
         return transactionSearchText(t, pass.display(t.bank), note,
             reasonRaw, pass.reason(reasonRaw),
             channelRaw, pass.channel(channelRaw),
-            pass.amount(t.amount), pass.direction(t.amount),
+            CashStore.isCash(t) ? cashSearchAmount(pass.context, t.amount) : pass.amount(t.amount),
+            pass.direction(t.amount),
             dateText(d, pass.persian), timeText(t.date, pass.persian),
             monthName(d.month, pass.persian), compactDate(d, pass.persian), tagValues, merchant);
     }
@@ -5395,8 +5397,8 @@ public final class HistoryActivity extends Activity {
 
     /** Normalizes text for search: lowercased, Persian and Arabic digits folded to Latin, the
      *  Arabic kaf/yeh/teh-marbuta/alef variants folded to their Persian forms, grouping separators
-     *  dropped so "500,000" and "500000" read the same, and the zero-width marks dropped so a word
-     *  typed with, without, or instead-spaced around a half-space still reads as one word. */
+     *  dropped, decimal separators and minus signs folded to their ASCII equivalents, and
+     *  formatting marks (such as half-spaces and bidirectional isolates) dropped. */
     static String normalizeSearch(String s) {
         if (s == null) return "";
         StringBuilder b = new StringBuilder(s.length());
@@ -5409,8 +5411,10 @@ public final class HistoryActivity extends Activity {
             else if (cp == '\u064A') b.append('\u06CC');
             else if (cp == '\u0629') b.append('\u0647');
             else if (cp == '\u0623' || cp == '\u0625' || cp == '\u0622') b.append('\u0627');
-            else if (cp == '\u200C' || cp == '\u200D' || cp == '\u0640' || cp == '\uFEFF') continue;
-            else if (cp == ',' || cp == '\u066C' || cp == '\u066B') continue;
+            else if (Character.getType(cp) == Character.FORMAT || cp == '\u0640') continue;
+            else if (cp == ',' || cp == '\u066C') continue;
+            else if (cp == '\u066B') b.append('.');
+            else if (cp == '\u2212') b.append('-');
             else b.appendCodePoint(Character.toLowerCase(cp));
         }
         return b.toString().trim().replaceAll("\\s+", " ");
@@ -5457,6 +5461,18 @@ public final class HistoryActivity extends Activity {
         if (field == null || field.isEmpty()) return;
         if (hay.length() > 0) hay.append(' ');
         hay.append(field);
+    }
+
+    /** Cash rows display fractional Toman; bank rows keep their whole-Toman format. */
+    static String transactionSearchAmount(Context context, boolean toman, boolean persian,
+            Transaction transaction) {
+        return CashStore.isCash(transaction) ? cashSearchAmount(context, transaction.amount)
+            : CurrencyHelper.amount(toman, persian, transaction.amount);
+    }
+
+    private static String cashSearchAmount(Context context, long amount) {
+        String formatted = CurrencyHelper.amountExact(context, amount);
+        return amount > 0 ? "+" + formatted : formatted;
     }
 
     /** Everything a movement can be found by, as one searchable text: the bank (canonical and

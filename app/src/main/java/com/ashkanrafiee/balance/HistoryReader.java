@@ -807,9 +807,9 @@ final class HistoryReader {
                 BankRules.displayName(context, transaction.bank), note, reason,
                 BankRules.reasonCaption(context, reason), channel,
                 BankRules.channelCaption(context, channel),
-                CurrencyHelper.amount(toman, persian, transaction.amount),
+                 HistoryActivity.transactionSearchAmount(context, toman, persian, transaction),
                  direction(transaction.amount), dateText(date), timeText(transaction.date),
-                CalDate.monthName(date.month, request.iran, persian), compactDate(date), tags,
+                 CalDate.monthName(date.month, request.iran, persian), compactDate(date), tags,
                  merchant);
             return HistoryActivity.matchesTokens(haystack, tokens);
         }
