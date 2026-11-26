@@ -185,16 +185,20 @@ final class CashStore {
     }
 
     static Transaction add(Context context, long date, long amount) {
-        return saveMovement(context, null, date, amount);
+        return add(context, date, amount, null);
+    }
+
+    static Transaction add(Context context, long date, long amount, String note) {
+        return saveMovement(context, null, date, amount, note == null ? "" : note.trim());
     }
 
     static Transaction update(Context context, Transaction expected, long date, long amount) {
         if (!isCash(expected)) throw new StaleCashTransactionException();
-        return saveMovement(context, expected, date, amount);
+        return saveMovement(context, expected, date, amount, "");
     }
 
     private static Transaction saveMovement(Context context, Transaction expected, long date,
-            long amount) {
+            long amount, String note) {
         Transaction saved;
         synchronized (BalanceData.class) {
             SharedPreferences prefs = writable(context);
@@ -205,8 +209,24 @@ final class CashStore {
             saved = new Transaction(KEY, date, amount, sig);
             List<Transaction> movements = withMovement(previous, expected, saved);
             if (expected != null && sameMovement(expected, saved)) return expected;
-            write(prefs, new State(previous.countedAmount, previous.countedAt,
-                affectsBalance(previous, expected, date) ? now : previous.updatedAt, movements));
+            State next = new State(previous.countedAmount, previous.countedAt,
+                affectsBalance(previous, expected, date) ? now : previous.updatedAt, movements);
+            // Validate the movement first. Publish its note before the row so a visible entry can
+            // never be saved without the note the user submitted.
+            if (!note.isEmpty()) {
+                try {
+                    if (!MetadataStore.setAnnotations(context, saved, note, Collections.emptyList()))
+                        throw new IllegalStateException("cash note was not saved");
+                } catch (Exception failure) {
+                    throw new IllegalStateException("cash note could not be saved");
+                }
+            }
+            try {
+                write(prefs, next);
+            } catch (RuntimeException failure) {
+                if (!note.isEmpty()) clearAnnotation(context, saved);
+                throw failure;
+            }
         }
         BalanceData.notifyHistoryChanged();
         return saved;
@@ -270,15 +290,19 @@ final class CashStore {
             if (expected.date > previous.countedAt) updatedAt = System.currentTimeMillis();
             if (previous.countedAt == 0 && movements.isEmpty()) updatedAt = 0;
             write(prefs, new State(previous.countedAmount, previous.countedAt, updatedAt, movements));
-            try {
-                MetadataStore.setAnnotations(context, expected, null, Collections.emptyList());
-            } catch (Exception failure) {
-                // An annotation cleanup failure must not cause a committed deletion to be retried.
-                Log.w("CashStore", "cash annotation cleanup failed");
-            }
+            clearAnnotation(context, expected);
         }
         BalanceData.notifyHistoryChanged();
         return true;
+    }
+
+    private static void clearAnnotation(Context context, Transaction transaction) {
+        try {
+            MetadataStore.setAnnotations(context, transaction, null, Collections.emptyList());
+        } catch (Exception failure) {
+            // An annotation cleanup failure must not cause a committed deletion to be retried.
+            Log.w("CashStore", "cash annotation cleanup failed");
+        }
     }
 
     private static SharedPreferences writable(Context context) {

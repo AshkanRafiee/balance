@@ -212,6 +212,27 @@ public class CashStoreTest {
         assertEquals(0L, withdrawal.resultingBalance);
     }
 
+    @Test public void optionalNoteIsAvailableThroughNormalAnnotationsAndInvalidSaveLeavesNone()
+            throws Exception {
+        long date = System.currentTimeMillis() - 60_000;
+        java.util.Map<String, String> previousNotes = BalanceData.readNotes(context);
+        try {
+            CashStore.add(context, date, -10, "must not be saved");
+            fail("withdrawal with no cash");
+        } catch (CashStore.InsufficientCashException expected) {}
+        assertEquals(previousNotes, BalanceData.readNotes(context));
+        Transaction deposit = CashStore.add(context, date, 10, " lunch ");
+        try {
+            assertEquals("lunch", BalanceData.getNote(context, deposit));
+            Transaction edited = CashStore.update(context, deposit, date, 20);
+            assertEquals("lunch", BalanceData.getNote(context, edited));
+            assertTrue(CashStore.remove(context, edited));
+            assertEquals(previousNotes, BalanceData.readNotes(context));
+        } finally {
+            MetadataStore.setAnnotations(context, deposit, null, Collections.emptyList());
+        }
+    }
+
     @Test public void snapshotCacheDoesNotMaskReplacementOrReadForCancelledPreview() {
         CashStore.setBalance(context, 30);
         CashStore.State original = CashStore.read(context);

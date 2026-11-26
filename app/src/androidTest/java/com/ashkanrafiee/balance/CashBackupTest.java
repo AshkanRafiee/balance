@@ -52,8 +52,7 @@ public class CashBackupTest {
     @Test public void wholeRestorePreservesLedgerAndAnnotationsAndCanBeRepeated()
             throws Exception {
         CashStore.setBalance(context, 2000);
-        Transaction entry = CashStore.add(context, DATE, 1000);
-        BalanceData.setNote(context, entry, "یادداشت خرید");
+        Transaction entry = CashStore.add(context, DATE, 1000, "یادداشت خرید");
         BalanceData.setTags(context, entry, Collections.singletonList("groceries"));
         String wallet = CashStore.exportData(context);
         BackupManager.createFramed(context, Uri.fromFile(backup), PASSWORD);
