@@ -321,7 +321,8 @@ final class CashStore {
     }
 
     static Long parseAmount(Context context, String input) {
-        if (input == null) return null;
+        // A long integer in either currency fits comfortably here, even with grouping.
+        if (input == null || input.length() > 128) return null;
         String number = TextNormalizer.normalize(input).trim();
         if (!AMOUNT_INPUT.matcher(number).matches())
             return null;

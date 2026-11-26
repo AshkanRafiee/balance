@@ -3112,6 +3112,7 @@ public final class HistoryActivity extends Activity {
         final int uiGen = historyUiGen;
         final Context app = getApplicationContext();
         final Filter f = filter;
+        final boolean cashScope = isCashScope();
         final Set<String> banks = new java.util.LinkedHashSet<>(selectedBanks);
         final Set<String> accounts = new java.util.LinkedHashSet<>(selectedAccounts);
         final boolean iran = iranCalendar;
@@ -3153,8 +3154,9 @@ public final class HistoryActivity extends Activity {
         new Thread(() -> {
             HistoryReader.Result result = null;
             try {
-                if (hadRenderedResult && state.equals(previousState) && previousTransactions != null
-                        && previousTransactions.equals(TransactionStore.revision(app))
+                if (hadRenderedResult && state.equals(previousState)
+                        && (cashScope || (previousTransactions != null
+                            && previousTransactions.equals(TransactionStore.revision(app))))
                         && sameRevision(previousCash, CashStore.revision(app))
                         && sameRevision(MetadataStore.revision(app), previousMetadata)) {
                     deliverRender(() -> {

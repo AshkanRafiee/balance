@@ -164,6 +164,7 @@ public class CashStoreTest {
                 CashStore.parseAmount(context, Long.toString(Long.MAX_VALUE)));
             assertNull(CashStore.parseAmount(context, "9223372036854775808"));
             assertNull(CashStore.parseAmount(context, "2.5"));
+            assertNull(CashStore.parseAmount(context, String.join("", Collections.nCopies(150, "9"))));
         } finally {
             CurrencyHelper.setCurrency(context, currency);
         }
