@@ -1039,6 +1039,8 @@ public class MainActivity extends Activity {
         dlg.setOnDismissListener(d -> {
             if (activeDialog == d) activeDialog = null;
         });
+        if (LockManager.isEnabled(this))
+            dlg.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
         dlg.show();
         return dlg;
     }

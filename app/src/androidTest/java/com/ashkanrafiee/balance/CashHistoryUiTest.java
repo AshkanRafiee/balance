@@ -210,6 +210,51 @@ public class CashHistoryUiTest {
         assertEquals(Collections.singletonList("new tag"), BalanceData.getTags(context, updated));
     }
 
+    @Test public void appLockSecuresCashDetailsAndAnnotations() throws Exception {
+        CashStore.add(context, System.currentTimeMillis(), 100, "Private cash note");
+        LockManager.enable(context, "test-password", false, false);
+        try {
+            launch(CashStore.KEY);
+            scenario.onActivity(activity -> {
+                assertTrue(LockManager.isSessionLocked());
+                View screen = root(activity);
+                EditText password = (EditText) find(screen,
+                    v -> v instanceof EditText && v.isShown()
+                        && (((EditText) v).getInputType()
+                            & android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD) != 0);
+                assertNotNull(password);
+                password.setText("test-password");
+                View unlock = find(screen, v -> v.isShown()
+                    && hasText(v, activity.getString(R.string.lock_action_unlock)));
+                assertNotNull(unlock);
+                click((View) unlock.getParent());
+            });
+            await(activity -> !LockManager.isSessionLocked() && movement(activity) != null);
+            scenario.onActivity(activity -> {
+                click(movement(activity));
+                AlertDialog details = currentDialog(activity);
+                assertSecure(details);
+                click(details.getButton(AlertDialog.BUTTON_POSITIVE));
+            });
+            await(activity -> currentDialog(activity) != null && find(currentDialog(activity).getWindow()
+                    .getDecorView(), v -> v instanceof EditText
+                        && hasText(v, "Private cash note")) != null);
+            scenario.onActivity(activity -> assertSecure(currentDialog(activity)));
+            scenario.moveToState(androidx.lifecycle.Lifecycle.State.STARTED);
+            scenario.onActivity(activity -> assertNull(currentDialog(activity)));
+        } finally {
+            if (scenario != null) scenario.close();
+            scenario = null;
+            LockManager.disable(context);
+        }
+    }
+
+    private static void assertSecure(AlertDialog dialog) {
+        assertNotNull(dialog);
+        assertTrue((dialog.getWindow().getAttributes().flags
+            & android.view.WindowManager.LayoutParams.FLAG_SECURE) != 0);
+    }
+
     @Test public void tagControlsMirrorInPersianAndKeepMixedScriptNamesIntact() {
         String previousLanguage = LocaleHelper.currentTag(context);
         try {

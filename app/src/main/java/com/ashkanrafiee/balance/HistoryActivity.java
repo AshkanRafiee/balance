@@ -622,6 +622,8 @@ public final class HistoryActivity extends Activity {
             activeDialogs.remove(dialog);
             if (onDismiss != null) onDismiss.run();
         });
+        if (LockManager.isEnabled(this))
+            dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
         dialog.show();
         return dialog;
     }
