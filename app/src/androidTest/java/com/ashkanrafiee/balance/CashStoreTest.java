@@ -323,6 +323,15 @@ public class CashStoreTest {
         assertEquals(3, interruptions[0]);
     }
 
+    @Test public void grossMovementsCanExceedTheBalanceLimit() {
+        long date = System.currentTimeMillis() - 60_000;
+        CashStore.add(context, date, Long.MAX_VALUE);
+        CashStore.add(context, date + 1, -Long.MAX_VALUE);
+        CashStore.add(context, date + 2, 1);
+        assertEquals(1, CashStore.read(context).balance);
+        assertEquals(3, CashStore.read(context).transactions.size());
+    }
+
     private static void failBeforePublish(Runnable mutation) {
         CashStore.setPublishHookForTests(point -> {
             if (point == DataGeneration.PublishPoint.BEFORE_MANIFEST)

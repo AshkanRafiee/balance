@@ -462,12 +462,7 @@ final class CashStore {
         List<Transaction> active = new ArrayList<>();
         long balance = opening;
         try {
-            // History also reports gross deposits and withdrawals separately.
-            long deposits = 0;
-            long withdrawals = 0;
             for (Transaction movement : movements) {
-                if (movement.amount > 0) deposits = Math.addExact(deposits, movement.amount);
-                else withdrawals = Math.addExact(withdrawals, -movement.amount);
                 if (movement.date > countedAt) active.add(movement);
             }
             active.sort(Comparator.comparingLong(movement -> movement.date));
@@ -482,7 +477,7 @@ final class CashStore {
                     firstUnfunded = movement;
                     available = before;
                 }
-                shortfall = Math.max(shortfall, -balance);
+                shortfall = Math.max(shortfall, Math.negateExact(balance));
             }
             if (firstUnfunded != null) {
                 throw new InsufficientCashException(available, -firstUnfunded.amount,
