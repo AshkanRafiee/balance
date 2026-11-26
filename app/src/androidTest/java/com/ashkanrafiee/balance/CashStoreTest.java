@@ -188,4 +188,97 @@ public class CashStoreTest {
             BalanceData.setStaleDays(context, previousStaleDays);
         }
     }
+
+    @Test public void previewExplainsBalanceEffectAndHasNoSideEffects() throws Exception {
+        long date = System.currentTimeMillis() - 60_000;
+        CashStore.setBalance(context, 30);
+        String revision = CashStore.revision(context);
+        CashStore.Preview older = CashStore.preview(context, date, -40, null);
+        assertFalse(older.affectsBalance);
+        assertFalse(older.insufficient);
+        assertEquals(30L, older.resultingBalance);
+        assertEquals(revision, CashStore.revision(context));
+        assertTrue(CashStore.read(context).transactions.isEmpty());
+
+        clear(context);
+        CashStore.Preview deposit = CashStore.preview(context, date, 10, null);
+        assertTrue(deposit.affectsBalance);
+        assertEquals(0L, deposit.currentBalance);
+        assertEquals(10L, deposit.resultingBalance);
+        CashStore.add(context, date, 10);
+        CashStore.Preview withdrawal = CashStore.preview(context, date + 1, -10, null);
+        assertEquals(10L, withdrawal.currentBalance);
+        assertEquals(0L, withdrawal.resultingBalance);
+    }
+
+    @Test public void shortfallPreviewUsesChronologicalBalanceAndSuggestsFundingBeforeDebit() {
+        long date = System.currentTimeMillis() - 60_000;
+        CashStore.add(context, date + 2_000, 100);
+        CashStore.Preview preview = CashStore.preview(context, date, -40, null);
+        assertTrue(preview.insufficient);
+        assertEquals(100L, preview.currentBalance);
+        assertEquals(0L, preview.availableAtShortfall);
+        assertEquals(40L, preview.requiredAtShortfall);
+        assertEquals(40L, preview.shortfall);
+        assertTrue(preview.recoveryDate < date);
+
+        CashStore.add(context, preview.recoveryDate, preview.shortfall);
+        CashStore.Preview funded = CashStore.preview(context, date, -40, null);
+        assertFalse(funded.insufficient);
+        CashStore.add(context, date, -40);
+        assertEquals(funded.resultingBalance, CashStore.read(context).balance);
+    }
+
+    @Test public void editPreservesAnnotationsAndRejectsStaleOrOverdrawingChanges() throws Exception {
+        long date = System.currentTimeMillis() - 60_000;
+        Transaction deposit = CashStore.add(context, date, 50);
+        Transaction withdrawal = CashStore.add(context, date + 1, -30);
+        assertTrue(MetadataStore.setCurrentAnnotations(context, withdrawal, "lunch",
+            Collections.singletonList("food")));
+        try {
+            try {
+                CashStore.update(context, deposit, date, 10);
+                fail("changing the deposit would overdraw the cash balance");
+            } catch (CashStore.InsufficientCashException expected) {}
+            assertEquals(20L, CashStore.read(context).balance);
+
+            CashStore.Preview preview = CashStore.preview(context, date + 2, 20, withdrawal);
+            Transaction edited = CashStore.update(context, withdrawal, date + 2, 20);
+            assertEquals(withdrawal.sig, edited.sig);
+            assertEquals(date + 2, edited.date);
+            assertEquals(20L, edited.amount);
+            assertEquals(preview.resultingBalance, CashStore.read(context).balance);
+            assertEquals(70L, preview.resultingBalance);
+            assertEquals(2, CashStore.read(context).transactions.size());
+            assertEquals("lunch", BalanceData.getNote(context, edited));
+            assertEquals(Collections.singletonList("food"), BalanceData.getTags(context, edited));
+
+            try {
+                CashStore.update(context, withdrawal, date + 3, -10);
+                fail("stale snapshot should not overwrite the saved edit");
+            } catch (CashStore.StaleCashTransactionException expected) {}
+        } finally {
+            MetadataStore.setAnnotations(context, withdrawal, null, Collections.emptyList());
+        }
+    }
+
+    @Test public void editingAcrossBalanceAdjustmentAppliesOrRemovesOnlyTheActiveMovement()
+            throws Exception {
+        long cutoff = System.currentTimeMillis() - 60_000;
+        assertEquals(CashStore.RestoreResult.IMPORTED, CashStore.restoreData(context,
+            "{\"countedAmount\":100,\"countedAt\":" + cutoff + ",\"updatedAt\":" + cutoff
+                + ",\"movements\":[]}"));
+        Transaction movement = CashStore.add(context, cutoff, -70);
+        assertEquals(100L, CashStore.read(context).balance);
+        CashStore.Preview preview = CashStore.preview(context, cutoff + 1, -70, movement);
+        assertTrue(preview.affectsBalance);
+        assertEquals(30L, preview.resultingBalance);
+        Transaction updated = CashStore.update(context, movement, cutoff + 1, -70);
+        assertEquals(30L, CashStore.read(context).balance);
+        preview = CashStore.preview(context, cutoff, -70, updated);
+        assertTrue(preview.affectsBalance);
+        assertEquals(100L, preview.resultingBalance);
+        CashStore.update(context, updated, cutoff, -70);
+        assertEquals(100L, CashStore.read(context).balance);
+    }
 }

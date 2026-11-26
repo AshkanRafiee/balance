@@ -37,7 +37,46 @@ final class CashStore {
     enum RestoreResult { IMPORTED, UNCHANGED, CONFLICT }
 
     static final class InsufficientCashException extends IllegalArgumentException {
-        InsufficientCashException() { super("cash balance would become negative"); }
+        final long available;
+        final long required;
+        final long date;
+        final long shortfall;
+
+        InsufficientCashException(long available, long required, long date, long shortfall) {
+            super("cash balance would become negative");
+            this.available = available;
+            this.required = required;
+            this.date = date;
+            this.shortfall = shortfall;
+        }
+    }
+
+    static final class StaleCashTransactionException extends IllegalArgumentException {
+        StaleCashTransactionException() { super("cash transaction changed"); }
+    }
+
+    static final class Preview {
+        final long currentBalance;
+        final long resultingBalance;
+        final boolean affectsBalance;
+        final boolean insufficient;
+        final long availableAtShortfall;
+        final long requiredAtShortfall;
+        final long shortfall;
+        final long recoveryDate;
+
+        private Preview(State current, long resultingBalance, boolean affectsBalance,
+                InsufficientCashException failure) {
+            currentBalance = current.balance;
+            this.resultingBalance = resultingBalance;
+            this.affectsBalance = affectsBalance;
+            insufficient = failure != null;
+            availableAtShortfall = insufficient ? failure.available : 0;
+            requiredAtShortfall = insufficient ? failure.required : 0;
+            shortfall = insufficient ? failure.shortfall : 0;
+            recoveryDate = insufficient && failure.date - 1 > current.countedAt
+                ? failure.date - 1 : 0;
+        }
     }
 
     static final class State {
@@ -127,21 +166,71 @@ final class CashStore {
     }
 
     static Transaction add(Context context, long date, long amount) {
-        Transaction added;
+        return saveMovement(context, null, date, amount);
+    }
+
+    static Transaction update(Context context, Transaction expected, long date, long amount) {
+        if (!isCash(expected)) throw new StaleCashTransactionException();
+        return saveMovement(context, expected, date, amount);
+    }
+
+    private static Transaction saveMovement(Context context, Transaction expected, long date,
+            long amount) {
+        Transaction saved;
         synchronized (BalanceData.class) {
             SharedPreferences prefs = writable(context);
             long now = System.currentTimeMillis();
-            validateMovement(date, amount);
-            if (date > now) throw new IllegalArgumentException("future cash movement");
+            validateEntryTime(date, amount, now);
             State previous = read(prefs);
-            added = new Transaction(KEY, date, amount, SIGNATURE_PREFIX + UUID.randomUUID());
-            List<Transaction> movements = new ArrayList<>(previous.transactions);
-            movements.add(added);
+            String sig = expected == null ? SIGNATURE_PREFIX + UUID.randomUUID() : expected.sig;
+            saved = new Transaction(KEY, date, amount, sig);
+            List<Transaction> movements = withMovement(previous, expected, saved);
+            if (expected != null && sameMovement(expected, saved)) return expected;
             write(prefs, new State(previous.countedAmount, previous.countedAt,
-                date > previous.countedAt ? now : previous.updatedAt, movements));
+                affectsBalance(previous, expected, date) ? now : previous.updatedAt, movements));
         }
         BalanceData.notifyHistoryChanged();
-        return added;
+        return saved;
+    }
+
+    /** Uses the same chronological check as Save, without writing anything. */
+    static Preview preview(Context context, long date, long amount, Transaction replacing) {
+        validateEntryTime(date, amount, System.currentTimeMillis());
+        State current;
+        synchronized (BalanceData.class) {
+            current = read(writable(context));
+        }
+        boolean affects = affectsBalance(current, replacing, date);
+        Transaction candidate = new Transaction(KEY, date, amount,
+            replacing == null ? null : replacing.sig);
+        List<Transaction> movements = withMovement(current, replacing, candidate);
+        try {
+            long balance = balanceAfterCount(current.countedAmount, current.countedAt, movements);
+            return new Preview(current, balance, affects, null);
+        } catch (InsufficientCashException failure) {
+            return new Preview(current, current.balance, affects, failure);
+        }
+    }
+
+    private static boolean affectsBalance(State current, Transaction replacing, long date) {
+        return date > current.countedAt || (replacing != null && replacing.date > current.countedAt);
+    }
+
+    private static List<Transaction> withMovement(State current, Transaction replacing,
+            Transaction candidate) {
+        List<Transaction> movements = new ArrayList<>(current.transactions);
+        if (replacing == null) {
+            movements.add(candidate);
+        } else {
+            for (int i = 0; i < movements.size(); i++) {
+                if (sameMovement(replacing, movements.get(i))) {
+                    movements.set(i, candidate);
+                    return movements;
+                }
+            }
+            throw new StaleCashTransactionException();
+        }
+        return movements;
     }
 
     static boolean remove(Context context, Transaction expected) {
@@ -240,9 +329,22 @@ final class CashStore {
                 if (movement.date > countedAt) active.add(movement);
             }
             active.sort(Comparator.comparingLong(movement -> movement.date));
+            Transaction firstUnfunded = null;
+            long available = 0;
+            long shortfall = 0;
             for (Transaction movement : active) {
+                long before = balance;
                 balance = Math.addExact(balance, movement.amount);
-                if (balance < 0) throw new InsufficientCashException();
+                if (balance >= 0) continue;
+                if (firstUnfunded == null) {
+                    firstUnfunded = movement;
+                    available = before;
+                }
+                shortfall = Math.max(shortfall, -balance);
+            }
+            if (firstUnfunded != null) {
+                throw new InsufficientCashException(available, -firstUnfunded.amount,
+                    firstUnfunded.date, shortfall);
             }
         } catch (ArithmeticException overflow) {
             throw new IllegalArgumentException("cash total is too large", overflow);
@@ -253,6 +355,11 @@ final class CashStore {
     private static void validateMovement(long date, long amount) {
         if (date <= 0 || amount == 0 || amount == Long.MIN_VALUE)
             throw new IllegalArgumentException("invalid cash movement");
+    }
+
+    private static void validateEntryTime(long date, long amount, long now) {
+        validateMovement(date, amount);
+        if (date > now) throw new IllegalArgumentException("future cash movement");
     }
 
     private static void write(SharedPreferences prefs, State state) {
