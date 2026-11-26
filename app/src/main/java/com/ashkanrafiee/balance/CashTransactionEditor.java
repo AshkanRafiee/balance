@@ -591,7 +591,13 @@ final class CashTransactionEditor {
                         saving = false;
                         setBusy(false);
                         showCashFeedback(feedback, result);
-                        requestPreview();
+                        if (result == R.string.cash_history_save_unconfirmed) {
+                            setEnabled(form, false);
+                            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+                            onChanged.run();
+                        } else {
+                            requestPreview();
+                        }
                     }
                 });
                 if (result == 0) {
@@ -615,6 +621,8 @@ final class CashTransactionEditor {
                 return 0;
             } catch (CashStore.StaleCashTransactionException stale) {
                 return R.string.cash_history_stale;
+            } catch (CashStore.UnconfirmedCashSaveException unconfirmed) {
+                return R.string.cash_history_save_unconfirmed;
             } catch (CashStore.InsufficientCashException insufficient) {
                 return R.string.cash_history_insufficient;
             } catch (IllegalArgumentException invalid) {

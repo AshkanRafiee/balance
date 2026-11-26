@@ -298,18 +298,24 @@ final class CashStore {
             try {
                 stage.publish();
             } catch (Exception failure) {
-                // A failure after replacing the selector may already have made both changes
-                // visible. Do not report a failed add that a caller could retry and duplicate.
                 try {
-                    if (stagedPrefs.getString(REVISION, null).equals(
-                            DataGeneration.dataPrefs(context).getString(REVISION, null))) return;
-                } catch (Exception verification) {
-                    failure.addSuppressed(verification);
+                    if (stage.confirmPublication()) return;
+                } catch (Exception confirmation) {
+                    failure.addSuppressed(confirmation);
+                    throw new UnconfirmedCashSaveException(failure);
                 }
                 throw failure;
             }
+        } catch (UnconfirmedCashSaveException failure) {
+            throw failure;
         } catch (Exception failure) {
             throw new IllegalStateException("cash movement and annotation could not be saved", failure);
+        }
+    }
+
+    static final class UnconfirmedCashSaveException extends IllegalStateException {
+        UnconfirmedCashSaveException(Throwable cause) {
+            super("cash publication could not be confirmed", cause);
         }
     }
 

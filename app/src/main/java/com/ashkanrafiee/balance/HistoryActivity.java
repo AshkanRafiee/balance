@@ -4531,6 +4531,8 @@ public final class HistoryActivity extends Activity {
                 }
             } catch (CashStore.StaleCashTransactionException stale) {
                 error = R.string.cash_history_stale;
+            } catch (CashStore.UnconfirmedCashSaveException unconfirmed) {
+                error = R.string.cash_history_remove_unconfirmed;
             } catch (CashStore.InsufficientCashException insufficient) {
                 error = R.string.cash_history_remove_insufficient;
             } catch (Exception failure) {

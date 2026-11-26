@@ -29,6 +29,7 @@
     <string name="cash_history_preview_failed">بررسی موجودی نقدی ممکن نشد.</string>
     <string name="cash_history_unavailable_amount">این مبلغ برای موجودی نقدی بیش از حد بزرگ است. مبلغ کمتری وارد کنید.</string>
     <string name="cash_history_save_failed">تراکنش نقدی ذخیره نشد. دوباره تلاش کنید.</string>
+    <string name="cash_history_save_unconfirmed">ذخیرهٔ تراکنش تأیید نشد. فرم را ببندید و پیش از ثبت دوباره، تاریخچهٔ پول نقد را بررسی کنید.</string>
     <string name="cash_history_details">تراکنش نقدی</string>
     <string name="cash_history_annotations">یادداشت و برچسب‌ها</string>
     <string name="cash_history_row_hint">برای دیدن جزئیات، یادداشت و برچسب‌ها یا ویرایش و حذف تراکنش، بزنید.</string>
@@ -41,4 +42,5 @@
     <string name="cash_history_stale">این تراکنش تغییر کرده است. ویرایشگر را ببندید و تراکنش را دوباره باز کنید.</string>
     <string name="cash_history_remove_insufficient">حذف این تراکنش موجودی نقدی را در این تاریخ یا پس از آن منفی می‌کند.</string>
     <string name="cash_history_remove_failed">تراکنش نقدی حذف نشد. دوباره تلاش کنید.</string>
+    <string name="cash_history_remove_unconfirmed">حذف تراکنش تأیید نشد. پیش از تلاش دوباره، تاریخچهٔ پول نقد را بررسی کنید.</string>
 </resources>

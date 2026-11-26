@@ -29,6 +29,7 @@
     <string name="cash_history_preview_failed">Could not check the cash balance.</string>
     <string name="cash_history_unavailable_amount">The amount is too large for your cash balance. Enter a smaller amount.</string>
     <string name="cash_history_save_failed">Could not save the cash transaction. Try again.</string>
+    <string name="cash_history_save_unconfirmed">Could not confirm the save. Close this form and check Cash History before adding the transaction again.</string>
     <string name="cash_history_details">Cash transaction</string>
     <string name="cash_history_annotations">Note &amp; tags</string>
     <string name="cash_history_row_hint">Tap for transaction details, notes and tags, or to edit or remove it.</string>
@@ -41,4 +42,5 @@
     <string name="cash_history_stale">This transaction changed. Close this editor and open the transaction again.</string>
     <string name="cash_history_remove_insufficient">Removing this transaction would make your cash balance negative on this date or later.</string>
     <string name="cash_history_remove_failed">Could not remove the cash transaction. Try again.</string>
+    <string name="cash_history_remove_unconfirmed">Could not confirm the removal. Check Cash History before trying again.</string>
 </resources>

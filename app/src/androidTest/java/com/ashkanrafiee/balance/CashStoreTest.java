@@ -338,6 +338,29 @@ public class CashStoreTest {
         }
     }
 
+    @Test public void visibleCashSaveIsNotAcknowledgedWithoutSelectorSync() throws Exception {
+        int[] attempts = {0};
+        CashStore.setPublishHookForTests(point -> {
+            if (point == DataGeneration.PublishPoint.BEFORE_MANIFEST_SYNC) {
+                attempts[0]++;
+                throw new IOException("injected selector sync failure");
+            }
+        });
+        CashStore.Annotation annotation = new CashStore.Annotation("Lunch",
+            Collections.singletonList("food"));
+        try {
+            CashStore.add(context, System.currentTimeMillis(), 10, annotation);
+            fail("an unsynced selector must not be acknowledged");
+        } catch (CashStore.UnconfirmedCashSaveException expected) {
+            assertEquals(2, attempts[0]);
+        } finally {
+            CashStore.setPublishHookForTests(null);
+        }
+        List<Transaction> movements = CashStore.read(context).transactions;
+        assertEquals(1, movements.size());
+        assertAnnotation(movements.get(0), annotation);
+    }
+
     private void assertAnnotation(Transaction movement, CashStore.Annotation annotation)
             throws Exception {
         assertEquals(annotation.note, MetadataStore.getNote(context, movement));

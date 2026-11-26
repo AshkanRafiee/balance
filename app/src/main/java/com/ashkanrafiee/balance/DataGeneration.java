@@ -71,7 +71,7 @@ final class DataGeneration {
 
     private DataGeneration() {}
 
-    enum PublishPoint { BEFORE_MANIFEST, AFTER_MANIFEST }
+    enum PublishPoint { BEFORE_MANIFEST, AFTER_MANIFEST, BEFORE_MANIFEST_SYNC }
     interface PublishHook { void at(PublishPoint point) throws Exception; }
 
     /** Resolves the generation at the start of a normal store/facade operation. */
@@ -579,6 +579,20 @@ final class DataGeneration {
             }
         }
 
+        /** Reconfirm the same selector without replaying any of the staged writes. */
+        boolean confirmPublication() throws Exception {
+            synchronized (BalanceData.class) {
+                checkOpen();
+                if (published) return true;
+                if (!publicationAttempted) return false;
+                Manifest selected = readManifest(root);
+                if (selected == null || !generation.equals(selected.generation)) return false;
+                syncManifest(root, publishHook);
+                published = true;
+                return true;
+            }
+        }
+
         /** Explicitly discards a stage. It is safe to call more than once. */
         void abort() {
             synchronized (BalanceData.class) {
@@ -861,10 +875,15 @@ final class DataGeneration {
         Manifest selected = readManifest(root);
         if (selected == null || !generation.equals(selected.generation))
             throw new IOException("generation selector was not published");
-                if (hook != null) hook.at(PublishPoint.AFTER_MANIFEST);
-                syncFile(manifestFile(root));
-                syncDirectory(parent);
-                pruneOldGenerations(root);
+        if (hook != null) hook.at(PublishPoint.AFTER_MANIFEST);
+        syncManifest(root, hook);
+    }
+
+    private static void syncManifest(Context root, PublishHook hook) throws Exception {
+        if (hook != null) hook.at(PublishPoint.BEFORE_MANIFEST_SYNC);
+        syncFile(manifestFile(root));
+        syncDirectory(root.getNoBackupFilesDir());
+        pruneOldGenerations(root);
     }
 
     private static void writeMarker(File directory, String value) throws Exception {
