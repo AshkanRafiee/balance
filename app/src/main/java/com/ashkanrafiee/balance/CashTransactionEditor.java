@@ -230,7 +230,8 @@ final class CashTransactionEditor {
             timestamp = draft.timestamp;
             this.returnDraft = returnDraft;
             form.setOrientation(LinearLayout.VERTICAL);
-            form.setPadding(dp(24), dp(8), dp(24), dp(8));
+            form.setLayoutDirection(activity.getResources().getConfiguration().getLayoutDirection());
+            form.setPaddingRelative(dp(24), dp(8), dp(24), dp(8));
 
             direction.setOrientation(LinearLayout.HORIZONTAL);
             RadioButton deposit = new RadioButton(activity);
@@ -259,6 +260,8 @@ final class CashTransactionEditor {
             amount.setImeOptions(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
             amount.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
             amount.setSaveEnabled(false);
+            amount.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+            amount.setTextDirection(View.TEXT_DIRECTION_LTR);
             amount.setText(draft.amountText);
             TextView amountLabel = text(activity.getString(R.string.cash_history_amount,
                 CurrencyHelper.label(activity)), 13, muted);
@@ -281,13 +284,19 @@ final class CashTransactionEditor {
                 addTypedTag();
                 return true;
             });
-            LinearLayout tagInput = new LinearLayout(activity);
-            tagInput.setGravity(android.view.Gravity.CENTER_VERTICAL);
-            tagInput.addView(tag, new LinearLayout.LayoutParams(0, -2, 1));
+            android.content.res.Configuration config = activity.getResources().getConfiguration();
+            boolean stackTagInput = config.fontScale >= 1.3f || config.screenWidthDp < 400;
+            LinearLayout tagInput = stackTagInput ? ExpressiveUi.column(activity)
+                : ExpressiveUi.row(activity);
+            tagInput.addView(tag, stackTagInput ? new LinearLayout.LayoutParams(-1, -2)
+                : new LinearLayout.LayoutParams(0, -2, 1));
             TextView addTag = ExpressiveUi.button(activity,
                 activity.getString(R.string.cash_history_add_tag), false);
             addTag.setOnClickListener(v -> addTypedTag());
-            tagInput.addView(addTag);
+            LinearLayout.LayoutParams addTagLayout = new LinearLayout.LayoutParams(-2, -2);
+            if (stackTagInput) addTagLayout.gravity = android.view.Gravity.END;
+            else addTagLayout.setMarginStart(dp(8));
+            tagInput.addView(addTag, addTagLayout);
             form.addView(tagInput, margins(0, 4));
             tagRows.setOrientation(LinearLayout.VERTICAL);
             form.addView(tagRows, margins(0, 4));
@@ -495,6 +504,8 @@ final class CashTransactionEditor {
             field.setImeOptions(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
             field.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
             field.setSaveEnabled(false);
+            field.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+            field.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG);
             return field;
         }
 
@@ -517,8 +528,28 @@ final class CashTransactionEditor {
         private void renderTags() {
             tagRows.removeAllViews();
             for (String label : tags) {
-                TextView remove = ExpressiveUi.button(activity, label + "  ×", false);
-                remove.setContentDescription(activity.getString(R.string.cash_history_remove_tag, label));
+                LinearLayout remove = ExpressiveUi.row(activity);
+                remove.setMinimumHeight(dp(ExpressiveUi.MIN_TOUCH_DP));
+                remove.setPaddingRelative(dp(12), dp(6), dp(12), dp(6));
+                remove.setBackground(ExpressiveUi.ripple(activity, ExpressiveUi.shape(activity,
+                    ExpressiveUi.color(activity, R.color.expressive_surface_container_high),
+                    ExpressiveUi.RADIUS_CONTROL)));
+                TextView name = text(label, 14, fg);
+                name.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG);
+                name.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+                name.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                remove.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+                TextView icon = text("×", 18, muted);
+                icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                LinearLayout.LayoutParams iconLayout = new LinearLayout.LayoutParams(-2, -2);
+                iconLayout.setMarginStart(dp(8));
+                remove.addView(icon, iconLayout);
+                String spokenLabel = android.text.BidiFormatter
+                    .getInstance(form.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL)
+                    .unicodeWrap(label);
+                remove.setContentDescription(activity.getString(R.string.cash_history_remove_tag,
+                    spokenLabel));
+                remove.setFocusable(true);
                 remove.setOnClickListener(v -> {
                     tags.remove(label);
                     renderTags();

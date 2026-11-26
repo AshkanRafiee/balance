@@ -210,6 +210,60 @@ public class CashHistoryUiTest {
         assertEquals(Collections.singletonList("new tag"), BalanceData.getTags(context, updated));
     }
 
+    @Test public void tagControlsMirrorInPersianAndKeepMixedScriptNamesIntact() {
+        String previousLanguage = LocaleHelper.currentTag(context);
+        try {
+            for (String language : new String[]{"en", "fa"}) {
+                LocaleHelper.setLanguage(context, language);
+                boolean rtl = "fa".equals(language);
+                launch(CashStore.KEY);
+                openNew();
+                String label = rtl ? "Lunch 123" : "خرید ۱۲۳";
+                await(activity -> {
+                    View button = dialogText(activity, activity.getString(R.string.cash_history_add_tag));
+                    return button != null && button.isLaidOut();
+                });
+                scenario.onActivity(activity -> {
+                    assertEquals(rtl ? "افزودن برچسب" : "Add tag",
+                        activity.getString(R.string.cash_history_add_tag));
+                    EditText field = editorTag(activity);
+                    View button = dialogText(activity, activity.getString(R.string.cash_history_add_tag));
+                    assertNotNull(button);
+                    assertEquals(rtl ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR,
+                        field.getLayoutDirection());
+                    assertEquals(View.TEXT_DIRECTION_FIRST_STRONG, field.getTextDirection());
+                    assertEquals(View.TEXT_DIRECTION_LTR, editorAmount(activity).getTextDirection());
+                    if (field.getTop() < button.getTop() && field.getBottom() <= button.getTop()) {
+                        assertEquals(rtl ? field.getLeft() : field.getRight(),
+                            rtl ? button.getLeft() : button.getRight());
+                    } else {
+                        assertTrue(rtl ? button.getRight() <= field.getLeft()
+                            : field.getRight() <= button.getLeft());
+                    }
+                    field.setText(label);
+                    click(button);
+                });
+                await(activity -> {
+                    View chip = removeTagControl(activity, label);
+                    return chip != null && chip.isLaidOut();
+                });
+                scenario.onActivity(activity -> {
+                    ViewGroup chip = (ViewGroup) removeTagControl(activity, label);
+                    TextView name = (TextView) chip.getChildAt(0);
+                    View icon = chip.getChildAt(1);
+                    assertEquals(label, name.getText().toString());
+                    assertTrue(rtl ? icon.getRight() <= name.getLeft()
+                        : name.getRight() <= icon.getLeft());
+                });
+                scenario.close();
+                scenario = null;
+            }
+        } finally {
+            if (scenario != null) scenario.close();
+            LocaleHelper.setLanguage(context, previousLanguage);
+        }
+    }
+
     @Test public void recoveryFromAnEditRestoresDraftOnCancelAndSave() throws Exception {
         long timestamp = (System.currentTimeMillis() / 60_000 - 1) * 60_000 + 12_345;
         Transaction original = CashStore.add(context, timestamp, 12);
@@ -409,7 +463,10 @@ public class CashHistoryUiTest {
     }
 
     private static View removeTagControl(HistoryActivity activity, String tag) {
-        String description = activity.getString(R.string.cash_history_remove_tag, tag);
+        boolean rtl = activity.getResources().getConfiguration().getLayoutDirection()
+            == View.LAYOUT_DIRECTION_RTL;
+        String description = activity.getString(R.string.cash_history_remove_tag,
+            android.text.BidiFormatter.getInstance(rtl).unicodeWrap(tag));
         return find(currentDialog(activity).getWindow().getDecorView(),
             view -> TextUtils.equals(description, view.getContentDescription()));
     }
