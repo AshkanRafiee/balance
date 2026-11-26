@@ -64,6 +64,7 @@ final class BackupV2Restore {
     private static final int SOURCE = 8;
     private static final int RESIDUAL_NOTE_PROVENANCE = 9;
     private static final int CASH = 10;
+    private static final String CASH_METADATA_PREFIX = "s:" + CashStore.SIGNATURE_PREFIX;
 
     private static final int SECTION_SCHEMA = 1;
     private static final int SECTION_BALANCES = 1 << 1;
@@ -1512,18 +1513,25 @@ final class BackupV2Restore {
 
     private static void mergeMetadata(Context context, InputStage stage, int inputKind,
             int storeKind, boolean tags, BackupManager.RestoreResult result) throws Exception {
+        // A rejected ledger may reuse a local movement's ID with different data. Leave its
+        // annotations alone, including when the user previously cleared them. If Cash was not
+        // selected, there is no ledger conflict and the selected annotations merge as usual.
+        boolean skipCash = result.cashConflict && (inputKind == NOTES || inputKind == TAGS);
         // All annotations converging on one repaired survivor belong to the same repair. Plan
         // this per selected kind in the encrypted input stage, independent of backup row order.
         // Otherwise an ordinary canonical-to-signed alias could still discard its original text
         // when the signed survivor already has a conflicting local value.
         stage.forEach(inputKind, payload -> {
             String original = new JSONObject(payload).getString("key");
+            if (skipCash && original.startsWith(CASH_METADATA_PREFIX)) return;
             String repaired = stage.repairedDestination(original);
             String normalized = DottedAccountMigration.metadataKey(original);
             if (repaired != null || !normalized.equals(original)
-                    || stage.accountRepairState(storeKind, original) != null)
-                stage.markMetadataRepairDestination(storeKind,
-                    metadataDestination(stage, original, repaired, normalized));
+                    || stage.accountRepairState(storeKind, original) != null) {
+                String destination = metadataDestination(stage, original, repaired, normalized);
+                if (!skipCash || !destination.startsWith(CASH_METADATA_PREFIX))
+                    stage.markMetadataRepairDestination(storeKind, destination);
+            }
         });
         // Bounded passes: preserve original repair rows first, then ordinary parser aliases, then
         // protected canonical aliases, and finally padded aliases. In particular, optional repair
@@ -1534,10 +1542,12 @@ final class BackupV2Restore {
             stage.forEach(inputKind, payload -> {
                 JSONObject row = new JSONObject(payload);
                 String original = row.getString("key");
+                if (skipCash && original.startsWith(CASH_METADATA_PREFIX)) return;
                 String repaired = stage.repairedDestination(original);
                 String normalized = DottedAccountMigration.metadataKey(original);
                 Boolean archived = stage.accountRepairState(storeKind, original);
                 String destination = metadataDestination(stage, original, repaired, normalized);
+                if (skipCash && destination.startsWith(CASH_METADATA_PREFIX)) return;
                 boolean padded = repaired != null || !normalized.equals(original);
                 boolean repair = archived != null || padded
                     || stage.metadataRepairDestination(storeKind, destination);
