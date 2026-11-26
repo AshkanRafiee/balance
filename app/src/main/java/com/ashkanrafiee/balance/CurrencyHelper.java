@@ -2,6 +2,7 @@ package com.ashkanrafiee.balance;
 
 import android.content.Context;
 
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.text.NumberFormat;
 import java.util.Locale;
@@ -57,6 +58,19 @@ public final class CurrencyHelper {
     static String amount(Context context, BigInteger n) {
         BigInteger displayed = CURRENCY_TOMAN.equals(currency(context)) ? n.divide(BigInteger.TEN) : n;
         return formatter(LocaleHelper.isPersian(context)).format(displayed);
+    }
+
+    /** Manually entered cash can include a tenth of a toman; keep that digit visible. */
+    static String amountExact(Context context, BigInteger rials) {
+        return formatter(LocaleHelper.isPersian(context)).format(exactDisplayValue(context, rials));
+    }
+
+    static String amountExact(Context context, long rials) {
+        return amountExact(context, BigInteger.valueOf(rials));
+    }
+
+    static BigDecimal exactDisplayValue(Context context, BigInteger rials) {
+        return new BigDecimal(rials, CURRENCY_TOMAN.equals(currency(context)) ? 1 : 0);
     }
 
     /** Formats without re-reading the stored currency and language, for passes over many rows

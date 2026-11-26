@@ -57,6 +57,7 @@ final class CsvExport {
 
     /** {@code kind} value for a row parsed from one bank message. */
     static final String KIND_MOVEMENT = "movement";
+    static final String KIND_MANUAL_CASH = "manual_cash";
     /** {@code kind} value for money that moved with no message to back it. */
     static final String KIND_UNACCOUNTED = "unaccounted";
 
@@ -236,7 +237,7 @@ final class CsvExport {
     /** Same as {@link #write(Context, Writer, Text)}, with an explicit bounded store page size. */
     static void write(Context context, int pageSize, Writer writer, Text text) throws Exception {
         if (writer == null) throw new NullPointerException("writer");
-            write(context, visitor -> TransactionStore.forEach(context, pageSize, visitor),
+        write(context, visitor -> HistoryReader.forEachVisible(context, pageSize, visitor),
             writer, text);
     }
 
@@ -361,13 +362,14 @@ final class CsvExport {
             local.year + "/" + local.month + "/" + local.day,
             time.format(new Date(t.date)),
             String.valueOf(t.amount),
-            CurrencyHelper.amount(context, t.amount),
+            CashStore.isCash(t) ? CurrencyHelper.amountExact(context, t.amount)
+                : CurrencyHelper.amount(context, t.amount),
             guardFormula(CurrencyHelper.label(context)),
             guardFormula(note == null ? "" : note),
             guardFormula(merchant == null ? "" : merchant),
             guardFormula(reason == null ? "" : reason),
             guardFormula(channel == null ? "" : channel),
-            KIND_MOVEMENT,
+            CashStore.isCash(t) ? KIND_MANUAL_CASH : KIND_MOVEMENT,
             // Always a "" or "[...]" array today (never a formula trigger), but guard the
             // invariant so a future serialization change cannot turn this cell into code.
             guardFormula(tagJson)
@@ -398,13 +400,14 @@ final class CsvExport {
             local.year + "/" + local.month + "/" + local.day,
             time.format(new Date(t.date)),
             String.valueOf(t.amount),
-            CurrencyHelper.amount(context, t.amount),
+            CashStore.isCash(t) ? CurrencyHelper.amountExact(context, t.amount)
+                : CurrencyHelper.amount(context, t.amount),
             guardFormula(CurrencyHelper.label(context)),
             guardFormula(note == null ? "" : note),
             guardFormula(merchant == null ? "" : merchant),
             guardFormula(reason == null ? "" : reason),
             guardFormula(channel == null ? "" : channel),
-            KIND_MOVEMENT,
+            CashStore.isCash(t) ? KIND_MANUAL_CASH : KIND_MOVEMENT,
             guardFormula(tagJson)
         };
     }

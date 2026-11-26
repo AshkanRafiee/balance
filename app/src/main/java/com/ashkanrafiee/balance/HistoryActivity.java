@@ -2,6 +2,7 @@ package com.ashkanrafiee.balance;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -24,6 +25,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Telephony;
 import android.text.Editable;
+import android.text.InputType;
 import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -38,9 +40,12 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.TimePicker;
 import android.widget.Toast;
 import java.io.File;
 import java.io.IOException;
@@ -152,6 +157,15 @@ public final class HistoryActivity extends Activity {
         return selectedBanks.size() == 1 ? selectedBanks.iterator().next() : null;
     }
 
+    private boolean isCashScope() {
+        return CashStore.KEY.equals(singleBank()) && selectedAccounts.isEmpty();
+    }
+
+    private boolean canAddCashTransaction() {
+        return CashStore.isEnabled(this) && selectedAccounts.isEmpty()
+            && (selectedBanks.isEmpty() || isCashScope());
+    }
+
     /** The account when exactly one is selected, else null. */
     private String singleAccount() {
         return selectedAccounts.size() == 1 ? selectedAccounts.iterator().next() : null;
@@ -239,7 +253,8 @@ public final class HistoryActivity extends Activity {
     private boolean renderRunning, renderQueued;
     private boolean historyScanRunning, historyScanAgain;
     private int historyScanStarts;
-    private String renderedTransactionsRevision, renderedMetadataRevision, renderedState;
+    private String renderedTransactionsRevision, renderedCashRevision, renderedMetadataRevision,
+        renderedState;
     private String renderingState;
     private static volatile CountDownLatch renderGateStarted;
     private static volatile CountDownLatch renderGateRelease;
@@ -1047,9 +1062,8 @@ public final class HistoryActivity extends Activity {
 
     /** Builds the CSV of the on-screen transactions on a worker and publishes a completed private
      *  staging file to the SAF uri. The current filters and search query shape the snapshot (with
-     *  none active that is the full history). Movements and residuals come from a single store
-     *  pass, so the file cannot mix transaction generations even though no store monitor is held
-     *  across the whole export — holding it is what starved renders and scans behind the dialog. */
+     *  none active that is the full history). A single bank pass feeds both movements and residuals;
+     *  the independent cash snapshot feeds movements only. No store monitor is held across export. */
     private void writeExport(Uri uri) {
         if (exportRunning) return;
         final String query = searchQuery == null ? "" : searchQuery.trim();
@@ -1057,6 +1071,8 @@ public final class HistoryActivity extends Activity {
         final Filter activeFilter = filter;
         final Set<String> banks = new java.util.LinkedHashSet<>(selectedBanks);
         final Set<String> accounts = new java.util.LinkedHashSet<>(selectedAccounts);
+        final boolean includeCash = accounts.isEmpty()
+            && (banks.isEmpty() || banks.contains(CashStore.KEY));
         final boolean iran = iranCalendar;
         // App-owned handles captured up front: the worker below must not call back into the
         // activity except through runOnUiThread, so a late finish after destroy stays safe.
@@ -1105,6 +1121,7 @@ public final class HistoryActivity extends Activity {
                 // change, cancellation, or activity teardown therefore cannot leave a truncated
                 // picked document looking like a completed export.
                 final String metadataRevision = MetadataStore.revision(app);
+                final String cashRevision = includeCash ? CashStore.revision(app) : null;
                 try (MetadataStore.LookupSession metadata =
                         MetadataStore.LookupSession.open(app);
                         OutputStreamWriter writer = new OutputStreamWriter(staged.outputStream(),
@@ -1135,12 +1152,25 @@ public final class HistoryActivity extends Activity {
                     final HistoryCsvExport.CombinedSource both = (movements, residuals) -> {
                         try (HistoryResidualReader.Staging staging =
                                 HistoryResidualReader.Staging.open(app)) {
-                            TransactionStore.forEach(app, CsvExport.STREAM_PAGE_SIZE, transaction -> {
-                                if (inExportScope(transaction, banks, accounts)) staging.add(transaction);
-                                if (!exportMovementMatches(app, transaction, banks, accounts,
-                                        activeFilter, iran, tagSelection, tokens, lookup)) return;
-                                movements.accept(transaction);
-                            });
+                            if (!(banks.size() == 1 && banks.contains(CashStore.KEY))) {
+                                TransactionStore.forEach(app, CsvExport.STREAM_PAGE_SIZE, transaction -> {
+                                    if (inExportScope(transaction, banks, accounts)) {
+                                        staging.add(transaction);
+                                    }
+                                    if (exportMovementMatches(app, transaction, banks, accounts,
+                                            activeFilter, iran, tagSelection, tokens, lookup)) {
+                                        movements.accept(transaction);
+                                    }
+                                });
+                            }
+                            if (includeCash) {
+                                CashStore.forEachVisible(app, transaction -> {
+                                    if (exportMovementMatches(app, transaction, banks, accounts,
+                                            activeFilter, iran, tagSelection, tokens, lookup)) {
+                                        movements.accept(transaction);
+                                    }
+                                });
+                            }
                             staging.emit(residual -> {
                                 if (!tagSelection.isEmpty() || !exportResidualMatches(app, residual,
                                         activeFilter, iran, tokens, lookup)) return;
@@ -1157,6 +1187,9 @@ public final class HistoryActivity extends Activity {
                     // file before it is published.
                     if (!sameRevision(metadataRevision, MetadataStore.revision(app))) {
                         throw new IOException("metadata changed during CSV export");
+                    }
+                    if (includeCash && !sameRevision(cashRevision, CashStore.revision(app))) {
+                        throw new IOException("cash changed during CSV export");
                     }
                 }
                 staged.finish();
@@ -1461,13 +1494,15 @@ public final class HistoryActivity extends Activity {
         dateLp.topMargin = dp(8);
         filterBar.addView(dateRow, dateLp);
 
-        // One scope row: the tag, bank and account pickers share the row width, so every
-        // filter stays one tap away without stacking three full-width rows.
+        // Share the row width so every scope filter stays one tap away.
         LinearLayout scopeRow = new LinearLayout(this);
         scopeRow.setOrientation(LinearLayout.HORIZONTAL);
         addTagFilterChip(scopeRow);
         addBankFilterChip(scopeRow);
         addAccountFilterChip(scopeRow);
+        if (CashStore.isEnabled(this)) {
+            addScopeChip(scopeRow, getString(R.string.cash_label), isCashScope(), this::toggleCashScope);
+        }
         LinearLayout.LayoutParams scopeLp = new LinearLayout.LayoutParams(-1, -2);
         scopeLp.topMargin = dp(8);
         filterBar.addView(scopeRow, scopeLp);
@@ -1508,10 +1543,21 @@ public final class HistoryActivity extends Activity {
 
     /** The bank scope chip: plain "Banks" with no selection, "Banks (N)" once narrowed. */
     private void addBankFilterChip(LinearLayout host) {
-        String label = selectedBanks.isEmpty()
-            ? getString(R.string.history_filter_banks)
-            : getString(R.string.history_filter_banks_count, selectedBanks.size());
-        addScopeChip(host, label, !selectedBanks.isEmpty(), this::bankFilterDialog);
+        boolean active = !selectedBanks.isEmpty() && !isCashScope();
+        String label = active ? getString(R.string.history_filter_banks_count, selectedBanks.size())
+            : getString(R.string.history_filter_banks);
+        addScopeChip(host, label, active, this::bankFilterDialog);
+    }
+
+    private void toggleCashScope() {
+        boolean selectCash = !isCashScope();
+        selectedBanks.clear();
+        if (selectCash) selectedBanks.add(CashStore.KEY);
+        selectedAccounts.clear();
+        accountBank = null;
+        rebuildHeader();
+        rebuildFilterBar();
+        render();
     }
 
     /** The account scope chip: plain "Accounts" with no selection, "Accounts (N)" once narrowed. */
@@ -1522,7 +1568,7 @@ public final class HistoryActivity extends Activity {
         addScopeChip(host, label, !selectedAccounts.isEmpty(), this::accountFilterDialog);
     }
 
-    /** One third of the scope row: a weighted chip sharing the row width with its siblings, so
+    /** A weighted chip sharing the row width with its siblings, so
      *  all labels stay on-screen at any font scale. */
     private void addScopeChip(LinearLayout host, String label, boolean active, Runnable action) {
         TextView chip = text(label, 12, active
@@ -1536,6 +1582,7 @@ public final class HistoryActivity extends Activity {
         chip.setContentDescription(getString(R.string.history_filter_tags_accessibility, label));
         chip.setClickable(true);
         chip.setFocusable(true);
+        chip.setSelected(active);
         chip.setOnClickListener(v -> action.run());
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
         lp.setMarginStart(dp(2));
@@ -2124,33 +2171,11 @@ public final class HistoryActivity extends Activity {
      *  typing. Opening it again restores the current bounds, ranged-selected, and applying with a
      *  single picked day keeps that bound open-ended (matching the old optional text fields). */
     private void customRangeDialog() {
-        final RangePicker picker = new RangePicker();
-
-        LinearLayout wrap = new LinearLayout(this);
-        wrap.setOrientation(LinearLayout.VERTICAL);
-        wrap.setLayoutDirection(isRtl() ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
-        wrap.setPadding(dp(24), dp(8), dp(24), 0);
-        wrap.addView(picker.status, new LinearLayout.LayoutParams(-1, -2));
-
-        // The arrows land at the reading-start edge: next on the left in LTR, mirroring for RTL.
-        LinearLayout monthRow = new LinearLayout(this);
-        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, -2, 1);
-        titleLp.setMarginStart(dp(8));
-        titleLp.setMarginEnd(dp(8));
-        monthRow.addView(picker.prev, new LinearLayout.LayoutParams(-2, -2));
-        monthRow.addView(picker.title, titleLp);
-        monthRow.addView(picker.next, new LinearLayout.LayoutParams(-2, -2));
-        LinearLayout.LayoutParams monthLp = new LinearLayout.LayoutParams(-1, -2);
-        monthLp.topMargin = dp(8);
-        wrap.addView(monthRow, monthLp);
-
-        LinearLayout.LayoutParams gridLp = new LinearLayout.LayoutParams(-1, -2);
-        gridLp.topMargin = dp(6);
-        wrap.addView(picker.grid, gridLp);
+        final RangePicker picker = new RangePicker(filter.from, filter.to, null);
 
         android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.history_filter_custom_range_title))
-            .setView(wrap)
+            .setView(picker.content())
             .setNegativeButton(getString(R.string.lock_cancel), null)
             .setPositiveButton(getString(R.string.history_filter_apply), null)
             .create();
@@ -2174,7 +2199,9 @@ public final class HistoryActivity extends Activity {
      *  is closed starts a fresh From pick, and a To tapped before From swaps the bounds so the
      *  range keeps its order. */
     private final class RangePicker {
-        final CalDate[] picked = new CalDate[]{filter.from, filter.to};
+        final CalDate[] picked;
+        /** Cash mode selects one date between the epoch and today. */
+        final CalDate earliest, latest;
         final LinearLayout grid = new LinearLayout(HistoryActivity.this);
         final TextView title = text("", 14, fg, medium());
         final TextView status = text("", 12.5f, muted);
@@ -2183,7 +2210,10 @@ public final class HistoryActivity extends Activity {
         int viewYear;
         int viewMonth;
 
-        RangePicker() {
+        RangePicker(CalDate from, CalDate to, CalDate latest) {
+            picked = new CalDate[]{from, to};
+            this.latest = latest;
+            earliest = latest == null ? null : calOf(1, iranCalendar);
             CalDate start = picked[0] != null ? picked[0] : picked[1];
             if (start == null) start = now();
             viewYear = start.year;
@@ -2194,6 +2224,25 @@ public final class HistoryActivity extends Activity {
             title.setContentDescription(getString(R.string.history_jump_title));
             title.setOnClickListener(v -> promptJump());
             render();
+        }
+
+        LinearLayout content() {
+            LinearLayout wrap = new LinearLayout(HistoryActivity.this);
+            wrap.setOrientation(LinearLayout.VERTICAL);
+            wrap.setLayoutDirection(isRtl() ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
+            wrap.setPadding(dp(24), dp(8), dp(24), 0);
+            wrap.addView(status, new LinearLayout.LayoutParams(-1, -2));
+
+            LinearLayout monthRow = new LinearLayout(HistoryActivity.this);
+            LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, -2, 1);
+            titleLp.setMarginStart(dp(8));
+            titleLp.setMarginEnd(dp(8));
+            monthRow.addView(prev, new LinearLayout.LayoutParams(-2, -2));
+            monthRow.addView(title, titleLp);
+            monthRow.addView(next, new LinearLayout.LayoutParams(-2, -2));
+            wrap.addView(monthRow, margin(0, 8, 0, 0));
+            wrap.addView(grid, margin(0, 6, 0, 0));
+            return wrap;
         }
 
         /** A single dialog to jump straight to any month and year of the active calendar instead of
@@ -2220,7 +2269,7 @@ public final class HistoryActivity extends Activity {
             box.addView(mLabel);
             box.addView(monthSpin, new LinearLayout.LayoutParams(-1, -2));
             String yRange = getString(R.string.history_year_label,
-                CalDate.minYear(iranCalendar), CalDate.maxYear(iranCalendar));
+                minYear(), maxYear());
             if (LocaleHelper.isPersian(HistoryActivity.this)) yRange = faDigitsString(yRange);
             TextView yLabel = text(yRange, 13, muted);
             LinearLayout.LayoutParams yLp = new LinearLayout.LayoutParams(-1, -2);
@@ -2236,9 +2285,9 @@ public final class HistoryActivity extends Activity {
                 .create();
             dlg.setOnShowListener(d -> dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
                 .setOnClickListener(v -> {
-                    int month = monthSpin.getSelectedItemPosition() + 1;
-                    viewMonth = month;
                     viewYear = parseYear(year.getText());
+                    viewMonth = Math.max(firstMonth(), Math.min(
+                        monthSpin.getSelectedItemPosition() + 1, lastMonth()));
                     dlg.dismiss();
                     render();
                 }));
@@ -2259,8 +2308,23 @@ public final class HistoryActivity extends Activity {
             } catch (NumberFormatException e) {
                 return viewYear;
             }
-            return Math.max(CalDate.minYear(iranCalendar),
-                Math.min(CalDate.maxYear(iranCalendar), year));
+            return Math.max(minYear(), Math.min(maxYear(), year));
+        }
+
+        int minYear() {
+            return earliest == null ? CalDate.minYear(iranCalendar) : earliest.year;
+        }
+
+        int maxYear() {
+            return latest == null ? CalDate.maxYear(iranCalendar) : latest.year;
+        }
+
+        int firstMonth() {
+            return earliest != null && viewYear == earliest.year ? earliest.month : 1;
+        }
+
+        int lastMonth() {
+            return latest != null && viewYear == latest.year ? latest.month : 12;
         }
 
         TextView navButton(String arrow) {
@@ -2279,10 +2343,8 @@ public final class HistoryActivity extends Activity {
             title.setText(monthName(viewMonth) + " "
                 + (fa ? faDigits(viewYear) : Integer.toString(viewYear)) + " \u25be");
             title.setGravity(Gravity.CENTER);
-            bindNav(prev, viewYear > CalDate.minYear(iranCalendar)
-                || viewYear == CalDate.minYear(iranCalendar) && viewMonth > 1, -1);
-            bindNav(next, viewYear < CalDate.maxYear(iranCalendar)
-                || viewYear == CalDate.maxYear(iranCalendar) && viewMonth < 12, 1);
+            bindNav(prev, viewMonth > firstMonth() || viewYear > minYear(), -1);
+            bindNav(next, viewMonth < lastMonth() || viewYear < maxYear(), 1);
             grid.removeAllViews();
 
             String[] weekdays = weekdayLabels();
@@ -2294,7 +2356,6 @@ public final class HistoryActivity extends Activity {
             }
             grid.addView(weekRow, new LinearLayout.LayoutParams(-1, -2));
 
-            int rangeFill = (accent & 0x00FFFFFF) | 0x26000000;
             CalDate today = now();
             int firstDay = CalDate.weekdayIndex(CalDate.of(viewYear, viewMonth, 1), iranCalendar);
             int days = CalDate.daysInMonth(viewYear, viewMonth, iranCalendar);
@@ -2323,6 +2384,11 @@ public final class HistoryActivity extends Activity {
                 fromSel || toSel ? ExpressiveUi.color(HistoryActivity.this,
                     R.color.expressive_on_primary) : fg);
             cell.setGravity(Gravity.CENTER);
+            if (latest != null && (day.compare(latest) > 0 || day.compare(earliest) < 0)) {
+                cell.setEnabled(false);
+                cell.setAlpha(.35f);
+                return cell;
+            }
             if (fromSel || toSel) {
                 cell.setBackground(rounded(accent, 10));
             } else if (isToday) {
@@ -2332,13 +2398,15 @@ public final class HistoryActivity extends Activity {
                 cell.setBackground(rounded(rangeFill, 10));
             }
             cell.setContentDescription(dateText(day)
-                + (fromSel ? " \u2014 " + getString(R.string.history_range_start)
+                + (fromSel && latest == null ? " \u2014 " + getString(R.string.history_range_start)
                     : toSel ? " \u2014 " + getString(R.string.history_range_end)
                     : inRange ? " \u2014 " + getString(R.string.history_range_selected) : ""));
             cell.setClickable(true);
             cell.setFocusable(true);
+            cell.setSelected(fromSel || toSel);
             cell.setOnClickListener(v -> {
-                pickDay(picked, day);
+                if (latest == null) pickDay(picked, day);
+                else picked[0] = day;
                 render();
             });
             return cell;
@@ -2365,7 +2433,9 @@ public final class HistoryActivity extends Activity {
 
         /** Tells the user what to pick next, or shows the closing summary once the range is full. */
         void updateStatus() {
-            if (picked[0] == null) {
+            if (latest != null) {
+                status.setText(dateText(picked[0]));
+            } else if (picked[0] == null) {
                 status.setText(R.string.history_filter_pick_from);
             } else if (picked[1] == null) {
                 status.setText(getString(R.string.history_filter_pick_to, compactDate(picked[0])));
@@ -3033,6 +3103,7 @@ public final class HistoryActivity extends Activity {
         final boolean hadRenderedResult = historyResult != null;
         final String previousState = renderedState;
         final String previousTransactions = renderedTransactionsRevision;
+        final String previousCash = renderedCashRevision;
         final String previousMetadata = renderedMetadataRevision;
         final WorkProgress renderProgress = new WorkProgress() {
             @Override public void stage(int stageResId) {
@@ -3050,6 +3121,7 @@ public final class HistoryActivity extends Activity {
             try {
                 if (hadRenderedResult && state.equals(previousState) && previousTransactions != null
                         && previousTransactions.equals(TransactionStore.revision(app))
+                        && sameRevision(previousCash, CashStore.revision(app))
                         && sameRevision(MetadataStore.revision(app), previousMetadata)) {
                     deliverRender(() -> {
                         if (gen == renderGen && !lifecycleStale(uiGen)) {
@@ -3107,7 +3179,8 @@ public final class HistoryActivity extends Activity {
                         finishRenderWork();
                         return;
                     }
-                    if (historyResult == null && historyScanRunning && lists.years.isEmpty()) {
+                    if (historyResult == null && historyScanRunning && lists.years.isEmpty()
+                            && !isCashScope()) {
                         // An unscanned empty snapshot is not an empty inbox. Keep cold progress
                         // until catch-up finishes, including an initially empty bank/account scope.
                         try { completed.close(); } catch (Exception e) {
@@ -3128,6 +3201,7 @@ public final class HistoryActivity extends Activity {
                         return;
                     }
                     renderedTransactionsRevision = completed.revisionStamp.transactions;
+                    renderedCashRevision = completed.revisionStamp.cash;
                     renderedMetadataRevision = completed.revisionStamp.metadata;
                     renderedState = state;
                     scopeChoicesCache = null;
@@ -3158,6 +3232,9 @@ public final class HistoryActivity extends Activity {
                     body.removeAllViews();
                     if (lists.years.isEmpty()) {
                         expandForNarrowing(expansionKey, expansionActive, lists.years);
+                        if (canAddCashTransaction()) {
+                            body.addView(breakdownHeading(0), margin(0, 16, 0, 0));
+                        }
                         emptyState();
                     } else {
                         body.addView(heroCard(lists), margin(0, 0, 0, 6));
@@ -3413,12 +3490,17 @@ public final class HistoryActivity extends Activity {
         } else if (filter.isActive() || !selectedTags.isEmpty()) {
             // A filter may hide every transaction even though history exists.
             empty = getString(R.string.history_empty_filtered);
+        } else if (isCashScope()) {
+            empty = getString(CashStore.isEnabled(this) ? R.string.cash_history_empty
+                : R.string.cash_history_disabled);
         } else if (singleBank() != null && singleAccount() != null) {
             empty = getString(R.string.history_empty_account);
         } else if (singleBank() != null && selectedAccounts.isEmpty()) {
             empty = getString(R.string.history_empty_bank, BankRules.displayName(this, singleBank()));
         } else if (!selectedBanks.isEmpty() || !selectedAccounts.isEmpty()) {
             empty = getString(R.string.history_empty_filtered);
+        } else if (canAddCashTransaction()) {
+            empty = getString(R.string.cash_history_empty_total);
         } else {
             empty = getString(R.string.history_empty);
         }
@@ -3577,7 +3659,7 @@ public final class HistoryActivity extends Activity {
         LinearLayout cell = new LinearLayout(this);
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setGravity(Gravity.START);
-        String amountText = CurrencyHelper.amount(this, Math.max(absAmount, 0));
+        String amountText = historyAmount(Math.max(absAmount, 0));
         TextView l = text(labelText, 12, color, medium());
         l.setGravity(Gravity.START);
         fitToWidth(l, 12, 9, 0);
@@ -3607,7 +3689,7 @@ public final class HistoryActivity extends Activity {
         fitToWidth(l, 12, 9, 0);
         cell.addView(l, new LinearLayout.LayoutParams(-1, -2));
         if (filter.direction == DIR_DEPOSIT) {
-            String amountText = CurrencyHelper.amount(this, Math.max(deposits, 0));
+            String amountText = historyAmount(Math.max(deposits, 0));
             TextView v = bold(amountText, 16, depFg);
             v.setGravity(Gravity.CENTER_HORIZONTAL);
             v.setContentDescription(getString(R.string.history_deposit) + " " + amountText);
@@ -3619,7 +3701,7 @@ public final class HistoryActivity extends Activity {
         }
         if (filter.direction == DIR_WITHDRAWAL) {
             long abs = Math.max(-withdrawals, 0);
-            String amountText = CurrencyHelper.amount(this, abs);
+            String amountText = historyAmount(abs);
             TextView v = bold(amountText, 16, witFg);
             v.setGravity(Gravity.CENTER_HORIZONTAL);
             v.setContentDescription(getString(R.string.history_withdrawal) + " " + amountText);
@@ -3629,21 +3711,23 @@ public final class HistoryActivity extends Activity {
             cell.addView(v, vp);
             return cell;
         }
-        String depText = "\u2191 " + CurrencyHelper.amount(this, Math.max(deposits, 0));
+        String depositAmount = historyAmount(Math.max(deposits, 0));
+        String depText = "\u2191 " + depositAmount;
         TextView depView = bold(depText, 14, depFg);
         depView.setGravity(Gravity.CENTER_HORIZONTAL);
         depView.setContentDescription(getString(R.string.history_deposit) + " "
-            + CurrencyHelper.amount(this, Math.max(deposits, 0)));
+            + depositAmount);
         fitToWidth(depView, 14, 8, 0);
         LinearLayout.LayoutParams depParams = new LinearLayout.LayoutParams(-1, -2);
         depParams.topMargin = dp(5);
         cell.addView(depView, depParams);
         long absWit = Math.max(-withdrawals, 0);
-        String witText = "\u2193 " + CurrencyHelper.amount(this, absWit);
+        String withdrawalAmount = historyAmount(absWit);
+        String witText = "\u2193 " + withdrawalAmount;
         TextView witView = bold(witText, 14, witFg);
         witView.setGravity(Gravity.CENTER_HORIZONTAL);
         witView.setContentDescription(getString(R.string.history_withdrawal) + " "
-            + CurrencyHelper.amount(this, absWit));
+            + withdrawalAmount);
         fitToWidth(witView, 14, 8, 0);
         LinearLayout.LayoutParams witParams = new LinearLayout.LayoutParams(-1, -2);
         witParams.topMargin = dp(2);
@@ -3678,6 +3762,18 @@ public final class HistoryActivity extends Activity {
         // of the breakdown below grows with it.
         row.addView(text(getResources().getQuantityString(
             R.plurals.history_n_tx, quantity(shown), shown), 12, muted, medium()));
+
+        if (canAddCashTransaction()) {
+            TextView add = text("+", 22, accent, medium());
+            add.setGravity(Gravity.CENTER);
+            add.setContentDescription(getString(R.string.cash_history_add));
+            add.setBackground(ripple(rounded(chipBg, 11)));
+            add.setFocusable(true);
+            add.setOnClickListener(v -> showCashEditor());
+            LinearLayout.LayoutParams addParams = new LinearLayout.LayoutParams(dp(48), dp(48));
+            addParams.setMarginStart(dp(8));
+            row.addView(add, addParams);
+        }
 
         if (residualCount == 0) return row;
 
@@ -4574,6 +4670,277 @@ public final class HistoryActivity extends Activity {
         return CalDate.fromGregorian(g[0], g[1], g[2], iranCalendar);
     }
 
+    private void showCashEditor() {
+        if (!canAddCashTransaction() || LockManager.isSessionLocked()) return;
+        final long[] timestamp = {System.currentTimeMillis()};
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(24), dp(8), dp(24), dp(8));
+
+        RadioGroup direction = new RadioGroup(this);
+        direction.setOrientation(LinearLayout.HORIZONTAL);
+        RadioButton deposit = new RadioButton(this);
+        deposit.setId(View.generateViewId());
+        deposit.setText(R.string.history_deposit);
+        direction.addView(deposit, new RadioGroup.LayoutParams(0, -2, 1));
+        RadioButton withdrawal = new RadioButton(this);
+        withdrawal.setId(View.generateViewId());
+        withdrawal.setText(R.string.history_withdrawal);
+        direction.addView(withdrawal, new RadioGroup.LayoutParams(0, -2, 1));
+        direction.check(deposit.getId());
+        form.addView(direction, margin(0, 0, 0, 6));
+
+        EditText amount = new EditText(this);
+        amount.setId(View.generateViewId());
+        amount.setSingleLine(true);
+        boolean decimal = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(this));
+        amount.setInputType(InputType.TYPE_CLASS_NUMBER
+            | (decimal ? InputType.TYPE_NUMBER_FLAG_DECIMAL : 0));
+        TextView amountLabel = text(getString(R.string.cash_history_amount,
+            CurrencyHelper.label(this)), 13, muted);
+        amountLabel.setLabelFor(amount.getId());
+        form.addView(amountLabel);
+        form.addView(amount, margin(0, 0, 0, 8));
+
+        TextView dateButton = ExpressiveUi.button(this, "", false);
+        TextView timeButton = ExpressiveUi.button(this, "", false);
+        Runnable updateLabels = () -> {
+            dateButton.setText(getString(R.string.cash_history_date_value,
+                dateText(calOf(timestamp[0], iranCalendar))));
+            timeButton.setText(getString(R.string.cash_history_time_value, timeText(timestamp[0])));
+        };
+        java.util.function.LongConsumer pickTimestamp = value -> {
+            timestamp[0] = value;
+            updateLabels.run();
+        };
+        updateLabels.run();
+        dateButton.setOnClickListener(v -> showCashDatePicker(timestamp[0], pickTimestamp));
+        timeButton.setOnClickListener(v -> showCashTimePicker(timestamp[0], pickTimestamp));
+        form.addView(dateButton, margin(0, 4, 0, 4));
+        form.addView(timeButton, margin(0, 4, 0, 4));
+        form.addView(text(getString(R.string.cash_history_count_rule), 13, muted),
+            margin(0, 8, 0, 4));
+        TextView feedback = cashFeedback(form);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(form);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle(R.string.cash_history_add)
+            .setView(scroll)
+            .setPositiveButton(R.string.note_save, null)
+            .setNegativeButton(R.string.lock_cancel, null)
+            .create();
+        dialog.getWindow().setSoftInputMode(
+            android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            .setOnClickListener(v -> {
+                feedback.setVisibility(View.GONE);
+                Long positiveAmount = CashStore.parseAmount(this, amount.getText().toString());
+                if (positiveAmount == null || positiveAmount <= 0) {
+                    amount.setError(getString(R.string.cash_history_invalid_amount));
+                    amount.requestFocus();
+                    return;
+                }
+                if (timestamp[0] > System.currentTimeMillis()) {
+                    showCashFeedback(feedback, R.string.cash_history_future);
+                    return;
+                }
+                long signedAmount = direction.getCheckedRadioButtonId() == withdrawal.getId()
+                    ? -positiveAmount : positiveAmount;
+                long date = timestamp[0];
+                saveCashChange(dialog, form, feedback, null, date, signedAmount);
+            }));
+        showDialog(dialog);
+    }
+
+    private void showCashDatePicker(long timestamp, java.util.function.LongConsumer update) {
+        CalDate current = calOf(timestamp, iranCalendar);
+        RangePicker picker = new RangePicker(current, null, now());
+        LinearLayout content = picker.content();
+        TextView feedback = cashFeedback(content);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle(R.string.cash_history_choose_date)
+            .setView(content)
+            .setPositiveButton(android.R.string.ok, null)
+            .setNegativeButton(R.string.lock_cancel, null)
+            .create();
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            .setOnClickListener(v -> {
+                CalDate date = picker.picked[0];
+                Calendar clock = Calendar.getInstance(Locale.US);
+                clock.setTimeInMillis(timestamp);
+                if (current.sameDay(date) && timestamp <= System.currentTimeMillis()) {
+                    dialog.dismiss();
+                } else {
+                    applyCashTimestamp(dialog, feedback, date, clock.get(Calendar.HOUR_OF_DAY),
+                        clock.get(Calendar.MINUTE), update);
+                }
+            }));
+        showDialog(dialog);
+    }
+
+    private void showCashTimePicker(long timestamp, java.util.function.LongConsumer update) {
+        Calendar clock = Calendar.getInstance(Locale.US);
+        clock.setTimeInMillis(timestamp);
+        TimePicker picker = new TimePicker(this);
+        picker.setIs24HourView(true);
+        picker.setHour(clock.get(Calendar.HOUR_OF_DAY));
+        picker.setMinute(clock.get(Calendar.MINUTE));
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.addView(picker);
+        TextView feedback = cashFeedback(content);
+        feedback.setPadding(dp(24), 0, dp(24), 0);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(content);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle(R.string.cash_history_choose_time)
+            .setView(scroll)
+            .setPositiveButton(android.R.string.ok, null)
+            .setNegativeButton(R.string.lock_cancel, null)
+            .create();
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            .setOnClickListener(v -> {
+                picker.clearFocus();
+                applyCashTimestamp(dialog, feedback, calOf(timestamp, iranCalendar),
+                    picker.getHour(), picker.getMinute(), update);
+            }));
+        showDialog(dialog);
+    }
+
+    private void applyCashTimestamp(AlertDialog dialog, TextView feedback, CalDate date, int hour,
+            int minute, java.util.function.LongConsumer update) {
+        long timestamp;
+        try {
+            Calendar clock = Calendar.getInstance(Locale.US);
+            clock.clear();
+            clock.setLenient(false);
+            int[] gregorian = date.toGregorian(iranCalendar);
+            clock.set(gregorian[0], gregorian[1] - 1, gregorian[2], hour, minute);
+            timestamp = clock.getTimeInMillis();
+        } catch (IllegalArgumentException invalidLocalTime) {
+            showCashFeedback(feedback, R.string.cash_history_invalid_time);
+            return;
+        }
+        if (timestamp > System.currentTimeMillis()) {
+            showCashFeedback(feedback, R.string.cash_history_future);
+            return;
+        }
+        if (timestamp <= 0) {
+            showCashFeedback(feedback, R.string.cash_history_too_early);
+            return;
+        }
+        update.accept(timestamp);
+        dialog.dismiss();
+    }
+
+    private void showCashDetails(Transaction transaction) {
+        if (!annotationUiActive(residualNoteUiEpoch)) return;
+        CalDate date = calOf(transaction.date, iranCalendar);
+        String direction = getString(transaction.amount > 0 ? R.string.history_deposit
+            : R.string.history_withdrawal);
+        String amount = signedCashAmount(transaction.amount) + " " + CurrencyHelper.label(this);
+        String details = getString(R.string.history_row_amount, direction, amount) + "\n"
+            + dateText(date) + " · " + timeText(transaction.date);
+        showDialog(new AlertDialog.Builder(this)
+            .setTitle(R.string.cash_history_details)
+            .setMessage(details)
+            .setPositiveButton(R.string.cash_history_annotations, (d, w) -> noteDialog(transaction))
+            .setNegativeButton(android.R.string.ok, null)
+            .setNeutralButton(R.string.cash_history_remove, (d, w) -> confirmCashRemoval(transaction))
+            .create());
+    }
+
+    private void confirmCashRemoval(Transaction transaction) {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(24), dp(8), dp(24), 0);
+        content.addView(text(getString(R.string.cash_history_remove_message), 14, fg));
+        TextView feedback = cashFeedback(content);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle(R.string.cash_history_remove_title)
+            .setView(content)
+            .setPositiveButton(R.string.cash_history_remove, null)
+            .setNegativeButton(R.string.lock_cancel, null)
+            .create();
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            .setOnClickListener(v -> saveCashChange(dialog, null, feedback, transaction, 0, 0)));
+        showDialog(dialog);
+    }
+
+    private TextView cashFeedback(LinearLayout content) {
+        TextView feedback = text("", 13, negativeColor);
+        feedback.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE);
+        feedback.setVisibility(View.GONE);
+        content.addView(feedback, margin(0, 4, 0, 4));
+        return feedback;
+    }
+
+    private void showCashFeedback(TextView feedback, int message) {
+        feedback.setText(message);
+        feedback.setVisibility(View.VISIBLE);
+    }
+
+    private void saveCashChange(AlertDialog dialog, View editor, TextView feedback,
+            Transaction removal, long date, long amount) {
+        int epoch = residualNoteUiEpoch;
+        if (!annotationUiActive(epoch)) return;
+        Context app = getApplicationContext();
+        feedback.setVisibility(View.GONE);
+        setCashEditorBusy(dialog, editor, true);
+        new Thread(() -> {
+            int error = 0;
+            try {
+                synchronized (BalanceData.class) {
+                    if (epoch != residualNoteUiEpoch || LockManager.isSessionLocked()) return;
+                    if (!CashStore.isEnabled(app)) {
+                        error = R.string.cash_history_disabled;
+                    } else if (removal != null) {
+                        if (!CashStore.remove(app, removal)) error = R.string.cash_history_missing;
+                    } else {
+                        CashStore.add(app, date, amount);
+                    }
+                }
+            } catch (CashStore.InsufficientCashException insufficient) {
+                error = removal == null ? R.string.cash_history_insufficient
+                    : R.string.cash_history_remove_insufficient;
+            } catch (IllegalArgumentException invalid) {
+                error = removal != null ? R.string.cash_history_remove_failed
+                    : date > System.currentTimeMillis() ? R.string.cash_history_future
+                    : R.string.cash_history_unavailable_amount;
+            } catch (Exception failure) {
+                error = removal == null ? R.string.cash_history_save_failed
+                    : R.string.cash_history_remove_failed;
+            }
+            final int result = error;
+            runOnUiThread(() -> {
+                if (!annotationUiActive(epoch) || !dialog.isShowing()) return;
+                if (result == 0) {
+                    dialog.dismiss();
+                    // The history listener otherwise waits for the bank scan's completion.
+                    if (historyScanRunning) render();
+                } else {
+                    setCashEditorBusy(dialog, editor, false);
+                    showCashFeedback(feedback, result);
+                }
+            });
+            if (result == 0) {
+                try {
+                    BalanceWidgetProvider.updateAll(app);
+                } catch (RuntimeException ignored) {
+                    // The history change is already saved.
+                }
+            }
+        }, "cash-history-save").start();
+    }
+
+    private static void setCashEditorBusy(AlertDialog dialog, View editor, boolean busy) {
+        if (editor != null) setAnnotationEditorEnabled(editor, !busy);
+        dialog.setCancelable(!busy);
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(!busy);
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(!busy);
+    }
+
     /** One movement: bank badge, bank name with time, the account number it hit, and the signed
      *  amount. In a per-bank view every row is the same bank, so the time alone identifies it and
      *  the badge/name are dropped — but the account number stays in both scopes, because a movement's
@@ -4585,8 +4952,12 @@ public final class HistoryActivity extends Activity {
         cell.setPaddingRelative(dp(4), dp(3), dp(4), dp(3));
         cell.setClickable(true);
         cell.setFocusable(true);
-        cell.setOnClickListener(v -> FigureExplanation.showTransaction(this, t, this::showDialog,
-            () -> historyResumed, () -> noteDialog(t)));
+        boolean cash = CashStore.isCash(t);
+        cell.setOnClickListener(v -> {
+            if (cash) showCashDetails(t);
+            else FigureExplanation.showTransaction(this, t, this::showDialog,
+                () -> historyResumed, () -> noteDialog(t));
+        });
 
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -4622,7 +4993,7 @@ public final class HistoryActivity extends Activity {
         colLp.setMarginStart(dp(9));
         row.addView(col, colLp);
 
-        String amountText = signedAmount(t.amount);
+        String amountText = cash ? signedCashAmount(t.amount) : signedAmount(t.amount);
         TextView amt = bold(amountText, 13, valueColor(t.amount));
         fitToWidth(amt, 13, 10, 0);
         row.addView(amt, new LinearLayout.LayoutParams(-2, -2));
@@ -4667,7 +5038,7 @@ public final class HistoryActivity extends Activity {
                 android.text.TextUtils.join(", ", tagValues)));
         }
         // Explain the actual tap destination, including the still-available annotation editor.
-        said.add(getString(R.string.figure_row_hint));
+        said.add(getString(cash ? R.string.cash_history_row_hint : R.string.figure_row_hint));
         cell.setContentDescription(android.text.TextUtils.join(" ", said));
         return cell;
     }
@@ -5142,12 +5513,12 @@ public final class HistoryActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         if (deposits > 0) {
-            String amountText = CurrencyHelper.amount(this, deposits);
+            String amountText = historyAmount(deposits);
             row.addView(chip("\u2191 " + amountText, depBg, depFg,
                 getString(R.string.history_deposit) + " " + amountText));
         }
         if (withdrawals < 0) {
-            String amountText = CurrencyHelper.amount(this, -withdrawals);
+            String amountText = historyAmount(-withdrawals);
             row.addView(chip("\u2193 " + amountText, witBg, witFg,
                 getString(R.string.history_withdrawal) + " " + amountText));
         }
@@ -5926,7 +6297,22 @@ public final class HistoryActivity extends Activity {
     /** Formats an amount as a signed currency string, following the app language's digit rules and
      *  the chosen currency's value (toman divides by ten, other currencies show the raw amount). */
     private String signedAmount(long n) {
-        String mag = CurrencyHelper.amount(this, Math.abs(n));
+        String magnitude = n == Long.MIN_VALUE
+            ? CurrencyHelper.amount(this, java.math.BigInteger.valueOf(n).negate())
+            : historyAmount(Math.abs(n));
+        return signedAmount(n, magnitude);
+    }
+
+    private String historyAmount(long amount) {
+        return isCashScope() ? CurrencyHelper.amountExact(this, amount)
+            : CurrencyHelper.amount(this, amount);
+    }
+
+    private String signedCashAmount(long n) {
+        return signedAmount(n, CurrencyHelper.amountExact(this, Math.abs(n)));
+    }
+
+    private String signedAmount(long n, String mag) {
         if (n == 0) return mag;
         String sign = (n < 0 ? "\u2212" : "+");
         if (!LocaleHelper.isPersian(this)) return sign + mag;

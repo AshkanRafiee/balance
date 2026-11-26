@@ -23,7 +23,7 @@ import java.util.TreeMap;
  * Bounded-memory history projection for the history screen.
  *
  * <p>{@link #summary(Context, Request)} is the production-shaped path. It consumes the stable
- * {@link TransactionStore#forEach} snapshot once, retains aggregates for calendar periods, and
+ * movement snapshot once, retains aggregates for calendar periods, and
  * writes visible rows to an encrypted disk timeline. Only requested page rows and their point
  * metadata are retained in the result heap.
  *
@@ -67,6 +67,7 @@ final class HistoryReader {
     /** Captured under BalanceData.class with the snapshot, never relabelled after a store write. */
     static final class RevisionStamp {
         final String transactions;
+        final String cash;
         final String metadata;
         final String today;
         final boolean iran;
@@ -76,6 +77,7 @@ final class HistoryReader {
         RevisionStamp(Context context, boolean iran, CalDate today, TimeZone zone,
                 SearchSettings searchSettings) {
             this.transactions = TransactionStore.revision(context);
+            this.cash = CashStore.revision(context);
             this.metadata = MetadataStore.revision(context);
             this.today = today.key();
             this.iran = iran;
@@ -99,6 +101,7 @@ final class HistoryReader {
             return other != null && iran == other.iran && today.equals(other.today)
                 && zone.getID().equals(other.zone.getID()) && zone.hasSameRules(other.zone)
                 && Objects.equals(transactions, other.transactions)
+                && Objects.equals(cash, other.cash)
                 && Objects.equals(metadata, other.metadata);
         }
 
@@ -106,7 +109,9 @@ final class HistoryReader {
             return Objects.hash(dataHashCode(), searchSettings);
         }
 
-        int dataHashCode() { return Objects.hash(transactions, metadata, today, iran, zone.getID()); }
+        int dataHashCode() {
+            return Objects.hash(transactions, cash, metadata, today, iran, zone.getID());
+        }
     }
 
     /** Search also matches localized labels and formatted amounts, not only stored text. */
@@ -324,7 +329,7 @@ final class HistoryReader {
         }
     }
 
-    /** Signed totals and the count of actual movement messages in a period. */
+    /** Signed totals and the count of actual movements in a period. */
     static final class Stats {
         final long sum;
         final long deposits;
@@ -448,7 +453,20 @@ final class HistoryReader {
         return reference(context, request);
     }
 
-    /** One stable pass over the transaction store; rows remain available through the timeline. */
+    /**
+     * Visits both ledgers in stable source order (bank rows first). Consumers needing date
+     * ordering sort independently; source order breaks ties without changing existing bank ties.
+     */
+    static void forEachVisible(Context context, int pageSize, TransactionStore.Visitor visitor)
+            throws Exception {
+        synchronized (BalanceData.class) {
+            BalanceData.ensureResetComplete(context);
+            TransactionStore.forEach(context, pageSize, visitor);
+            CashStore.forEachVisible(context, visitor);
+        }
+    }
+
+    /** One stable pass over both ledgers; rows remain available through the timeline. */
     static Result summary(Context context, Request request) throws Exception {
         return timelineSummary(context, request, false);
     }
@@ -476,9 +494,9 @@ final class HistoryReader {
 
     /**
      * Builds one immutable cross-store snapshot. All transaction, residual and point-metadata
-     * passes happen under the same store monitor: a scan cannot publish a new generation between
-     * the summary and the residual walk, and a metadata edit cannot make a page disagree with the
-     * search that selected it.
+     * passes happen under the same store monitor: a scan or cash edit cannot change data between
+     * the summary and the residual walk, and a metadata edit cannot make a page disagree with
+     * the search that selected it.
      */
     private static Result timelineSummary(Context context, Request request, boolean residuals)
             throws Exception {
@@ -522,16 +540,18 @@ final class HistoryReader {
                     List<Transaction> matchingBatch = new ArrayList<>(batchSize);
                     int pageSize = cancel == null ? request.pageSize
                         : Math.min(batchSize, request.pageSize);
-                    TransactionStore.forEach(context, pageSize, transaction -> {
+                    forEachVisible(context, pageSize, transaction -> {
                         if (cancel != null) cancel.throwIfCanceled();
                         // Scope narrowing precedes all other filters. Residual detection needs the
                         // whole bank/account scope, so staging happens before narrowing predicates.
                         if (!inScope(transaction, request)) return;
-                        if (residualStaging != null) residualStaging.add(transaction);
-                        if (memoryScope != null) {
-                            if (memoryScope.size() >= MEMORY_RESIDUAL_LIMIT)
-                                throw new IllegalStateException("residual scope outgrew its bound");
-                            memoryScope.add(transaction);
+                        if (!CashStore.isCash(transaction)) {
+                            if (residualStaging != null) residualStaging.add(transaction);
+                            if (memoryScope != null) {
+                                if (memoryScope.size() >= MEMORY_RESIDUAL_LIMIT)
+                                    throw new IllegalStateException("residual scope outgrew its bound");
+                                memoryScope.add(transaction);
+                            }
                         }
                         if (!matchesMovementFilter(transaction, request)) return;
                         matchingBatch.add(transaction);
@@ -582,18 +602,22 @@ final class HistoryReader {
      * allowed to retain all rows so residual arithmetic can be compared with HistoryActivity.
      */
     static Result reference(Context context, Request request) throws Exception {
-        BalanceData.ensureResetComplete(context);
-        List<Transaction> stored = new ArrayList<>();
-        TransactionStore.forEach(context, request.pageSize, stored::add);
-
-        List<Transaction> scope = new ArrayList<>();
-        for (Transaction transaction : stored) {
-            if (inScope(transaction, request)) scope.add(transaction);
+        synchronized (BalanceData.class) {
+            return referenceLocked(context, request);
         }
+    }
 
-        // This is the only production-code call site kept for residual parity. Residual detection
-        // happens before direction/date/tag/search narrowing, just as HistoryActivity currently does.
-        List<Residual> residuals = Residual.between(scope);
+    private static Result referenceLocked(Context context, Request request) throws Exception {
+        List<Transaction> scope = new ArrayList<>();
+        List<Transaction> bankScope = new ArrayList<>();
+        forEachVisible(context, request.pageSize, transaction -> {
+            if (!inScope(transaction, request)) return;
+            scope.add(transaction);
+            if (!CashStore.isCash(transaction)) bankScope.add(transaction);
+        });
+
+        // Residual detection uses the full bank scope before direction/date/tag/search narrowing.
+        List<Residual> residuals = Residual.between(bankScope);
         List<Residual> filteredResiduals = HistoryActivity.applyResidualFilters(
             residuals, request.filter, request.iran);
         List<Transaction> filteredTransactions = HistoryActivity.applyFilters(
@@ -634,9 +658,7 @@ final class HistoryReader {
     }
 
     private static boolean inScope(Transaction transaction, Request request) {
-        if (transaction == null) return false;
-        if (!request.banks.isEmpty() && !request.banks.contains(transaction.bank)) return false;
-        return request.accounts.isEmpty() || request.accounts.contains(transaction.account);
+        return HistoryActivity.inBankAccountScope(transaction, request.banks, request.accounts);
     }
 
     private static boolean matchesMovementFilter(Transaction transaction, Request request) {
@@ -826,20 +848,18 @@ final class HistoryReader {
     }
 
     private static final class MutableStats {
-        long sum;
         long deposits;
         long withdrawals;
         long movementCount;
 
         void add(long amount, boolean movement) {
-            sum += amount;
-            if (amount > 0) deposits += amount;
-            else withdrawals += amount;
+            if (amount > 0) deposits = Math.addExact(deposits, amount);
+            else withdrawals = Math.addExact(withdrawals, amount);
             if (movement) movementCount++;
         }
 
         Stats freeze() {
-            return new Stats(sum, deposits, withdrawals, movementCount);
+            return new Stats(deposits + withdrawals, deposits, withdrawals, movementCount);
         }
     }
 

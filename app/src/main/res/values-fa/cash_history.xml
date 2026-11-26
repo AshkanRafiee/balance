@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cash_history_empty">هنوز تراکنش نقدی ثبت نشده است. برای افزودن، + را بزنید.</string>
+    <string name="cash_history_empty_total">هنوز تراکنشی ثبت نشده است. تراکنش‌های بانکی از پیامک‌ها خوانده می‌شوند. برای افزودن تراکنش نقدی، + را بزنید.</string>
+    <string name="cash_history_add">افزودن تراکنش نقدی</string>
+    <string name="cash_history_amount">مبلغ (%1$s)</string>
+    <string name="cash_history_date_value">تاریخ: %1$s</string>
+    <string name="cash_history_time_value">ساعت: %1$s</string>
+    <string name="cash_history_choose_date">انتخاب تاریخ تراکنش</string>
+    <string name="cash_history_choose_time">انتخاب ساعت تراکنش</string>
+    <string name="cash_history_count_rule">تراکنش‌هایی که در زمان آخرین شمارش پول نقد یا پیش از آن انجام شده‌اند، فقط در تاریخچه ثبت می‌شوند. تراکنش‌های بعدی موجودی نقدی را هم تغییر می‌دهند.</string>
+    <string name="cash_history_invalid_amount">مبلغ معتبری بیشتر از صفر وارد کنید.</string>
+    <string name="cash_history_future">تاریخ و ساعتی انتخاب کنید که در آینده نباشد.</string>
+    <string name="cash_history_too_early">تاریخ یا ساعت دیرتری انتخاب کنید.</string>
+    <string name="cash_history_invalid_time">این ساعت محلی در این تاریخ وجود ندارد. ساعت دیگری انتخاب کنید.</string>
+    <string name="cash_history_disabled">پول نقد غیرفعال است.</string>
+    <string name="cash_history_insufficient">این برداشت موجودی نقدی را در این تاریخ یا پس از آن منفی می‌کند.</string>
+    <string name="cash_history_unavailable_amount">این مبلغ برای موجودی نقدی بیش از حد بزرگ است. مبلغ کمتری وارد کنید.</string>
+    <string name="cash_history_save_failed">تراکنش نقدی ذخیره نشد. دوباره تلاش کنید.</string>
+    <string name="cash_history_details">تراکنش نقدی</string>
+    <string name="cash_history_annotations">یادداشت و برچسب‌ها</string>
+    <string name="cash_history_row_hint">برای دیدن جزئیات، یادداشت و برچسب‌ها یا حذف تراکنش، بزنید.</string>
+    <string name="cash_history_remove">حذف</string>
+    <string name="cash_history_remove_title">تراکنش نقدی حذف شود؟</string>
+    <string name="cash_history_remove_message">این تراکنش از تاریخچه حذف می‌شود و اگر موجودی نقدی فعلی را تغییر داده باشد، اثر آن برگردانده می‌شود.</string>
+    <string name="cash_history_missing">این تراکنش نقدی دیگر در تاریخچه نیست.</string>
+    <string name="cash_history_remove_insufficient">حذف این تراکنش موجودی نقدی را در این تاریخ یا پس از آن منفی می‌کند.</string>
+    <string name="cash_history_remove_failed">تراکنش نقدی حذف نشد. دوباره تلاش کنید.</string>
+</resources>

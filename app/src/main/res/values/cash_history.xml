@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cash_history_empty">No cash transactions yet. Tap + to add one.</string>
+    <string name="cash_history_empty_total">No transactions yet. Bank transactions come from SMS. Tap + to add a cash transaction.</string>
+    <string name="cash_history_add">Add cash transaction</string>
+    <string name="cash_history_amount">Amount (%1$s)</string>
+    <string name="cash_history_date_value">Date: %1$s</string>
+    <string name="cash_history_time_value">Time: %1$s</string>
+    <string name="cash_history_choose_date">Choose transaction date</string>
+    <string name="cash_history_choose_time">Choose transaction time</string>
+    <string name="cash_history_count_rule">Transactions dated on or before your last cash count appear only in history. Later transactions also change your cash balance.</string>
+    <string name="cash_history_invalid_amount">Enter a valid amount greater than zero.</string>
+    <string name="cash_history_future">Choose a date and time that are not in the future.</string>
+    <string name="cash_history_too_early">Choose a later date or time.</string>
+    <string name="cash_history_invalid_time">That local time does not exist on this date. Choose another time.</string>
+    <string name="cash_history_disabled">Cash is turned off.</string>
+    <string name="cash_history_insufficient">This withdrawal would make your cash balance negative on this date or later.</string>
+    <string name="cash_history_unavailable_amount">The amount is too large for your cash balance. Enter a smaller amount.</string>
+    <string name="cash_history_save_failed">Could not save the cash transaction. Try again.</string>
+    <string name="cash_history_details">Cash transaction</string>
+    <string name="cash_history_annotations">Note &amp; tags</string>
+    <string name="cash_history_row_hint">Tap for transaction details, notes and tags, or to remove it.</string>
+    <string name="cash_history_remove">Remove</string>
+    <string name="cash_history_remove_title">Remove cash transaction?</string>
+    <string name="cash_history_remove_message">This removes the transaction from history and reverses any effect it had on your current cash balance.</string>
+    <string name="cash_history_missing">This cash transaction is no longer in history.</string>
+    <string name="cash_history_remove_insufficient">Removing this transaction would make your cash balance negative on this date or later.</string>
+    <string name="cash_history_remove_failed">Could not remove the cash transaction. Try again.</string>
+</resources>
