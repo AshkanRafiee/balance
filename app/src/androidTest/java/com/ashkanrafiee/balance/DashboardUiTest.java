@@ -313,8 +313,8 @@ public final class DashboardUiTest {
         BalanceData.setShowCommitments(context, true);
         LockManager.resetSessionForTest();
         LockManager.enable(context, "1234", true, false);
-        try {
-            launch();
+        try (ActivityScenario<MainActivity> lockedScenario = ActivityScenario.launch(MainActivity.class)) {
+            scenario = lockedScenario;
             await(() -> currentRoot().findViewById(R.id.dashboard_commitments_card) != null,
                 20_000);
             scenario.onActivity(activity -> {
@@ -339,10 +339,7 @@ public final class DashboardUiTest {
                         || hasText(card, strings.getString(R.string.commitments_remaining_payable)));
             }, 20_000);
         } finally {
-            if (scenario != null) {
-                scenario.close();
-                scenario = null;
-            }
+            scenario = null;
             LockManager.disable(context);
             LockManager.resetSessionForTest();
         }
