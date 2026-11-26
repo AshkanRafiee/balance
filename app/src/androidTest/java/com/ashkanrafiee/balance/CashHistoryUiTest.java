@@ -19,6 +19,7 @@ import android.widget.TextView;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Predicate;
@@ -120,6 +121,34 @@ public class CashHistoryUiTest {
         });
     }
 
+    @Test public void totalHistoryShowsExactLargeGrossAmountsAndFractionalNet() throws Exception {
+        String previousLanguage = LocaleHelper.currentTag(context);
+        try {
+            LocaleHelper.setLanguage(context, "en");
+            long timestamp = System.currentTimeMillis() - 2000;
+            assertTrue(BalanceData.writeTransactions(context, Arrays.asList(
+                new Transaction("Mellat", "111", timestamp, 20L, "deposit"),
+                new Transaction("Mellat", "111", timestamp + 1000, -20L, "withdrawal"))));
+            CashStore.add(context, timestamp, Long.MAX_VALUE);
+            CashStore.add(context, timestamp + 1000, -(Long.MAX_VALUE - 1));
+
+            launch(null);
+            await(activity -> find(root(activity), view -> hasText(view, "+0.1")) != null);
+            scenario.onActivity(activity -> {
+                assertNotNull(findByDescription(activity,
+                    activity.getString(R.string.history_filter_deposits) + " 922,337,203,685,477,582.7"));
+                assertNotNull(findByDescription(activity,
+                    activity.getString(R.string.history_filter_withdrawals) + " 922,337,203,685,477,582.6"));
+            });
+        } finally {
+            if (scenario != null) {
+                scenario.close();
+                scenario = null;
+            }
+            LocaleHelper.setLanguage(context, previousLanguage);
+        }
+    }
+
     @Test public void newCashEditorShowsPreviewForLatestAmount() {
         CashStore.setBalance(context, 21);
         launch(CashStore.KEY);
@@ -213,6 +242,7 @@ public class CashHistoryUiTest {
     @Test public void appLockSecuresCashDetailsAndAnnotations() throws Exception {
         CashStore.add(context, System.currentTimeMillis(), 100, "Private cash note");
         LockManager.enable(context, "test-password", false, false);
+        LockManager.lockSession();
         try {
             launch(CashStore.KEY);
             scenario.onActivity(activity -> {
