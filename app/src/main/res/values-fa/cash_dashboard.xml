@@ -4,10 +4,11 @@
     <string name="cash_dashboard_value">%1$s %2$s</string>
     <string name="cash_dashboard_not_counted">موجودی نقدی هنوز تنظیم نشده است</string>
     <string name="cash_dashboard_last_updated">آخرین به‌روزرسانی: %1$s</string>
-    <string name="cash_dashboard_count">تنظیم موجودی نقدی</string>
+    <string name="cash_dashboard_add">افزودن تراکنش</string>
     <string name="cash_dashboard_history">تاریخچهٔ پول نقد</string>
-    <string name="cash_dashboard_count_message">مقدار پول نقدی را که اکنون دارید وارد کنید. این مبلغ جایگزین موجودی نقدی فعلی می‌شود و تراکنشی ثبت نمی‌شود. برای ثبت واریز یا برداشت، تاریخچهٔ پول نقد را باز کنید.</string>
-    <string name="cash_dashboard_count_amount">مقدار پول نقد (%1$s)</string>
+    <string name="cash_dashboard_adjust">اصلاح موجودی</string>
+    <string name="cash_dashboard_adjust_message">مقدار پول نقدی را که اکنون دارید وارد کنید. این مبلغ جایگزین موجودی نقدی فعلی می‌شود و تراکنشی ثبت نمی‌شود. برای ثبت واریز یا برداشت، «افزودن تراکنش» را بزنید.</string>
+    <string name="cash_dashboard_adjust_amount">مقدار پول نقد (%1$s)</string>
     <string name="cash_dashboard_amount_error">یک مبلغ معتبر و نامنفی وارد کنید.</string>
     <string name="cash_dashboard_save">ذخیره</string>
     <string name="cash_dashboard_disable_title">پول نقد پنهان شود؟</string>

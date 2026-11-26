@@ -823,11 +823,18 @@ public class MainActivity extends Activity {
         startActivity(history);
     }
 
-    private void countCashDialog() {
+    private void addCashTransaction() {
+        if (cashBusy || view.cash == null || !canUseCashUi()) return;
+        startActivity(new Intent(this, HistoryActivity.class)
+            .putExtra(HistoryActivity.EXTRA_BANK, CashStore.KEY)
+            .putExtra(HistoryActivity.EXTRA_ADD_CASH, true));
+    }
+
+    private void adjustCashBalanceDialog() {
         if (cashBusy || view.cash == null || !canUseCashUi()) return;
         LinearLayout body = ExpressiveUi.column(this);
         body.setPadding(dp(24), dp(12), dp(24), 0);
-        body.addView(ExpressiveUi.label(this, getString(R.string.cash_dashboard_count_message),
+        body.addView(ExpressiveUi.label(this, getString(R.string.cash_dashboard_adjust_message),
             14, resColor(R.color.fg)), ExpressiveUi.widthMatch(this, 0, 8));
         EditText amount = new EditText(this);
         amount.setSingleLine(true);
@@ -837,7 +844,7 @@ public class MainActivity extends Activity {
         amount.setRawInputType(InputType.TYPE_CLASS_NUMBER
             | (toman ? InputType.TYPE_NUMBER_FLAG_DECIMAL : 0));
         amount.setImeOptions(android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
-        amount.setHint(getString(R.string.cash_dashboard_count_amount, CurrencyHelper.label(this)));
+        amount.setHint(getString(R.string.cash_dashboard_adjust_amount, CurrencyHelper.label(this)));
         if (!view.hidden && view.cash.date > 0) {
             amount.setText(CashStore.formatAmountForInput(this, view.cash.amount));
             amount.setSelectAllOnFocus(true);
@@ -849,7 +856,7 @@ public class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         scroll.addView(body);
         android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
-            .setTitle(R.string.cash_dashboard_count)
+            .setTitle(R.string.cash_dashboard_adjust)
             .setView(scroll)
             .setPositiveButton(R.string.cash_dashboard_save, null)
             .setNegativeButton(android.R.string.cancel, null)
@@ -2195,22 +2202,28 @@ public class MainActivity extends Activity {
                 lp.topMargin = ExpressiveUi.dp(this, 6);
                 card.addView(badge, lp);
             }
-            LinearLayout actions = largeText ? ExpressiveUi.column(this) : ExpressiveUi.row(this);
-            TextView count = ExpressiveUi.button(this, getString(R.string.cash_dashboard_count), true);
-            count.setOnClickListener(v -> countCashDialog());
+            TextView add = ExpressiveUi.button(this, getString(R.string.cash_dashboard_add), true);
+            add.setOnClickListener(v -> addCashTransaction());
+            card.addView(add, ExpressiveUi.widthMatch(this, 12, 0));
+
+            boolean stackActions = largeText || getResources().getConfiguration().screenWidthDp < 360;
+            LinearLayout actions = stackActions ? ExpressiveUi.column(this) : ExpressiveUi.row(this);
             TextView history = ExpressiveUi.button(this, getString(R.string.cash_dashboard_history),
                 false);
             history.setOnClickListener(v -> openCashRelatedHistory(true));
-            if (largeText) {
-                actions.addView(count, ExpressiveUi.widthMatch(this, 0, 8));
-                actions.addView(history, ExpressiveUi.widthMatch(this, 0, 0));
+            TextView adjust = ExpressiveUi.button(this, getString(R.string.cash_dashboard_adjust),
+                false);
+            adjust.setOnClickListener(v -> adjustCashBalanceDialog());
+            if (stackActions) {
+                actions.addView(history, ExpressiveUi.widthMatch(this, 0, 8));
+                actions.addView(adjust, ExpressiveUi.widthMatch(this, 0, 0));
             } else {
-                LinearLayout.LayoutParams countLp = new LinearLayout.LayoutParams(0, -2, 1);
-                countLp.setMarginEnd(ExpressiveUi.dp(this, 8));
-                actions.addView(count, countLp);
-                actions.addView(history, new LinearLayout.LayoutParams(0, -2, 1));
+                LinearLayout.LayoutParams historyLp = new LinearLayout.LayoutParams(0, -1, 1);
+                historyLp.setMarginEnd(ExpressiveUi.dp(this, 8));
+                actions.addView(history, historyLp);
+                actions.addView(adjust, new LinearLayout.LayoutParams(0, -1, 1));
             }
-            card.addView(actions, ExpressiveUi.widthMatch(this, 12, 0));
+            card.addView(actions, ExpressiveUi.widthMatch(this, 8, 0));
             card.setOnLongClickListener(v -> {
                 if (canUseCashUi()) view.copyBalance(getString(R.string.cash_label),
                     BigInteger.valueOf(cash.amount), true);

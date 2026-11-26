@@ -6,10 +6,11 @@
     <string name="cash_dashboard_value">%1$s %2$s</string>
     <string name="cash_dashboard_not_counted">No cash balance set yet</string>
     <string name="cash_dashboard_last_updated">Last updated: %1$s</string>
-    <string name="cash_dashboard_count">Set cash balance</string>
+    <string name="cash_dashboard_add">Add transaction</string>
     <string name="cash_dashboard_history">Cash history</string>
-    <string name="cash_dashboard_count_message">Enter how much cash you have now. This replaces your cash balance without adding a transaction. To record a deposit or withdrawal, open Cash history.</string>
-    <string name="cash_dashboard_count_amount">Cash amount (%1$s)</string>
+    <string name="cash_dashboard_adjust">Adjust balance</string>
+    <string name="cash_dashboard_adjust_message">Enter how much cash you have now. This replaces your cash balance without recording a transaction. To record a deposit or withdrawal, use Add transaction.</string>
+    <string name="cash_dashboard_adjust_amount">Cash amount (%1$s)</string>
     <string name="cash_dashboard_amount_error">Enter a valid amount of zero or more.</string>
     <string name="cash_dashboard_save">Save</string>
     <string name="cash_dashboard_disable_title">Hide cash?</string>

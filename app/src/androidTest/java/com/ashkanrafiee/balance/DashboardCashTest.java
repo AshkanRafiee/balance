@@ -3,7 +3,6 @@ package com.ashkanrafiee.balance;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -30,6 +29,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import java.lang.reflect.Field;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 @RunWith(AndroidJUnit4.class)
@@ -76,21 +76,38 @@ public final class DashboardCashTest {
         preferences().edit().putBoolean(BalanceData.KEY_HIDDEN, originalHidden).commit();
     }
 
-    @Test public void countUpdatesBalanceWithoutHistoryAndMaskedRecountDoesNotPrefill() {
+    @Test public void addTransactionAndCashHistoryOpenTheIntendedCashScreenWhenMasked() {
+        CashStore.setBalance(context, 86_000);
+        launch();
+        scenario.onActivity(activity -> {
+            activity.findViewById(R.id.dashboard_mask_button).performClick();
+            TextView masked = activity.findViewById(R.id.dashboard_cash_amount);
+            assertEquals("••••••", masked.getText().toString());
+        });
+
+        openHistory(CashStore.KEY, true, activity ->
+            clickText(activity.findViewById(R.id.dashboard_cash_card),
+                activity.getString(R.string.cash_dashboard_add)));
+        openHistory(CashStore.KEY, false, activity ->
+            clickText(activity.findViewById(R.id.dashboard_cash_card),
+                activity.getString(R.string.cash_dashboard_history)));
+    }
+
+    @Test public void adjustUpdatesBalanceWithoutHistoryAndDoesNotPrefillWhenMasked() {
         launch();
         scenario.onActivity(activity -> {
             View card = activity.findViewById(R.id.dashboard_cash_card);
             assertNotNull(findText(card, activity.getString(R.string.cash_dashboard_not_counted)));
-            clickText(card, activity.getString(R.string.cash_dashboard_count));
-            AlertDialog count = dialog(activity);
-            assertNotNull(findText(count.getWindow().getDecorView(),
-                activity.getString(R.string.cash_dashboard_count_message)));
-            EditText field = amountField(count);
+            clickText(card, activity.getString(R.string.cash_dashboard_adjust));
+            AlertDialog adjustment = dialog(activity);
+            assertNotNull(findText(adjustment.getWindow().getDecorView(),
+                activity.getString(R.string.cash_dashboard_adjust_message)));
+            EditText field = amountField(adjustment);
             field.setText("-1");
-            count.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+            adjustment.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
             assertNotNull(field.getError());
             field.setText("142.1");
-            count.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+            adjustment.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
         });
         await(activity -> {
             TextView amount = activity.findViewById(R.id.dashboard_cash_amount);
@@ -105,14 +122,14 @@ public final class DashboardCashTest {
 
         scenario.onActivity(activity -> {
             clickText(activity.findViewById(R.id.dashboard_cash_card),
-                activity.getString(R.string.cash_dashboard_count));
+                activity.getString(R.string.cash_dashboard_adjust));
             assertEquals("142.1", amountField(dialog(activity)).getText().toString());
             dialog(activity).dismiss();
             activity.findViewById(R.id.dashboard_mask_button).performClick();
             TextView masked = activity.findViewById(R.id.dashboard_cash_amount);
             assertEquals("••••••", masked.getText().toString());
             clickText(activity.findViewById(R.id.dashboard_cash_card),
-                activity.getString(R.string.cash_dashboard_count));
+                activity.getString(R.string.cash_dashboard_adjust));
             assertEquals(0, amountField(dialog(activity)).length());
         });
         reviewHistory(CashStore.KEY);
@@ -172,15 +189,22 @@ public final class DashboardCashTest {
     }
 
     private void reviewHistory(String expectedScope) {
+        openHistory(expectedScope, false, activity -> dialog(activity)
+            .getButton(AlertDialog.BUTTON_NEUTRAL).performClick());
+    }
+
+    private void openHistory(String expectedScope, boolean addCash, Consumer<MainActivity> open) {
         Instrumentation.ActivityMonitor monitor = instrumentation.addMonitor(
             HistoryActivity.class.getName(), null, false);
         try {
-            scenario.onActivity(activity -> dialog(activity).getButton(AlertDialog.BUTTON_NEUTRAL)
-                .performClick());
+            scenario.onActivity(open::accept);
             Activity history = instrumentation.waitForMonitorWithTimeout(monitor, 10_000);
-            assertNotNull("Review opens history", history);
+            assertNotNull("Cash action opens history", history);
             try {
-                assertEquals(expectedScope, history.getIntent().getStringExtra(HistoryActivity.EXTRA_BANK));
+                assertEquals(expectedScope,
+                    history.getIntent().getStringExtra(HistoryActivity.EXTRA_BANK));
+                assertEquals(addCash,
+                    history.getIntent().getBooleanExtra(HistoryActivity.EXTRA_ADD_CASH, false));
             } finally {
                 instrumentation.runOnMainSync(history::finish);
                 instrumentation.waitForIdleSync();
