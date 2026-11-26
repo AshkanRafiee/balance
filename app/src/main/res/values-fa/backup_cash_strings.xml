@@ -2,5 +2,5 @@
 <resources>
     <string name="restore_section_cash">دفتر نقدی</string>
     <string name="backup_restore_cash_imported">دفتر نقدی بازیابی شد.</string>
-    <string name="backup_restore_cash_conflict">دفتر نقدی فعلی شما حفظ شد، چون با نسخهٔ پشتیبان متفاوت است.</string>
+    <string name="backup_restore_cash_conflict">بازیابی پول نقد از نسخهٔ پشتیبان ممکن نبود. داده‌های نقدی فعلی شما حفظ شدند.</string>
 </resources>

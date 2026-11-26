@@ -2,5 +2,5 @@
 <resources>
     <string name="restore_section_cash">Cash ledger</string>
     <string name="backup_restore_cash_imported">Cash ledger restored.</string>
-    <string name="backup_restore_cash_conflict">Your cash ledger was kept because it differs from the backup.</string>
+    <string name="backup_restore_cash_conflict">Cash from the backup could not be restored. Your current cash data was kept.</string>
 </resources>
