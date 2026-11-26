@@ -27,6 +27,7 @@ import android.provider.Telephony;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
+import android.text.method.DigitsKeyListener;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -64,6 +65,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.function.IntConsumer;
 
 /**
  * Shows the transaction history parsed from supported bank SMS: gross deposits and withdrawals
@@ -103,6 +105,10 @@ public final class HistoryActivity extends Activity {
      *  number of that bank are shown. */
     static final String EXTRA_ACCOUNT = "account_filter";
 
+    /** Intent extra: open the cash entry form once the Cash history scope is ready. */
+    static final String EXTRA_ADD_CASH = "add_cash";
+    private static final String KEY_PENDING_ADD_CASH = "pending_add_cash";
+
     /** Movement-direction filter: all transactions, deposits only, or withdrawals only. */
     static final int DIR_ALL = 0;
     static final int DIR_DEPOSIT = 1;
@@ -131,6 +137,8 @@ public final class HistoryActivity extends Activity {
     private Runnable skeletonPending;
     private int skeletonShowCount;
     private LockOverlay lockOverlay;
+    private boolean pendingAddCash;
+    private CashEditor activeCashEditor;
     /** Draws the pull-to-refresh chip pinned to the true top of the screen — clear of the hero card
      *  and the rows — while the gesture and its state stay in the list's scroll view. */
     private PullIndicatorOverlay indicatorOverlay;
@@ -613,8 +621,15 @@ public final class HistoryActivity extends Activity {
 
     /** Shows a dialog owned by this screen and remembers it until it is dismissed. */
     private android.app.AlertDialog showDialog(android.app.AlertDialog dialog) {
+        return showDialog(dialog, null);
+    }
+
+    private android.app.AlertDialog showDialog(android.app.AlertDialog dialog, Runnable onDismiss) {
         activeDialogs.add(dialog);
-        dialog.setOnDismissListener(d -> activeDialogs.remove(dialog));
+        dialog.setOnDismissListener(d -> {
+            activeDialogs.remove(dialog);
+            if (onDismiss != null) onDismiss.run();
+        });
         dialog.show();
         return dialog;
     }
@@ -691,6 +706,9 @@ public final class HistoryActivity extends Activity {
             if (intentAccount != null) selectedAccounts.add(intentAccount);
             accountBank = intentAccount == null ? null : intentBank;
         }
+        pendingAddCash = isCashScope() && (state != null
+            ? state.getBoolean(KEY_PENDING_ADD_CASH)
+            : getIntent() != null && getIntent().getBooleanExtra(EXTRA_ADD_CASH, false));
         bg = color(R.color.expressive_surface);
         card = color(R.color.panel);
         muted = color(R.color.expressive_on_surface_variant);
@@ -762,7 +780,10 @@ public final class HistoryActivity extends Activity {
         host.addView(indicatorOverlay, new FrameLayout.LayoutParams(-1, -1));
 
         lockOverlay = new LockOverlay(this);
-        lockOverlay.setUnlockListener(this::updateSecureFlag);
+        lockOverlay.setUnlockListener(() -> {
+            updateSecureFlag();
+            maybeOpenRequestedCashEditor();
+        });
         lockOverlay.setCancelListener(() -> lockOverlay.hide());
         host.addView(lockOverlay, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
@@ -2721,6 +2742,7 @@ public final class HistoryActivity extends Activity {
         outState.putStringArrayList(KEY_ACCOUNT_FILTERS,
             new java.util.ArrayList<>(selectedAccounts));
         outState.putString(KEY_ACCOUNT_BANK, accountBank);
+        outState.putBoolean(KEY_PENDING_ADD_CASH, pendingAddCash);
         outState.putString(KEY_SEARCH_QUERY, searchQuery == null ? "" : searchQuery);
         outState.putString(KEY_NARROWING_EXPANDED_FOR, narrowingExpandedFor);
         putStringSet(outState, KEY_PRE_NARROWING_YEARS, preNarrowingYears);
@@ -2790,6 +2812,7 @@ public final class HistoryActivity extends Activity {
         onHistoryChanged = () -> runOnUiThread(() -> {
             if (listenerGen != historyListenerGen || !historyResumed
                     || isDestroyed() || isFinishing()) return;
+            if (activeCashEditor != null) activeCashEditor.requestPreview();
             // Our scan completion requests the same snapshot. Do not decrypt/build it twice.
             if (!historyScanRunning) render();
         });
@@ -3310,6 +3333,14 @@ public final class HistoryActivity extends Activity {
     private void finishRenderWork() {
         renderRunning = false;
         if (renderQueued && historyResumed && !isDestroyed() && !isFinishing()) render();
+        maybeOpenRequestedCashEditor();
+    }
+
+    private void maybeOpenRequestedCashEditor() {
+        if (!pendingAddCash || renderRunning || historyResult == null
+                || !annotationUiActive(residualNoteUiEpoch) || lockOverlay.isShowing()) return;
+        pendingAddCash = false;
+        if (isCashScope()) showCashEditor();
     }
 
     /** Settles manual feedback only after its scan's render/validation was accepted. */
@@ -4671,86 +4702,298 @@ public final class HistoryActivity extends Activity {
     }
 
     private void showCashEditor() {
-        if (!canAddCashTransaction() || LockManager.isSessionLocked()) return;
-        final long[] timestamp = {System.currentTimeMillis()};
-        LinearLayout form = new LinearLayout(this);
-        form.setOrientation(LinearLayout.VERTICAL);
-        form.setPadding(dp(24), dp(8), dp(24), dp(8));
+        if (!canAddCashTransaction()) return;
+        showCashEditor(new CashDraft(null, System.currentTimeMillis(), "", false), null);
+    }
 
-        RadioGroup direction = new RadioGroup(this);
-        direction.setOrientation(LinearLayout.HORIZONTAL);
-        RadioButton deposit = new RadioButton(this);
-        deposit.setId(View.generateViewId());
-        deposit.setText(R.string.history_deposit);
-        direction.addView(deposit, new RadioGroup.LayoutParams(0, -2, 1));
-        RadioButton withdrawal = new RadioButton(this);
-        withdrawal.setId(View.generateViewId());
-        withdrawal.setText(R.string.history_withdrawal);
-        direction.addView(withdrawal, new RadioGroup.LayoutParams(0, -2, 1));
-        direction.check(deposit.getId());
-        form.addView(direction, margin(0, 0, 0, 6));
+    private void showCashEditor(CashDraft draft, CashDraft returnDraft) {
+        if (!annotationUiActive(residualNoteUiEpoch) || lockOverlay.isShowing()) return;
+        activeCashEditor = new CashEditor(draft, returnDraft);
+        activeCashEditor.show();
+    }
 
-        EditText amount = new EditText(this);
-        amount.setId(View.generateViewId());
-        amount.setSingleLine(true);
-        boolean decimal = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(this));
-        amount.setInputType(InputType.TYPE_CLASS_NUMBER
-            | (decimal ? InputType.TYPE_NUMBER_FLAG_DECIMAL : 0));
-        TextView amountLabel = text(getString(R.string.cash_history_amount,
-            CurrencyHelper.label(this)), 13, muted);
-        amountLabel.setLabelFor(amount.getId());
-        form.addView(amountLabel);
-        form.addView(amount, margin(0, 0, 0, 8));
+    private static final class CashDraft {
+        final Transaction replacing;
+        final long timestamp;
+        final String amountText;
+        final boolean withdrawal;
 
-        TextView dateButton = ExpressiveUi.button(this, "", false);
-        TextView timeButton = ExpressiveUi.button(this, "", false);
-        Runnable updateLabels = () -> {
+        CashDraft(Transaction replacing, long timestamp, String amountText, boolean withdrawal) {
+            this.replacing = replacing;
+            this.timestamp = timestamp;
+            this.amountText = amountText;
+            this.withdrawal = withdrawal;
+        }
+    }
+
+    private String cashInput(long rials) {
+        String value = CashStore.formatAmountForInput(this, rials);
+        return LocaleHelper.isPersian(this) ? faDigitsString(value).replace('.', '٫') : value;
+    }
+
+    private String cashBalanceValue(long rials) {
+        return CurrencyHelper.amountExact(this, rials) + " " + CurrencyHelper.label(this);
+    }
+
+    private final class CashEditor {
+        private final Transaction replacing;
+        private final CashDraft returnDraft;
+        private final int epoch = residualNoteUiEpoch;
+        private final LinearLayout form = new LinearLayout(HistoryActivity.this);
+        private final RadioGroup direction = new RadioGroup(HistoryActivity.this);
+        private final int withdrawalId = View.generateViewId();
+        private final EditText amount = new EditText(HistoryActivity.this);
+        private final TextView dateButton = ExpressiveUi.button(HistoryActivity.this, "", false);
+        private final TextView timeButton = ExpressiveUi.button(HistoryActivity.this, "", false);
+        private final TextView preview = text("", 14, fg);
+        private final TextView feedback;
+        private final TextView recover = ExpressiveUi.button(HistoryActivity.this,
+            getString(R.string.cash_history_record_deposit), false);
+        private final AlertDialog dialog;
+        private final Handler previewHandler = new Handler(Looper.getMainLooper());
+        private final Runnable previewWork = this::loadPreview;
+        private long timestamp;
+        private int previewGeneration;
+        private boolean previewRunning;
+        private boolean saving;
+
+        CashEditor(CashDraft draft, CashDraft returnDraft) {
+            replacing = draft.replacing;
+            timestamp = draft.timestamp;
+            this.returnDraft = returnDraft;
+            form.setOrientation(LinearLayout.VERTICAL);
+            form.setPadding(dp(24), dp(8), dp(24), dp(8));
+
+            direction.setOrientation(LinearLayout.HORIZONTAL);
+            RadioButton deposit = new RadioButton(HistoryActivity.this);
+            deposit.setId(View.generateViewId());
+            deposit.setText(R.string.history_deposit);
+            direction.addView(deposit, new RadioGroup.LayoutParams(0, -2, 1));
+            RadioButton withdrawal = new RadioButton(HistoryActivity.this);
+            withdrawal.setId(withdrawalId);
+            withdrawal.setText(R.string.history_withdrawal);
+            direction.addView(withdrawal, new RadioGroup.LayoutParams(0, -2, 1));
+            direction.check(draft.withdrawal ? withdrawalId : deposit.getId());
+            if (returnDraft == null) {
+                form.addView(direction, margin(0, 0, 0, 6));
+            } else {
+                form.addView(text(getString(R.string.cash_history_recovery_hint), 13, muted),
+                    margin(0, 0, 0, 8));
+            }
+
+            amount.setId(View.generateViewId());
+            amount.setSingleLine(true);
+            boolean decimal = CurrencyHelper.CURRENCY_TOMAN.equals(CurrencyHelper.currency(HistoryActivity.this));
+            amount.setKeyListener(DigitsKeyListener.getInstance(
+                "0123456789۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩,٬،" + (decimal ? ".٫" : "")));
+            amount.setRawInputType(InputType.TYPE_CLASS_NUMBER
+                | (decimal ? InputType.TYPE_NUMBER_FLAG_DECIMAL : 0));
+            amount.setText(draft.amountText);
+            TextView amountLabel = text(getString(R.string.cash_history_amount,
+                CurrencyHelper.label(HistoryActivity.this)), 13, muted);
+            amountLabel.setLabelFor(amount.getId());
+            form.addView(amountLabel);
+            form.addView(amount, margin(0, 0, 0, 8));
+
+            updateDateLabels();
+            dateButton.setOnClickListener(v -> showCashDatePicker(timestamp, this::pickTimestamp));
+            timeButton.setOnClickListener(v -> showCashTimePicker(timestamp, this::pickTimestamp));
+            form.addView(dateButton, margin(0, 4, 0, 4));
+            form.addView(timeButton, margin(0, 4, 0, 4));
+            preview.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+            preview.setVisibility(View.GONE);
+            form.addView(preview, margin(0, 8, 0, 4));
+            feedback = cashFeedback(form);
+            recover.setVisibility(View.GONE);
+            form.addView(recover, margin(0, 4, 0, 4));
+            form.addView(text(getString(R.string.cash_history_count_rule), 13, muted),
+                margin(0, 4, 0, 4));
+
+            ScrollView scroll = new ScrollView(HistoryActivity.this);
+            scroll.addView(form);
+            int title = returnDraft != null ? R.string.cash_history_record_deposit
+                : replacing != null ? R.string.cash_history_edit : R.string.cash_history_add;
+            dialog = new AlertDialog.Builder(HistoryActivity.this)
+                .setTitle(title)
+                .setView(scroll)
+                .setPositiveButton(R.string.note_save, null)
+                .setNegativeButton(R.string.lock_cancel, (d, w) -> restoreDraft())
+                .create();
+            dialog.getWindow().setSoftInputMode(
+                android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
+            dialog.setOnCancelListener(d -> restoreDraft());
+            dialog.setOnShowListener(d -> {
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> save());
+                requestPreview();
+            });
+            direction.setOnCheckedChangeListener((group, checked) -> draftChanged());
+            amount.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                    draftChanged();
+                }
+                @Override public void afterTextChanged(Editable s) {}
+            });
+        }
+
+        void show() {
+            showDialog(dialog, () -> {
+                previewHandler.removeCallbacks(previewWork);
+                if (activeCashEditor == this) activeCashEditor = null;
+            });
+        }
+
+        private boolean isActive() {
+            return activeCashEditor == this && dialog.isShowing() && annotationUiActive(epoch);
+        }
+
+        private void updateDateLabels() {
             dateButton.setText(getString(R.string.cash_history_date_value,
-                dateText(calOf(timestamp[0], iranCalendar))));
-            timeButton.setText(getString(R.string.cash_history_time_value, timeText(timestamp[0])));
-        };
-        java.util.function.LongConsumer pickTimestamp = value -> {
-            timestamp[0] = value;
-            updateLabels.run();
-        };
-        updateLabels.run();
-        dateButton.setOnClickListener(v -> showCashDatePicker(timestamp[0], pickTimestamp));
-        timeButton.setOnClickListener(v -> showCashTimePicker(timestamp[0], pickTimestamp));
-        form.addView(dateButton, margin(0, 4, 0, 4));
-        form.addView(timeButton, margin(0, 4, 0, 4));
-        form.addView(text(getString(R.string.cash_history_count_rule), 13, muted),
-            margin(0, 8, 0, 4));
-        TextView feedback = cashFeedback(form);
+                dateText(calOf(timestamp, iranCalendar))));
+            timeButton.setText(getString(R.string.cash_history_time_value, timeText(timestamp)));
+        }
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(form);
-        AlertDialog dialog = new AlertDialog.Builder(this)
-            .setTitle(R.string.cash_history_add)
-            .setView(scroll)
-            .setPositiveButton(R.string.note_save, null)
-            .setNegativeButton(R.string.lock_cancel, null)
-            .create();
-        dialog.getWindow().setSoftInputMode(
-            android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
-        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
-            .setOnClickListener(v -> {
+        private void pickTimestamp(long value) {
+            timestamp = value;
+            updateDateLabels();
+            draftChanged();
+        }
+
+        private boolean isWithdrawal() {
+            return direction.getCheckedRadioButtonId() == withdrawalId;
+        }
+
+        private Long parseAmount() {
+            Long value = CashStore.parseAmount(HistoryActivity.this, amount.getText().toString());
+            if (value == null || value == 0) return null;
+            return isWithdrawal() ? -value : value;
+        }
+
+        private void draftChanged() {
+            feedback.setVisibility(View.GONE);
+            amount.setError(null);
+            requestPreview();
+        }
+
+        void requestPreview() {
+            if (!isActive() || saving) return;
+            previewGeneration++;
+            previewHandler.removeCallbacks(previewWork);
+            boolean validAmount = parseAmount() != null;
+            preview.setText(R.string.cash_history_preview_loading);
+            preview.setVisibility(validAmount ? View.VISIBLE : View.GONE);
+            recover.setVisibility(View.GONE);
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(!validAmount);
+            if (validAmount && !previewRunning) previewHandler.postDelayed(previewWork, 100);
+        }
+
+        private void loadPreview() {
+            if (!isActive() || saving) return;
+            Long signedAmount = parseAmount();
+            if (signedAmount == null) return;
+            long date = timestamp;
+            int generation = previewGeneration;
+            Context app = getApplicationContext();
+            previewRunning = true;
+            new Thread(() -> {
+                CashStore.Preview result = null;
+                int error = 0;
+                try {
+                    if (!CashStore.isEnabled(app)) {
+                        error = R.string.cash_history_disabled;
+                    } else {
+                        result = CashStore.preview(app, date, signedAmount, replacing);
+                    }
+                } catch (CashStore.StaleCashTransactionException stale) {
+                    error = R.string.cash_history_stale;
+                } catch (IllegalArgumentException invalid) {
+                    error = date > System.currentTimeMillis() ? R.string.cash_history_future
+                        : R.string.cash_history_unavailable_amount;
+                } catch (Exception failure) {
+                    error = R.string.cash_history_preview_failed;
+                }
+                CashStore.Preview loaded = result;
+                int failureMessage = error;
+                runOnUiThread(() -> {
+                    previewRunning = false;
+                    if (!isActive() || saving) return;
+                    if (generation != previewGeneration) {
+                        previewHandler.post(previewWork);
+                    } else {
+                        showPreview(loaded, failureMessage);
+                    }
+                });
+            }, "cash-history-preview").start();
+        }
+
+        private void showPreview(CashStore.Preview result, int error) {
+            // A transient preview failure still permits a write attempt.
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(
+                error == R.string.cash_history_preview_failed || (result != null && !result.insufficient));
+            if (error != 0) {
+                preview.setText(error);
+                preview.setVisibility(View.VISIBLE);
+                return;
+            }
+            if (result.insufficient) {
+                preview.setText(getString(R.string.cash_history_preview_insufficient,
+                    cashBalanceValue(result.availableAtShortfall),
+                    cashBalanceValue(result.requiredAtShortfall)));
                 feedback.setVisibility(View.GONE);
-                Long positiveAmount = CashStore.parseAmount(this, amount.getText().toString());
-                if (positiveAmount == null || positiveAmount <= 0) {
-                    amount.setError(getString(R.string.cash_history_invalid_amount));
-                    amount.requestFocus();
-                    return;
+                if (returnDraft == null && result.recoveryDate > 0) {
+                    recover.setVisibility(View.VISIBLE);
+                    recover.setOnClickListener(v -> {
+                        CashDraft draft = new CashDraft(replacing, timestamp,
+                            amount.getText().toString(), isWithdrawal());
+                        dialog.dismiss();
+                        showCashEditor(new CashDraft(null, result.recoveryDate,
+                            cashInput(result.shortfall), false), draft);
+                    });
                 }
-                if (timestamp[0] > System.currentTimeMillis()) {
-                    showCashFeedback(feedback, R.string.cash_history_future);
-                    return;
+            } else if (result.affectsBalance) {
+                preview.setText(getString(R.string.cash_history_preview_balance,
+                    cashBalanceValue(result.currentBalance), cashBalanceValue(result.resultingBalance)));
+            } else {
+                preview.setText(getString(R.string.cash_history_preview_history_only,
+                    cashBalanceValue(result.currentBalance)));
+            }
+            preview.setVisibility(View.VISIBLE);
+        }
+
+        private void restoreDraft() {
+            if (returnDraft != null && annotationUiActive(epoch)) showCashEditor(returnDraft, null);
+        }
+
+        private void save() {
+            if (!isActive() || saving) return;
+            feedback.setVisibility(View.GONE);
+            Long signedAmount = parseAmount();
+            if (signedAmount == null) {
+                amount.setError(getString(R.string.cash_history_invalid_amount));
+                amount.requestFocus();
+                return;
+            }
+            if (timestamp > System.currentTimeMillis()) {
+                showCashFeedback(feedback, R.string.cash_history_future);
+                return;
+            }
+            saving = true;
+            previewGeneration++;
+            previewHandler.removeCallbacks(previewWork);
+            setCashEditorBusy(dialog, form, true);
+            saveCashChange(replacing, null, timestamp, signedAmount, error -> {
+                if (!isActive()) return;
+                if (error == 0) {
+                    dialog.dismiss();
+                    restoreDraft();
+                } else {
+                    saving = false;
+                    setCashEditorBusy(dialog, form, false);
+                    showCashFeedback(feedback, error);
+                    requestPreview();
                 }
-                long signedAmount = direction.getCheckedRadioButtonId() == withdrawal.getId()
-                    ? -positiveAmount : positiveAmount;
-                long date = timestamp[0];
-                saveCashChange(dialog, form, feedback, null, date, signedAmount);
-            }));
-        showDialog(dialog);
+            });
+        }
     }
 
     private void showCashDatePicker(long timestamp, java.util.function.LongConsumer update) {
@@ -4802,8 +5045,14 @@ public final class HistoryActivity extends Activity {
         dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
             .setOnClickListener(v -> {
                 picker.clearFocus();
-                applyCashTimestamp(dialog, feedback, calOf(timestamp, iranCalendar),
-                    picker.getHour(), picker.getMinute(), update);
+                if (picker.getHour() == clock.get(Calendar.HOUR_OF_DAY)
+                        && picker.getMinute() == clock.get(Calendar.MINUTE)
+                        && timestamp <= System.currentTimeMillis()) {
+                    dialog.dismiss();
+                } else {
+                    applyCashTimestamp(dialog, feedback, calOf(timestamp, iranCalendar),
+                        picker.getHour(), picker.getMinute(), update);
+                }
             }));
         showDialog(dialog);
     }
@@ -4842,13 +5091,25 @@ public final class HistoryActivity extends Activity {
         String amount = signedCashAmount(transaction.amount) + " " + CurrencyHelper.label(this);
         String details = getString(R.string.history_row_amount, direction, amount) + "\n"
             + dateText(date) + " · " + timeText(transaction.date);
-        showDialog(new AlertDialog.Builder(this)
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(24), dp(12), dp(24), dp(8));
+        content.addView(text(details, 16, fg));
+        TextView edit = ExpressiveUi.button(this, getString(R.string.cash_history_edit_action), false);
+        content.addView(edit, margin(0, 12, 0, 0));
+        AlertDialog dialog = new AlertDialog.Builder(this)
             .setTitle(R.string.cash_history_details)
-            .setMessage(details)
+            .setView(content)
             .setPositiveButton(R.string.cash_history_annotations, (d, w) -> noteDialog(transaction))
             .setNegativeButton(android.R.string.ok, null)
             .setNeutralButton(R.string.cash_history_remove, (d, w) -> confirmCashRemoval(transaction))
-            .create());
+            .create();
+        edit.setOnClickListener(v -> {
+            dialog.dismiss();
+            showCashEditor(new CashDraft(transaction, transaction.date,
+                cashInput(Math.abs(transaction.amount)), transaction.amount < 0), null);
+        });
+        showDialog(dialog);
     }
 
     private void confirmCashRemoval(Transaction transaction) {
@@ -4864,7 +5125,19 @@ public final class HistoryActivity extends Activity {
             .setNegativeButton(R.string.lock_cancel, null)
             .create();
         dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
-            .setOnClickListener(v -> saveCashChange(dialog, null, feedback, transaction, 0, 0)));
+            .setOnClickListener(v -> {
+                feedback.setVisibility(View.GONE);
+                setCashEditorBusy(dialog, null, true);
+                saveCashChange(null, transaction, 0, 0, error -> {
+                    if (!dialog.isShowing()) return;
+                    if (error == 0) {
+                        dialog.dismiss();
+                    } else {
+                        setCashEditorBusy(dialog, null, false);
+                        showCashFeedback(feedback, error);
+                    }
+                });
+            }));
         showDialog(dialog);
     }
 
@@ -4881,13 +5154,11 @@ public final class HistoryActivity extends Activity {
         feedback.setVisibility(View.VISIBLE);
     }
 
-    private void saveCashChange(AlertDialog dialog, View editor, TextView feedback,
-            Transaction removal, long date, long amount) {
+    private void saveCashChange(Transaction replacing, Transaction removal, long date, long amount,
+            IntConsumer finished) {
         int epoch = residualNoteUiEpoch;
         if (!annotationUiActive(epoch)) return;
         Context app = getApplicationContext();
-        feedback.setVisibility(View.GONE);
-        setCashEditorBusy(dialog, editor, true);
         new Thread(() -> {
             int error = 0;
             try {
@@ -4897,10 +5168,14 @@ public final class HistoryActivity extends Activity {
                         error = R.string.cash_history_disabled;
                     } else if (removal != null) {
                         if (!CashStore.remove(app, removal)) error = R.string.cash_history_missing;
+                    } else if (replacing != null) {
+                        CashStore.update(app, replacing, date, amount);
                     } else {
                         CashStore.add(app, date, amount);
                     }
                 }
+            } catch (CashStore.StaleCashTransactionException stale) {
+                error = R.string.cash_history_stale;
             } catch (CashStore.InsufficientCashException insufficient) {
                 error = removal == null ? R.string.cash_history_insufficient
                     : R.string.cash_history_remove_insufficient;
@@ -4914,15 +5189,12 @@ public final class HistoryActivity extends Activity {
             }
             final int result = error;
             runOnUiThread(() -> {
-                if (!annotationUiActive(epoch) || !dialog.isShowing()) return;
-                if (result == 0) {
-                    dialog.dismiss();
+                if (!annotationUiActive(epoch)) return;
+                if (result == 0 && historyScanRunning) {
                     // The history listener otherwise waits for the bank scan's completion.
-                    if (historyScanRunning) render();
-                } else {
-                    setCashEditorBusy(dialog, editor, false);
-                    showCashFeedback(feedback, result);
+                    render();
                 }
+                finished.accept(result);
             });
             if (result == 0) {
                 try {

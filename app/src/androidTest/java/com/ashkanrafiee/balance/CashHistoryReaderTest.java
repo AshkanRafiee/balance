@@ -185,6 +185,29 @@ public class CashHistoryReaderTest {
         }
     }
 
+    @Test public void editInvalidatesWarmHistoryAndMovesTheSameEntryToItsNewDay() throws Exception {
+        Transaction original = CashStore.add(context, noon, 50L);
+        HistoryWarmup.warmNow(context);
+        Calendar previousDay = Calendar.getInstance();
+        previousDay.setTimeInMillis(noon);
+        previousDay.add(Calendar.DAY_OF_MONTH, -1);
+        long yesterday = previousDay.getTimeInMillis();
+        Transaction edited = CashStore.update(context, original, yesterday, 35L);
+        try (HistoryReader.Result stale = takeDefault();
+                HistoryReader.Result cash = summary(CashStore.KEY, null)) {
+            assertNull(stale);
+            assertEquals(1L, cash.movementCount);
+            assertEquals(35L, cash.total);
+            assertEquals(1, cash.daySummaries.size());
+            String day = CalDate.of(previousDay.get(Calendar.YEAR),
+                previousDay.get(Calendar.MONTH) + 1, previousDay.get(Calendar.DAY_OF_MONTH)).key();
+            HistoryReader.DayRows rows = HistoryReader.readPage(context, cash, day, null, false, 1);
+            assertEquals(original.sig, edited.sig);
+            assertEquals(edited.sig, rows.transactions.get(0).sig);
+            assertEquals(yesterday, rows.transactions.get(0).date);
+        }
+    }
+
     private void seedBankGap() {
         assertTrue(BalanceData.writeTransactions(context, Arrays.asList(
             new Transaction(BANK, ACCOUNT, noon, -30L, 290L, "open", null),

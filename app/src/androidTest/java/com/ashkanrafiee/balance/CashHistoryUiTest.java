@@ -13,10 +13,12 @@ import android.os.SystemClock;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
+import android.widget.RadioButton;
 import android.widget.TextView;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Predicate;
 import org.junit.After;
@@ -73,8 +75,8 @@ public class CashHistoryUiTest {
             editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
             assertEquals(activity.getString(R.string.cash_history_invalid_amount), amount.getError());
             amount.setText("25");
-            editor.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
         });
+        saveEditor();
         await(activity -> currentDialog(activity) == null && movement(activity) != null);
         Transaction added = CashStore.read(context).transactions.get(0);
         assertEquals(250, added.amount);
@@ -113,9 +115,138 @@ public class CashHistoryUiTest {
         });
     }
 
+    @Test public void dashboardRequestOpensOnceAndShowsLatestExactCashBalancePreview() {
+        CashStore.setBalance(context, 21);
+        launch(CashStore.KEY, true);
+        await(activity -> editorAmount(activity) != null);
+        scenario.onActivity(activity -> {
+            editorAmount(activity).setText("5.2");
+            editorAmount(activity).setText("1.3");
+        });
+        await(activity -> dialogText(activity, activity.getString(R.string.cash_history_preview_balance,
+            cashValue(activity, 21), cashValue(activity, 34))) != null);
+        scenario.onActivity(activity -> currentDialog(activity)
+            .getButton(AlertDialog.BUTTON_NEGATIVE).performClick());
+        await(activity -> currentDialog(activity) == null);
+        scenario.recreate();
+        await(activity -> findByDescription(activity, R.string.cash_history_add) != null
+            && HistoryActivity.idleForTest(activity));
+        scenario.onActivity(activity -> assertNull(currentDialog(activity)));
+        assertTrue(CashStore.read(context).transactions.isEmpty());
+    }
+
+    @Test public void recoveryFromAnEditRestoresDraftOnCancelAndSave() throws Exception {
+        long timestamp = (System.currentTimeMillis() / 60_000 - 1) * 60_000 + 12_345;
+        Transaction original = CashStore.add(context, timestamp, 12);
+        MetadataStore.setAnnotations(context, original, "cash note", Collections.singletonList("tag"));
+        launch(CashStore.KEY);
+        openEdit();
+        scenario.onActivity(activity -> {
+            assertEquals(Long.valueOf(12), CashStore.parseAmount(activity,
+                editorAmount(activity).getText().toString()));
+            RadioButton withdrawal = (RadioButton) dialogText(activity,
+                activity.getString(R.string.history_withdrawal));
+            assertNotNull(withdrawal);
+            withdrawal.setChecked(true);
+            editorAmount(activity).setText("۴٫۳");
+        });
+        awaitRecoveryAction();
+        scenario.onActivity(activity -> {
+            View time = find(currentDialog(activity).getWindow().getDecorView(), view ->
+                view instanceof TextView && ((TextView) view).getText().toString().startsWith(
+                    activity.getString(R.string.cash_history_time_value, "")));
+            click(time);
+        });
+        await(activity -> currentDialog(activity) != null && dialogText(activity,
+            activity.getString(R.string.cash_history_choose_time)) != null);
+        scenario.onActivity(activity -> currentDialog(activity)
+            .getButton(AlertDialog.BUTTON_POSITIVE).performClick());
+        awaitRecoveryAction();
+        scenario.onActivity(activity -> {
+            click(dialogText(activity, activity.getString(R.string.cash_history_record_deposit)));
+            assertEquals(Long.valueOf(43), CashStore.parseAmount(activity,
+                editorAmount(activity).getText().toString()));
+            currentDialog(activity).getButton(AlertDialog.BUTTON_NEGATIVE).performClick();
+        });
+        awaitRecoveryAction();
+        scenario.onActivity(activity -> {
+            assertEquals("۴٫۳", editorAmount(activity).getText().toString());
+            click(dialogText(activity, activity.getString(R.string.cash_history_record_deposit)));
+        });
+        saveEditor();
+        await(activity -> dialogText(activity, activity.getString(R.string.cash_history_preview_balance,
+            cashValue(activity, 55), cashValue(activity, 0))) != null);
+        scenario.onActivity(activity -> {
+            assertEquals("۴٫۳", editorAmount(activity).getText().toString());
+            RadioButton withdrawal = (RadioButton) dialogText(activity,
+                activity.getString(R.string.history_withdrawal));
+            assertTrue(withdrawal.isChecked());
+        });
+        saveEditor();
+        await(activity -> currentDialog(activity) == null && HistoryActivity.idleForTest(activity));
+        CashStore.State state = CashStore.read(context);
+        assertEquals(2, state.transactions.size());
+        assertEquals(0, state.balance);
+        Transaction updated = state.transactions.stream().filter(tx -> original.sig.equals(tx.sig))
+            .findFirst().orElseThrow(AssertionError::new);
+        assertEquals(timestamp, updated.date);
+        assertEquals(-43, updated.amount);
+        assertEquals("cash note", MetadataStore.getNote(context, updated));
+        assertEquals(Collections.singletonList("tag"), MetadataStore.getTags(context, updated));
+    }
+
+    @Test public void editingHistoricalMovementShowsHistoryOnlyWithUnchangedBalance() {
+        CashStore.setBalance(context, 111);
+        long historical = CashStore.read(context).countedAt - 60_000;
+        CashStore.add(context, historical, -109);
+        launch(CashStore.KEY);
+        openEdit();
+        await(activity -> dialogText(activity, activity.getString(
+            R.string.cash_history_preview_history_only, cashValue(activity, 111))) != null);
+        scenario.onActivity(activity -> editorAmount(activity).setText("12.3"));
+        saveEditor();
+        await(activity -> currentDialog(activity) == null && HistoryActivity.idleForTest(activity));
+        CashStore.State state = CashStore.read(context);
+        assertEquals(111, state.balance);
+        assertEquals(-123, state.transactions.get(0).amount);
+        assertEquals(historical, state.transactions.get(0).date);
+    }
+
+    private void openEdit() {
+        await(activity -> movement(activity) != null);
+        scenario.onActivity(activity -> {
+            click(movement(activity));
+            click(dialogText(activity, activity.getString(R.string.cash_history_edit_action)));
+        });
+        await(activity -> editorAmount(activity) != null);
+    }
+
+    private void awaitRecoveryAction() {
+        await(activity -> {
+            View action = dialogText(activity, activity.getString(R.string.cash_history_record_deposit));
+            return action != null && action.isClickable();
+        });
+    }
+
+    private void saveEditor() {
+        await(activity -> editorAmount(activity) != null
+            && currentDialog(activity).getButton(AlertDialog.BUTTON_POSITIVE).isEnabled());
+        scenario.onActivity(activity ->
+            currentDialog(activity).getButton(AlertDialog.BUTTON_POSITIVE).performClick());
+    }
+
+    private static String cashValue(HistoryActivity activity, long rials) {
+        return CurrencyHelper.amountExact(activity, rials) + " " + CurrencyHelper.label(activity);
+    }
+
     private void launch(String bank) {
+        launch(bank, false);
+    }
+
+    private void launch(String bank, boolean addCash) {
         Intent intent = new Intent(context, HistoryActivity.class);
         if (bank != null) intent.putExtra(HistoryActivity.EXTRA_BANK, bank);
+        if (addCash) intent.putExtra(HistoryActivity.EXTRA_ADD_CASH, true);
         scenario = ActivityScenario.launch(intent);
     }
 
@@ -164,6 +295,23 @@ public class CashHistoryUiTest {
             if (dialogs.get(i).isShowing()) return dialogs.get(i);
         }
         return null;
+    }
+
+    private static EditText editorAmount(HistoryActivity activity) {
+        AlertDialog dialog = currentDialog(activity);
+        return dialog == null ? null : (EditText) find(dialog.getWindow().getDecorView(),
+            view -> view instanceof EditText);
+    }
+
+    private static View dialogText(HistoryActivity activity, String text) {
+        AlertDialog dialog = currentDialog(activity);
+        return dialog == null ? null : find(dialog.getWindow().getDecorView(),
+            view -> view.getVisibility() == View.VISIBLE && hasText(view, text));
+    }
+
+    private static void click(View view) {
+        assertNotNull(view);
+        assertTrue(view.performClick());
     }
 
     private static View findByDescription(HistoryActivity activity, int resource) {
