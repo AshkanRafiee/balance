@@ -271,14 +271,6 @@ final class CashTransactionEditor {
             dialog.getWindow().setSoftInputMode(
                 WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
             dialog.setOnCancelListener(d -> restoreDraft());
-            dialog.setOnShowListener(d -> {
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> save());
-                dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> {
-                    if (returnDraft != null && canShow()) restoreDraft();
-                    else dialog.dismiss();
-                });
-                requestPreview();
-            });
             direction.setOnCheckedChangeListener((group, checked) -> draftChanged(0));
             amount.addTextChangedListener(new TextWatcher() {
                 @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
@@ -297,6 +289,12 @@ final class CashTransactionEditor {
                     onClosed.run();
                 }
             });
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> save());
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> {
+                if (returnDraft != null && canShow()) restoreDraft();
+                else dialog.dismiss();
+            });
+            requestPreview();
         }
 
         private void cancelPendingWork() {

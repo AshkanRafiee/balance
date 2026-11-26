@@ -82,7 +82,7 @@ public class CashHistoryUiTest {
         Transaction added = CashStore.read(context).transactions.get(0);
         assertEquals(250, added.amount);
         assertTrue(added.date >= beforeEditor && added.date <= System.currentTimeMillis());
-        assertEquals("Cash from the market", MetadataStore.getNote(context, added));
+        assertEquals("Cash from the market", BalanceData.getNote(context, added));
 
         requestRemoval();
         scenario.onActivity(activity -> currentDialog(activity)
@@ -174,7 +174,7 @@ public class CashHistoryUiTest {
         assertEquals(0, state.balance);
         for (Transaction transaction : state.transactions) {
             assertEquals(transaction.amount > 0 ? "Separate deposit" : "Original withdrawal",
-                MetadataStore.getNote(context, transaction));
+                BalanceData.getNote(context, transaction));
         }
     }
 
